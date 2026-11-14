@@ -32,16 +32,40 @@
 //!
 //! [`ALLOWED`] holds each divergence the test accepts: a code, in every document or in one, with
 //! its reason. A row that excuses nothing over the whole corpus is a failure as well, so the list
-//! holds the divergences there are and no other. Its target is the three rows of the capacity
-//! ceilings `smear-schema`'s representation has and GraphQLx has not; each other row names the work
-//! that removes it.
+//! holds the divergences there are and no other.
 //!
-//! It holds eighteen rows. Six are for every document: the three of the capacity ceilings, which
-//! stay, and the three of the input-object cycles, which L4's last part deletes. Coercion and the
-//! implementation phase have none: each of their codes has `smear-schema`'s count on every
-//! document, or a row for that document. Twelve are each for one document both dialects refuse: one
-//! where `smear-schema` drops a second definition of a name unread, and eleven where the mistake
-//! lies in a contribution that also holds a phase's error, beside which the rule is silent.
+//! It holds 15 rows, its final ones, which `the_allow_list_holds_its_final_rows` holds it to:
+//!
+//! - three for every document, which stay for good: the capacity ceilings `smear-schema`'s
+//!   representation has and GraphQLx has not, `type-reference-too-deep`, `too-many-field-arguments`
+//!   and `too-many-directive-arguments` (`[Z6]`);
+//! - one for one document both dialects refuse, where `smear-schema` drops a second definition of
+//!   a name unread and the analyzer reads both (`[Z40]`);
+//! - eleven for one document each, both dialects refusing it, where the mistake lies in a
+//!   contribution that also holds a phase's error, beside which the rule is silent (`[Z31]`).
+//!
+//! Coercion, the implementation phase, and the cycles of input objects and of their defaults have
+//! none: each of their codes has `smear-schema`'s count on every document of the corpus.
+//!
+//! # The divergences with no row
+//!
+//! No document of the corpus holds one of these, so a row for one would excuse nothing, and fail.
+//! They are recorded here by class, and W's record holds them with the classes the rules that read
+//! one definition recorded:
+//!
+//! - a name GraphQL finds undefined that GraphQLx's prelude answers (L, binding 4 (e));
+//! - `null` for a non-null type whose base did not resolve or is no input type (`[Z11]`);
+//! - a required argument of a name an earlier argument of its field has (part 1.1's fourth settled
+//!   point);
+//! - a document with more than one cycle of defaults: the coercion phase reports the first cycle a
+//!   count meets, at one of its fields, and `smear-schema` one for each walk that finds one;
+//! - a cycle of defaults through a OneOf input object's defaulted field, which is never filled:
+//!   `one-of-field-has-default` alone, beside which `smear-schema` reports the cycle too;
+//! - a rule silent beside a cycle of defaults, which is a phase's error: `input In { a: In! = {} }`
+//!   is `input-object-default-value-cycle` alone, beside which `smear-schema` reports
+//!   `circular-non-null-input-field` too.
+//!
+//! An integer too long to be a finite `Float` (`[Z12]`) is no divergence: both dialects refuse it.
 #![cfg(all(feature = "std", feature = "analysis", feature = "validator"))]
 
 use std::{
@@ -114,22 +138,26 @@ const BESIDE_A_PHASE: &str = "[Z31]: the contribution that holds the mistake als
 const CEILING: &str =
   "[Z6]: a capacity ceiling of smear-schema's representation, which GraphQLx does not have";
 
-/// Why a row of the input-object cycles exists.
-const CYCLES: &str = "the cycle rules report it: L4's last part";
+/// Why the row of `[Z40]`'s class exists.
+const UNREAD: &str = "[Z40]: the document defines `Type1` twice, and smear-schema drops the \
+                      second definition unread where the analyzer reads both";
+
+/// The codes of the capacity ceilings, each a row for every document, in the list's order.
+const CEILINGS: [&str; 3] = [
+  "smear::schema::type-reference-too-deep",
+  "smear::schema::too-many-field-arguments",
+  "smear::schema::too-many-directive-arguments",
+];
 
 /// Every divergence the test allows.
 const ALLOWED: &[Allowed] = &[
-  every("smear::schema::type-reference-too-deep", CEILING),
-  every("smear::schema::too-many-field-arguments", CEILING),
-  every("smear::schema::too-many-directive-arguments", CEILING),
-  every("smear::schema::circular-non-null-input-field", CYCLES),
-  every("smear::schema::circular-one-of-input-field", CYCLES),
-  every("smear::schema::input-object-default-value-cycle", CYCLES),
+  every(CEILINGS[0], CEILING),
+  every(CEILINGS[1], CEILING),
+  every(CEILINGS[2], CEILING),
   Allowed {
     code: "smear::schema::undefined-implements-interface",
     document: Some("implements.graphql"),
-    reason: "[Z40]: the document defines `Type1` twice, and smear-schema drops the second \
-             definition unread where the analyzer reads both",
+    reason: UNREAD,
   },
   beside_a_phase(
     "smear::schema::duplicate-field-name",
@@ -682,6 +710,38 @@ fn every_shared_code_a_rule_lists_is_one_of_smear_schemas() {
       );
     }
   }
+}
+
+/// The allow-list holds its final rows: those for every document are the three capacity ceilings,
+/// which stay for good; every other names one document, by one of the two classes the header
+/// gives; and the header says how many rows there are.
+#[test]
+fn the_allow_list_holds_its_final_rows() {
+  let every_document: Vec<&str> = ALLOWED
+    .iter()
+    .filter(|row: &&Allowed| row.document.is_none())
+    .map(|row: &Allowed| row.code)
+    .collect();
+  assert_eq!(every_document, CEILINGS);
+  for row in ALLOWED {
+    match row.document {
+      None => assert_eq!(row.reason, CEILING, "{}", row.code),
+      Some(document) => {
+        assert!(!document.is_empty(), "{}", row.code);
+        assert!(
+          row.reason == UNREAD || row.reason == BESIDE_A_PHASE,
+          "{} in {document}: {}",
+          row.code,
+          row.reason
+        );
+      }
+    }
+  }
+  let said = format!("It holds {} rows", ALLOWED.len());
+  assert!(
+    include_str!("analysis_differential.rs").contains(&said),
+    "the header does not say `{said}`"
+  );
 }
 
 /// W's test 10: a root package that replaces a built-in scalar and applies `@specifiedBy` to it, and

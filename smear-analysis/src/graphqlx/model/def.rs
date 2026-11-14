@@ -794,6 +794,23 @@ impl<'a> Iterator for TypeParams<'a> {
     let remaining = (self.back - self.front) as usize;
     (remaining, Some(remaining))
   }
+
+  /// The parameter `n` places on, in one step: the rows are in order, so it reads the one it is
+  /// asked for and skips none.
+  #[inline]
+  fn nth(&mut self, n: usize) -> Option<TypeParam<'a>> {
+    let remaining = self.back - self.front;
+    match u32::try_from(n) {
+      Ok(n) if n < remaining => {
+        self.front += n;
+        self.next()
+      }
+      _ => {
+        self.front = self.back;
+        None
+      }
+    }
+  }
 }
 
 impl DoubleEndedIterator for TypeParams<'_> {

@@ -1,0 +1,1613 @@
+//! Where a type parameter stands, and whether a type fits where it stands: what the rules that
+//! judge an instantiation's arguments share.
+//!
+//! # Places
+//!
+//! A place is a kind of position a type parameter can stand in: a field's type, which takes an
+//! output type; a field argument's, an input field's and a directive argument's, which take an
+//! input type; what a value an operation's field argument takes can hold, which holds no
+//! `TypeRef`; and the whole type, written nullable, of a field of a OneOf input object, and of a
+//! deprecated argument or input field with no default, each of which takes a nullable type.
+//! [`Positions`] finds, once for a walk, the places each type parameter of every
+//! package's definitions stands in, and for each, where in its own definition it stands there or
+//! is passed to a parameter that does, the witness a diagnostic labels, and the member whose type
+//! the place came from. A place that is a member's whole type does not pass from a list to its
+//! element, or from a collection to its arguments: the list or the collection stands there. Nor,
+//! since each mistake has one owner, does it pass from a type parameter's type written non-null,
+//! `T!`, to its slot: that `!`, written in the type argument or in the default that fills it, makes
+//! the member's type non-null whatever the slot is given, and the instantiation that gives it is
+//! refused for it where it is written, as every instantiation is; neither what the slot is given
+//! nor the slot is to blame. Nor does it stand at a collection's key or element, which every
+//! instantiation makes non-null however it is written, and nothing passes it on from there, so that
+//! no use of the collection repeats it: one that reaches the key or element, which nothing written
+//! makes, is the mistake of the collection's definition, and [`Positions::forced`] keeps it, with
+//! where the member applies `@deprecated` for a deprecated member's place.
+//!
+//! A parameter stands where its definition puts it: in the complete type of each of its members,
+//! a field's arguments among them, every contribution's, a slot a default fills included; through
+//! a list's element and a collection's arguments, which a value holds; and, given as an argument to
+//! another definition, which an object, an interface, a union, an input object, a directive and a
+//! scalar are, wherever that definition's parameter stands. So a collection's argument stands
+//! where the collection stands, and where the collection's own parameter does, which its
+//! applications can put in a directive's argument: with `scalar M<K, V> @map @d<V>`, the `T` of
+//! `type Box<T> { v: M<Int, T> }` stands as a field's type, and wherever `@d`'s parameter stands. A
+//! value of a scalar that is no collection holds nothing, so its argument stands only where the
+//! scalar's own parameter does: with `scalar Ref<T> @d<T>`, the `T` of `type Box<T> { v: Ref<T> }`
+//! stands wherever `@d`'s parameter stands, and not as a field's type. What its argument passes on
+//! is passed on all the same: `Ref<Page<T>>` puts its `T` where `Page`'s parameter stands. An enum
+//! hides its arguments: it takes no type parameter. A union member, an `implements` entry and an
+//! application's type, the directive's instantiation, pass a parameter on and put it nowhere
+//! themselves. An implementing type declares each field itself, but neither its interface's
+//! applications nor the `@deprecated` of its fields' arguments, which put the interface's
+//! parameters in places too: with `interface Tagged<X> @d<X>`, the `T` of
+//! `type Holds<T> implements Tagged<T>` stands wherever `@d`'s parameter stands. A bound and a
+//! parameter's default put it nowhere: a bound's argument is judged where it is written, and what a
+//! default gives is judged where an occurrence leaves its slot out.
+//!
+//! The table is a graph whose nodes are the slots, one for each type parameter of each definition,
+//! and the open types the roots reach, each interned type once: a type entered before is passed
+//! over, whatever reached it. A type parameter's type leads to its slot; a list to its element and a
+//! collection to each argument; and a slot of another definition, any scalar's among them, to each
+//! argument given to it, the edge carrying where that is written. Each root gives its type its
+//! place, and the places spread along the edges, each node gaining each place once, a slot keeping
+//! the witness it gained it with: across an edge out of a slot the witness becomes the edge's. A
+//! place that is a member's whole type does not cross a flagged edge: a list's to its element, a
+//! collection's to each argument, and a type parameter's type's, written non-null, to its slot.
+//!
+//! What an operation's argument reaches is found last: each field argument's type is given it,
+//! and it spreads along the same edges, and from a named type of an input object to each argument
+//! a value of the input object holds. So with `type Q<A> { f(a: A): Int }` and
+//! `input Wrapped<W> { v: W }`, the `T` of `type D<T> { q: Q<Wrapped<T>> }` is reached from an
+//! operation's argument: `Q`'s field argument takes a `Wrapped<T>`, whose value holds a `T`.
+//!
+//! # What a value holds
+//!
+//! Which arguments of an input object a value of it holds is no place: a value holds what its
+//! input fields' complete types hold, under lists, collections' arguments and the arguments of
+//! other input objects that their values hold, and nothing a directive applied to it, or that
+//! directive's arguments, name, which are metadata. A parameter can stand in an input field's
+//! place through a directive's argument, which the kind its arguments take must answer to, while
+//! no value holds it: `input Empty<T> @tag<T> { n: Int }` holds no `T`, whatever `@tag`'s
+//! arguments are. [`Positions::holds`] answers it, for what an operation's argument reaches and
+//! for the `reach` module.
+//!
+//! # Classes
+//!
+//! [`Fits`] answers whether a type is of a class, and, when it is not, where under it the type that
+//! is not lies:
+//!
+//! - a list fits when its element does;
+//! - a collection, a scalar `core`'s `@set` or `@map` makes one, when each of its arguments does,
+//!   in order, since a value of it holds values of them;
+//! - a type parameter and the unresolved type fit every class: what a parameter takes is judged
+//!   where an instantiation gives it a type, and what did not resolve was refused where it is
+//!   written;
+//! - any other type by its definition's kind: an input object is no output type, an object, an
+//!   interface and a union are no input types, and a scalar that is no collection, an enum and a
+//!   directive are of every class, whatever their arguments.
+//!
+//! # What a fill derives
+//!
+//! [`Derived`] judges what the slots an occurrence leaves to their defaults derive, by a rule's
+//! own verdict: every named type under those slots that no occurrence of the program writes, each
+//! once, a type the occurrence or the program writes, open or closed, being judged where it is
+//! written. A fill that leaves a slot to a default the rule refuses derives nothing to judge: the
+//! default's complete type, open in its definition's parameters, or a type it holds, is a named
+//! type the rule's verdict refuses, and that mistake is the default's, reported where it is
+//! written, or where the nested occurrence or default it comes from is, and no use repeats it.
+//!
+//! # What it costs
+//!
+//! [`Positions::of`] looks once at each member, union member and `implements` entry, and at each
+//! application, whose closed type it passes over at once and whose arguments its defaults fill it
+//! enters once for each type and count of written arguments; enters each open type the roots reach
+//! once, reading its arguments once; and spreads each place to each node once, reading each edge
+//! once for each place its source gains, and each argument of a named type of an input object once
+//! more, for what an operation's argument reaches: linear in the slots, the written type arguments,
+//! the open types the roots reach and their arguments, with a logarithm for each lookup of an
+//! ordered map. A type given to many slots is one node with an edge from each, never a walk of what
+//! it holds for each. What a value holds is one more worklist over the input fields, as linear. The
+//! look at a member reads its applications once, and keeps where a deprecated member with no
+//! default applies `@deprecated`, which a collection's mistake keeps in turn: a report of one reads
+//! one kept entry, and never a member's applications, however many collections give one member's
+//! place.
+//! [`Fits`] judges each pair of a type and a class asked about once, with an explicit stack, a
+//! type's children before it, and keeps with a type that does not fit the way down to what does
+//! not, made in one step from its child's; and answers each pair of a written occurrence and a
+//! class asked about once, the child the occurrence writes on the way before it, keeping where
+//! under it what does not fit lies, made in one step from that child's answer, or from its own
+//! type's way where it stops writing the way. So a report reads one kept answer: a written tree is
+//! read once, however many reports nest in it, and a path a default fills is never walked for a
+//! report. [`Derived`] expands each type the fills derive once for the walk, however many
+//! fills derive it, reading each of its arguments at most twice, and reads, for each type and
+//! count of written arguments, one kept answer for each slot its fill typed, which
+//! `Limits::max_substitutions` paid for when the instantiation phase filled them; what the program
+//! writes is one pass over the type occurrences. Whether a definition's defaults are refused is
+//! found once for the walk, at the first of its fills judged, each type of the defaults' trees
+//! expanded once with nothing passed over, and kept as the greatest index of a refused default,
+//! which every later fill compares its count of written arguments with: linear in the distinct
+//! types of the defaults. Nothing recurses, and every table is keyed by the model's ids.
+
+use std::{
+  collections::{BTreeMap, BTreeSet},
+  format,
+  string::String,
+  vec,
+  vec::Vec,
+};
+
+use tokora::diagnostic::Location;
+
+use crate::graphqlx::{
+  ApplicationId, DefId, DefKind, MemberId, MemberKind, Model, Resolution, SourceMap, TyId, TyKind,
+  TypeExprId, TypeExprKind, diagnostic::Excerpt, id::dense, rules::one_of_in,
+};
+
+/// A class of type a position takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Class {
+  /// An output type, which a field's type is.
+  Output,
+  /// An input type, which an argument's, a directive's argument's and an input field's are.
+  Input,
+}
+
+/// A kind of position a type parameter can stand in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Place {
+  /// A field's type.
+  Field,
+  /// A field argument's type.
+  Argument,
+  /// An input field's type.
+  InputField,
+  /// A directive definition's argument's type.
+  DirectiveArgument,
+  /// What a value an operation's field argument takes can hold: the argument's type, through
+  /// lists, collections' arguments, the definitions it is passed to, and the arguments a value of
+  /// an input object holds.
+  Operation,
+  /// The whole type of a field of a OneOf input object, which takes a nullable type: the field's
+  /// type is the parameter itself, written nullable, and no list or collection stands between.
+  OneOfField,
+  /// The whole type, written nullable, of a deprecated argument with no default, a field's or a
+  /// directive's, which takes a nullable type.
+  DeprecatedArgument,
+  /// The whole type, written nullable, of a deprecated input field with no default, which takes a
+  /// nullable type.
+  DeprecatedInputField,
+}
+
+/// How many places there are: the witnesses a slot keeps.
+const PLACES: usize = 8;
+
+impl Place {
+  /// Its index among the places.
+  const fn index(self) -> usize {
+    match self {
+      Self::Field => 0,
+      Self::Argument => 1,
+      Self::InputField => 2,
+      Self::DirectiveArgument => 3,
+      Self::Operation => 4,
+      Self::OneOfField => 5,
+      Self::DeprecatedArgument => 6,
+      Self::DeprecatedInputField => 7,
+    }
+  }
+
+  /// Whether it stands only where the parameter is a member's whole type, so that it does not
+  /// pass from a list to its element or from a collection to its arguments.
+  const fn whole(self) -> bool {
+    matches!(
+      self,
+      Self::OneOfField | Self::DeprecatedArgument | Self::DeprecatedInputField
+    )
+  }
+
+  /// Its bit in a set of places.
+  const fn bit(self) -> u8 {
+    1 << self.index()
+  }
+}
+
+/// Where each type parameter of a model stands: for each, the places it stands in, and where, in
+/// its own definition, it stands there or is passed to a parameter that does; for each type
+/// parameter of an input object, whether a value of the input object holds a value of it; and
+/// where a collection's own definition gives its key or element, nullable, a place that takes a
+/// nullable type.
+#[derive(Default)]
+pub(crate) struct Positions {
+  /// The first slot of each definition, in id order, and the count of slots last: definition `d`'s
+  /// type parameter `i` is slot `base[d] + i`.
+  base: Vec<u32>,
+  /// For each slot, and each place in turn, where the slot stands there, when it does.
+  witnesses: Vec<Option<Location>>,
+  /// For each slot, and each place in turn, the member whose type the place came from, when the
+  /// root it came from is a member's type.
+  origins: Vec<Option<MemberId>>,
+  /// For each slot, whether a value of its definition, an input object, holds a value of its
+  /// argument.
+  held: Vec<bool>,
+  /// Each place that takes a nullable type that reached a collection's key or element, nullable,
+  /// which stands in none of them.
+  forced: Forced,
+}
+
+/// Each place that takes a nullable type that reached a collection's key or element, nullable, by
+/// the slot and the place's index.
+type Forced = BTreeMap<(u32, usize), Mistake>;
+
+/// A place that takes a nullable type that reached a collection's key or element through the type
+/// parameter's type nullable: the mistake of the collection's definition, as
+/// [`Positions::forced`] answers it, with everything its report reads.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Mistake {
+  /// Where the definition gives the key or element the place: the witness it reached it with.
+  pub(crate) at: Location,
+  /// The member whose type the place came from.
+  pub(crate) member: Option<MemberId>,
+  /// Where that member applies `@deprecated`, its first, when it is a deprecated member with no
+  /// default: kept when the member is looked at, so that no report reads its applications.
+  pub(crate) deprecated: Option<Location>,
+}
+
+impl Positions {
+  /// The positions of `model`'s every type parameter, found once, `sources` saying who wrote each
+  /// definition and application, which tells a OneOf input object.
+  pub(crate) fn of(model: &Model, sources: &SourceMap) -> Self {
+    let base = bases(model);
+    let slots = base.last().copied().unwrap_or(0);
+    let held = containment(model, &base);
+    let keys = key_slots(model, &base);
+    let mut graph = Graph {
+      base: &base,
+      keys: &keys,
+      slots,
+      types: BTreeMap::new(),
+      edges: Vec::new(),
+      holds: Vec::new(),
+      seeds: Vec::new(),
+      deprecated: BTreeMap::new(),
+      operations: Vec::new(),
+      filled: BTreeSet::new(),
+      stack: Vec::new(),
+    };
+    for def in model.defs() {
+      graph.def(model, sources, def);
+    }
+    let (witnesses, origins, forced) = graph.spread(&held);
+    Self {
+      base,
+      witnesses,
+      origins,
+      held,
+      forced,
+    }
+  }
+
+  /// The member whose type the place `place` of the type parameter `index` of `def` came from: the
+  /// field of a OneOf whose whole type it is, for `OneOfField`; `None` when it does not stand
+  /// there, or came from no member's type.
+  pub(crate) fn origin(&self, def: DefId, index: u32, place: Place) -> Option<MemberId> {
+    let slot = slot(&self.base, def, index)?;
+    let at = (slot as usize)
+      .checked_mul(PLACES)?
+      .checked_add(place.index())?;
+    self.origins.get(at).copied().flatten()
+  }
+
+  /// Where the type parameter `index` of `def` stands in `place`, in its own definition, or is
+  /// passed to a parameter that does; `None` when it does not, or `def` has no such parameter.
+  pub(crate) fn witness(&self, def: DefId, index: u32, place: Place) -> Option<Location> {
+    let slot = slot(&self.base, def, index)?;
+    let at = (slot as usize)
+      .checked_mul(PLACES)?
+      .checked_add(place.index())?;
+    self.witnesses.get(at).copied().flatten()
+  }
+
+  /// Whether a value of `def`, an input object, holds a value of its type parameter `index`'s
+  /// argument: what [`containment`] answers, which no place is. False for any other definition.
+  pub(crate) fn holds(&self, def: DefId, index: u32) -> bool {
+    slot(&self.base, def, index)
+      .and_then(|slot: u32| self.held.get(slot as usize).copied())
+      .unwrap_or(false)
+  }
+
+  /// Where the definition of `def`, a collection, gives its key or element, nullable, `place`, a
+  /// place that takes a nullable type, with the member the place came from and where a deprecated
+  /// one applies `@deprecated`: the definition's mistake, since every instantiation makes the key
+  /// or element non-null. The place stands at no key or element, so no use of `def` repeats the
+  /// mistake. `None` when `def` is no collection, or no such place reaches its key or element: none
+  /// passes a type parameter written non-null, `T!`, which is the mistake of the instantiation that
+  /// gives it, refused where it is written. One lookup.
+  pub(crate) fn forced(&self, def: DefId, place: Place) -> Option<Mistake> {
+    let slot = slot(&self.base, def, 0)?;
+    self.forced.get(&(slot, place.index())).copied()
+  }
+}
+
+/// For each slot under `base`, whether it is a collection's key or element: the first type
+/// parameter of a definition of `model` that stands for a collection, which every instantiation
+/// makes non-null, however it is written or filled.
+fn key_slots(model: &Model, base: &[u32]) -> Vec<bool> {
+  let mut keys = vec![false; base.last().copied().unwrap_or(0) as usize];
+  for def in model.defs() {
+    if model.def(def).collection().is_some()
+      && let Some(first) = slot(base, def, 0)
+      && let Some(key) = keys.get_mut(first as usize)
+    {
+      *key = true;
+    }
+  }
+  keys
+}
+
+/// A step [`containment`] takes from a type it reached.
+#[derive(Clone, Copy)]
+enum Step {
+  /// To a type a value of it always holds: a list's element, a collection's argument.
+  Always(u32),
+  /// To an argument of an input object, held when the input object's slot, the first, is.
+  If(u32, u32),
+  /// To the slot of the type parameter it is.
+  Param(u32),
+}
+
+/// For each slot under `base`, whether a value of its definition, an input object of `model`,
+/// holds a value of its argument: whether the complete type of one of the definition's input
+/// fields, every contribution's, holds its type parameter, under lists, collections' arguments and
+/// the arguments of input objects at the slots that hold theirs, found the same way.
+///
+/// A value holds what its input fields hold, and nothing else: a directive applied to the input
+/// object, and the arguments of that directive, are metadata, and give no value of the input object
+/// a value of anything. So it is no place, which says where a type parameter stands for the kind
+/// its arguments take: `input Empty<T> @tag<T> { n: Int }` holds no `T`, whatever `@tag`'s
+/// arguments do with its own.
+///
+/// A worklist: the open types the input fields' complete types reach, each `TyId` once, each with
+/// the steps it leads by; a type is reached once, a slot held once, and a step to an argument of
+/// an input object is read once when its type is reached and once when its slot is held. Linear in
+/// the input fields and the open types they reach, with a logarithm for each lookup.
+fn containment(model: &Model, base: &[u32]) -> Vec<bool> {
+  let slots = base.last().copied().unwrap_or(0) as usize;
+  let mut held = vec![false; slots];
+  let mut types: BTreeMap<TyId, u32> = BTreeMap::new();
+  let mut steps: Vec<(u32, Step)> = Vec::new();
+  let mut stack: Vec<TyId> = Vec::new();
+  let mut roots: Vec<u32> = Vec::new();
+  let node_of = |types: &mut BTreeMap<TyId, u32>, stack: &mut Vec<TyId>, ty: TyId| -> Option<u32> {
+    // A closed type names no parameter, and holds none.
+    if model.ty(ty).is_closed() {
+      return None;
+    }
+    if let Some(node) = types.get(&ty) {
+      return Some(*node);
+    }
+    let node = dense(types.len());
+    types.insert(ty, node);
+    stack.push(ty);
+    Some(node)
+  };
+  for def in model.defs() {
+    let definition = model.def(def);
+    if definition.kind() != DefKind::InputObject {
+      continue;
+    }
+    for field in definition.input_fields() {
+      let Some(written) = model.member(field).ty() else {
+        continue;
+      };
+      if let Some(node) = node_of(&mut types, &mut stack, model.type_expr(written).ty()) {
+        roots.push(node);
+      }
+    }
+  }
+  // Each open type's steps, once: the stack holds each type when it is first numbered.
+  while let Some(ty) = stack.pop() {
+    let Some(&from) = types.get(&ty) else {
+      continue;
+    };
+    match model.ty(ty).kind() {
+      TyKind::Param { def, index } => {
+        if let Some(slot) = slot(base, def, index) {
+          steps.push((from, Step::Param(slot)));
+        }
+      }
+      TyKind::List { element } => {
+        if let Some(to) = node_of(&mut types, &mut stack, element) {
+          steps.push((from, Step::Always(to)));
+        }
+      }
+      TyKind::Named { def, args } => {
+        let definition = model.def(def);
+        let input = definition.kind() == DefKind::InputObject;
+        if definition.collection().is_some() || input {
+          for (index, arg) in args.iter().enumerate() {
+            let Some(to) = node_of(&mut types, &mut stack, *arg) else {
+              continue;
+            };
+            if !input {
+              steps.push((from, Step::Always(to)));
+            } else if let Some(slot) = slot(base, def, dense(index)) {
+              steps.push((from, Step::If(slot, to)));
+            }
+          }
+        }
+      }
+      TyKind::Unresolved => {}
+    }
+  }
+  steps.sort_by_key(|step: &(u32, Step)| step.0);
+  // The steps to an argument of an input object, by the slot that holds it.
+  let mut waits: Vec<(u32, u32, u32)> = steps
+    .iter()
+    .filter_map(|&(from, step): &(u32, Step)| match step {
+      Step::If(slot, to) => Some((slot, from, to)),
+      Step::Always(_) | Step::Param(_) => None,
+    })
+    .collect();
+  waits.sort_unstable();
+  let mut reached = vec![false; types.len()];
+  // What is reached or held and not followed yet.
+  let mut queue: Vec<Event> = roots.into_iter().map(Event::Reached).collect();
+  while let Some(event) = queue.pop() {
+    match event {
+      Event::Reached(node) => {
+        let Some(seen) = reached.get_mut(node as usize) else {
+          continue;
+        };
+        if *seen {
+          continue;
+        }
+        *seen = true;
+        for &(_, step) in run(&steps, node, |step: &(u32, Step)| step.0) {
+          match step {
+            Step::Always(to) => queue.push(Event::Reached(to)),
+            Step::If(slot, to) => {
+              if held.get(slot as usize).copied().unwrap_or(false) {
+                queue.push(Event::Reached(to));
+              }
+            }
+            Step::Param(slot) => queue.push(Event::Held(slot)),
+          }
+        }
+      }
+      Event::Held(slot) => {
+        let Some(holds) = held.get_mut(slot as usize) else {
+          continue;
+        };
+        if *holds {
+          continue;
+        }
+        *holds = true;
+        for &(_, from, to) in run(&waits, slot, |wait: &(u32, u32, u32)| wait.0) {
+          if reached.get(from as usize).copied().unwrap_or(false) {
+            queue.push(Event::Reached(to));
+          }
+        }
+      }
+    }
+  }
+  held
+}
+
+/// What [`containment`]'s worklist follows next.
+#[derive(Clone, Copy)]
+enum Event {
+  /// A type's node, reached from an input field.
+  Reached(u32),
+  /// A slot, which a value of its input object holds.
+  Held(u32),
+}
+
+/// The first slot of each definition of `model`, in id order, and the count of slots last: one
+/// slot for each type parameter of each definition, every package's.
+pub(crate) fn bases(model: &Model) -> Vec<u32> {
+  let mut base: Vec<u32> = Vec::with_capacity((model.defs().len() as usize).saturating_add(1));
+  let mut slots: u32 = 0;
+  for def in model.defs() {
+    base.push(slots);
+    slots = slots.saturating_add(dense(model.def(def).type_params().len()));
+  }
+  base.push(slots);
+  base
+}
+
+/// The slot of the type parameter `index` of `def`, under `base`, as [`bases`] numbers them,
+/// when `def` has it.
+pub(crate) fn slot(base: &[u32], def: DefId, index: u32) -> Option<u32> {
+  let at = def.get() as usize;
+  let first = *base.get(at)?;
+  let end = *base.get(at.checked_add(1)?)?;
+  let slot = first.checked_add(index)?;
+  (slot < end).then_some(slot)
+}
+
+/// An edge of the graph: from a node, to a node, where it is written, and whether it is flagged,
+/// so that a place that is a member's whole type does not cross it: one from a list to its element
+/// or from a collection to an argument, and one from a type parameter's type written non-null to
+/// its slot.
+type Edge = (u32, u32, Location, bool);
+
+/// A node given a place, with the witness it gains it with and the member whose type the place
+/// came from, when one did.
+type Seed = (u32, Place, Location, Option<MemberId>);
+
+/// The graph [`Positions::of`] spreads places over, dropped once they are found.
+struct Graph<'b> {
+  /// The first slot of each definition.
+  base: &'b [u32],
+  /// For each slot, whether it is a collection's key or element.
+  keys: &'b [bool],
+  /// How many slots there are: they are the first nodes.
+  slots: u32,
+  /// The node of each open type entered, numbered after the slots.
+  types: BTreeMap<TyId, u32>,
+  /// Each edge, from a node to a node, with where it is written, the witness it gives when it
+  /// leaves a slot, and whether it is flagged: one a place that is a member's whole type does not
+  /// cross.
+  edges: Vec<Edge>,
+  /// Each open argument of a named type of an input object: from the type's node to the
+  /// argument's, with the slot it is given to, which a value of the type holds a value of when
+  /// [`containment`] says so.
+  holds: Vec<(u32, u32, u32)>,
+  /// The places the roots give, in the order of the roots: a node, its place, the root's witness,
+  /// and the member whose type the root is.
+  seeds: Vec<Seed>,
+  /// Where each member that gives a deprecated member's place applies `@deprecated`, its first:
+  /// found in the one look at the member, for a collection's mistake to keep.
+  deprecated: BTreeMap<MemberId, Location>,
+  /// The field arguments' roots, in the order of the roots, each a node and the root's witness:
+  /// what an operation's argument reaches, given once the other places are found.
+  operations: Vec<(u32, Location)>,
+  /// Each open type of an application, with its count of written type arguments, whose arguments
+  /// its defaults fill were entered: once for each, whatever the applications.
+  filled: BTreeSet<(TyId, u32)>,
+  /// The types still to enter, each with the witness of the root it is entered for.
+  stack: Vec<(TyId, Location)>,
+}
+
+impl Graph<'_> {
+  /// Enters the roots of `def`, of `model`: its applications, its union members, each member's
+  /// applications and type, a field's arguments' after the field's, and its `implements` entries.
+  /// `sources` tells whether it is a OneOf input object.
+  fn def(&mut self, model: &Model, sources: &SourceMap, def: DefId) {
+    let definition = model.def(def);
+    for application in definition.applications() {
+      self.application(model, *application);
+    }
+    for entry in definition.union_members() {
+      let occurrence = model.type_expr(*entry);
+      self.enter(model, occurrence.ty(), occurrence.location());
+    }
+    let one_of = one_of_in(model, sources, def);
+    let members = definition
+      .fields()
+      .into_iter()
+      .chain(definition.input_fields())
+      .chain(definition.arguments())
+      .chain(definition.enum_values());
+    for member in members {
+      self.member(model, member, one_of);
+      for argument in model.member(member).arguments() {
+        self.member(model, argument, one_of);
+      }
+    }
+    // An entry gives no place of its own, as a union member gives none: it passes the interface's
+    // parameters on. Last, so that a type it shares with a member is entered for the member, whose
+    // witness its edges carry.
+    for entry in definition.implements() {
+      let occurrence = model.type_expr(*entry);
+      self.enter(model, occurrence.ty(), occurrence.location());
+    }
+  }
+
+  /// Enters `member`'s applications, and its type, which it gives the place its kind is; and, typed
+  /// by its definition's type parameter written nullable, the field of a OneOf, when `one_of`, the
+  /// place of a OneOf's field too, and an argument or an input field with no default that applies
+  /// `@deprecated` a deprecated member's place, keeping where it applies the first: one look at its
+  /// applications.
+  fn member(&mut self, model: &Model, member: MemberId, one_of: bool) {
+    let written = model.member(member);
+    for application in written.applications() {
+      self.application(model, *application);
+    }
+    let Some(ty) = written.ty() else {
+      return;
+    };
+    let place = match (written.kind(), written.parent()) {
+      (MemberKind::Field, _) => Place::Field,
+      (MemberKind::Argument, Some(_)) => Place::Argument,
+      (MemberKind::Argument, None) => Place::DirectiveArgument,
+      (MemberKind::InputField, _) => Place::InputField,
+      (MemberKind::EnumValue, _) => return,
+    };
+    let occurrence = model.type_expr(ty);
+    let at = occurrence.location();
+    let Some(node) = self.enter(model, occurrence.ty(), at) else {
+      return;
+    };
+    self.seeds.push((node, place, at, Some(member)));
+    // A field's argument is what an operation sets.
+    if place == Place::Argument {
+      self.operations.push((node, at));
+    }
+    let complete = model.ty(occurrence.ty());
+    let TyKind::Param { def, .. } = complete.kind() else {
+      return;
+    };
+    if def != written.owner() || complete.non_null() {
+      return;
+    }
+    if one_of && place == Place::InputField {
+      self.seeds.push((node, Place::OneOfField, at, Some(member)));
+    }
+    // A deprecated member a caller may leave out, which a non-null argument would make required.
+    if written.default().is_some() {
+      return;
+    }
+    let required = match place {
+      Place::Argument | Place::DirectiveArgument => Place::DeprecatedArgument,
+      Place::InputField => Place::DeprecatedInputField,
+      _ => return,
+    };
+    let deprecated = model.builtins().deprecated();
+    let Some(application) = written.applications().iter().find(|id: &&ApplicationId| {
+      matches!(
+        model.application(**id).directive(),
+        Resolution::Resolved(directive) if directive == deprecated
+      )
+    }) else {
+      return;
+    };
+    // Where it applies `@deprecated`, found in this one look at it: what a report of a collection's
+    // mistake labels, which then reads no member's applications.
+    self
+      .deprecated
+      .insert(member, model.application(*application).path_location());
+    self.seeds.push((node, required, at, Some(member)));
+  }
+
+  /// Enters the arguments of `application`'s type, each from its directive's slot, with where it
+  /// is written: each written type argument where it is written, which the source pays for; and
+  /// the arguments its defaults fill at its path, once for each type and count of written
+  /// arguments, which the fill that typed them paid for. A closed type gives no edge, and is
+  /// passed over at once.
+  fn application(&mut self, model: &Model, id: ApplicationId) {
+    let application = model.application(id);
+    let Some(ty) = application.ty() else {
+      return;
+    };
+    let complete = model.ty(ty);
+    if complete.is_closed() {
+      return;
+    }
+    let TyKind::Named { def, args } = complete.kind() else {
+      return;
+    };
+    let written = application.type_args();
+    for (index, (arg, argument)) in args.iter().zip(written).enumerate() {
+      self.argument(
+        model,
+        def,
+        index,
+        *arg,
+        model.type_expr(*argument).location(),
+      );
+    }
+    if written.len() < args.len() && self.filled.insert((ty, dense(written.len()))) {
+      let at = application.path_location();
+      for (index, arg) in args.iter().enumerate().skip(written.len()) {
+        self.argument(model, def, index, *arg, at);
+      }
+    }
+  }
+
+  /// Enters `arg`, the argument at `index` of a type of `def`, for a root written at `at`, with an
+  /// edge to it from `def`'s slot.
+  fn argument(&mut self, model: &Model, def: DefId, index: usize, arg: TyId, at: Location) {
+    let Some(to) = self.enter(model, arg, at) else {
+      return;
+    };
+    if let Some(from) = slot(self.base, def, dense(index)) {
+      self.edges.push((from, to, at, false));
+    }
+  }
+
+  /// The node of `root`, entered for a root written at `witness`, with every open type under it
+  /// that was not entered before; `None` for a closed type.
+  fn enter(&mut self, model: &Model, root: TyId, witness: Location) -> Option<u32> {
+    let node = self.open(model, root, witness)?;
+    while let Some((ty, at)) = self.stack.pop() {
+      let Some(&from) = self.types.get(&ty) else {
+        continue;
+      };
+      match model.ty(ty).kind() {
+        TyKind::Param { def, index } => {
+          if let Some(to) = slot(self.base, def, index) {
+            // A type parameter given non-null, `T!`: the instantiation that gives it to a member's
+            // whole type is refused where it is written, for its `!`, as any is, whatever the slot
+            // is given; so the member's place stops here, and is no mistake of what the slot is
+            // given, nor of a collection's definition whose key or element the slot is.
+            self.edges.push((from, to, at, model.ty(ty).non_null()));
+          }
+        }
+        TyKind::List { element } => {
+          if let Some(to) = self.open(model, element, at) {
+            self.edges.push((from, to, at, true));
+          }
+        }
+        TyKind::Named { def, args } => {
+          let definition = model.def(def);
+          let collection = definition.collection().is_some();
+          // An enum hides its arguments: it takes no type parameter, as the generic-enum rule
+          // says.
+          if definition.kind() != DefKind::Enum {
+            let input = definition.kind() == DefKind::InputObject;
+            for (index, arg) in args.iter().enumerate() {
+              let Some(to) = self.open(model, *arg, at) else {
+                continue;
+              };
+              // A value of a collection holds its arguments, which stand where it stands; a value
+              // of any other scalar holds nothing.
+              if collection {
+                self.edges.push((from, to, at, true));
+              }
+              // What an argument takes is the definition's slot's to say, a scalar's too.
+              if let Some(given) = slot(self.base, def, dense(index)) {
+                self.edges.push((given, to, at, false));
+                if input {
+                  self.holds.push((from, to, given));
+                }
+              }
+            }
+          }
+        }
+        TyKind::Unresolved => {}
+      }
+    }
+    Some(node)
+  }
+
+  /// The node of `ty`, made and pushed to be entered when it is new, for a root written at
+  /// `witness`; `None` for a closed type, which names no parameter.
+  fn open(&mut self, model: &Model, ty: TyId, witness: Location) -> Option<u32> {
+    if model.ty(ty).is_closed() {
+      return None;
+    }
+    if let Some(node) = self.types.get(&ty) {
+      return Some(*node);
+    }
+    let node = self.slots.saturating_add(dense(self.types.len()));
+    self.types.insert(ty, node);
+    self.stack.push((ty, witness));
+    Some(node)
+  }
+
+  /// Spreads each root's place along the edges, root by root, then what an operation's argument
+  /// reaches, which passes from an input object's type to the arguments a value of it holds by
+  /// `held`, and answers each slot's witnesses and the members its places came from, and each
+  /// place that takes a nullable type that reached a collection's key or element, nullable.
+  fn spread(mut self, held: &[bool]) -> (Vec<Option<Location>>, Vec<Option<MemberId>>, Forced) {
+    let nodes = (self.slots as usize).saturating_add(self.types.len());
+    let size = (self.slots as usize).saturating_mul(PLACES);
+    // The edges by their source, so that a node's are one run.
+    self.edges.sort_by_key(|edge: &Edge| edge.0);
+    self.holds.sort_by_key(|hold: &(u32, u32, u32)| hold.0);
+    let mut spread = Spread {
+      slots: self.slots,
+      edges: &self.edges,
+      holds: &self.holds,
+      held,
+      keys: self.keys,
+      deprecated: &self.deprecated,
+      gained: vec![0; nodes],
+      witnesses: vec![None; size],
+      origins: vec![None; size],
+      forced: BTreeMap::new(),
+      queue: Vec::new(),
+    };
+    for &seed in &self.seeds {
+      spread.gain(seed);
+      spread.drain();
+    }
+    // Last, and root by root as well, so that a slot's witness is that of the first field
+    // argument, in the order of the roots, that reaches it.
+    for &(node, at) in &self.operations {
+      spread.gain((node, Place::Operation, at, None));
+      spread.drain();
+    }
+    (spread.witnesses, spread.origins, spread.forced)
+  }
+}
+
+/// The places spreading over a graph: what each node gained, each slot's witnesses and origins,
+/// what reached a collection's key or element and stands there in no place, and the nodes still to
+/// pass a place on.
+struct Spread<'e> {
+  /// How many slots there are: they are the first nodes.
+  slots: u32,
+  /// The edges, by their source.
+  edges: &'e [Edge],
+  /// The arguments of named types of input objects, by the type's node, each with its slot.
+  holds: &'e [(u32, u32, u32)],
+  /// For each slot, whether a value of its input object holds a value of its argument.
+  held: &'e [bool],
+  /// For each slot, whether it is a collection's key or element.
+  keys: &'e [bool],
+  /// Where each member that gives a deprecated member's place applies `@deprecated`.
+  deprecated: &'e BTreeMap<MemberId, Location>,
+  /// For each node, the places it gained, a bit for each.
+  gained: Vec<u8>,
+  /// For each slot, and each place in turn, the witness it gained the place with.
+  witnesses: Vec<Option<Location>>,
+  /// For each slot, and each place in turn, the member the place came from, when one did.
+  origins: Vec<Option<MemberId>>,
+  /// Each place that takes a nullable type that reached a collection's key or element, nullable.
+  forced: Forced,
+  /// The nodes that gained a place and have not passed it on, with the witness they gained it
+  /// with and the member it came from.
+  queue: Vec<Seed>,
+}
+
+impl Spread<'_> {
+  /// A node gains a place, with a witness and an origin, unless it has it. A collection's key or
+  /// element, which every instantiation makes non-null, stands in no place that takes a nullable
+  /// type: one that reaches it, which only the type parameter's type nullable leads to, is kept
+  /// apart, its definition's mistake, with where a deprecated member applies `@deprecated`, one
+  /// lookup, and passed on to nothing.
+  fn gain(&mut self, (node, place, at, origin): Seed) {
+    let Some(gained) = self.gained.get_mut(node as usize) else {
+      return;
+    };
+    if *gained & place.bit() != 0 {
+      return;
+    }
+    *gained |= place.bit();
+    if place.whole() && self.keys.get(node as usize).copied().unwrap_or(false) {
+      let deprecated = origin.and_then(|member: MemberId| self.deprecated.get(&member).copied());
+      self.forced.insert(
+        (node, place.index()),
+        Mistake {
+          at,
+          member: origin,
+          deprecated,
+        },
+      );
+      return;
+    }
+    if node < self.slots
+      && let Some(index) = (node as usize)
+        .checked_mul(PLACES)
+        .and_then(|first: usize| first.checked_add(place.index()))
+    {
+      if let Some(witness) = self.witnesses.get_mut(index) {
+        *witness = Some(at);
+      }
+      if let Some(from) = self.origins.get_mut(index) {
+        *from = origin;
+      }
+    }
+    self.queue.push((node, place, at, origin));
+  }
+
+  /// Passes every queued place along each edge out of its node, until none is left: but a place
+  /// that stands only as a member's whole type not along a flagged edge, from a list to its
+  /// element, from a collection to an argument, or from a type parameter's type written non-null
+  /// to its slot; and what an operation's argument reaches, from a named type of an input object
+  /// to each of its arguments a value of it holds.
+  fn drain(&mut self) {
+    let edges = self.edges;
+    let holds = self.holds;
+    let held = self.held;
+    while let Some((node, place, at, origin)) = self.queue.pop() {
+      for &(_, next, written, flagged) in run(edges, node, |edge: &Edge| edge.0) {
+        if flagged && place.whole() {
+          continue;
+        }
+        // Across an edge out of a slot, the witness is where the argument is given.
+        let witness = if node < self.slots { written } else { at };
+        self.gain((next, place, witness, origin));
+      }
+      if place != Place::Operation {
+        continue;
+      }
+      for &(_, next, given) in run(holds, node, |hold: &(u32, u32, u32)| hold.0) {
+        if held.get(given as usize).copied().unwrap_or(false) {
+          self.gain((next, place, at, origin));
+        }
+      }
+    }
+  }
+}
+
+/// The run of `sorted`, sorted by `source`, whose source is `node`.
+fn run<T>(sorted: &[T], node: u32, source: fn(&T) -> u32) -> &[T] {
+  let from = sorted.partition_point(|item: &T| source(item) < node);
+  let to = sorted.partition_point(|item: &T| source(item) <= node);
+  sorted.get(from..to).unwrap_or(&[])
+}
+
+/// The first step of the way down from a type that does not fit a class to the type under it that
+/// does not: the type itself, or one of its children.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Under {
+  /// It is of a kind the class does not take.
+  Itself,
+  /// A list's element does not fit.
+  Element,
+  /// A collection's argument at this index does not fit, the first of them that does not.
+  Argument(u32),
+}
+
+/// Where a type does not fit a class, as [`Fits`] keeps it: the first step of the way down to the
+/// type under it that does not fit, and what lies at the way's end, which is the same whichever
+/// occurrence asks, made once from the first step's child's.
+#[derive(Debug, Clone, Copy)]
+struct Way {
+  /// The first step.
+  under: Under,
+  /// The definition of the type at the way's end, which does not fit: an object, an interface, a
+  /// union or an input object.
+  leaf: DefId,
+  /// Whether the way passes an argument of a collection.
+  nested: bool,
+}
+
+/// A type that does not fit a class, as [`Fits::misfit`] reads it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Misfit {
+  /// The definition of the type that does not fit, under the lists and the collections' arguments
+  /// that hold it: an object, an interface, a union or an input object.
+  pub(crate) leaf: DefId,
+  /// Whether it lies under an argument of a collection.
+  pub(crate) nested: bool,
+  /// The deepest of the written occurrences handed in and nested in it that writes the way to it,
+  /// when one is handed in.
+  pub(crate) at: Option<TypeExprId>,
+  /// The collection, and the index of its type parameter, whose slot the way leaves the written
+  /// occurrences by: a slot the occurrence does not write, which its default fills.
+  pub(crate) filled: Option<(DefId, u32)>,
+}
+
+/// What a written occurrence's own check answers, as [`Fits::check`] makes it.
+enum Check {
+  /// Its answer, `None` when it fits: made from its own type's way where the tree stops writing
+  /// the way there.
+  Answer(Option<Misfit>),
+  /// The child it writes on the way, and whether the step down to it passes an argument of a
+  /// collection: its answer is made from the child's.
+  Child(TypeExprId, bool),
+}
+
+/// Whether types fit classes, each type and class judged once, and where, under each written
+/// occurrence asked about, what does not fit lies, each occurrence and class answered once.
+///
+/// A rule keeps one for its walk and resets it in `begin`: what it holds is keyed by the model's
+/// ids.
+///
+/// Its work is linear in the distinct types it judges and in the written occurrences it answers
+/// for. Each type and class is judged once, its children before it, and a type that does not fit
+/// keeps the way down to the type under it that does not: the way's first step, and what lies at
+/// its end, made in one step from the first step's child's. Each written occurrence and class is
+/// answered once for the walk, the child it writes on the way before it, and keeps where under it
+/// what does not fit lies, made in one step: from that child's answer while the way goes down what
+/// the occurrence writes, and from its own type's way where it stops writing the way, at a slot it
+/// leaves to its default, a list it does not write, or what itself does not fit. So a report reads
+/// one kept answer, however many reports nest above one another in one written tree, and a path
+/// that defaults fill, however long, is walked once, when its types are judged, and never for a
+/// report.
+#[derive(Default)]
+pub(crate) struct Fits {
+  /// Each type and class judged, with the way down to what does not fit; `None` when it fits.
+  judged: BTreeMap<(TyId, Class), Option<Way>>,
+  /// Each written occurrence and class answered, with where under it what does not fit lies;
+  /// `None` when it fits.
+  answered: BTreeMap<(TypeExprId, Class), Option<Misfit>>,
+  /// The types still to judge, each with whether its children were pushed above it.
+  stack: Vec<(TyId, bool)>,
+  /// The occurrences whose answers wait for their child's, outermost first, each with whether the
+  /// step down from it passes an argument of a collection.
+  waiting: Vec<(TypeExprId, bool)>,
+}
+
+impl Fits {
+  /// Whether `ty`, of `model`, fits `class`.
+  pub(crate) fn fits(&mut self, model: &Model, ty: TyId, class: Class) -> bool {
+    self.way(model, ty, class).is_none()
+  }
+
+  /// Where `ty`, of `model`, does not fit `class`, `written` being the occurrence that writes it,
+  /// if one does, whose own type is `ty` up to a collection key's `!`, which no class reads: the
+  /// definition of the type under it that does not fit, and the deepest occurrence of `written`'s
+  /// tree that writes the way to it. `None` when it fits.
+  ///
+  /// It reads one kept answer: the way kept for `ty` when no occurrence writes it, and else the
+  /// answer kept for `written`, which [`answer`](Self::answer) makes once for the walk.
+  pub(crate) fn misfit(
+    &mut self,
+    model: &Model,
+    ty: TyId,
+    class: Class,
+    written: Option<TypeExprId>,
+  ) -> Option<Misfit> {
+    let way = self.way(model, ty, class)?;
+    match written {
+      Some(occurrence) => self.answer(model, occurrence, class),
+      None => Some(Misfit {
+        leaf: way.leaf,
+        nested: way.nested,
+        at: None,
+        filled: None,
+      }),
+    }
+  }
+
+  /// Where, under `occurrence`, a written occurrence of `model`, what does not fit `class` lies,
+  /// `None` when it fits: each occurrence's answer made once for the walk, and kept.
+  ///
+  /// Asked about an occurrence it has not answered, it answers the occurrences down the way from
+  /// it that it has not answered either, children before their parents: down the tree while the
+  /// tree writes the way, to an occurrence answered before or to one whose own check answers it,
+  /// then each above it from its child's answer, in one step. So each written occurrence and class
+  /// is answered once for the walk, however many reports nest above it.
+  fn answer(&mut self, model: &Model, occurrence: TypeExprId, class: Class) -> Option<Misfit> {
+    if let Some(kept) = self.answered.get(&(occurrence, class)) {
+      return *kept;
+    }
+    self.waiting.clear();
+    let mut at = occurrence;
+    // Down the tree while it writes the way and nothing down there is answered: each step goes
+    // one level down the tree, so the loop ends within it.
+    let mut answer = loop {
+      if let Some(kept) = self.answered.get(&(at, class)) {
+        break *kept;
+      }
+      match self.check(model, at, class) {
+        Check::Answer(answer) => {
+          self.answered.insert((at, class), answer);
+          break answer;
+        }
+        Check::Child(child, argument) => {
+          self.waiting.push((at, argument));
+          at = child;
+        }
+      }
+    };
+    // Up again, the deepest first, each answer from its child's.
+    while let Some((parent, argument)) = self.waiting.pop() {
+      answer = answer.map(|below: Misfit| Misfit {
+        nested: below.nested || argument,
+        ..below
+      });
+      self.answered.insert((parent, class), answer);
+    }
+    answer
+  }
+
+  /// What `occurrence`, a written occurrence of `model`, answers for `class` by its own check: its
+  /// answer, from its own type's way, when it fits or the tree stops writing the way there, at a
+  /// slot it leaves to its default, a list it does not write, or what itself does not fit; else
+  /// the child it writes on the way.
+  fn check(&mut self, model: &Model, occurrence: TypeExprId, class: Class) -> Check {
+    let written = model.type_expr(occurrence);
+    let ty = written.ty();
+    let Some(way) = self.way(model, ty, class) else {
+      return Check::Answer(None);
+    };
+    let filled = match (way.under, model.ty(ty).kind()) {
+      (Under::Element, TyKind::List { .. }) => match written.kind() {
+        TypeExprKind::List { element } => return Check::Child(element, false),
+        // The tree writes no list where the way goes down one.
+        _ => None,
+      },
+      (Under::Argument(index), TyKind::Named { def, args }) => {
+        // The way down a collection goes to one of its arguments.
+        if args.get(index as usize).is_none() {
+          return Check::Answer(None);
+        }
+        let child = match written.kind() {
+          TypeExprKind::Named { args: given, .. } => given.get(index as usize).copied(),
+          _ => None,
+        };
+        if let Some(child) = child {
+          return Check::Child(child, true);
+        }
+        // A slot the occurrence leaves to its default: the way leaves the tree here.
+        Some((def, index))
+      }
+      // The type itself does not fit.
+      _ => None,
+    };
+    Check::Answer(Some(Misfit {
+      leaf: way.leaf,
+      nested: way.nested,
+      at: Some(occurrence),
+      filled,
+    }))
+  }
+
+  /// The way down from `ty`, of `model`, to what does not fit `class`, `None` when it fits. It
+  /// judges `ty` and every type under it not judged yet, children before their parent, each way
+  /// made in one step from its first step's child's.
+  fn way(&mut self, model: &Model, ty: TyId, class: Class) -> Option<Way> {
+    if let Some(way) = self.judged.get(&(ty, class)) {
+      return *way;
+    }
+    self.stack.clear();
+    self.stack.push((ty, false));
+    while let Some((next, pushed)) = self.stack.pop() {
+      if self.judged.contains_key(&(next, class)) {
+        continue;
+      }
+      let way = match model.ty(next).kind() {
+        TyKind::List { element } => {
+          if !pushed {
+            self.stack.push((next, true));
+            self.stack.push((element, false));
+            continue;
+          }
+          self.kept(element, class).map(|below: Way| Way {
+            under: Under::Element,
+            ..below
+          })
+        }
+        TyKind::Named { def, args } if model.def(def).collection().is_some() => {
+          if !pushed {
+            self.stack.push((next, true));
+            self
+              .stack
+              .extend(args.iter().rev().map(|arg: &TyId| (*arg, false)));
+            continue;
+          }
+          // The first argument, in order, that does not fit.
+          args
+            .iter()
+            .enumerate()
+            .find_map(|(index, arg): (usize, &TyId)| {
+              self.kept(*arg, class).map(|below: Way| Way {
+                under: Under::Argument(dense(index)),
+                leaf: below.leaf,
+                nested: true,
+              })
+            })
+        }
+        TyKind::Named { def, .. } => leaf(def, model.def(def).kind(), class),
+        TyKind::Param { .. } | TyKind::Unresolved => None,
+      };
+      self.judged.insert((next, class), way);
+    }
+    self.kept(ty, class)
+  }
+
+  /// The way kept for `ty`, judged for `class` already, down to what does not fit it; `None` when
+  /// it fits.
+  fn kept(&self, ty: TyId, class: Class) -> Option<Way> {
+    self.judged.get(&(ty, class)).copied().flatten()
+  }
+}
+
+/// The way down from a type of `def`, a definition of `kind` that is no collection, to what does
+/// not fit `class`: the type itself, or `None` when it fits.
+fn leaf(def: DefId, kind: DefKind, class: Class) -> Option<Way> {
+  let refused = match class {
+    Class::Output => kind == DefKind::InputObject,
+    Class::Input => matches!(kind, DefKind::Object | DefKind::Interface | DefKind::Union),
+  };
+  refused.then_some(Way {
+    under: Under::Itself,
+    leaf: def,
+    nested: false,
+  })
+}
+
+/// A type that a fill derives and a rule refuses: what [`Derived::verdict`] answers.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Fill<V> {
+  /// The slot of the occurrence's type whose default derives it.
+  pub(crate) slot: u32,
+  /// The type it derives.
+  pub(crate) ty: TyId,
+  /// The rule's verdict on that type.
+  pub(crate) verdict: V,
+}
+
+/// A type a fill derives that a rule refuses, with the rule's verdict on it: the first failure
+/// under a type.
+type Failure<V> = (TyId, V);
+
+/// How [`Derived`] looks under a type, which keeps each answer by the type and the look.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Look {
+  /// Under what a fill derives: a type the program writes is passed over with what it holds, being
+  /// judged where it is written.
+  Fill,
+  /// Under a default's complete type: nothing is passed over, the default being written itself.
+  Default,
+}
+
+/// A rule's verdicts on what the slots an occurrence leaves to their defaults derive, each type and
+/// count of written arguments judged once.
+///
+/// A rule keeps one for its walk and resets it in `begin`: what it holds is keyed by the model's
+/// ids, and what it answers for a type and a count is the same whatever the walk met before.
+///
+/// A fill that leaves a slot to a default the rule refuses derives nothing to judge. A default is
+/// refused when its complete type, open in its definition's parameters, the fills of the
+/// occurrences nested in it included, or a type it holds, is a named type of a definition that has
+/// type parameters that the rule's verdict refuses. That mistake has its owner where it is
+/// written: the default's own occurrence, or, when a nested occurrence's fill derives it, that
+/// occurrence or the default that fills it, in turn, each reported once; a use that leaves the
+/// slot out would only repeat it. So the whole fill is passed over, and not that slot alone: a
+/// default may name a parameter written after it, which is filled first, so that another slot's
+/// type holds the refused one's. A refused default at a slot the occurrence writes is not used,
+/// and changes nothing. A failure that substitution alone would add to such a fill is not reported
+/// until the default is fixed: with `input Choice<X> @oneOf { value: X }`, `Ref<Int!>` of
+/// `scalar Ref<A, B = Choice<A!>, C = Choice<A>>` hides `C`'s. The analysis is not ok meanwhile,
+/// since the default is refused where it is written; and a dependency's refused default is the
+/// dependency's mistake, as every type a dependency writes is judged where it is written.
+///
+/// Its work is linear in the distinct types the fills derive, the distinct types of the defaults
+/// and the occurrences that ask. The first failure under a type, the type itself and then what it
+/// holds, in order, is the same whichever fill derives the type and whichever occurrence asks: a
+/// type the program writes is passed over wherever it is met, the arguments an occurrence writes
+/// among them, so no answer depends on the occurrence. So each type's answer is kept by its id for
+/// the walk, and each type is expanded once, each of its arguments read at most twice, however
+/// many fills share it: a shared subtree is never walked again for another outer fill. An
+/// occurrence then reads one kept answer for each slot it leaves out, slots its fill typed and
+/// `Limits::max_substitutions` paid for, and its own answer is kept by its type and count of
+/// written arguments. What the program writes is one pass over the type occurrences, sorted, at the
+/// first fill judged. Whether a definition's defaults are refused is found at the first of its
+/// fills judged, and kept by the definition as the greatest index of a refused default, which
+/// every later fill compares its count of written arguments with. Whether the rule refuses a type
+/// or a type it holds is the type's alone, so each type of the defaults' trees is looked under
+/// once for the walk, nothing passed over, its answer kept by its id, whichever default holds it.
+pub(crate) struct Derived<V> {
+  /// Each type and count of written arguments judged, with the first failure found.
+  judged: BTreeMap<(TyId, u32), Option<Fill<V>>>,
+  /// Each type looked under, and how, with the first failure under it.
+  under: BTreeMap<(TyId, Look), Option<Failure<V>>>,
+  /// Each definition a fill of which was judged, with the greatest index of its type parameters
+  /// whose default the rule refuses, or `None` when it refuses none.
+  refused: BTreeMap<DefId, Option<u32>>,
+  /// Every named type of a definition that has type parameters that the program writes, sorted
+  /// and each once, read at the first fill judged.
+  written: Option<Vec<TyId>>,
+  /// The types being looked under, each with the index of the next of its arguments to read.
+  stack: Vec<(TyId, u32)>,
+}
+
+impl<V> Default for Derived<V> {
+  fn default() -> Self {
+    Self {
+      judged: BTreeMap::new(),
+      under: BTreeMap::new(),
+      refused: BTreeMap::new(),
+      written: None,
+      stack: Vec::new(),
+    }
+  }
+}
+
+impl<V: Copy> Derived<V> {
+  /// The first failure, by `judge`, the rule's own verdict on one type, among what the slots
+  /// `written` and after of `ty`, of `model`, derive: an occurrence of `ty` that writes `written`
+  /// arguments leaves those slots to their defaults. For each slot in order, the first failure
+  /// under its argument: a type an occurrence of the program writes, one the occurrence writes
+  /// among them, is passed over with what it holds, and each other named type of a definition that
+  /// has type parameters is judged, then what it holds. `None` when none fails, and when one of
+  /// those slots is filled from a default `judge` refuses, whose mistake is reported where it is
+  /// written.
+  pub(crate) fn verdict(
+    &mut self,
+    model: &Model,
+    ty: TyId,
+    written: u32,
+    mut judge: impl FnMut(TyId) -> Option<V>,
+  ) -> Option<Fill<V>> {
+    if let Some(kept) = self.judged.get(&(ty, written)) {
+      return *kept;
+    }
+    let mut found: Option<Fill<V>> = None;
+    if let TyKind::Named { def, args } = model.ty(ty).kind()
+      && args.len() > written as usize
+      && self
+        .refused(model, def, &mut judge)
+        .is_none_or(|last: u32| last < written)
+    {
+      for (slot, arg) in args.iter().enumerate().skip(written as usize) {
+        if let Some((derived, verdict)) = self.under(model, *arg, Look::Fill, &mut judge) {
+          found = Some(Fill {
+            slot: dense(slot),
+            ty: derived,
+            verdict,
+          });
+          break;
+        }
+      }
+    }
+    self.judged.insert((ty, written), found);
+    found
+  }
+
+  /// The greatest index of a type parameter of `def`, of `model`, whose default `judge` refuses,
+  /// kept for the walk; `None` when it refuses none. A default is refused when its complete type,
+  /// or a type it holds, is a named type of a definition that has type parameters that `judge`
+  /// refuses, nothing passed over. The parameters are read from the last, so the first default
+  /// found refused is the answer, and those before it are not looked under.
+  fn refused(
+    &mut self,
+    model: &Model,
+    def: DefId,
+    judge: &mut impl FnMut(TyId) -> Option<V>,
+  ) -> Option<u32> {
+    if let Some(kept) = self.refused.get(&def) {
+      return *kept;
+    }
+    let mut last: Option<u32> = None;
+    for param in model.def(def).type_params().rev() {
+      if let Some(default) = param.default()
+        && self
+          .under(
+            model,
+            model.type_expr(default).ty(),
+            Look::Default,
+            &mut *judge,
+          )
+          .is_some()
+      {
+        last = Some(param.index());
+        break;
+      }
+    }
+    self.refused.insert(def, last);
+    last
+  }
+
+  /// The first failure, by `judge`, under `root`, of `model`, looked under by `look`: `root` itself
+  /// when it is a named type of a definition that has type parameters and `judge` refuses it, else
+  /// the first under each of its arguments, or under its element, in order. Each type's answer is
+  /// kept for the walk by the type and the look, whoever asks, and each type is expanded once for
+  /// each look, with an explicit stack, each of its arguments read at most twice: once to find it
+  /// unanswered, and once its answer is kept.
+  fn under(
+    &mut self,
+    model: &Model,
+    root: TyId,
+    look: Look,
+    judge: &mut impl FnMut(TyId) -> Option<V>,
+  ) -> Option<Failure<V>> {
+    if let Some(kept) = self.under.get(&(root, look)) {
+      return *kept;
+    }
+    if let Some(answer) = self.settle(model, root, look, &mut *judge) {
+      self.under.insert((root, look), answer);
+      return answer;
+    }
+    self.stack.clear();
+    self.stack.push((root, 0));
+    while let Some(&(ty, next)) = self.stack.last() {
+      let Some(child) = held_at(model, ty, next) else {
+        // Nothing under it fails.
+        self.under.insert((ty, look), None);
+        self.stack.pop();
+        continue;
+      };
+      match self.under.get(&(child, look)).copied() {
+        // The first failure under it is the first under its first argument that has one.
+        Some(Some(failure)) => {
+          self.under.insert((ty, look), Some(failure));
+          self.stack.pop();
+        }
+        Some(None) => {
+          if let Some(top) = self.stack.last_mut() {
+            top.1 = next.saturating_add(1);
+          }
+        }
+        None => match self.settle(model, child, look, &mut *judge) {
+          Some(answer) => {
+            self.under.insert((child, look), answer);
+          }
+          None => self.stack.push((child, 0)),
+        },
+      }
+    }
+    self.under.get(&(root, look)).copied().flatten()
+  }
+
+  /// What `ty`, of `model`, answers before what it holds is read, when it can, looked under by
+  /// `look`: nothing for a type parameter, the unresolved type and a named type with no argument,
+  /// and, under a fill, for a type the program writes, which is judged where it is written; itself,
+  /// with `judge`'s verdict, for a named type of a definition that has type parameters that `judge`
+  /// refuses. `None` when what it holds is to read.
+  fn settle(
+    &mut self,
+    model: &Model,
+    ty: TyId,
+    look: Look,
+    judge: &mut impl FnMut(TyId) -> Option<V>,
+  ) -> Option<Option<Failure<V>>> {
+    match model.ty(ty).kind() {
+      TyKind::Named { def, args } => {
+        if look == Look::Fill && self.writes(model, ty) {
+          return Some(None);
+        }
+        if model.def(def).type_params().next().is_some()
+          && let Some(verdict) = judge(ty)
+        {
+          return Some(Some((ty, verdict)));
+        }
+        if args.is_empty() { Some(None) } else { None }
+      }
+      TyKind::List { .. } => None,
+      TyKind::Param { .. } | TyKind::Unresolved => Some(None),
+    }
+  }
+
+  /// Whether the program `model` holds writes `ty`, as an occurrence's type or as an argument an
+  /// occurrence writes: what it writes is read the first time it is asked.
+  fn writes(&mut self, model: &Model, ty: TyId) -> bool {
+    self
+      .written
+      .get_or_insert_with(|| written_types(model))
+      .binary_search(&ty)
+      .is_ok()
+  }
+}
+
+/// The argument `index` of `ty`, of `model`, or its element: what a type holds, in order.
+fn held_at(model: &Model, ty: TyId, index: u32) -> Option<TyId> {
+  match model.ty(ty).kind() {
+    TyKind::Named { args, .. } => args.get(index as usize).copied(),
+    TyKind::List { element } => (index == 0).then_some(element),
+    TyKind::Param { .. } | TyKind::Unresolved => None,
+  }
+}
+
+/// Every named type of a definition that has type parameters that `model`'s program writes,
+/// sorted and each once: each type occurrence's type, every package's, open or closed, and each
+/// argument the occurrence writes, as its type has it, a collection's key being non-null there
+/// whatever is written. A closed one that is an instantiation `Model::instantiations` lists is
+/// among them.
+fn written_types(model: &Model) -> Vec<TyId> {
+  let mut written: Vec<TyId> = Vec::new();
+  for id in model.type_exprs() {
+    let occurrence = model.type_expr(id);
+    let TypeExprKind::Named { args: given, .. } = occurrence.kind() else {
+      continue;
+    };
+    let ty = occurrence.ty();
+    let TyKind::Named { args, .. } = model.ty(ty).kind() else {
+      continue;
+    };
+    if args.is_empty() {
+      continue;
+    }
+    written.push(ty);
+    written.extend(args.iter().take(given.len()).copied());
+  }
+  written.sort_unstable();
+  written.dedup();
+  written
+}
+
+/// Who takes what an occurrence or an application is refused for, and where to say so: what a rule
+/// that judges an instantiation reports, whatever it judges.
+pub(crate) struct Taking {
+  /// The definition whose type parameter takes it.
+  pub(crate) def: DefId,
+  /// The parameter's index.
+  pub(crate) slot: u32,
+  /// The type it takes.
+  pub(crate) argument: TyId,
+  /// The message's lead, which names who takes it: `` `D` takes ``, `` `D` takes, from the default
+  /// of `P`, `` or `` the default of `Q` of `E` makes `D` take ``.
+  pub(crate) lead: String,
+  /// Where it is reported: the argument as written, or the occurrence, an application at its path,
+  /// for an argument a default fills.
+  pub(crate) at: Location,
+  /// Where the default that fills it is written, when a default fills it.
+  pub(crate) filled: Option<Location>,
+}
+
+/// Who takes the argument at `slot` of the type `ty`, of `model`, of an occurrence or an
+/// application that writes the type arguments `written` and is written at `whole`; or, when
+/// `derived` is the slot of `ty` a default fills and the type that fill derives, the argument at
+/// `slot` of that type. A directive is named with its `@`.
+pub(crate) fn taking(
+  model: &Model,
+  ty: TyId,
+  written: &[TypeExprId],
+  whole: Location,
+  slot: u32,
+  derived: Option<(u32, TyId)>,
+) -> Option<Taking> {
+  let TyKind::Named { def, args } = model.ty(ty).kind() else {
+    return None;
+  };
+  let definition = Excerpt(model.def(def).name().as_bytes());
+  let sign = if model.def(def).kind() == DefKind::Directive {
+    "@"
+  } else {
+    ""
+  };
+  let Some((filled, derived)) = derived else {
+    let argument = *args.get(slot as usize)?;
+    return Some(match written.get(slot as usize) {
+      Some(given) => Taking {
+        def,
+        slot,
+        argument,
+        lead: format!("`{sign}{definition}` takes"),
+        at: model.type_expr(*given).location(),
+        filled: None,
+      },
+      None => Taking {
+        def,
+        slot,
+        argument,
+        lead: format!(
+          "`{sign}{definition}` takes, from the default of `{}`,",
+          Excerpt(parameter(model, def, slot).as_bytes())
+        ),
+        at: whole,
+        filled: default_of(model, def, slot),
+      },
+    });
+  };
+  let TyKind::Named {
+    def: derived_def,
+    args: derived_args,
+  } = model.ty(derived).kind()
+  else {
+    return None;
+  };
+  Some(Taking {
+    def: derived_def,
+    slot,
+    argument: *derived_args.get(slot as usize)?,
+    lead: format!(
+      "the default of `{}` of `{sign}{definition}` makes `{}` take",
+      Excerpt(parameter(model, def, filled).as_bytes()),
+      Excerpt(model.def(derived_def).name().as_bytes())
+    ),
+    at: whole,
+    filled: default_of(model, def, filled),
+  })
+}
+
+/// How a message names a definition of `kind`, before its name: "the object type `Obj`".
+pub(crate) fn named(kind: DefKind) -> &'static str {
+  match kind {
+    DefKind::InputObject => "the input object",
+    DefKind::Object => "the object type",
+    DefKind::Interface => "the interface",
+    DefKind::Union => "the union",
+    DefKind::Scalar => "the scalar",
+    DefKind::Enum => "the enum",
+    DefKind::Directive => "the directive",
+  }
+}
+
+/// Where the default of the type parameter `index` of `def`, of `model`, is written, when it has
+/// one: what fills a slot an occurrence leaves out. A constant step: `TypeParams::nth` reads the
+/// row it is asked for.
+pub(crate) fn default_of(model: &Model, def: DefId, index: u32) -> Option<Location> {
+  let default = model
+    .def(def)
+    .type_params()
+    .nth(index as usize)?
+    .default()?;
+  Some(model.type_expr(default).location())
+}
+
+/// The name of the type parameter `index` of `def`, of `model`, or nothing when it has none. A
+/// constant step, as [`default_of`]'s.
+pub(crate) fn parameter(model: &Model, def: DefId, index: u32) -> &str {
+  match model.def(def).type_params().nth(index as usize) {
+    Some(param) => param.name(),
+    None => "",
+  }
+}

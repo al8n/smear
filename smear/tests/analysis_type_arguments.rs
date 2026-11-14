@@ -1268,8 +1268,9 @@ fn a_check_a_limit_stops_is_reported_at_the_occurrence() {
 /// meets the count being made: the count is poisoned, no copy is made, and the read is cut. Then
 /// `"bad"`, which `Int` does not take: the count does not fit, so `Rec<Int>` is
 /// `invalid-default-value`, the code of a default's site, at the occurrence, labelled at the
-/// value. `next`'s default stays its literal. The cycle is another rule's, so this phase's codes
-/// alone are read. Refuses a poison that clears the check pending beside it.
+/// value. `next`'s default stays its literal. The phase reports the cycle too, under GraphQL's own
+/// code, so the codes it reports values with alone are read. Refuses a poison that clears the check
+/// pending beside it.
 #[test]
 fn a_count_that_meets_itself_still_judges_the_values_it_reached() {
   let text = "type Query {\n  f(arg: Rec<Int>): Int\n}\n\
@@ -1299,8 +1300,8 @@ fn a_count_that_meets_itself_still_judges_the_values_it_reached() {
 }
 
 /// The same count, its `1` taking `Int`, fits: the count is poisoned as before, and nothing it
-/// reached is refused, so this phase says nothing, and the cycle is another rule's to report.
-/// Refuses a poison taken for a value that does not fit.
+/// reached is refused, so this phase says nothing of its values, and reports the cycle alone, under
+/// GraphQL's own code. Refuses a poison taken for a value that does not fit.
 #[test]
 fn a_count_that_meets_itself_with_values_that_fit_says_nothing() {
   let text = "type Query {\n  f(arg: Rec<Int>): Int\n}\n\

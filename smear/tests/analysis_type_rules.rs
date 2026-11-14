@@ -1,7 +1,8 @@
 //! The GraphQLx analyzer's rules on what is judged of types: a marker has no field, is named only
 //! in `implements` and in bounds, and is what a scalar, an enum, an input object or a union
 //! implements; a set has one type parameter and a map two; `TypeRef` stands only in a directive's
-//! arguments; `NonZero`'s argument is an integer primitive; and a definition's type parameters
+//! arguments, and no field's argument reaches an input object that holds one, whichever package
+//! wrote it; `NonZero`'s argument is an integer primitive; and a definition's type parameters
 //! have distinct names. Each rule says nothing within what a phase refused, and quotes a name only
 //! as an excerpt.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
@@ -534,6 +535,502 @@ fn type_ref_is_a_directive_arguments_type() {
   );
 }
 
+/// An input object that holds a `TypeRef`, one that holds it, generic ones given it, written and
+/// filled from a default, and one that holds a list of `TypeRef`; then field arguments that reach
+/// them every way a value can, and those that do not: through a scalar that is no collection, in
+/// a directive's arguments, nowhere, and `TypeRef` itself.
+const REACHES: &str = "type Query {\n  ok: Int\n}\ninput Binding {\n  type: TypeRef!\n}\n\
+                       input Outer {\n  inner: Binding\n}\ninput Wrapped<T> {\n  v: T\n}\n\
+                       input WrappedDefault<T = Binding> {\n  v: T\n}\n\
+                       input Many {\n  types: [TypeRef!]\n}\ninput Unused {\n  b: Binding\n}\n\
+                       scalar Ref<T>\ndirective @bind(b: Binding, o: Outer) on OBJECT\n\
+                       type Uses @bind(b: { type: Query }) {\n  a(b: Binding): Int\n  \
+                       c(o: [Outer!]): Int\n  d(w: Wrapped<Binding>): Int\n  \
+                       e(m: HashMap<string, Binding>): Int\n  e2(w: WrappedDefault): Int\n  \
+                       f(m: Many): Int\n  g(r: Ref<Binding>): Int\n  h(x: Int): Int\n  \
+                       i(t: TypeRef): Int\n}\n";
+
+#[test]
+fn an_operations_argument_reaches_no_type_ref_field() {
+  let analysis = analyze_one(REACHES);
+  let schema = schema_file(&analysis);
+  let text = REACHES;
+  let binding = Some(named(schema, text, "  ", "type", 0));
+  assert_eq!(
+    found(&analysis),
+    [
+      (TYPEREF, named(schema, text, "a(b: ", "Binding", 0), binding),
+      (TYPEREF, at(schema, text, "[Outer!]", 0), binding),
+      (TYPEREF, at(schema, text, "Wrapped<Binding>", 0), binding),
+      (
+        TYPEREF,
+        at(schema, text, "HashMap<string, Binding>", 0),
+        binding
+      ),
+      // A default fills it: what the slot holds is the argument's too.
+      (
+        TYPEREF,
+        named(schema, text, "e2(w: ", "WrappedDefault", 0),
+        binding
+      ),
+      (
+        TYPEREF,
+        named(schema, text, "f(m: ", "Many", 0),
+        Some(named(schema, text, "  ", "types", 0))
+      ),
+      // `TypeRef` itself is the first half's alone, and once.
+      (TYPEREF, named(schema, text, "t: ", "TypeRef", 0), None),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let first = reported(&analysis)[0];
+  assert_eq!(
+    first.to_string(),
+    "the argument `b` of the field `a` of `Uses` takes a value that can hold the input field \
+     `type` of `Binding`, whose type is `TypeRef`, which only a directive's arguments may reach"
+  );
+  assert_eq!(
+    (
+      first.primary_label(),
+      first.label(0).map(|label| label.text()),
+      first.help()
+    ),
+    (
+      Some("`TypeRef` where it may not stand"),
+      Some("a value of `TypeRef` stands here"),
+      Some(
+        "an operation's argument never holds a type reference: take the input object in a \
+         directive's argument alone, or drop the `TypeRef` field from what the argument reaches"
+      )
+    )
+  );
+}
+
+#[test]
+fn a_dependencys_input_object_reached_from_the_roots_argument_is_refused() {
+  // The dependency takes its input object in a directive's argument alone, which is metadata; the
+  // root package's field argument takes it, which an operation sets.
+  const GEO: &str = "type Query {\n  ok: Int\n}\ninput Binding {\n  type: TypeRef!\n}\n\
+                     directive @bind(b: Binding) on OBJECT\n\
+                     type Point @bind(b: { type: Point }) {\n  x: Int\n}\n";
+  const OURS: &str = "type Query {\n  f(b: ^::geo::Binding): Int\n}\n";
+  let geo = || -> Package<&'static str> {
+    Package::new("geo", Layout::Flat, Tier::Core).with_files([SourceFile::new("geo.graphqlx", GEO)])
+  };
+  let root = package("app", Layout::Flat, &[("schema.graphqlx", OURS)]).with_dependencies(["geo"]);
+  let analysis = analyze(&root, &[geo()], &Limits::new());
+  let schema = schema_file(&analysis);
+  let geo_file = file(&analysis, 4, "geo.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [(
+      TYPEREF,
+      at(schema, OURS, "^::geo::Binding", 0),
+      Some(named(geo_file, GEO, "  ", "type", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  // Alone, as the root package, the dependency is ok.
+  let analysis = analyze(&geo(), &[], &Limits::new());
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+/// Generic definitions whose type parameter an operation's argument reaches: directly, through a
+/// default, passed on to another such definition, through an input object a field argument
+/// takes, through an input object given to another such definition's parameter, an interface's,
+/// and one only a default's fill reaches; each given an input object that holds a `TypeRef`, beside
+/// instantiations that give them what holds none, and a directive's parameter, which only a
+/// directive's arguments reach.
+const OPERATIONS: &str = "type Query {\n  ok: Int\n}\ninput Binding {\n  type: TypeRef!\n}\n\
+                          input Wrapped<W> {\n  v: W\n}\ntype Q<T> {\n  f(a: T): Int\n}\n\
+                          type QD<T = Binding> {\n  f(a: T): Int\n}\n\
+                          type Outer2<U> {\n  q: Q<U>\n}\ntype Q2<T> {\n  f(a: Wrapped<T>): Int\n}\n\
+                          type D<T> {\n  q: Q<Wrapped<T>>\n}\ninterface I<T> {\n  f(a: T): Int\n}\n\
+                          type X implements I<Binding> {\n  f(a: Binding): Int\n}\n\
+                          type Edge2<N> {\n  f(a: N): Int\n}\n\
+                          type Conn2<N, E = Edge2<N>> {\n  edges: [E]\n}\ntype P<T> {\n  p: T\n}\n\
+                          directive @dd<T>(v: T) on OBJECT\n\
+                          type Uses @dd<Binding> {\n  q: Q<Binding>\n  qd: QD\n  o: Outer2<Binding>\n  \
+                          q2: Q2<Binding>\n  d: D<Binding>\n  c: Conn2<Binding>\n  p: P<Int>\n  \
+                          qi: Q<Int>\n}\n";
+
+#[test]
+fn an_instantiations_argument_reaches_no_type_ref_field() {
+  let analysis = analyze_one(OPERATIONS);
+  let schema = schema_file(&analysis);
+  let text = OPERATIONS;
+  assert_eq!(
+    found(&analysis),
+    [
+      // An `implements` entry is an instantiation; the field that implements it is the argument
+      // rule's, each true.
+      (
+        TYPEREF,
+        named(schema, text, "I<", "Binding", 0),
+        Some(named(schema, text, "f(a: ", "T", 2))
+      ),
+      (
+        TYPEREF,
+        named(schema, text, "f(a: ", "Binding", 0),
+        Some(named(schema, text, "  ", "type", 0))
+      ),
+      (
+        TYPEREF,
+        named(schema, text, "q: Q<", "Binding", 0),
+        Some(named(schema, text, "f(a: ", "T", 0))
+      ),
+      // A default fills it: at the occurrence.
+      (
+        TYPEREF,
+        named(schema, text, "qd: ", "QD", 0),
+        Some(named(schema, text, "f(a: ", "T", 1))
+      ),
+      // `Outer2`'s parameter is passed on to `Q`'s.
+      (
+        TYPEREF,
+        named(schema, text, "Outer2<", "Binding", 0),
+        Some(at(schema, text, "Q<U>", 0))
+      ),
+      // A field argument takes a `Wrapped<T>`, whose value holds a `T`.
+      (
+        TYPEREF,
+        named(schema, text, "Q2<", "Binding", 0),
+        Some(at(schema, text, "Wrapped<T>", 0))
+      ),
+      // `Q`'s field argument takes a `Wrapped<T>` of `D`'s parameter.
+      (
+        TYPEREF,
+        named(schema, text, "d: D<", "Binding", 0),
+        Some(at(schema, text, "Q<Wrapped<T>>", 0))
+      ),
+      // What the default of `E` derives, `Edge2<Binding>`, which no occurrence writes.
+      (
+        TYPEREF,
+        at(schema, text, "Conn2<Binding>", 0),
+        Some(named(schema, text, "f(a: ", "N", 0))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let messages = messages(&analysis);
+  assert_eq!(
+    messages[2],
+    "`Q` takes `Binding` for its type parameter `T`, which an operation's argument reaches, and \
+     a value of `Binding` can hold the input field `type` of `Binding`, whose type is `TypeRef`"
+  );
+  assert_eq!(
+    messages[3],
+    "`QD` takes, from the default of `T`, `Binding` for its type parameter `T`, which an \
+     operation's argument reaches, and a value of `Binding` can hold the input field `type` of \
+     `Binding`, whose type is `TypeRef`"
+  );
+  assert_eq!(
+    messages[7],
+    "the default of `E` of `Conn2` makes `Edge2` take `Binding` for its type parameter `N`, which \
+     an operation's argument reaches, and a value of `Binding` can hold the input field `type` of \
+     `Binding`, whose type is `TypeRef`"
+  );
+  // The labels: where the parameter is reached, the field of type `TypeRef`, and the default that
+  // fills the slot, when one does.
+  let labels: Vec<Vec<(Location, &str)>> = reported(&analysis)
+    .into_iter()
+    .map(|diagnostic: &Diagnostic| {
+      (0..diagnostic.labels())
+        .filter_map(|index: usize| diagnostic.label(index))
+        .map(|label| (label.location(), label.text()))
+        .collect()
+    })
+    .collect();
+  let field = (
+    named(schema, text, "  ", "type", 0),
+    "a value of `TypeRef` stands here",
+  );
+  assert_eq!(
+    labels[3],
+    [
+      (
+        named(schema, text, "f(a: ", "T", 1),
+        "`T` is reached from an operation's argument here"
+      ),
+      field,
+      (
+        named(schema, text, "T = ", "Binding", 0),
+        "filled from this default"
+      ),
+    ]
+  );
+  assert_eq!(
+    labels[7],
+    [
+      (
+        named(schema, text, "f(a: ", "N", 0),
+        "`N` is reached from an operation's argument here"
+      ),
+      field,
+      (
+        named(schema, text, "E = ", "Edge2<N>", 0),
+        "filled from this default"
+      ),
+    ]
+  );
+  let first = reported(&analysis)[2];
+  assert_eq!(
+    (first.primary_label(), first.help()),
+    (
+      Some("`TypeRef` where it may not stand"),
+      Some(
+        "an operation's argument never holds a type reference: take the input object in a \
+         directive's argument alone, or drop the `TypeRef` field from what the argument reaches"
+      )
+    )
+  );
+}
+
+#[test]
+fn a_default_that_reaches_a_type_ref_is_refused_where_it_is_written() {
+  // `P`'s `T` is reached from an operation's argument, so `Ref`'s default `P<A, Binding>` is
+  // refused at `Binding`, where it is written, labelled where `T` is reached and at `Binding`'s
+  // `type`. Each use derives a `P` of its own, `P<Int, Binding>` and `P<Boolean, Binding>`, which
+  // no occurrence writes and which would repeat the default's mistake: a fill that leaves a slot to
+  // a default the rule refuses derives nothing to judge, and neither use adds a report.
+  let text = "type Query {\n  r: Ref<Int>\n  s: Ref<Boolean>\n}\n\
+              input Binding {\n  type: TypeRef!\n}\ntype P<S, T> {\n  f(a: T): Int\n}\n\
+              type Ref<A, B = P<A, Binding>> {\n  r: Int\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let reached = named(schema, text, "f(a: ", "T", 0);
+  let field = (
+    named(schema, text, "  ", "type", 0),
+    "a value of `TypeRef` stands here",
+  );
+  assert_eq!(
+    found(&analysis),
+    [(
+      TYPEREF,
+      named(schema, text, "P<A, ", "Binding", 0),
+      Some(reached)
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "`P` takes `Binding` for its type parameter `T`, which an operation's argument reaches, and \
+       a value of `Binding` can hold the input field `type` of `Binding`, whose type is `TypeRef`"
+    ]
+  );
+  let labels: Vec<Vec<(Location, &str)>> = reported(&analysis)
+    .into_iter()
+    .map(|diagnostic: &Diagnostic| {
+      (0..diagnostic.labels())
+        .filter_map(|index: usize| diagnostic.label(index))
+        .map(|label| (label.location(), label.text()))
+        .collect()
+    })
+    .collect();
+  assert_eq!(
+    labels,
+    [vec![
+      (reached, "`T` is reached from an operation's argument here"),
+      field,
+    ]]
+  );
+
+  // The twin, a default that holds no `TypeRef` as written: `Ref<Binding>`'s fill derives
+  // `P<Binding, Binding>`, refused at the use, from the default of `B`, labelled at the default
+  // too. `Ref<Int>` adds nothing.
+  let text = "type Query {\n  r: Ref<Binding>\n  s: Ref<Int>\n}\n\
+              input Binding {\n  type: TypeRef!\n}\ntype P<S, T> {\n  f(a: T): Int\n}\n\
+              type Ref<A, B = P<A, A>> {\n  r: Int\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let reached = named(schema, text, "f(a: ", "T", 0);
+  assert_eq!(
+    found(&analysis),
+    [(TYPEREF, at(schema, text, "Ref<Binding>", 0), Some(reached))],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "the default of `B` of `Ref` makes `P` take `Binding` for its type parameter `T`, which an \
+       operation's argument reaches, and a value of `Binding` can hold the input field `type` of \
+       `Binding`, whose type is `TypeRef`"
+    ]
+  );
+  let labels: Vec<Vec<(Location, &str)>> = reported(&analysis)
+    .into_iter()
+    .map(|diagnostic: &Diagnostic| {
+      (0..diagnostic.labels())
+        .filter_map(|index: usize| diagnostic.label(index))
+        .map(|label| (label.location(), label.text()))
+        .collect()
+    })
+    .collect();
+  assert_eq!(
+    labels,
+    [vec![
+      (reached, "`T` is reached from an operation's argument here"),
+      (
+        named(schema, text, "  ", "type", 0),
+        "a value of `TypeRef` stands here"
+      ),
+      (
+        named(schema, text, "B = ", "P<A, A>", 0),
+        "filled from this default"
+      ),
+    ]]
+  );
+}
+
+#[test]
+fn a_directive_applied_to_an_input_object_holds_no_value() {
+  // `Empty`'s `T` stands in an input field through `@tag`'s argument, which the kind it takes
+  // answers to; but a value of `Empty` holds what its input fields hold, and `@tag` is metadata:
+  // no value of `Empty<Ref>` holds a `Ref`, whether a field argument takes it or a type parameter
+  // a field argument reaches.
+  const HOLDS_NONE: &str = "type Query {\n  f(x: Empty<Ref>): Int\n  d: D<Ref>\n}\n\
+                            input Ref {\n  r: TypeRef\n}\ninput Box<T> {\n  v: T\n}\n\
+                            directive @tag<T>(arg: Box<T>) on INPUT_OBJECT\n\
+                            input Empty<T> @tag<T> {\n  n: Int\n}\n\
+                            type Q<A> {\n  f(a: A): Int\n}\ntype D<T> {\n  q: Q<Empty<T>>\n}\n";
+  let analysis = analyze_one(HOLDS_NONE);
+  assert!(
+    reported(&analysis).is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // With a field that holds its `T`, a value of `Empty<Ref>` holds a `Ref`.
+  const HOLDS: &str = "type Query {\n  f(x: Empty<Ref>): Int\n  d: D<Ref>\n}\n\
+                       input Ref {\n  r: TypeRef\n}\ninput Box<T> {\n  v: T\n}\n\
+                       directive @tag<T>(arg: Box<T>) on INPUT_OBJECT\n\
+                       input Empty<T> @tag<T> {\n  n: Int\n  v: T\n}\n\
+                       type Q<A> {\n  f(a: A): Int\n}\ntype D<T> {\n  q: Q<Empty<T>>\n}\n";
+  let analysis = analyze_one(HOLDS);
+  let schema = schema_file(&analysis);
+  let field = Some(named(schema, HOLDS, "  ", "r", 0));
+  assert_eq!(
+    found(&analysis),
+    [
+      (TYPEREF, at(schema, HOLDS, "Empty<Ref>", 0), field),
+      (
+        TYPEREF,
+        named(schema, HOLDS, "D<", "Ref", 0),
+        Some(at(schema, HOLDS, "Q<Empty<T>>", 0))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
+fn a_report_reads_what_a_chain_of_lists_names_once() {
+  // `Q`'s parameters after the first are each a list of the one before, by default, and the first
+  // is `Binding`, which holds a `TypeRef`, by default; an operation's argument takes the last. So
+  // each field of `Query` that leaves `Q`'s parameters to their defaults is refused, at its
+  // occurrence, naming `Binding`, which the last argument names under its lists, and labelled where
+  // the last parameter is reached, at `Binding`'s `type` and at the last default. What a list
+  // names under its lists is kept for the walk beside what a value of it can reach, which the
+  // verdict asks once for each type, so each list is walked once for the walk, whichever report
+  // names it. The depth and the count of fields vary, and each program runs again under a
+  // diagnostic ceiling of zero, which keeps no report and still builds and counts each. A test sees
+  // the diagnostics, not the work, which holds by construction: a report reads the answer its
+  // verdict kept, and walks no list. Walked again for each report, the largest program here would
+  // read its 3,000 lists for each of its 3,000 fields, 9 million steps.
+  const DEPTH: usize = 3_000;
+  const FIELDS: usize = 3_000;
+  // `Q` is a level deeper than its last argument, which is as deep as the lists, past the default
+  // bound.
+  let limits = Limits::new()
+    .with_max_generic_depth(u32::try_from(DEPTH + 1).expect("the lists' depth is a u32"));
+  for (depth, fields) in [(1, 1), (DEPTH, 1), (1, FIELDS), (DEPTH, FIELDS)] {
+    let mut text = String::from("type Query {\n");
+    let mut written: Vec<usize> = Vec::with_capacity(fields);
+    for index in 0..fields {
+      let field = format!("  q{index}: ");
+      written.push(text.len() + field.len());
+      text.push_str(&field);
+      text.push_str("Q\n");
+    }
+    text.push_str("}\ninput Binding {\n  type: TypeRef!\n}\ntype Q<A = Binding");
+    // The last parameter's name, and where its default is written, with its length.
+    let mut last = String::from("A");
+    let mut default = (0, 0);
+    for index in 1..=depth {
+      let head = format!(", B{index} = ");
+      let list = format!("[{last}]");
+      default = (text.len() + head.len(), list.len());
+      text.push_str(&head);
+      text.push_str(&list);
+      last = format!("B{index}");
+    }
+    text.push_str("> {\n  f(a: ");
+    let stands = text.len();
+    text.push_str(&last);
+    text.push_str("): Int\n}\n");
+    let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+      .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
+    let analysis = analyze(&root, &[], &limits);
+    let schema = schema_file(&analysis);
+    let span = |start: usize, len: usize| -> Location {
+      Location::new(schema.get(), SimpleSpan::new(start, start + len))
+    };
+    let reached = span(stands, last.len());
+    let expected: Vec<(&'static str, Location, Option<Location>)> = written
+      .iter()
+      .map(|start: &usize| (TYPEREF, span(*start, "Q".len()), Some(reached)))
+      .collect();
+    assert_eq!(found(&analysis), expected, "depth {depth}, fields {fields}");
+    let first = reported(&analysis)[0];
+    assert_eq!(
+      first.to_string(),
+      format!(
+        "`Q` takes, from the default of `{last}`, `Binding` for its type parameter `{last}`, which \
+         an operation's argument reaches, and a value of `Binding` can hold the input field `type` \
+         of `Binding`, whose type is `TypeRef`"
+      )
+    );
+    let labels: Vec<(Location, String)> = (0..first.labels())
+      .filter_map(|index: usize| first.label(index))
+      .map(|label| (label.location(), String::from(label.text())))
+      .collect();
+    assert_eq!(
+      labels,
+      [
+        (
+          reached,
+          format!("`{last}` is reached from an operation's argument here")
+        ),
+        (
+          named(schema, &text, "  ", "type", 0),
+          String::from("a value of `TypeRef` stands here")
+        ),
+        (
+          span(default.0, default.1),
+          String::from("filled from this default")
+        ),
+      ]
+    );
+    // Under a ceiling of zero, each report is built and counted, and none is kept.
+    let silent = analyze(&root, &[], &limits.with_max_diagnostics(0));
+    let diagnostics = silent.diagnostics();
+    assert!(diagnostics.is_empty(), "depth {depth}, fields {fields}");
+    assert!(diagnostics.truncated());
+    assert_eq!(diagnostics.error_count(), fields);
+  }
+}
+
 /// `NonZero` of integer primitives, written and through an alias; then of a float, `string`, `u0`,
 /// a list, an object, an integer written with `!` and a type parameter; and with no argument.
 const NON_ZEROS: &str = "type User {\n  id: ID\n}\n\
@@ -789,6 +1286,15 @@ fn a_rule_says_nothing_where_a_phase_spoke() {
     ),
     ("type F {\n  f: TypeRef\n  x: Missing\n}\n", UNDEFINED),
     (
+      "input Binding {\n  type: TypeRef!\n}\ntype F {\n  f(b: Binding): Int\n  x: Missing\n}\n",
+      UNDEFINED,
+    ),
+    (
+      "input Binding {\n  type: TypeRef!\n}\ntype Q<T> {\n  f(a: T): Int\n}\n\
+       type F {\n  q: Q<Binding>\n  x: Missing\n}\n",
+      UNDEFINED,
+    ),
+    (
       "type F {\n  n: NonZero<Float>\n  x: Missing\n}\n",
       UNDEFINED,
     ),
@@ -824,6 +1330,16 @@ fn a_rule_says_nothing_where_a_phase_spoke() {
     ("scalar S0 @set\ntype G {\n  x: Missing\n}\n", COLLECTION),
     (
       "type F {\n  f: TypeRef\n}\ntype G {\n  x: Missing\n}\n",
+      TYPEREF,
+    ),
+    (
+      "input Binding {\n  type: TypeRef!\n}\ntype F {\n  f(b: Binding): Int\n}\n\
+       type G {\n  x: Missing\n}\n",
+      TYPEREF,
+    ),
+    (
+      "input Binding {\n  type: TypeRef!\n}\ntype Q<T> {\n  f(a: T): Int\n}\n\
+       type F {\n  q: Q<Binding>\n}\ntype G {\n  x: Missing\n}\n",
       TYPEREF,
     ),
     (
@@ -900,6 +1416,41 @@ fn long_names_in_the_rules_are_quoted_as_excerpts() {
        declares 0",
       quoted("S")
     )]
+  );
+
+  // A field's argument and the input object it takes, each named with four kilobytes, the input
+  // object holding a field of type `TypeRef` named so too: each name quoted by its ends.
+  let name = "B".repeat(4096);
+  let analysis = analyze_text(&format!(
+    "input {name} {{\n  {name}: TypeRef!\n}}\ntype Query {{\n  {name}({name}: {name}): Int\n}}\n"
+  ));
+  let messages_of_reach = messages(&analysis);
+  assert_eq!(messages_of_reach.len(), 1, "{:#?}", analysis.diagnostics());
+  assert!(
+    messages_of_reach[0].len() < 1024,
+    "{}",
+    messages_of_reach[0]
+  );
+
+  // A generic definition, its type parameter and the input object it is given, each named with
+  // four kilobytes, the input object's field of type `TypeRef` named so too.
+  let def = "Q".repeat(4096);
+  let param = "T".repeat(4096);
+  let analysis = analyze_text(&format!(
+    "input {name} {{\n  {name}: TypeRef!\n}}\ntype {def}<{param}> {{\n  f(a: {param}): Int\n}}\n\
+     type Query {{\n  q: {def}<{name}>\n}}\n"
+  ));
+  let messages_of_instantiation = messages(&analysis);
+  assert_eq!(
+    messages_of_instantiation.len(),
+    1,
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert!(
+    messages_of_instantiation[0].len() < 1024,
+    "{}",
+    messages_of_instantiation[0]
   );
 
   // `NonZero` of a scalar named with four kilobytes: the message names no type.

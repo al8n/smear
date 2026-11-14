@@ -403,7 +403,13 @@ All notable changes to Smear are documented in this file.
   `@oneOf` to takes exactly one field, and not `null`; and a field left out that has a default
   takes a copy of it, as an argument does, but a OneOf input object's, and is otherwise absent. A
   copy is counted before it is made, each default's count kept by its tree and its type, and a
-  default whose copy would hold a copy of itself is not copied, its argument or field absent. A set
+  default whose copy would hold a copy of itself is not copied, its argument or field absent, and
+  the first time a count meets itself the cycle is `smear::schema::input-object-default-value-cycle`,
+  at the input field of least id whose default is on it, once for each field, "under the type
+  arguments a use gives it" for `input A { b: Box<A> = {} }` with `input Box<T> { v: T = {} }`;
+  a program with such a cycle among closed types gets at least one, and a cycle in a generic
+  definition no closed instantiation reaches is not met, nor one of `input G<T> { g: G<[T]> = {} }`,
+  which grows and is `resource-limit`. A set
   takes a `set!{…}` and a map a `map!{…}`, as `ValueKind::Set` and `ValueKind::Map`, each element,
   key and value coerced against the collection's types, a key or an element never `null`; any
   other literal where a collection is expected, an extern one among them, and a collection
@@ -481,7 +487,11 @@ All notable changes to Smear are documented in this file.
   `smear::schema::missing-interface-field`, `invalid-interface-field-type`,
   `interface-field-not-deprecated`, `missing-interface-field-argument`,
   `invalid-interface-field-argument-type` or `unexpected-required-argument`, where `smear-schema`
-  reports each. Last, each instantiation the program writes of a definition whose entries or
+  reports each; and each instantiation the program writes that gives a non-null type to the type
+  parameter typing such an argument, written bare and nullable with no default, makes it required,
+  and is `unexpected-required-argument` at the occurrence: `Page<Int!>` of
+  `type Page<T> implements Paged { items(after: T): [Int] }`. Last, each instantiation the program
+  writes of a definition whose entries or
   members name its type parameters, an open one included, has no two of them that are one type
   under its arguments, `Either<User, User>` of `union Either<A, B> = A | B` being
   `duplicate-union-member` at the occurrence. A new `Limits::max_implementation_steps`, 2^20 by
@@ -526,7 +536,15 @@ All notable changes to Smear are documented in this file.
   application, and a scalar that applies both is so once, at the later. And `TypeRef` stands only as
   the type of a directive definition's argument or of an input field, under lists alone: anywhere
   else, a type argument of any generic definition included, it is the new
-  `smear::graphqlx::typeref-misuse`. And `NonZero`'s type argument is an integer primitive at least
+  `smear::graphqlx::typeref-misuse`; and so is a field's argument whose value can hold an input
+  field of type `TypeRef`, through lists, collections' arguments and input objects, over every
+  package's input objects together, at the argument's type, labelled at that field: the root
+  package's `f(b: ^::geo::Binding)` is refused when `geo`'s `Binding` holds a `TypeRef`, though
+  only `geo`'s directives take it; a value of an input object holds what its input fields hold,
+  and nothing a directive applied to it names. It is also each instantiation that gives such a
+  type to a type parameter an operation's argument reaches, where it is written, or whose defaults
+  derive one that does: `Q<Binding>` of `type Q<T> { f(a: T): Int }`, and `D<Binding>` of
+  `type D<T> { q: Q<Wrapped<T>> }`. And `NonZero`'s type argument is an integer primitive at least
   one bit wide, written without `!`: `NonZero` of a float, `string`, an object, a list, `u0`, a type
   parameter or an integer written with `!` is the new `smear::graphqlx::nonzero-argument`, where it
   is written, which is then all a map or a set keyed by it is refused with. And a definition's type
@@ -565,18 +583,50 @@ All notable changes to Smear are documented in this file.
   base, under its lists, is an input object, and an argument, an input field or a directive's
   argument whose base is an object, an interface or a union, are `field-type-not-output-type`,
   `argument-type-not-input-type`, `input-field-type-not-input-type` or
-  `directive-argument-type-not-input-type`, at the base; and an `implements` entry of an object or
+  `directive-argument-type-not-input-type`, at the base, and so is a base that is a collection
+  holding such a type, its complete type's arguments read through the collections and lists they
+  hold, at the deepest occurrence that writes the way to it, with a label at the default that
+  fills a slot left out: `f(a: HashMap<string, User>)` is `argument-type-not-input-type` at
+  `User`; and at each instantiation the same codes judge what it gives each type parameter where
+  the parameter stands, every written type occurrence and every directive application by its
+  complete type arguments, a parameter standing where its definition's members, union members,
+  `implements` entries and applications put it, through lists, collections and the definitions it
+  is passed to, a scalar and an interface among them:
+  `Page<Input>` of `type Page<T> { items: [T] }` is `field-type-not-output-type` at `Input`, with a
+  label at `[T]`; and what the slots an occurrence leaves to their defaults derive, which no
+  occurrence writes, is judged at the occurrence: `Conn<Input>` of `type Conn<N, E = Edge<N>>` is
+  refused when `Edge`'s `N` stands in a field, and a default refused where it is written is
+  refused there alone, at no use that leaves its slot out; and an `implements` entry of an object or
   an interface that names what is no interface, a type parameter among them, is
   `implements-non-interface`; and an interface on a cycle of `implements` entries, of any length,
   is `self-implementing-interface`; and a union member that names what is no object type is
   `union-member-not-object`; and an argument or an input field written non-null, with no default,
   that applies `core`'s `@deprecated`, told by its definition and not its spelling, is
-  `deprecated-required-argument` or `deprecated-required-input-field`; and an input object is OneOf
+  `deprecated-required-argument` or `deprecated-required-input-field`, and so is an instantiation
+  that makes one required, where it is written: `I<Int!>` of `input I<T> { a: T @deprecated }`;
+  and so is, once, where it does so, a collection's own definition that gives its element or key,
+  non-null in every instantiation however it is written, such a member's type, which no use of the
+  collection repeats: `scalar S<T> @set @d<T>` of `directive @d<X>(v: X @deprecated)`; and an
+  input object is OneOf
   when the package that wrote it applies `core`'s `@oneOf` to it, in its definition or in an
-  extension of its own, and a field of one written non-null is `one-of-field-not-nullable`, and one
-  that declares a default `one-of-field-has-default`; and each `@oneOf` an extension of an input
-  object applies is `one-of-on-input-object-extension`. And every application a supplied package
-  writes keeps GraphQL's own rules on directives, with GraphQL's codes: one at a location its
+  extension of its own, and a field of one written non-null is `one-of-field-not-nullable`, and so
+  is an instantiation that gives a non-null type to a type parameter that is such a field's type,
+  where it is written: `Choice<Int!>` of `input Choice<T> @oneOf { x: T }`, but not `L<Int!>` of
+  `input L<T> @oneOf { x: [T] }`, and so, once, is a collection's own definition that gives its
+  element or key such a field's type; and one that declares a default `one-of-field-has-default`;
+  and each `@oneOf` an extension of an input
+  object applies is `one-of-on-input-object-extension`; and an input object that requires a value
+  of itself is `circular-non-null-input-field` when every field on the way is non-null and no
+  list, and `circular-one-of-input-field` when the way passes a OneOf none of whose fields can be
+  given a finite value, at the field that closes the cycle, once for its input object, by the
+  draft's unbreakable-cycle algorithm over every package's input objects, a generic input object
+  requiring what its type arguments must hold: `input Wrap<T> { v: T! }` makes
+  `input A { w: Wrap<A>! }` a cycle, and `input Wrap<T> { v: T }` makes `Wrap<A!>!` one. Where
+  only a substitution would say what an alternative of a OneOf requires, and past a cap on the
+  choices an input object keeps, the rule requires less: it never refuses an input object a finite
+  value satisfies, and may miss a cycle only in a program with type parameters. And every
+  application a supplied package writes keeps GraphQL's own rules on directives, with GraphQL's
+  codes: one at a location its
   directive's definition does not list, a built-in's own directive or a program's, is
   `smear::schema::unsupported-directive-location`, at its path, with a label at the directive's
   definition; and one of a directive that is not repeatable, applied again where it is applied, a

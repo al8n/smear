@@ -30,6 +30,27 @@
 //! package has none, and a consumer that analyzes one waives that code by filtering it, since the
 //! analysis keeps GraphQL's rule on the query root and exposes no waiver.
 //!
+//! A rule that judges what an instantiation gives a type parameter reads where each type parameter
+//! stands: the table of `positions::Positions`, found once for the walk, in `begin`, by each rule
+//! that reads it, over every package's definitions, so that a dependency's generic definition
+//! used by the root package is judged by what all its contributions write. A parameter stands
+//! where its definition's members, union members, `implements` entries and applications put it,
+//! through lists and collections, and where each definition it is passed to puts that definition's
+//! parameter, a scalar's and an interface's among them. Such a rule judges every written occurrence
+//! and every application, each type once, and what the slots an occurrence leaves to their
+//! defaults derive, at the occurrence, through `positions::Derived`, but for a default the rule
+//! refuses, which is reported where it is written and at no use.
+//! `MemberTypeKind` is one, for the kinds its places take, `TypeRefMisuse` another, for the
+//! parameters an operation's argument reaches, `OneOfFieldNotNullable` a third, for the
+//! parameters that are a OneOf's field's whole type, which `positions::Positions::of` tells from
+//! who wrote each `@oneOf`, as `one_of` does, and `DeprecatedRequired` a fourth, for the
+//! parameters that are a deprecated member's whole type; each reads one crate-private accessor,
+//! `Application::ty`, an application's complete type, its directive's instantiation.
+//! `TypeRefMisuse` reads the graph of what a value can reach too, `reach::Reach`, found once for
+//! the walk over every package's input objects, so that an argument the root package writes is
+//! judged by what a dependency's input object holds; what a value of an input object holds is its
+//! input fields' to say, and no directive's applied to it, as `Positions::holds` answers.
+//!
 //! Where an occurrence stands in its tree is told from the order the walk reaches occurrences in,
 //! by `Nesting`, which reads the public `TypeExpr::written_args`: the walk descends the written
 //! arguments of an occurrence that names a type parameter, or nothing, which the kind does not
@@ -42,6 +63,7 @@
 //! One rule is in no set: `UnboundedInstantiation`, which is public, which `analyze` never runs,
 //! and which a backend composes into its own walk. It reads the public model alone.
 
+mod circular_input_field;
 mod collection_arity;
 mod deprecated_required;
 mod duplicate_directive_argument_use;
@@ -77,7 +99,8 @@ mod union_member_not_object;
 mod unsupported_directive_location;
 
 use self::{
-  collection_arity::CollectionArity, deprecated_required::DeprecatedRequired,
+  circular_input_field::CircularInputField, collection_arity::CollectionArity,
+  deprecated_required::DeprecatedRequired,
   duplicate_directive_argument_use::DuplicateDirectiveArgumentUse,
   duplicate_directive_use::DuplicateDirectiveUse, duplicate_member::DuplicateMember,
   duplicate_schema_definition::DuplicateSchemaDefinition,
@@ -101,7 +124,7 @@ use self::{
 };
 use super::{
   ApplicationId, Contribution, Cx, DefId, DefKind, Model, PackageId, PackageKind, Resolution,
-  TypeExprId, TypeExprKind, id::dense,
+  SourceMap, TypeExprId, TypeExprKind, id::dense,
 };
 
 pub use self::unbounded_instantiation::UnboundedInstantiation;
@@ -113,13 +136,21 @@ pub use self::unbounded_instantiation::UnboundedInstantiation;
 /// built-in. `None` when the first contribution is an extension, so that the answer never rests
 /// on the order lowering appends contributions in.
 fn own_contribution<'a>(cx: &Cx<'a>, def: DefId) -> Option<(Contribution<'a>, PackageId)> {
-  let own = cx
-    .model()
+  own_in(cx.model(), cx.sources(), def)
+}
+
+/// [`own_contribution`]'s answer for `def` of `model`, whose files `sources` holds.
+fn own_in<'a>(
+  model: &'a Model,
+  sources: &SourceMap,
+  def: DefId,
+) -> Option<(Contribution<'a>, PackageId)> {
+  let own = model
     .def(def)
     .contributions()
     .next()
     .filter(|part: &Contribution<'a>| !part.is_extension())?;
-  let writer = cx.sources().written_by(own.location())?;
+  let writer = sources.written_by(own.location())?;
   Some((own, writer))
 }
 
@@ -134,16 +165,20 @@ fn supplied(cx: &Cx<'_>, def: DefId) -> bool {
 /// Whether the input object `def` is a OneOf input object: the package that wrote it applies
 /// `core`'s `@oneOf` to it, in its definition or in an extension of its own.
 fn one_of(cx: &Cx<'_>, def: DefId) -> bool {
-  let model = cx.model();
+  one_of_in(cx.model(), cx.sources(), def)
+}
+
+/// [`one_of`]'s answer for `def` of `model`, whose files `sources` holds: what the table of where
+/// each type parameter stands reads, which is found before any hook.
+pub(super) fn one_of_in(model: &Model, sources: &SourceMap, def: DefId) -> bool {
   let definition = model.def(def);
   if definition.kind() != DefKind::InputObject {
     return false;
   }
-  let Some((_, writer)) = own_contribution(cx, def) else {
+  let Some((_, writer)) = own_in(model, sources, def) else {
     return false;
   };
   let one_of = model.builtins().one_of();
-  let sources = cx.sources();
   definition.applications().iter().any(|id: &ApplicationId| {
     let application = model.application(*id);
     matches!(application.directive(), Resolution::Resolved(directive) if directive == one_of)
@@ -374,7 +409,9 @@ rule_set! {
   /// the root package adds to a built-in, none of which may give it a built-in meaning or a host
   /// type; an enum takes no type parameter; a marker has no field and is named only in `implements`
   /// and in bounds, and a scalar, an enum, an input object or a union implements markers alone; a
-  /// set has one type parameter and a map two; `TypeRef` stands only in a directive's arguments;
+  /// set has one type parameter and a map two; `TypeRef` stands only in a directive's arguments,
+  /// and no field's argument reaches an input object that holds one, nor, at each instantiation,
+  /// what it gives a type parameter an operation's argument reaches;
   /// `NonZero`'s argument is an integer primitive at least one bit wide, written without `!`; a
   /// definition's type parameters have distinct names, and so do the names an extension's own list
   /// gives them; `@extern` binds a scalar its own package defines, once for each language; `@repr`
@@ -383,10 +420,15 @@ rule_set! {
   /// of the definitions a supplied package wrote, GraphQL's own rules: a member's name does not
   /// begin with `__`; a definition's members have distinct names, and so have a field's arguments;
   /// a definition that holds members holds one at least, a marker holding none; a member's type is
-  /// of the kind its position takes; an object or an interface implements interfaces; no interface
-  /// implements itself; a union's members are object types; a required argument or input field is
-  /// not deprecated; a OneOf input object's fields are nullable and have no default; and an input
-  /// object takes `@oneOf` in its definition alone. And of the directives and every application a
+  /// of the kind its position takes, and so are a collection's arguments there, and at each
+  /// instantiation what it gives a type parameter where the parameter stands; an object or an
+  /// interface implements interfaces; no interface implements itself; a union's members are object
+  /// types; a required argument or input field is not deprecated, nor one an instantiation makes
+  /// required; a OneOf input object's fields are
+  /// nullable, at each instantiation too, and have no default; an input object takes `@oneOf` in
+  /// its definition alone; and no
+  /// input object requires a value of itself, through its fields and the type arguments they give.
+  /// And of the directives and every application a
   /// supplied package writes, GraphQL's own rules: a directive stands where its definition lists; a
   /// directive that is not repeatable is applied once to a location, a definition and its
   /// extensions being one; an application passes each argument once; no directive refers to itself,
@@ -473,6 +515,10 @@ rule_set! {
     extern_misuse: ExternMisuse => [super::DiagnosticKind::ExternMisuse.code()],
     repr_misuse: ReprMisuse => [super::DiagnosticKind::ReprMisuse.code()],
     tier_violation: TierViolation => [super::DiagnosticKind::Tier.code()],
+    circular_input_field: CircularInputField => [
+      super::code::schema::CIRCULAR_NON_NULL_INPUT_FIELD,
+      super::code::schema::CIRCULAR_ONE_OF_INPUT_FIELD,
+    ],
   }
 }
 
