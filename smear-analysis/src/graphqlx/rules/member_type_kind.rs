@@ -44,8 +44,8 @@
 //! package replaces among them, and so is a member's type occurrence; every other occurrence and
 //! application the walk reaches is judged where it is written.
 //!
-//! The rule reads the public model, and one crate-private accessor, `Application::ty`: an
-//! application's complete type, its directive's instantiation.
+//! The rule reads the public model, the public `Application::ty` among it: an application's
+//! complete type, its directive's instantiation.
 
 use std::{collections::BTreeMap, format, string::String};
 
