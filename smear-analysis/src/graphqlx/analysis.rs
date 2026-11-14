@@ -404,7 +404,11 @@ impl Analysis {
 ///   or a map with `@map` and that has not exactly two, is `collection-arity`, at the application,
 ///   and so is one that applies both, at the later. `TypeRef` anywhere but as the type of a
 ///   directive definition's argument or of an input field, under lists alone, is `typeref-misuse`,
-///   where it is named, a type argument of any generic definition included. `NonZero` whose type
+///   where it is named, a type argument of any generic definition included; and a field's
+///   argument a value of whose type can hold an input field of type `TypeRef`, through lists,
+///   collections' arguments and input objects, each input object's arguments for its type
+///   parameters that stand in its input fields, over every package's input objects, is
+///   `typeref-misuse` too, at the argument's type, labelled at that field. `NonZero` whose type
 ///   argument, in the occurrence's type, is no integer primitive at least one bit wide written
 ///   without `!` is `nonzero-argument`, where it is written, with a label at the argument. A type
 ///   parameter with the name of an earlier one of its definition, and a name an extension's own

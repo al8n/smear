@@ -137,7 +137,9 @@
 //! own package makes a collection with another count, or makes both, is
 //! `smear::graphqlx::collection-arity`. And `TypeRef` stands only as the type of a directive
 //! definition's argument or of an input field, under lists alone: anywhere else it is
-//! `smear::graphqlx::typeref-misuse`. And `NonZero` makes an integer never zero: `NonZero` of what
+//! `smear::graphqlx::typeref-misuse`, and so is a field's argument whose value can hold an input
+//! field of type `TypeRef`, through lists, collections and the input objects of every package, at
+//! the argument's type. And `NonZero` makes an integer never zero: `NonZero` of what
 //! is no integer primitive at least one bit wide, written without `!`, is
 //! `smear::graphqlx::nonzero-argument`. And a definition's type parameters have distinct names, and
 //! so do the names an extension's own list gives them: a type parameter with the name of an
@@ -229,6 +231,7 @@ mod package;
 mod parse;
 mod positions;
 mod raw;
+mod reach;
 mod resolve;
 mod rules;
 mod set;

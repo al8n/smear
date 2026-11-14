@@ -126,7 +126,9 @@ is all a scalar, an enum, an input object or a union implements, each other use 
 package makes a collection with another count, or makes both, being
 `smear::graphqlx::collection-arity`; and `TypeRef` stands only as the type of a directive
 definition's argument or of an input field, under lists alone, anywhere else being
-`smear::graphqlx::typeref-misuse`; and `NonZero`'s type argument is an integer primitive at least
+`smear::graphqlx::typeref-misuse`, and so is a field's argument whose value can hold an input field
+of type `TypeRef`, through lists, collections and the input objects of every package; and
+`NonZero`'s type argument is an integer primitive at least
 one bit wide, written without `!`, `NonZero` of anything else being
 `smear::graphqlx::nonzero-argument`; and a definition's type parameters have distinct names, and so
 do the names an extension's own list gives them, a type parameter with the name of an earlier one

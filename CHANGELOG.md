@@ -532,7 +532,11 @@ All notable changes to Smear are documented in this file.
   application, and a scalar that applies both is so once, at the later. And `TypeRef` stands only as
   the type of a directive definition's argument or of an input field, under lists alone: anywhere
   else, a type argument of any generic definition included, it is the new
-  `smear::graphqlx::typeref-misuse`. And `NonZero`'s type argument is an integer primitive at least
+  `smear::graphqlx::typeref-misuse`; and so is a field's argument whose value can hold an input
+  field of type `TypeRef`, through lists, collections' arguments and input objects, over every
+  package's input objects together, at the argument's type, labelled at that field: the root
+  package's `f(b: ^::geo::Binding)` is refused when `geo`'s `Binding` holds a `TypeRef`, though
+  only `geo`'s directives take it. And `NonZero`'s type argument is an integer primitive at least
   one bit wide, written without `!`: `NonZero` of a float, `string`, an object, a list, `u0`, a type
   parameter or an integer written with `!` is the new `smear::graphqlx::nonzero-argument`, where it
   is written, which is then all a map or a set keyed by it is refused with. And a definition's type

@@ -39,7 +39,10 @@
 //! rule judges every written occurrence and every application, each type once, and what the slots
 //! an occurrence leaves to their defaults derive, at the occurrence, through `positions::Derived`.
 //! `MemberTypeKind` is one, and reads one crate-private accessor, `Application::ty`, an
-//! application's complete type, its directive's instantiation.
+//! application's complete type, its directive's instantiation. `TypeRefMisuse` reads the table
+//! too, and the graph of what a value can reach, `reach::Reach`, found once for the walk over
+//! every package's input objects, so that an argument the root package writes is judged by what
+//! a dependency's input object holds.
 //!
 //! Where an occurrence stands in its tree is told from the order the walk reaches occurrences in,
 //! by `Nesting`, which reads the public `TypeExpr::written_args`: the walk descends the written
@@ -388,7 +391,8 @@ rule_set! {
   /// the root package adds to a built-in, none of which may give it a built-in meaning or a host
   /// type; an enum takes no type parameter; a marker has no field and is named only in `implements`
   /// and in bounds, and a scalar, an enum, an input object or a union implements markers alone; a
-  /// set has one type parameter and a map two; `TypeRef` stands only in a directive's arguments;
+  /// set has one type parameter and a map two; `TypeRef` stands only in a directive's arguments,
+  /// and no field's argument reaches an input object that holds one;
   /// `NonZero`'s argument is an integer primitive at least one bit wide, written without `!`; a
   /// definition's type parameters have distinct names, and so do the names an extension's own list
   /// gives them; `@extern` binds a scalar its own package defines, once for each language; `@repr`

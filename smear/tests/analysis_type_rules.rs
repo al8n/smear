@@ -1,7 +1,8 @@
 //! The GraphQLx analyzer's rules on what is judged of types: a marker has no field, is named only
 //! in `implements` and in bounds, and is what a scalar, an enum, an input object or a union
 //! implements; a set has one type parameter and a map two; `TypeRef` stands only in a directive's
-//! arguments; `NonZero`'s argument is an integer primitive; and a definition's type parameters
+//! arguments, and no field's argument reaches an input object that holds one, whichever package
+//! wrote it; `NonZero`'s argument is an integer primitive; and a definition's type parameters
 //! have distinct names. Each rule says nothing within what a phase refused, and quotes a name only
 //! as an excerpt.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
@@ -534,6 +535,112 @@ fn type_ref_is_a_directive_arguments_type() {
   );
 }
 
+/// An input object that holds a `TypeRef`, one that holds it, generic ones given it, written and
+/// filled from a default, and one that holds a list of `TypeRef`; then field arguments that reach
+/// them every way a value can, and those that do not: through a scalar that is no collection, in
+/// a directive's arguments, nowhere, and `TypeRef` itself.
+const REACHES: &str = "type Query {\n  ok: Int\n}\ninput Binding {\n  type: TypeRef!\n}\n\
+                       input Outer {\n  inner: Binding\n}\ninput Wrapped<T> {\n  v: T\n}\n\
+                       input WrappedDefault<T = Binding> {\n  v: T\n}\n\
+                       input Many {\n  types: [TypeRef!]\n}\ninput Unused {\n  b: Binding\n}\n\
+                       scalar Ref<T>\ndirective @bind(b: Binding, o: Outer) on OBJECT\n\
+                       type Uses @bind(b: { type: Query }) {\n  a(b: Binding): Int\n  \
+                       c(o: [Outer!]): Int\n  d(w: Wrapped<Binding>): Int\n  \
+                       e(m: HashMap<string, Binding>): Int\n  e2(w: WrappedDefault): Int\n  \
+                       f(m: Many): Int\n  g(r: Ref<Binding>): Int\n  h(x: Int): Int\n  \
+                       i(t: TypeRef): Int\n}\n";
+
+#[test]
+fn an_operations_argument_reaches_no_type_ref_field() {
+  let analysis = analyze_one(REACHES);
+  let schema = schema_file(&analysis);
+  let text = REACHES;
+  let binding = Some(named(schema, text, "  ", "type", 0));
+  assert_eq!(
+    found(&analysis),
+    [
+      (TYPEREF, named(schema, text, "a(b: ", "Binding", 0), binding),
+      (TYPEREF, at(schema, text, "[Outer!]", 0), binding),
+      (TYPEREF, at(schema, text, "Wrapped<Binding>", 0), binding),
+      (
+        TYPEREF,
+        at(schema, text, "HashMap<string, Binding>", 0),
+        binding
+      ),
+      // A default fills it: what the slot holds is the argument's too.
+      (
+        TYPEREF,
+        named(schema, text, "e2(w: ", "WrappedDefault", 0),
+        binding
+      ),
+      (
+        TYPEREF,
+        named(schema, text, "f(m: ", "Many", 0),
+        Some(named(schema, text, "  ", "types", 0))
+      ),
+      // `TypeRef` itself is the first half's alone, and once.
+      (TYPEREF, named(schema, text, "t: ", "TypeRef", 0), None),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let first = reported(&analysis)[0];
+  assert_eq!(
+    first.to_string(),
+    "the argument `b` of the field `a` of `Uses` takes a value that can hold the input field \
+     `type` of `Binding`, whose type is `TypeRef`, which only a directive's arguments may reach"
+  );
+  assert_eq!(
+    (
+      first.primary_label(),
+      first.label(0).map(|label| label.text()),
+      first.help()
+    ),
+    (
+      Some("`TypeRef` where it may not stand"),
+      Some("a value of `TypeRef` stands here"),
+      Some(
+        "an operation's argument never holds a type reference: take the input object in a \
+         directive's argument alone, or drop the `TypeRef` field from what the argument reaches"
+      )
+    )
+  );
+}
+
+#[test]
+fn a_dependencys_input_object_reached_from_the_roots_argument_is_refused() {
+  // The dependency takes its input object in a directive's argument alone, which is metadata; the
+  // root package's field argument takes it, which an operation sets.
+  const GEO: &str = "type Query {\n  ok: Int\n}\ninput Binding {\n  type: TypeRef!\n}\n\
+                     directive @bind(b: Binding) on OBJECT\n\
+                     type Point @bind(b: { type: Point }) {\n  x: Int\n}\n";
+  const OURS: &str = "type Query {\n  f(b: ^::geo::Binding): Int\n}\n";
+  let geo = || -> Package<&'static str> {
+    Package::new("geo", Layout::Flat, Tier::Core).with_files([SourceFile::new("geo.graphqlx", GEO)])
+  };
+  let root = package("app", Layout::Flat, &[("schema.graphqlx", OURS)]).with_dependencies(["geo"]);
+  let analysis = analyze(&root, &[geo()], &Limits::new());
+  let schema = schema_file(&analysis);
+  let geo_file = file(&analysis, 4, "geo.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [(
+      TYPEREF,
+      at(schema, OURS, "^::geo::Binding", 0),
+      Some(named(geo_file, GEO, "  ", "type", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  // Alone, as the root package, the dependency is ok.
+  let analysis = analyze(&geo(), &[], &Limits::new());
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
 /// `NonZero` of integer primitives, written and through an alias; then of a float, `string`, `u0`,
 /// a list, an object, an integer written with `!` and a type parameter; and with no argument.
 const NON_ZEROS: &str = "type User {\n  id: ID\n}\n\
@@ -789,6 +896,10 @@ fn a_rule_says_nothing_where_a_phase_spoke() {
     ),
     ("type F {\n  f: TypeRef\n  x: Missing\n}\n", UNDEFINED),
     (
+      "input Binding {\n  type: TypeRef!\n}\ntype F {\n  f(b: Binding): Int\n  x: Missing\n}\n",
+      UNDEFINED,
+    ),
+    (
       "type F {\n  n: NonZero<Float>\n  x: Missing\n}\n",
       UNDEFINED,
     ),
@@ -824,6 +935,11 @@ fn a_rule_says_nothing_where_a_phase_spoke() {
     ("scalar S0 @set\ntype G {\n  x: Missing\n}\n", COLLECTION),
     (
       "type F {\n  f: TypeRef\n}\ntype G {\n  x: Missing\n}\n",
+      TYPEREF,
+    ),
+    (
+      "input Binding {\n  type: TypeRef!\n}\ntype F {\n  f(b: Binding): Int\n}\n\
+       type G {\n  x: Missing\n}\n",
       TYPEREF,
     ),
     (
@@ -900,6 +1016,20 @@ fn long_names_in_the_rules_are_quoted_as_excerpts() {
        declares 0",
       quoted("S")
     )]
+  );
+
+  // A field's argument and the input object it takes, each named with four kilobytes, the input
+  // object holding a field of type `TypeRef` named so too: each name quoted by its ends.
+  let name = "B".repeat(4096);
+  let analysis = analyze_text(&format!(
+    "input {name} {{\n  {name}: TypeRef!\n}}\ntype Query {{\n  {name}({name}: {name}): Int\n}}\n"
+  ));
+  let messages_of_reach = messages(&analysis);
+  assert_eq!(messages_of_reach.len(), 1, "{:#?}", analysis.diagnostics());
+  assert!(
+    messages_of_reach[0].len() < 1024,
+    "{}",
+    messages_of_reach[0]
   );
 
   // `NonZero` of a scalar named with four kilobytes: the message names no type.
