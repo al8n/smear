@@ -612,6 +612,37 @@ fn an_application_that_grows_through_a_filled_default_is_refused_at_the_applicat
   );
 }
 
+/// The growth of the test above, in a program `analyze` accepts: `G`'s field applies `@d<T>`, which
+/// is `@d<T, [T]>`, and `d`'s argument names `G<B>` through `@e`, so `d` is on no cycle of
+/// `self-referential-directive`'s graph, which leaves out an object's field. Reported as above, at
+/// the application's path, labelled at the default.
+#[test]
+fn an_application_that_grows_through_a_filled_default_is_refused_in_an_accepted_program() {
+  let text = "directive @e<W> on ARGUMENT_DEFINITION\n\
+              directive @d<A, B = [A]>(x: Int @e<G<B>>) on FIELD_DEFINITION\n\
+              type G<T> { f: Int @d<T> }\ntype Query { x: Int }\n";
+  let analysis = accepted(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unbounded(&analysis, Packages::All),
+    [(
+      within(schema, text, "@d<T>", "d"),
+      Some(at(schema, text, "[A]", 0))
+    )]
+  );
+
+  let diagnostics = visit(&analysis, Packages::All, &mut UnboundedInstantiation::new());
+  let diagnostic = diagnostics.iter().next().expect("one diagnostic");
+  assert_eq!(
+    diagnostic.to_string(),
+    "an application of `@d` that grows without end"
+  );
+  assert_eq!(
+    diagnostic.label(0).map(|label: Label<'_>| label.text()),
+    Some("this default fills a type argument that wraps a type parameter it reaches again")
+  );
+}
+
 /// `@d<T>` is `@d<T, H<[T]>>`, which does not grow and holds `H<[T]>`, which does: `G<Int>` needs
 /// `@d<Int>`, which holds `H<[Int]>`, whose field is `G<[Int]>`, and so on without end. No
 /// occurrence is written with the type `H<[T]>`, so the report is at the application's path,
