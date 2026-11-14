@@ -24,6 +24,9 @@
 //! - `smear-schema` gives more `duplicate-implements-interface` or `duplicate-union-member` where
 //!   the analyzer reports `undefined-implements-interface` or `undefined-union-member`: a name that
 //!   does not resolve is compared with nothing here, and by its spelling there.
+//!
+//! No document of the corpora uses either: the nine codes agree on all of them. So an excuse used
+//! is a failure too, since the direction each excuses is the one a too lenient relation errs in.
 #![cfg(all(feature = "std", feature = "analysis", feature = "validator"))]
 
 use std::path::PathBuf;
@@ -352,6 +355,14 @@ fn implementations_agree_with_graphqls_validator() {
     "{} divergences:\n{}",
     sweep.failures.len(),
     sweep.failures.join("\n")
+  );
+  // The model of the corpus finds the nine codes equal on every document, so no excuse is used:
+  // one that is, a relation too lenient where a type does not resolve among them, is read here.
+  assert!(
+    sweep.excused.is_empty(),
+    "{} excuses used:\n{}",
+    sweep.excused.len(),
+    sweep.excused.join("\n")
   );
   assert!(sweep.compared >= 200, "{} compared", sweep.compared);
   assert!(
