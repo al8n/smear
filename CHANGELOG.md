@@ -438,7 +438,8 @@ All notable changes to Smear are documented in this file.
   arguments are coerced under its application's type arguments, "required" read there, and so are
   a generic input object's fields under its type's arguments; a copy of a default made under them
   is counted a step a node and judged as a written value is, the first that does not fit
-  `invalid-default-value` once, at the application, or at the literal whose type a rebuild made.
+  `invalid-default-value` once, at the application, or at the literal, but where a type occurrence
+  the program writes has the literal's type, whose instantiation's check reports it there.
   A value of a generic type definition whose type names its type parameters stays a `Literal`,
   and is checked at each closed instantiation of it the program writes: the first that does not
   fit is reported once at each occurrence, with its site's code, labelled at the value. An

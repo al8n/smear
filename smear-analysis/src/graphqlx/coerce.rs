@@ -180,12 +180,19 @@
 //! - an application whose type arguments rebuilt the type of an argument it leaves out reports
 //!   the first such copy that does not fit, in its directive's order: one `invalid-default-value`,
 //!   at its path, labelled at the default;
-//! - a written object literal whose type a rebuild made, a field's or an argument's type rebuilt,
-//!   or an element of one, reports the first copy of a default it leaves out that does not fit, in
-//!   its input object's order: one `invalid-default-value`, at the literal, labelled at the
-//!   default;
-//! - a written object literal whose type a written occurrence gave is silent: that occurrence's
-//!   instantiation is checked where it is written.
+//! - a written object literal whose type a type occurrence a supplied package writes has, in
+//!   either nullness, is silent: that type's instantiation is checked where it is written, and its
+//!   check reports the default there, once at each occurrence;
+//! - any other written object literal reports the first copy of a default it leaves out that does
+//!   not fit, in its input object's order: one `invalid-default-value`, at the literal, labelled
+//!   at the default. So does one whose type a rebuild made, a field's or an argument's type under
+//!   type arguments, and one whose type a type parameter's default filled, such as the value of a
+//!   map whose value type no argument gives: no occurrence writes its type, and no check reads it.
+//!
+//! Which types occurrences write is read once, before the walk: the nullable form of each closed
+//! instantiation of a generic definition that a supplied package's type occurrence has, as the
+//! check at each instantiation reads them. A literal asks at its first copy that does not fit,
+//! once. Whether a rebuild made a type says only whether a copy against it is judged.
 //!
 //! A copy reports nothing: whether it fits reaches whoever asked for its outermost count. A
 //! default whose copy would hold a copy of itself is not copied, and is judged all the same, by
@@ -449,6 +456,7 @@ pub(crate) fn coerce(
     owner: None,
     recorded: Vec::new(),
     checked: BTreeMap::new(),
+    written: BTreeSet::new(),
     paid: 0,
     copied: 0,
     levels: BTreeMap::new(),
@@ -456,6 +464,7 @@ pub(crate) fn coerce(
   };
   coercion.list_arguments();
   coercion.list_fields();
+  coercion.list_written();
   for index in 0..coercion.builder.def_count() {
     let def = DefId::new(index);
     // A generic definition's values that name its type parameters are recorded under it: a
@@ -958,16 +967,13 @@ struct Spelling {
   growths: (u32, u32),
 }
 
-/// A node to make: the node, the type it is made against, the tree it is of, and how; and whether
-/// a rebuild under type arguments made its type, or the type of a value it is held in, which says
-/// who reports a copy of a default an object literal of it leaves out that does not fit.
+/// A node to make: the node, the type it is made against, the tree it is of, and how.
 #[derive(Clone, Copy)]
 struct Making {
   node: u32,
   ty: Option<TyId>,
   tree: RawTree,
   mode: Mode,
-  rebuilt: bool,
 }
 
 impl Making {
@@ -1135,6 +1141,12 @@ struct Coercion<'c, 'p, 'x> {
   /// What the rows recorded under each closed instantiation's definition come to under its
   /// arguments, by the instantiation's nullable form.
   checked: BTreeMap<TyId, Checked>,
+  /// The nullable form of each closed instantiation of a generic definition that a type occurrence
+  /// a supplied package writes has, read before the walk: the types `instantiations` reads at type
+  /// occurrences, checking the rows recorded under each one's definition, when it records any,
+  /// where it is written. A written object literal of one of them leaves a copy that does not fit
+  /// to that check; of any other type it reports the copy itself.
+  written: BTreeSet<TyId>,
   /// The rows of every count a copy was made of, charged or not.
   paid: u64,
   /// The rows made of copies: what `paid` is when the phase ends, since a copy and its count are
@@ -1152,7 +1164,7 @@ impl<'p> Coercion<'_, 'p, '_> {
   fn member(&mut self, member: MemberId) {
     if let Some(&tree) = self.raw.defaults.get(&member) {
       let ty = self.member_type(member);
-      if let Some(value) = self.value(tree, ty, Mode::Written(Site::Default), false) {
+      if let Some(value) = self.value(tree, ty, Mode::Written(Site::Default)) {
         self.builder.set_member_default(member, value);
       }
       // A generic directive's argument's default is judged where an application leaves the
@@ -1315,6 +1327,45 @@ impl<'p> Coercion<'_, 'p, '_> {
         },
       });
     }
+  }
+
+  /// Lists [`Coercion::written`], before the walk: for each type occurrence in id order whose type
+  /// is a closed named type of a generic definition, written by a supplied package, that type's
+  /// nullable form. The same types `instantiations` reads at type occurrences, by the same test.
+  /// One look at each occurrence, and one at the nullable form of each distinct non-null type, as
+  /// `instantiation` makes: linear in the occurrences, and paid as the walk over them is, by the
+  /// source that wrote them.
+  fn list_written(&mut self) {
+    for index in 0..self.builder.type_expr_count() {
+      let Some(occurrence) = self.builder.occurrence(TypeExprId::new(index)) else {
+        continue;
+      };
+      let (Written::Named(def), Some(ty)) = (occurrence.written, occurrence.ty) else {
+        continue;
+      };
+      if occurrence.location.source() < self.supplied
+        || self.builder.type_param_count(def) == 0
+        || !self.builder.ty_closed(ty)
+        || !self.is_named(ty, def)
+      {
+        continue;
+      }
+      let nullable = self.nullable(ty, def);
+      self.written.insert(nullable);
+    }
+  }
+
+  /// Whether a written object literal of the input object `def`, made against `ty`, leaves a copy
+  /// that does not fit under `ty`'s arguments to the check where `ty` is written: when a type
+  /// occurrence a supplied package writes has `ty`, in either nullness. One look at `ty`'s
+  /// nullable form and one search of [`Coercion::written`], asked once for each literal, at its
+  /// first such copy, whose count the literal paid for.
+  fn checked_where_written(&mut self, ty: Option<TyId>, def: DefId) -> bool {
+    let Some(ty) = ty else {
+      return false;
+    };
+    let nullable = self.nullable(ty, def);
+    self.written.contains(&nullable)
   }
 
   /// Checks the rows recorded under each generic definition at each closed instantiation of it a
@@ -1730,7 +1781,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       return true;
     };
     let before = self.builder.value_count();
-    if let Some(value) = self.value(tree, ty, Mode::Copied, false) {
+    if let Some(value) = self.value(tree, ty, Mode::Copied) {
       debug_assert_eq!(
         self.builder.value_count().saturating_sub(before),
         rows,
@@ -2726,12 +2777,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     let value = if required && null {
       self.null_for_required(application, argument, ty)
     } else {
-      self.value(
-        argument.tree,
-        ty,
-        Mode::Written(Site::Argument),
-        expected.rebuilt,
-      )
+      self.value(argument.tree, ty, Mode::Written(Site::Argument))
     };
     if let Some(value) = value {
       self.builder.push_application_argument(
@@ -2798,10 +2844,9 @@ impl<'p> Coercion<'_, 'p, '_> {
     Some(id)
   }
 
-  /// Makes the rows of the tree `tree` against `ty`, as `mode` says, `rebuilt` when a rebuild under
-  /// type arguments made `ty`: the value, then what it holds, in pre-order. Answers the value's id,
-  /// `None` for a tree lowering did not make.
-  fn value(&mut self, tree: u32, ty: Option<TyId>, mode: Mode, rebuilt: bool) -> Option<ValueId> {
+  /// Makes the rows of the tree `tree` against `ty`, as `mode` says: the value, then what it holds,
+  /// in pre-order. Answers the value's id, `None` for a tree lowering did not make.
+  fn value(&mut self, tree: u32, ty: Option<TyId>, mode: Mode) -> Option<ValueId> {
     let tree = self.raw.trees.get(tree as usize).copied()?;
     let base = self.items.len();
     self.stack.push(Task::Make(Making {
@@ -2809,7 +2854,6 @@ impl<'p> Coercion<'_, 'p, '_> {
       ty,
       tree,
       mode,
-      rebuilt,
     }));
     while let Some(task) = self.stack.pop() {
       match task {
@@ -3158,8 +3202,9 @@ impl<'p> Coercion<'_, 'p, '_> {
     // The entries' tasks are pushed in order, then reversed, so that the first is made first.
     let tasks = self.stack.len();
     let alone = one_of && fields.written == 1;
-    // Whether a copy that does not fit under the object's type arguments is reported: once for it.
-    let mut reported = false;
+    // Whether the first copy that does not fit under the object's type arguments was met: reported
+    // here, or left to the check where the object's type is written. Once for the literal.
+    let mut met = false;
     while let Some(next) = self.next(&mut merge) {
       let (field, default) = match next {
         Next::Set(set) => {
@@ -3205,11 +3250,14 @@ impl<'p> Coercion<'_, 'p, '_> {
             continue;
           }
         };
-        // A literal whose type a rebuild made reports its copy that does not fit; one whose type a
-        // written occurrence gave leaves it to that occurrence's instantiation.
-        if !fits && making.rebuilt && !reported {
-          reported = true;
-          self.unfit_field(at, field, default);
+        // A literal whose type a type occurrence a supplied package writes has leaves its copy that
+        // does not fit to that occurrence's check, which reports it there; any other reports it
+        // here, whether a rebuild or a fill made its type.
+        if !fits && !met {
+          met = true;
+          if !self.checked_where_written(making.ty, def) {
+            self.unfit_field(at, field, default);
+          }
         }
         if !made {
           continue;
@@ -3221,7 +3269,6 @@ impl<'p> Coercion<'_, 'p, '_> {
         ty,
         tree: default_tree,
         mode: Mode::Copied,
-        rebuilt: false,
       }));
     }
     if let Some(tail) = self.stack.get_mut(tasks..) {
@@ -3249,17 +3296,11 @@ impl<'p> Coercion<'_, 'p, '_> {
       Ok(expected) => expected,
       Err(stop) => {
         let written = self.member_type(set.field);
-        let value = Making {
-          rebuilt: false,
-          ..making.child(set.node, written)
-        };
+        let value = making.child(set.node, written);
         return Task::Refuse(value, Why::Unbuilt(stop));
       }
     };
-    let value = Making {
-      rebuilt: expected.rebuilt,
-      ..making.child(set.node, expected.ty)
-    };
+    let value = making.child(set.node, expected.ty);
     if !matches!(self.kind(set.node), RawKind::Null) {
       return Task::Make(value);
     }
