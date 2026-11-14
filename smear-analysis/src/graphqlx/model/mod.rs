@@ -56,8 +56,8 @@ use table::{
 /// type the packages were supplied in. It is read through views, such as [`PackageInfo`], each a
 /// `Copy` pair of the model and an id.
 ///
-/// The model is always complete: what could not be resolved is still in it, and the diagnostics
-/// say why.
+/// The model is complete for what collection admits: what could not be resolved is still in it,
+/// and the diagnostics say why. What collection leaves out, a phase reports as an error.
 ///
 /// Two models are equal when every table holds equal rows in the same order and both arenas hold
 /// the same spellings: when every id names the same thing in both. That is finer than every

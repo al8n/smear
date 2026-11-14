@@ -33,8 +33,9 @@ use super::{
 /// What one analysis found: the model, the diagnostics, and the source map.
 ///
 /// It has no type parameter and no lifetime: it is the same type whatever text type the packages
-/// were supplied in, and it borrows nothing from them. The model and the diagnostics are complete
-/// whatever was refused; [`is_ok`](Self::is_ok) is the verdict.
+/// were supplied in, and it borrows nothing from them. Whatever was refused, the model holds all
+/// that collection admitted, and the diagnostics say what collection left out;
+/// [`is_ok`](Self::is_ok) is the verdict.
 ///
 /// Two analyses are equal when their models, their diagnostics (the list, the error count and
 /// whether the list is truncated), their source maps and the diagnostic ceilings they were made

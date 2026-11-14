@@ -157,8 +157,17 @@
 //!
 //! # When it is not ok
 //!
-//! The model is still complete: every definition that parsed is in it, a refused one included,
-//! with its members, applications and values. What could not be built is one of four shapes:
+//! The model is still complete for what collection admits: every definition collection kept is in
+//! it, a refused one included, with its members, applications and values. Collection keeps nothing
+//! of a file whose path the package set refused, an invalid path or one that two files share, nor
+//! of a file under a directory that is not a Name or that passes
+//! [`max_module_depth`](Limits::max_module_depth) or [`max_modules`](Limits::max_modules), nor of
+//! a `mod` whose module passes the same two limits, nor of what comes after the first definition
+//! that passes [`max_definitions`](Limits::max_definitions); and it keeps no item of a kind it
+//! does not know. A file that was not parsed holds nothing either, whether the parser refused it
+//! or the supplied sources passed [`max_source_bytes`](Limits::max_source_bytes). A phase reports
+//! an error whenever any of this happens, so such an analysis is not ok. What could not be built
+//! is one of four shapes:
 //! [`TypeExprKind::Unresolved`], [`ValueKind::Unresolved`], [`Resolution::Unresolved`], and the
 //! unresolved type, [`TyKind::Unresolved`], which a resolved occurrence also has when it holds one
 //! that has it, or when its type could not be built. Each lies within the extent of an error a
