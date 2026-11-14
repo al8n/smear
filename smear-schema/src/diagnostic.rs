@@ -21,10 +21,11 @@
 //!   `smear::graphqlx::shadowed-primitive`, a type a package declares with the name of a primitive
 //!   of the prelude, which GraphQL schemas do freely, is a [`Severity::Warning`]. Nothing here
 //!   reports [`Severity::Advice`].
-//! - **[`Location::entire`] has two users**, each an input with no position worth pointing at: the
-//!   introspection door's `ResponseError`, whose input is a machine-generated response, and the
-//!   GraphQLx analyzer's diagnostics about a package as a whole, which point at that package's
-//!   package source, a source with no text. Every other family points at the bytes it refused.
+//! - **[`Location::entire`] is for an input with no position worth pointing at.** Its users
+//!   include the introspection door's `ResponseError`, whose input is a machine-generated
+//!   response, and the GraphQLx analyzer's diagnostics about a package as a whole, which point at
+//!   that package's package source, a source with no text, or about a file it could not read as a
+//!   document. The syntax, schema and validation families point at the bytes they refused.
 //! - **No path segments.** All five refuse an input before any request has produced a result,
 //!   so none has a field of one to point at.
 //!
