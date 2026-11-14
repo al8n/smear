@@ -5,7 +5,7 @@ use core::num::NonZeroU32;
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  id::{DefId, Sym, TyId, TypeExprId},
+  id::{DefId, IdRange, Sym, TyId, TypeExprId, dense},
   package::Tier,
 };
 
@@ -150,6 +150,13 @@ impl Model {
       self.type_exprs.len()
     );
     TypeExpr { model: self, id }
+  }
+
+  /// Every type occurrence, in id order: each written occurrence, in every package, a nested
+  /// argument's and a default's included.
+  #[inline]
+  pub(crate) fn type_exprs(&self) -> IdRange<TypeExprId> {
+    IdRange::new(0, dense(self.type_exprs.len()))
   }
 
   /// The type `id` names.

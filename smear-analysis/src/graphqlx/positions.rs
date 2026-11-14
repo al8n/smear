@@ -69,7 +69,8 @@
 //!
 //! [`Derived`] judges what the slots an occurrence leaves to their defaults derive, by a rule's
 //! own verdict: every named type under those slots that no occurrence of the program writes, each
-//! once, a type the occurrence or the program writes being judged where it is written.
+//! once, a type the occurrence or the program writes, open or closed, being judged where it is
+//! written.
 //!
 //! # What it costs
 //!
@@ -84,10 +85,12 @@
 //! for each. What a value holds is one more worklist over the input fields, as linear.
 //! [`Fits`] judges each pair of a type and a class asked about once, with an explicit stack, a
 //! type's children before it; reading where a misfit lies follows one path down the type, beside
-//! the written occurrence that holds it. [`Derived`] walks, for each type and count of written
-//! arguments, the types its fill typed, each once, which `Limits::max_substitutions` paid for when
-//! the instantiation phase filled them. Nothing recurses, and every table is keyed by the model's
-//! ids.
+//! the written occurrence that holds it. [`Derived`] expands each type the fills derive once for
+//! the walk, however many fills derive it, reading each of its arguments at most twice, and reads,
+//! for each type and count of written arguments, one kept answer for each slot its fill typed,
+//! which `Limits::max_substitutions` paid for when the instantiation phase filled them; what the
+//! program writes is one pass over the type occurrences. Nothing recurses, and every table is
+//! keyed by the model's ids.
 
 use std::{
   collections::{BTreeMap, BTreeSet},
@@ -973,26 +976,45 @@ pub(crate) struct Fill<V> {
   pub(crate) verdict: V,
 }
 
+/// A type a fill derives that a rule refuses, with the rule's verdict on it: the first failure
+/// under a type.
+type Failure<V> = (TyId, V);
+
 /// A rule's verdicts on what the slots an occurrence leaves to their defaults derive, each type and
 /// count of written arguments judged once.
 ///
 /// A rule keeps one for its walk and resets it in `begin`: what it holds is keyed by the model's
 /// ids, and what it answers for a type and a count is the same whatever the walk met before.
+///
+/// Its work is linear in the distinct types the fills derive and the occurrences that ask. The
+/// first failure under a type, the type itself and then what it holds, in order, is the same
+/// whichever fill derives the type and whichever occurrence asks: a type the program writes is
+/// passed over wherever it is met, the arguments an occurrence writes among them, so no answer
+/// depends on the occurrence. So each type's answer is kept by its id for the walk, and each type
+/// is expanded once, each of its arguments read at most twice, however many fills share it: a
+/// shared subtree is never walked again for another outer fill. An occurrence then reads one kept
+/// answer for each slot it leaves out, slots its fill typed and `Limits::max_substitutions` paid
+/// for, and its own answer is kept by its type and count of written arguments. What the program
+/// writes is one pass over the type occurrences, sorted, at the first fill judged.
 pub(crate) struct Derived<V> {
   /// Each type and count of written arguments judged, with the first failure found.
   judged: BTreeMap<(TyId, u32), Option<Fill<V>>>,
-  /// The types under a slot still to look at.
-  stack: Vec<TyId>,
-  /// The types looked at for the type and count being judged.
-  seen: BTreeSet<TyId>,
+  /// Each type looked under, with the first failure under it.
+  under: BTreeMap<TyId, Option<Failure<V>>>,
+  /// Every named type of a definition that has type parameters that the program writes, sorted
+  /// and each once, read at the first fill judged.
+  written: Option<Vec<TyId>>,
+  /// The types being looked under, each with the index of the next of its arguments to read.
+  stack: Vec<(TyId, u32)>,
 }
 
 impl<V> Default for Derived<V> {
   fn default() -> Self {
     Self {
       judged: BTreeMap::new(),
+      under: BTreeMap::new(),
+      written: None,
       stack: Vec::new(),
-      seen: BTreeSet::new(),
     }
   }
 }
@@ -1000,10 +1022,10 @@ impl<V> Default for Derived<V> {
 impl<V: Copy> Derived<V> {
   /// The first failure, by `judge`, the rule's own verdict on one type, among what the slots
   /// `written` and after of `ty`, of `model`, derive: an occurrence of `ty` that writes `written`
-  /// arguments leaves those slots to their defaults. For each slot in order, every type under it,
-  /// each once; a type the occurrence writes, or that an occurrence of the program writes, is
-  /// passed over with what it holds, and each other named type of a definition that has type
-  /// parameters is judged, then what it holds. `None` when none fails.
+  /// arguments leaves those slots to their defaults. For each slot in order, the first failure
+  /// under its argument: a type an occurrence of the program writes, one the occurrence writes
+  /// among them, is passed over with what it holds, and each other named type of a definition that
+  /// has type parameters is judged, then what it holds. `None` when none fails.
   pub(crate) fn verdict(
     &mut self,
     model: &Model,
@@ -1014,58 +1036,145 @@ impl<V: Copy> Derived<V> {
     if let Some(kept) = self.judged.get(&(ty, written)) {
       return *kept;
     }
-    let found = self.walk(model, ty, written, &mut judge);
+    let mut found: Option<Fill<V>> = None;
+    if let TyKind::Named { args, .. } = model.ty(ty).kind() {
+      for (slot, arg) in args.iter().enumerate().skip(written as usize) {
+        if let Some((derived, verdict)) = self.under(model, *arg, &mut judge) {
+          found = Some(Fill {
+            slot: dense(slot),
+            ty: derived,
+            verdict,
+          });
+          break;
+        }
+      }
+    }
     self.judged.insert((ty, written), found);
     found
   }
 
-  /// The walk [`verdict`](Self::verdict) keeps the answer of.
-  fn walk(
+  /// The first failure, by `judge`, under `root`, of `model`: `root` itself when it is a named
+  /// type of a definition that has type parameters and `judge` refuses it, else the first under
+  /// each of its arguments, or under its element, in order. Each type's answer is kept for the
+  /// walk, whoever asks, and each type is expanded once, with an explicit stack, each of its
+  /// arguments read at most twice: once to find it unanswered, and once its answer is kept.
+  fn under(
+    &mut self,
+    model: &Model,
+    root: TyId,
+    judge: &mut impl FnMut(TyId) -> Option<V>,
+  ) -> Option<Failure<V>> {
+    if let Some(kept) = self.under.get(&root) {
+      return *kept;
+    }
+    if let Some(answer) = self.settle(model, root, &mut *judge) {
+      self.under.insert(root, answer);
+      return answer;
+    }
+    self.stack.clear();
+    self.stack.push((root, 0));
+    while let Some(&(ty, next)) = self.stack.last() {
+      let Some(child) = held_at(model, ty, next) else {
+        // Nothing under it fails.
+        self.under.insert(ty, None);
+        self.stack.pop();
+        continue;
+      };
+      match self.under.get(&child).copied() {
+        // The first failure under it is the first under its first argument that has one.
+        Some(Some(failure)) => {
+          self.under.insert(ty, Some(failure));
+          self.stack.pop();
+        }
+        Some(None) => {
+          if let Some(top) = self.stack.last_mut() {
+            top.1 = next.saturating_add(1);
+          }
+        }
+        None => match self.settle(model, child, &mut *judge) {
+          Some(answer) => {
+            self.under.insert(child, answer);
+          }
+          None => self.stack.push((child, 0)),
+        },
+      }
+    }
+    self.under.get(&root).copied().flatten()
+  }
+
+  /// What `ty`, of `model`, answers before what it holds is read, when it can: nothing for a type
+  /// the program writes, which is judged where it is written, for a type parameter, the unresolved
+  /// type and a named type with no argument; itself, with `judge`'s verdict, for a named type of a
+  /// definition that has type parameters that `judge` refuses. `None` when what it holds is to
+  /// read.
+  fn settle(
     &mut self,
     model: &Model,
     ty: TyId,
-    written: u32,
     judge: &mut impl FnMut(TyId) -> Option<V>,
-  ) -> Option<Fill<V>> {
-    let TyKind::Named { args, .. } = model.ty(ty).kind() else {
-      return None;
-    };
-    self.seen.clear();
-    // What the occurrence writes is judged where it is written.
-    self
-      .seen
-      .extend(args.iter().take(written as usize).copied());
-    for (slot, arg) in args.iter().enumerate().skip(written as usize) {
-      self.stack.clear();
-      self.stack.push(*arg);
-      while let Some(next) = self.stack.pop() {
-        if !self.seen.insert(next) {
-          continue;
+  ) -> Option<Option<Failure<V>>> {
+    match model.ty(ty).kind() {
+      TyKind::Named { def, args } => {
+        if self.writes(model, ty) {
+          return Some(None);
         }
-        match model.ty(next).kind() {
-          TyKind::Named { def, args } => {
-            // What the program writes is judged where it is written.
-            if model.instantiations(def).binary_search(&next).is_ok() {
-              continue;
-            }
-            if model.def(def).type_params().next().is_some()
-              && let Some(verdict) = judge(next)
-            {
-              return Some(Fill {
-                slot: dense(slot),
-                ty: next,
-                verdict,
-              });
-            }
-            self.stack.extend(args.iter().rev().copied());
-          }
-          TyKind::List { element } => self.stack.push(element),
-          TyKind::Param { .. } | TyKind::Unresolved => {}
+        if model.def(def).type_params().next().is_some()
+          && let Some(verdict) = judge(ty)
+        {
+          return Some(Some((ty, verdict)));
         }
+        if args.is_empty() { Some(None) } else { None }
       }
+      TyKind::List { .. } => None,
+      TyKind::Param { .. } | TyKind::Unresolved => Some(None),
     }
-    None
   }
+
+  /// Whether the program `model` holds writes `ty`, as an occurrence's type or as an argument an
+  /// occurrence writes: what it writes is read the first time it is asked.
+  fn writes(&mut self, model: &Model, ty: TyId) -> bool {
+    self
+      .written
+      .get_or_insert_with(|| written_types(model))
+      .binary_search(&ty)
+      .is_ok()
+  }
+}
+
+/// The argument `index` of `ty`, of `model`, or its element: what a type holds, in order.
+fn held_at(model: &Model, ty: TyId, index: u32) -> Option<TyId> {
+  match model.ty(ty).kind() {
+    TyKind::Named { args, .. } => args.get(index as usize).copied(),
+    TyKind::List { element } => (index == 0).then_some(element),
+    TyKind::Param { .. } | TyKind::Unresolved => None,
+  }
+}
+
+/// Every named type of a definition that has type parameters that `model`'s program writes,
+/// sorted and each once: each type occurrence's type, every package's, open or closed, and each
+/// argument the occurrence writes, as its type has it, a collection's key being non-null there
+/// whatever is written. A closed one that is an instantiation `Model::instantiations` lists is
+/// among them.
+fn written_types(model: &Model) -> Vec<TyId> {
+  let mut written: Vec<TyId> = Vec::new();
+  for id in model.type_exprs() {
+    let occurrence = model.type_expr(id);
+    let TypeExprKind::Named { args: given, .. } = occurrence.kind() else {
+      continue;
+    };
+    let ty = occurrence.ty();
+    let TyKind::Named { args, .. } = model.ty(ty).kind() else {
+      continue;
+    };
+    if args.is_empty() {
+      continue;
+    }
+    written.push(ty);
+    written.extend(args.iter().take(given.len()).copied());
+  }
+  written.sort_unstable();
+  written.dedup();
+  written
 }
 
 /// Who takes what an occurrence or an application is refused for, and where to say so: what a rule

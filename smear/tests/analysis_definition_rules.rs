@@ -1276,6 +1276,80 @@ fn a_parameter_far_down_a_long_list_is_named_in_one_step() {
 }
 
 #[test]
+fn a_type_many_fills_derive_is_walked_once() {
+  // Each `Outer<Si>` leaves `T`, `R`, `X` and `B` to their defaults. `R` derives `Maker<Int>`,
+  // whose own default derives `Wide<Int, …, Int>`, and `B` derives `Page<In>`, which no occurrence
+  // writes and which takes an input object where its parameter stands as a field's type: each use
+  // is refused, labelled at `item: T` and at `B`'s default. Every use's fill derives the one
+  // `Maker<Int>`, which the instantiation phase typed once, and the walk below a derived type is
+  // made once, whichever use asks: each use reads one kept answer for each slot it leaves out. The
+  // depth is constant; the width of `Wide` and the count of uses vary. A test sees the
+  // diagnostics, not the work, which holds by construction: a derived type's answer is kept by its
+  // id, the same whichever fill derives it, and each type is expanded once, its arguments read at
+  // most twice. Walked again for each use, the largest program here would read `Wide`'s 3,000
+  // arguments for each of its 3,000 uses, in each of the four rules that judge what a fill
+  // derives: 36 million steps, where each rule now makes a few for each use and for each of
+  // `Wide`'s arguments.
+  const WIDTH: usize = 3_000;
+  const USES: usize = 3_000;
+  for (width, uses) in [(1, 1), (WIDTH, 1), (1, USES), (WIDTH, USES)] {
+    let mut text = String::from(
+      "type Query {\n  u: Uses\n}\ninput In {\n  i: Int\n}\ntype Page<T> {\n  item: T\n}\n\
+       scalar Wide<P0",
+    );
+    for index in 1..width {
+      text.push_str(&format!(", P{index}"));
+    }
+    text.push_str(">\nscalar Maker<T, R = Wide<T");
+    for _ in 1..width {
+      text.push_str(", T");
+    }
+    text.push_str(">>\nscalar Outer<U, T = Int, R = Maker<T>, X = In, B = ");
+    let default = text.len();
+    text.push_str("Page<X>>\n");
+    for index in 0..uses {
+      text.push_str(&format!("scalar S{index}\n"));
+    }
+    text.push_str("type Uses {\n");
+    let mut written: Vec<(usize, usize)> = Vec::with_capacity(uses);
+    for index in 0..uses {
+      let field = format!("  u{index}: ");
+      let ty = format!("Outer<S{index}>");
+      written.push((text.len() + field.len(), ty.len()));
+      text.push_str(&field);
+      text.push_str(&ty);
+      text.push('\n');
+    }
+    text.push_str("}\n");
+    let analysis = analyze_text(&text);
+    let schema = schema_file(&analysis);
+    let span = |start: usize, len: usize| -> Location {
+      Location::new(schema.get(), SimpleSpan::new(start, start + len))
+    };
+    let item = Some(named(schema, &text, "item: ", "T", 0));
+    let expected: Vec<(&'static str, Location, Option<Location>)> = written
+      .iter()
+      .map(|&(start, len): &(usize, usize)| (FIELD_TYPE, span(start, len), item))
+      .collect();
+    assert_eq!(found(&analysis), expected, "width {width}, uses {uses}");
+    let first = analysis
+      .diagnostics()
+      .iter()
+      .next()
+      .expect("a diagnostic for each use");
+    assert_eq!(
+      first.to_string(),
+      "the default of `B` of `Outer` makes `Page` take the input object `In` for its type \
+       parameter `T`, which stands as a field's type, and a field's type is an output type"
+    );
+    assert_eq!(
+      first.label(1).map(|label| (label.location(), label.text())),
+      Some((span(default, "Page<X>".len()), "filled from this default"))
+    );
+  }
+}
+
+#[test]
 fn instantiations_are_judged_across_files_modules_and_packages() {
   // An extension in another file uses a generic type of a module; an extension in a third file
   // adds a field argument to it; a dependency's generic input object is used by the root package.
