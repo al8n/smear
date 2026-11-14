@@ -482,7 +482,7 @@ apollo-compiler = "=1.32.0"
 [lib]
 bench = false
 
-# Both examples read files from argv and print to stdout, and they drive the
+# The first two read files from argv and print to stdout, and they drive the
 # GraphQL lossless lexer, so they need `std` and `graphql`.
 [[example]]
 name = "trivia_spans"
@@ -493,6 +493,15 @@ required-features = ["std", "graphql"]
 name = "token_mix"
 path = "examples/token_mix.rs"
 required-features = ["std", "graphql"]
+
+# What a lowering reads, as running code: two packages built in memory, analyzed and read through
+# the model, with a rule of the consumer's own. It needs `analysis`, and `std` because it prints.
+# `cargo test` builds it and runs nothing, so `ci.yml`'s `test` job runs it by name, which also
+# makes an unmet `required-features` loud.
+[[example]]
+name = "analysis_model"
+path = "examples/analysis_model.rs"
+required-features = ["analysis", "std"]
 
 # ── THE BENCHMARKS ──────────────────────────────────────────────────────────────────────────
 #

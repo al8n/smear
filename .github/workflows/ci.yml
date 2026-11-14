@@ -885,6 +885,10 @@ jobs:
     # binary that fails; `--no-fail-fast` makes one run report every binary instead of the first.
     - name: Run test
       run: cargo test --all-features --no-fail-fast -- --quiet
+    # `smear/examples/analysis_model.rs`: `cargo test` builds every example and runs none, and an
+    # unmet `required-features` skips a target in silence, so it is run here by name.
+    - name: Run the analysis example
+      run: cargo run -p smear --example analysis_model --features analysis
 
   # Build the documentation under `-D warnings`.
   #
