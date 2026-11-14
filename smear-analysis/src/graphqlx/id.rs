@@ -151,7 +151,8 @@ model_id! {
   /// checks in turn: the `implements` entries of the interfaces it reads, then the interface's
   /// fields' types, and the entries and union members comparing them reads, and its fields'
   /// arguments' types, each under the type arguments that reach it, in the order first needed,
-  /// each type's arguments before it.
+  /// each type's arguments before it; and then those that comparing the entries and members of
+  /// each instantiation the program writes derives, in the order of its occurrences.
   TyId
 }
 

@@ -71,6 +71,21 @@
 //! judged once, where it is written: a type parameter is a subtype of itself and of its bounds
 //! alone.
 //!
+//! # Duplicates under type arguments
+//!
+//! Last, every type occurrence, in id order, of a definition that is listed: whose own entries,
+//! or, for a union, own members, include a type that names its type parameters, so that an
+//! instantiation can make two of them one type. Its distinct written entries, each the first of
+//! its type, are read under the occurrence's type's arguments, and so are its distinct members:
+//! two that meet there are `smear::schema::duplicate-implements-interface`, or
+//! `smear::schema::duplicate-union-member`, at the occurrence, labelled at the two, at most one of
+//! each for an occurrence. `Either<User, User>` of `union Either<A, B> = A | B` is one. An open
+//! occurrence is judged too: `Pair<X, X>` inside a definition of `X` has two entries of one type
+//! whatever `X` stands for. A written duplicate was reported where it is written, and is not
+//! again; an instantiation only a fill derives is not judged. Each type is judged once, its two
+//! nullnesses sharing one verdict, and a verdict a limit stopped is `resource-limit` at each
+//! occurrence of it, but at an entry a definition's check stopped at, which said so.
+//!
 //! # What it costs, and what bounds it
 //!
 //! A definition's own entries and members are written, and each is read once: one scan of the
@@ -80,9 +95,11 @@
 //! each entry looked at of an interface the check reads, whoever wrote it; each field of an
 //! interface looked at, and each argument of it or of the field that implements it; each pair of
 //! types the relation looks at, one answered before included,
-//! and each entry, bound and member it looks at to answer one; and each node of a type rebuilt
-//! under an entry's arguments, a rebuild remembered by the type and the arguments' named type
-//! costing nothing more. On a program the check accepts, each root costs its interface's entries
+//! and each entry, bound and member it looks at to answer one; each distinct written entry and
+//! member a verdict reads; and each node of a type rebuilt under an entry's arguments, a rebuild
+//! remembered by the type and the arguments' named type costing nothing more. A listed
+//! definition's own entries and members are read once, when an occurrence first asks about it,
+//! and a verdict looked up costs nothing. On a program the check accepts, each root costs its interface's entries
 //! and its fields, and no more. The definition's own fields are indexed by name once, at its first
 //! root whose fields are compared, each field's arguments once for the phase, and whether a field
 //! is deprecated is read once. What a rebuild derives is checked against `Limits::max_generic_depth` and
@@ -111,7 +128,7 @@ use super::{
   diagnostic::{Diagnostic, DiagnosticBuilder, Excerpt, Reporter},
   id::{ApplicationId, DefId, MemberId, PackageId, Sym, TyId, TypeExprId, dense},
   instantiate::{binding, own_package},
-  model::{DefKind, ModelBuilder, Occurrence, Resolution, Shape},
+  model::{DefKind, ModelBuilder, Occurrence, Resolution, Shape, Written},
   source::SourceMap,
   types::{Counter, Limit, Stop, Types},
 };
@@ -122,8 +139,10 @@ mod subtype;
 
 /// Checks what each definition `builder` holds says it is, whose declarations are `declarations`
 /// and whose sources `sources` numbers, with the type services of `types`, reporting into
-/// `reporter`: that no two of its `implements` entries, nor of a union's members, are one type, and
-/// that it implements what the interfaces it implements implement.
+/// `reporter`: that no two of its `implements` entries, nor of a union's members, are one type, as
+/// written or under the type arguments of an instantiation the program writes; that it implements
+/// what the interfaces it implements implement; and that an object or an interface declares their
+/// fields, with their arguments.
 pub(crate) fn implement(
   declarations: &Declarations<'_, '_>,
   sources: &SourceMap,
@@ -165,8 +184,14 @@ pub(crate) fn implement(
     frontier: Vec::new(),
     fields: Vec::new(),
     indexed: false,
+    stopped_roots: BTreeSet::new(),
+    listings: BTreeMap::new(),
+    distinct: Vec::new(),
+    under: Vec::new(),
+    verdicts: BTreeMap::new(),
   };
   implementing.definitions();
+  implementing.occurrences();
 }
 
 /// One of a definition's lists of types.
@@ -192,6 +217,26 @@ struct Root {
   ty: TyId,
   /// The interface.
   interface: DefId,
+}
+
+/// A listed definition's distinct written entries and members, each list a run of `distinct`.
+#[derive(Clone, Copy)]
+struct Listed {
+  entries: (u32, u32),
+  members: (u32, u32),
+}
+
+/// What comparing an instantiation's entries and members under its arguments came to.
+#[derive(Clone, Copy)]
+enum Verdict {
+  /// The first two entries, and the first two members, that are one type there, each the earlier
+  /// first: none when no two are.
+  Compared {
+    entries: Option<(TypeExprId, TypeExprId)>,
+    members: Option<(TypeExprId, TypeExprId)>,
+  },
+  /// A limit stopped it before it was known.
+  Stopped(Stop),
 }
 
 /// What the phase keeps from one definition to the next, beside the type services, whose rebuild
@@ -248,6 +293,20 @@ struct Implementing<'p> {
   fields: Vec<(Sym, MemberId)>,
   /// Whether `fields` holds them: built at its first root whose fields are compared.
   indexed: bool,
+  /// The entries a definition's check stopped at, and reported: an occurrence that is one says
+  /// nothing more of a stop.
+  stopped_roots: BTreeSet<TypeExprId>,
+  /// Each definition an occurrence asked about, by the definition: listed when one of its own
+  /// entries or members names its type parameters, `None` otherwise.
+  listings: BTreeMap<DefId, Option<Listed>>,
+  /// The listed definitions' distinct written entries and members, each with its type, a run for
+  /// each list.
+  distinct: Vec<(TypeExprId, TyId)>,
+  /// One run of `distinct` under an instantiation's arguments, while it is compared.
+  under: Vec<(TypeExprId, TyId)>,
+  /// Each type an occurrence of a listed definition has, and the nullable form of each written
+  /// non-null, by the type, with its verdict.
+  verdicts: BTreeMap<TyId, Verdict>,
 }
 
 impl Implementing<'_> {
@@ -343,6 +402,7 @@ impl Implementing<'_> {
       };
       if let Err(stop) = self.root(root, wide) {
         self.report_stopped(root, stop);
+        self.stopped_roots.insert(root.entry);
         return;
       }
     }
@@ -690,6 +750,194 @@ impl Implementing<'_> {
     made
   }
 
+  /// Compares the entries and members of every instantiation the program writes of a listed
+  /// definition under its arguments, every type occurrence in id order: one verdict for each type,
+  /// both nullnesses sharing it, made the first time it is asked and kept.
+  fn occurrences(&mut self) {
+    for index in 0..self.builder.type_expr_count() {
+      self.occurrence(TypeExprId::new(index));
+    }
+  }
+
+  /// Compares, when `id` is an occurrence of a listed definition whose type is that definition's,
+  /// its entries and its members under that type's arguments, and reports at it: two entries, or
+  /// two members, of one type, at most one report of each; or a stop, unless the occurrence is an
+  /// entry a definition's check stopped at, which reported it.
+  fn occurrence(&mut self, id: TypeExprId) {
+    let Some((written, ty, at)) = self
+      .builder
+      .occurrence(id)
+      .map(|occurrence: Occurrence<'_>| (occurrence.written, occurrence.ty, occurrence.location))
+    else {
+      return;
+    };
+    let (Written::Named(def), Some(ty)) = (written, ty) else {
+      return;
+    };
+    if !matches!(self.builder.ty_shape(ty), Some(Shape::Named(named)) if named == def) {
+      return;
+    }
+    let Some(listed) = self.listed(def) else {
+      return;
+    };
+    match self.verdict(ty, def, listed) {
+      Verdict::Compared { entries, members } => {
+        if let Some((first, later)) = entries {
+          self.report_meeting(at, def, List::Implements, first, later);
+        }
+        if let Some((first, later)) = members {
+          self.report_meeting(at, def, List::Members, first, later);
+        }
+      }
+      Verdict::Stopped(stop) => {
+        if !self.stopped_roots.contains(&id) {
+          self.report_uncompared(at, def, stop);
+        }
+      }
+    }
+  }
+
+  /// Whether `def` is listed, and its distinct written entries and members if it is: read the
+  /// first time it is asked, and kept.
+  fn listed(&mut self, def: DefId) -> Option<Listed> {
+    if let Some(&known) = self.listings.get(&def) {
+      return known;
+    }
+    let found = self.list(def);
+    self.listings.insert(def, found);
+    found
+  }
+
+  /// `def`'s distinct written entries and members, those its own package writes whose types
+  /// resolved, each the first of its type, when one of them names `def`'s type parameters: an
+  /// instantiation can make two of them one type then, and no two written apart otherwise.
+  fn list(&mut self, def: DefId) -> Option<Listed> {
+    let own = self.owner(def)?;
+    own_items(
+      self.builder,
+      self.sources,
+      def,
+      own,
+      List::Implements,
+      &mut self.entries,
+    );
+    if self.builder.def_kind(def) == Some(DefKind::Union) {
+      own_items(
+        self.builder,
+        self.sources,
+        def,
+        own,
+        List::Members,
+        &mut self.members,
+      );
+    } else {
+      self.members.clear();
+    }
+    let builder: &ModelBuilder = &*self.builder;
+    let open = self
+      .entries
+      .iter()
+      .chain(self.members.iter())
+      .any(|&(_, ty): &(TypeExprId, TyId)| !builder.ty_closed(ty));
+    if !open {
+      return None;
+    }
+    let entries = self.push_distinct(List::Implements);
+    let members = self.push_distinct(List::Members);
+    Some(Listed { entries, members })
+  }
+
+  /// Appends to `distinct` the items of the list `list`, as gathered, each the first of its type:
+  /// a written duplicate is reported where it is written, and not again. Answers their run.
+  fn push_distinct(&mut self, list: List) -> (u32, u32) {
+    let start = dense(self.distinct.len());
+    let items: &[(TypeExprId, TyId)] = match list {
+      List::Implements => &self.entries,
+      List::Members => &self.members,
+    };
+    let mut seen: Duplicates<TyId> = Duplicates::over(items.len(), |at: usize| {
+      items
+        .get(at)
+        .map_or(TyId::new(0), |&(_, ty): &(TypeExprId, TyId)| ty)
+    });
+    for (position, &(item, ty)) in items.iter().enumerate() {
+      if seen.first(position, ty).is_none() {
+        self.distinct.push((item, ty));
+      }
+    }
+    (start, dense(self.distinct.len()))
+  }
+
+  /// The verdict of `ty`, a named type of the listed definition `def`: kept once made, by the type
+  /// and by its nullable form, which a non-null type's arguments find once, interning nothing.
+  fn verdict(&mut self, ty: TyId, def: DefId, listed: Listed) -> Verdict {
+    if let Some(&known) = self.verdicts.get(&ty) {
+      return known;
+    }
+    // A named type's nullable form is interned before its non-null one, so it is found.
+    let nullable = if self.builder.ty_non_null(ty) {
+      let builder: &ModelBuilder = &*self.builder;
+      builder
+        .find_named(def, builder.ty_args(ty), false)
+        .unwrap_or(ty)
+    } else {
+      ty
+    };
+    let verdict = match self.verdicts.get(&nullable).copied() {
+      Some(known) => known,
+      None => {
+        let made = match self.meeting(nullable, def, listed.entries) {
+          Err(stop) => Verdict::Stopped(stop),
+          Ok(entries) => match self.meeting(nullable, def, listed.members) {
+            Err(stop) => Verdict::Stopped(stop),
+            Ok(members) => Verdict::Compared { entries, members },
+          },
+        };
+        self.verdicts.insert(nullable, made);
+        made
+      }
+    };
+    self.verdicts.insert(ty, verdict);
+    verdict
+  }
+
+  /// The first two of the run `run` of `distinct`, each under the arguments of `ty`, a named type
+  /// of `def`, that are one type, the earlier first: each item a step, and its rebuild the
+  /// phase's. One that cannot be rebuilt there is compared with nothing.
+  fn meeting(
+    &mut self,
+    ty: TyId,
+    def: DefId,
+    run: (u32, u32),
+  ) -> Result<Option<(TypeExprId, TypeExprId)>, Stop> {
+    self.under.clear();
+    for at in run.0..run.1 {
+      if !self.steps.charge(1) {
+        return Err(Stop::Steps);
+      }
+      let Some(&(item, written)) = self.distinct.get(at as usize) else {
+        break;
+      };
+      if let Some(made) = self.rebuilt(written, ty, def)? {
+        self.under.push((item, made));
+      }
+    }
+    let items: &[(TypeExprId, TyId)] = &self.under;
+    let mut seen: Duplicates<TyId> = Duplicates::over(items.len(), |at: usize| {
+      items
+        .get(at)
+        .map_or(TyId::new(0), |&(_, made): &(TypeExprId, TyId)| made)
+    });
+    for (position, &(later, made)) in items.iter().enumerate() {
+      if let Some(earlier) = seen.first(position, made)
+        && let Some(&(first, _)) = items.get(earlier)
+      {
+        return Ok(Some((first, later)));
+      }
+    }
+    Ok(None)
+  }
+
   /// Reports `later`, an item of `def`'s list `list` of the type `ty`, which `first`, an earlier
   /// one, has.
   fn report_written(
@@ -936,12 +1184,64 @@ impl Implementing<'_> {
       Excerpt(self.builder.def_name(root.def)),
       Excerpt(self.builder.def_name(root.interface))
     );
-    self.stopped(root.at, &subject, stop);
+    self.report_limit(root.at, &subject, stop);
+  }
+
+  /// Reports, at the occurrence written at `at` of an instantiation of `def`, that `stop` stopped
+  /// comparing its entries and members.
+  fn report_uncompared(&mut self, at: Location, def: DefId, stop: Stop) {
+    let subject = format!(
+      "the entries and members `{}` holds under the type arguments it is instantiated with here",
+      Excerpt(self.builder.def_name(def))
+    );
+    self.report_limit(at, &subject, stop);
+  }
+
+  /// Reports, at the occurrence written at `at` of an instantiation of `def`, that `first` and
+  /// `later`, two items of `def`'s list `list`, are one type under its arguments.
+  fn report_meeting(
+    &mut self,
+    at: Location,
+    def: DefId,
+    list: List,
+    first: TypeExprId,
+    later: TypeExprId,
+  ) {
+    let (Some(first_at), Some(later_at)) = (self.located(first), self.located(later)) else {
+      return;
+    };
+    let named = Excerpt(self.builder.def_name(def));
+    let (code, message, title, labels) = match list {
+      List::Implements => (
+        schema::DUPLICATE_IMPLEMENTS_INTERFACE,
+        format!(
+          "`{named}` is instantiated here with type arguments under which two of its `implements` \
+           entries are one interface type"
+        ),
+        "duplicate interface",
+        ("this entry", "the same interface type here"),
+      ),
+      List::Members => (
+        schema::DUPLICATE_UNION_MEMBER,
+        format!(
+          "`{named}` is instantiated here with type arguments under which two of its members are \
+           one type"
+        ),
+        "duplicate union member",
+        ("this member", "the same type here"),
+      ),
+    };
+    let report = Diagnostic::builder(code, at)
+      .message(message)
+      .primary_label(title)
+      .help("instantiate it with type arguments under which they stay distinct");
+    let report = labelled(labelled(report, first_at, labels.0), later_at, labels.1);
+    self.reporter.report(report.build());
   }
 
   /// Reports `resource-limit` at `at`, where `stop` stopped the check of `subject`, naming the
   /// limit: one message for each way to stop.
-  fn stopped(&mut self, at: Location, subject: &str, stop: Stop) {
+  fn report_limit(&mut self, at: Location, subject: &str, stop: Stop) {
     let limits = self.types.limits();
     let (message, help): (String, &'static str) = match stop {
       Stop::Steps => (

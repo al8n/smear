@@ -39,7 +39,8 @@
 //! satisfy a bound of its definition is `smear::graphqlx::unsatisfied-bound`, where the
 //! instantiation is written, and so is each directive application, by its complete type
 //! arguments, at its path. No definition implements one interface type twice, nor has a union one
-//! member type twice: each later one is `smear::schema::duplicate-implements-interface` or
+//! member type twice, as written or under the type arguments of an instantiation the program
+//! writes: each later one is `smear::schema::duplicate-implements-interface` or
 //! `smear::schema::duplicate-union-member`. And a definition of any kind implements what the
 //! interfaces it implements implement, under the type arguments its entries give them: one it
 //! omits is `smear::schema::missing-transitive-interface`. An object or an interface declares each

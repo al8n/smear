@@ -72,7 +72,22 @@ copy of a default made there is judged as a written value is, the first that doe
 reported once, at the application or at the literal whose type the arguments made. A value of a
 generic type definition whose type names its type parameters stays a literal, and is checked at
 each closed instantiation of the definition the program writes, reported once at each occurrence
-of one under which it does not fit. Every definition and every type has the tier it requires, the
+of one under which it does not fit. Each definition is checked against what it says it is, reading
+of it what its own package writes: no two of its `implements` entries, nor of a union's members,
+are one type, as written or under the type arguments of an instantiation the program writes; it
+implements every interface the interfaces it implements implement, compared as types under its
+entries' type arguments, on every kind that may write `implements`, so a type that omits one is
+refused; and an object or an interface declares each field of the interfaces it implements, with a
+type that is a subtype of the interface's under those arguments, covariant through lists, non-null,
+declared interfaces, union members and type arguments, a type parameter a subtype of itself and of
+its bounds alone, deprecated only where the interface's is, and taking each of its arguments with
+exactly its type and requiring no other. The refusals are `smear-schema`'s nine codes,
+`smear::schema::duplicate-implements-interface`, `duplicate-union-member`,
+`missing-transitive-interface`, `missing-interface-field`, `invalid-interface-field-type`,
+`interface-field-not-deprecated`, `missing-interface-field-argument`,
+`invalid-interface-field-argument-type` and `unexpected-required-argument`, and the steps the check
+takes are bounded by `Limits::max_implementation_steps`, a budget of its own, which a valid GraphQL
+document can meet. Every definition and every type has the tier it requires, the
 least of `core`, `alloc` and `std` that holds what it uses: a built-in its package's tag, a scalar
 its externs' greatest tier, an object, an interface, an input object or a union the greatest of its
 positions' and members' types', a position `@heap` marks `alloc` at least, and a type its

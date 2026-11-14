@@ -8,7 +8,8 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Diagnostic, Layout, Limits, Package, PackageId, SourceFile, SourceId, Tier, analyze,
+    Analysis, DefId, DefKind, Diagnostic, Layout, Limits, Package, PackageId, SourceFile, SourceId,
+    Tier, TyKind, TypeExprId, analyze,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -1181,4 +1182,279 @@ fn each_argument_is_a_step() {
     found(&short),
     [(LIMIT, named(schema, text, "implements ", "I", 0))]
   );
+}
+
+/// The members of `union Either<A, B> = A | B` stay distinct at each instantiation: `Either<User,
+/// Post>` says nothing, and `Either<User, User>` is refused where it is written, labelled at `A`
+/// and `B`. Refuses the interim, which said nothing.
+#[test]
+fn a_generic_unions_members_stay_distinct_at_each_instantiation() {
+  let text = "type Query {\n  a: Either<User, Post>\n  b: Either<User, User>\n}\n\
+              type User {\n  id: ID\n}\ntype Post {\n  id: ID\n}\nunion Either<A, B> = A | B\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, text, "Either<User, User>", 0);
+  assert_eq!(found(&analysis), [(MEMBER, occurrence)]);
+  let report = the(&analysis, MEMBER, occurrence);
+  assert_eq!(
+    report.to_string(),
+    "`Either` is instantiated here with type arguments under which two of its members are one \
+     type"
+  );
+  assert_eq!(
+    labels(report),
+    [
+      (named(schema, text, "= ", "A", 0), "this member"),
+      (named(schema, text, "| ", "B", 0), "the same type here"),
+    ]
+  );
+}
+
+/// Two `implements` entries that one instantiation's arguments make one type are refused at the
+/// use: `Pair<Int, String>` says nothing, and `Pair<Int, Int>` is refused, labelled at the two.
+#[test]
+fn entries_that_meet_under_type_arguments_are_refused_at_the_use() {
+  let text = "type Query {\n  a: Pair<Int, String>\n  b: Pair<Int, Int>\n}\n\
+              interface Tagged<X> @marker\n\
+              type Pair<A, B> implements Tagged<A> & Tagged<B> {\n  a: A\n  b: B\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, text, "Pair<Int, Int>", 0);
+  assert_eq!(found(&analysis), [(DUPLICATE, occurrence)]);
+  assert_eq!(
+    labels(the(&analysis, DUPLICATE, occurrence)),
+    [
+      (at(schema, text, "Tagged<A>", 0), "this entry"),
+      (
+        at(schema, text, "Tagged<B>", 0),
+        "the same interface type here"
+      ),
+    ]
+  );
+}
+
+/// A slot a default fills is an argument like a written one: `P<Int>` fills `B` from `A`, and its
+/// two entries are one type.
+#[test]
+fn a_filled_argument_can_make_entries_meet() {
+  let text = "type Query {\n  x: Int\n  p: P<Int>\n}\ninterface Tagged<X> @marker\n\
+              type P<A, B = A> implements Tagged<A> & Tagged<B> {\n  a: A\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(DUPLICATE, at(schema, text, "P<Int>", 0))]
+  );
+}
+
+/// An open instantiation whose entries meet is refused where it is written: `Pair<X, X>` inside
+/// `Q<X>` has `Tagged<X>` twice whatever `X` stands for, and `Pair<X, Int>` does not. Refuses
+/// closed instantiations judged alone.
+#[test]
+fn an_open_instantiation_whose_entries_meet_is_refused() {
+  let text = "type Query {\n  x: Int\n}\ninterface Tagged<X> @marker\n\
+              type Pair<A, B> implements Tagged<A> & Tagged<B> {\n  a: A\n  b: B\n}\n\
+              type Q<X> {\n  p: Pair<X, X>\n  q: Pair<X, Int>\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(DUPLICATE, at(schema, text, "Pair<X, X>", 0))]
+  );
+}
+
+/// A written duplicate is reported where it is written, and not again at each instantiation:
+/// `P1<A>`'s second `Tagged<A>` alone, and nothing at `P1<Int>`.
+#[test]
+fn a_written_duplicate_is_not_reported_again_at_its_instantiations() {
+  let text = "type Query {\n  x: Int\n  p: P1<Int>\n}\ninterface Tagged<X> @marker\n\
+              type P1<A> implements Tagged<A> & Tagged<A> {\n  a: A\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(DUPLICATE, at(schema, text, "Tagged<A>", 1))]
+  );
+}
+
+/// One verdict serves every occurrence of a type, whatever its nullness. `Either<User, Post>`'s
+/// verdict looks at its two members and rebuilds each, a bare parameter, a step each: four; and
+/// `Either<User, User>`'s four: eight. At eight, its three occurrences, one non-null, are each
+/// refused; at seven, its verdict stops at its second rebuild, and each of the three is
+/// `resource-limit`. Refuses a verdict per occurrence or per nullness.
+#[test]
+fn one_verdict_serves_every_occurrence() {
+  let text = "type Query {\n  a: Either<User, Post>\n  b: Either<User, User>\n  \
+              c: Either<User, User>!\n  d: Either<User, User>\n}\n\
+              type User {\n  id: ID\n}\ntype Post {\n  id: ID\n}\nunion Either<A, B> = A | B\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_implementation_steps(8));
+  let schema = schema_file(&analysis);
+  let occurrences = [
+    at(schema, text, "Either<User, User>", 0),
+    at(schema, text, "Either<User, User>!", 0),
+    at(schema, text, "Either<User, User>", 2),
+  ];
+  assert_eq!(
+    found(&analysis),
+    occurrences.map(|at: Location| (MEMBER, at))
+  );
+  let short = analyze_text(text, &Limits::new().with_max_implementation_steps(7));
+  assert_eq!(found(&short), occurrences.map(|at: Location| (LIMIT, at)));
+}
+
+/// A type the check derives is counted and depth-checked, and its stop is reported once, at the
+/// entry. `Item`'s `Ord<Int>` derives `Cmp<Int>`, a third instantiation beside the program's
+/// `Cmp<X>` and `Ord<Int>`: under two, `resource-limit` at `Ord<Int>` alone, though comparing
+/// `Ord<Int>`'s entries meets the same stop there; under three, `Item` omits `Cmp<Int>`. And
+/// `Cmp<[[Int]]>` nests three deep, where everything written nests two. Refuses a derived type
+/// uncounted, and a second report at one occurrence.
+#[test]
+fn a_type_the_check_derives_is_counted_and_depth_checked() {
+  let text = "type Query {\n  x: Int\n}\ninterface Cmp<X> @marker\n\
+              interface Ord<X> implements Cmp<X> @marker\ntype Item implements Ord<Int> {\n  x: Int\n}\n";
+  let counted = analyze_text(text, &Limits::new().with_max_instantiations(2));
+  let schema = schema_file(&counted);
+  let entry = at(schema, text, "Ord<Int>", 0);
+  assert_eq!(found(&counted), [(LIMIT, entry)]);
+  let message = the(&counted, LIMIT, entry).to_string();
+  assert!(
+    message.contains("`Limits::max_instantiations`, 2"),
+    "{message}"
+  );
+  assert_eq!(
+    found(&analyze_text(
+      text,
+      &Limits::new().with_max_instantiations(3)
+    )),
+    [(TRANSITIVE, entry)]
+  );
+
+  let text = "type Query {\n  x: Int\n}\ninterface Cmp<X> @marker\n\
+              interface Ord<X> implements Cmp<[X]> @marker\n\
+              type Item implements Ord<[Int]> {\n  x: Int\n}\n";
+  let deep = analyze_text(text, &Limits::new().with_max_generic_depth(2));
+  let schema = schema_file(&deep);
+  let entry = at(schema, text, "Ord<[Int]>", 0);
+  assert_eq!(found(&deep), [(LIMIT, entry)]);
+  let message = the(&deep, LIMIT, entry).to_string();
+  assert!(
+    message.contains("`Limits::max_generic_depth`, 2"),
+    "{message}"
+  );
+  assert_eq!(
+    found(&analyze_text(
+      text,
+      &Limits::new().with_max_generic_depth(3)
+    )),
+    [(TRANSITIVE, entry)]
+  );
+}
+
+/// Every diagnostic of `analysis`, written out: its code, where it points, its message, and each of
+/// its labels.
+fn rendered(analysis: &Analysis) -> String {
+  let mut text = String::new();
+  for diagnostic in analysis.diagnostics() {
+    text.push_str(&format!(
+      "{} {:?} {diagnostic}",
+      diagnostic.code().as_str(),
+      diagnostic.primary()
+    ));
+    for (at, label) in labels(diagnostic) {
+      text.push_str(&format!(" [{at:?} {label}]"));
+    }
+    text.push('\n');
+  }
+  text
+}
+
+/// Passing the files and the dependencies in another order changes nothing this phase says: an
+/// interface of a dependency the root package's types implement, a generic union in a second file,
+/// and a refusal of each of five kinds.
+#[test]
+fn reversing_files_and_dependencies_changes_nothing_the_phase_says() {
+  let geo = "interface Node {\n  id: ID\n}\ninterface Named implements Node {\n  id: ID\n}\n";
+  let other = "type Unused {\n  x: Int\n}\n";
+  let a = "type Query {\n  x: Int\n  e: Either<User, User>\n}\n\
+           type User implements ^::geo::Named {\n  id: ID\n}\n\
+           type Bad implements ^::geo::Node {\n  id: Int\n}\n";
+  let b = "union Either<A, B> = A | B\ninterface I {\n  f(x: Int): Int\n}\n\
+           type T implements I & I {\n  f: Int\n}\n";
+  let forward = analyze(
+    &package("app", &[("a.graphqlx", a), ("b.graphqlx", b)]).with_dependencies(["geo", "other"]),
+    &[
+      package("geo", &[("geo.graphqlx", geo)]),
+      package("other", &[("other.graphqlx", other)]),
+    ],
+    &Limits::new(),
+  );
+  let backward = analyze(
+    &package("app", &[("b.graphqlx", b), ("a.graphqlx", a)]).with_dependencies(["other", "geo"]),
+    &[
+      package("other", &[("other.graphqlx", other)]),
+      package("geo", &[("geo.graphqlx", geo)]),
+    ],
+    &Limits::new(),
+  );
+  let mut kinds: Vec<&str> = codes(&forward);
+  kinds.sort_unstable();
+  assert_eq!(
+    kinds,
+    [DUPLICATE, MEMBER, FIELD_TYPE, MISSING_ARGUMENT, TRANSITIVE]
+  );
+  assert_eq!(rendered(&forward), rendered(&backward));
+}
+
+/// Over a program of every shape this phase reads, which it accepts, no interface generic: every
+/// definition implements what each interface it implements implements, read off the public model,
+/// `Def::implements()` and each entry's type. The premise satisfaction by declaration rests on.
+#[test]
+fn an_ok_analysis_implements_what_its_interfaces_implement() {
+  let text = "type Query {\n  x: Int\n  u: Union\n  e: Either<User, Post>\n  p: Pair<Int, String>\n}\n\
+              interface Node {\n  id: ID\n}\n\
+              interface Named implements Node {\n  id: ID\n  name: String\n}\n\
+              interface Entity implements Named & Node {\n  id: ID\n  name: String\n  \
+              tags(first: Int = 10): [String!]!\n}\n\
+              interface Mark @marker\ninterface Strong implements Mark @marker\n\
+              type User implements Entity & Named & Node & Strong & Mark {\n  id: ID\n  \
+              name: String\n  tags(first: Int = 10, after: String): [String!]!\n  extra: Int\n}\n\
+              type Post implements Named & Node {\n  id: ID!\n  name: String\n}\n\
+              union Union = User | Post\nunion Either<A, B> = A | B\n\
+              type Pair<A, B> implements Strong & Mark {\n  a: A\n  b: B\n}\n\
+              scalar S implements Strong & Mark\nenum E implements Mark {\n  A\n}\n\
+              input In implements Mark {\n  a: Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  let named_by = |entries: &[TypeExprId]| -> Vec<DefId> {
+    entries
+      .iter()
+      .filter_map(
+        |entry: &TypeExprId| match model.ty(model.type_expr(*entry).ty()).kind() {
+          TyKind::Named { def, .. } => Some(def),
+          _ => None,
+        },
+      )
+      .collect()
+  };
+  let mut compared: usize = 0;
+  for def in model.defs() {
+    let own = named_by(model.def(def).implements());
+    for &interface in &own {
+      if model.def(interface).kind() != DefKind::Interface {
+        continue;
+      }
+      for needed in named_by(model.def(interface).implements()) {
+        assert!(
+          own.contains(&needed),
+          "`{}` implements `{}` and not `{}`, which it implements",
+          model.def(def).name(),
+          model.def(interface).name(),
+          model.def(needed).name()
+        );
+        compared += 1;
+      }
+    }
+  }
+  assert!(compared >= 8, "{compared}");
 }

@@ -349,7 +349,14 @@ impl Analysis {
 ///   [`Limits::max_implementation_steps`]; such a type is depth-checked against
 ///   [`Limits::max_generic_depth`] and counted toward [`Limits::max_instantiations`]. A check one
 ///   of them stops is `resource-limit`, once, at the entry it was checking, naming the limit, and
-///   nothing more is said of the definition.
+///   nothing more is said of the definition. Last, every type occurrence, in id order, of a
+///   definition whose own entries or members name its type parameters, an occurrence inside a
+///   generic definition included: its distinct written entries, and its distinct members, each
+///   read under the occurrence's type's arguments, a step each, two that are one type there are
+///   `duplicate-implements-interface` or `duplicate-union-member` at the occurrence, labelled at
+///   the two. Each type is judged once, both nullnesses sharing the verdict, and one a limit stops
+///   is `resource-limit` at each occurrence of it, but at an entry whose definition's check
+///   stopped there; an instantiation only a fill derives is not judged.
 /// - Gives every definition and every type the tier it requires, last, once every type is
 ///   interned: a built-in keeps its package's tag; a scalar a supplied package defines requires
 ///   its externs' greatest tier, `core` with none; an enum and a directive `core`; an object or an

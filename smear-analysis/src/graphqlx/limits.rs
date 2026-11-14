@@ -254,11 +254,10 @@ impl Limits {
   /// deeper than this is reported at each occurrence of the instantiation, where it is written, and
   /// the occurrence keeps its type; and a type that checking an implementation reads under an
   /// `implements` entry's type arguments that would nest deeper stops the check of its definition,
-  /// reported once, at the entry it was checking. The built-in library's types are built whatever
-  /// the bound, so
-  /// `0`, which
-  /// refuses every list and every type with an argument a supplied package writes, reports nothing
-  /// inside it.
+  /// reported once, at the entry it was checking, and the comparing of an instantiation's entries
+  /// and members, reported at each occurrence of it. The built-in library's types are built
+  /// whatever the bound, so `0`, which refuses every list and every type with an argument a
+  /// supplied package writes, reports nothing inside it.
   ///
   /// The default is 64. A written type is already bounded by the parser's bracket ceiling (24 at
   /// its default); substitution is what can go deeper, since a default that wraps a parameter once
@@ -284,8 +283,10 @@ impl Limits {
   /// under type arguments would need one more is reported as
   /// [`max_value_steps`](Self::max_value_steps) says of a type that cannot be built. An occurrence
   /// whose bounds, put under its arguments, would need one more is reported where it is written
-  /// too, and keeps its type; and a definition whose implementation's check would need one more
-  /// is reported once, at the `implements` entry it was checking. The built-in library's are not
+  /// too, and keeps its type; a definition whose implementation's check would need one more is
+  /// reported once, at the `implements` entry it was checking; and an instantiation whose entries
+  /// and members, compared under its arguments, would need one more is reported at each
+  /// occurrence of it. The built-in library's are not
   /// counted.
   ///
   /// The default is 2^16. A program writes hundreds of instantiations; derived ones can double per

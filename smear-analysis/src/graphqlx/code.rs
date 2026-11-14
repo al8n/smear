@@ -523,8 +523,9 @@ pub(crate) mod schema {
   pub(crate) const MISSING_REQUIRED_INPUT_OBJECT_FIELD: Code =
     Code::new("smear::schema::missing-required-input-object-field");
 
-  /// A definition's `implements` entry is the type an earlier entry of its is, as written:
-  /// `smear-schema`'s `DuplicateImplementsInterface`.
+  /// A definition's `implements` entry is the type an earlier entry of its is, as written or under
+  /// the type arguments of an instantiation the program writes: `smear-schema`'s
+  /// `DuplicateImplementsInterface`.
   pub(crate) const DUPLICATE_IMPLEMENTS_INTERFACE: Code =
     Code::new("smear::schema::duplicate-implements-interface");
 
@@ -565,8 +566,8 @@ pub(crate) mod schema {
   pub(crate) const INTERFACE_FIELD_NOT_DEPRECATED: Code =
     Code::new("smear::schema::interface-field-not-deprecated");
 
-  /// A union's member is the type an earlier member of its is, as written: `smear-schema`'s
-  /// `DuplicateUnionMember`.
+  /// A union's member is the type an earlier member of its is, as written or under the type
+  /// arguments of an instantiation the program writes: `smear-schema`'s `DuplicateUnionMember`.
   pub(crate) const DUPLICATE_UNION_MEMBER: Code =
     Code::new("smear::schema::duplicate-union-member");
 }

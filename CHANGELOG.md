@@ -449,7 +449,31 @@ All notable changes to Smear are documented in this file.
   in application order, a `lang` written twice twice, with its `lang` and `type`, the strings
   coerced, and its effective tier, the `tier` it writes or, absent or `null`, its package's. An
   `@extern` whose values did not coerce, one another package writes and one on a built-in bind
-  nothing. Then every definition and every type is given the tier it requires, which
+  nothing. Then each definition is checked against what it says it is, reading of it, and of every
+  interface the check reads, what its own package writes: an `implements` entry, or a union's
+  member, of the type an earlier one has is `smear::schema::duplicate-implements-interface` or
+  `smear::schema::duplicate-union-member`, at the later, labelled at the first; each interface the
+  interfaces a definition implements implement, read under its entries' type arguments, is one of
+  its entries too, compared as a type, or it is `smear::schema::missing-transitive-interface`, so a
+  type that omits one is refused on every kind that may write `implements`, markers included,
+  `type Lazy implements Ord<Lazy>` having to write the `Comparable<Lazy>` that `Ord<X>`'s
+  `Comparable<X>` asks; and an object or an interface declares each field of an interface it
+  implements, its type a subtype of the interface's under the entry's type arguments, covariant
+  through lists, non-null, declared interfaces, union members and every type argument, a type
+  parameter a subtype of itself and of its bounds alone, deprecated only where the interface's is,
+  taking each of its arguments with exactly its type and requiring no other, or it is
+  `smear::schema::missing-interface-field`, `invalid-interface-field-type`,
+  `interface-field-not-deprecated`, `missing-interface-field-argument`,
+  `invalid-interface-field-argument-type` or `unexpected-required-argument`, where `smear-schema`
+  reports each. Last, each instantiation the program writes of a definition whose entries or
+  members name its type parameters, an open one included, has no two of them that are one type
+  under its arguments, `Either<User, User>` of `union Either<A, B> = A | B` being
+  `duplicate-union-member` at the occurrence. A new `Limits::max_implementation_steps`, 2^20 by
+  default, bounds the check, which costs the square of a definition's entries on programs it
+  accepts: each entry, field, argument and union member looked at, each pair of types compared and
+  each node of a type rebuilt under type arguments is a step, and past it the definition's check,
+  or an instantiation's, is `resource-limit` once where it was checking. Then every definition and
+  every type is given the tier it requires, which
   `Def::tier()` and `Ty::tier()` answer: a built-in keeps its package's tag; a scalar a supplied
   package defines requires its externs' greatest tier, `core` with none; an enum and a directive
   `core`; an object or an interface the greatest of its fields' types' and their arguments', an
