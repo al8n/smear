@@ -70,11 +70,46 @@ definition's argument or of an input field, under lists alone, anywhere else bei
 one bit wide, written without `!`, `NonZero` of anything else being
 `smear::graphqlx::nonzero-argument`; and a definition's type parameters have distinct names, and so
 do the names an extension's own list gives them, a type parameter with the name of an earlier one
-being `smear::graphqlx::duplicate-type-parameter`. An
-error that a phase or a rule reports marks the contributions, members and definitions that hold it,
-as their `has_errors()` says, whether the diagnostic ceiling keeps it or not. A syntax error marks
-nothing. A consumer's walk marks nothing, answers its own diagnostics under the same ceiling, and
-holds memory bounded by it.
+being `smear::graphqlx::duplicate-type-parameter`. And what a definition a supplied package
+wrote holds keeps GraphQL's own rules, with GraphQL's codes: a member whose name begins with `__` is
+`smear::schema::reserved-field-name`, or the code of what else it is, and a member whose name an
+earlier member of its list has is `smear::schema::duplicate-field-name`, or the code of its list,
+and a definition that holds members and holds none, its extensions' counted, is
+`smear::schema::empty-fields-definition`, or the code of its kind, a marker holding none, and a
+member typed by a definition of a kind its position does not take is
+`smear::schema::field-type-not-output-type`, or the code of its position, and an `implements` entry
+of an object or an interface that names what is no interface is
+`smear::schema::implements-non-interface`, and an interface on a cycle of `implements` entries is
+`smear::schema::self-implementing-interface`, and a union member that is no object type is
+`smear::schema::union-member-not-object`, and a required argument or input field that applies
+`core`'s `@deprecated` is `smear::schema::deprecated-required-argument`, or the code of an input
+field, and a field written non-null of an input object its own package makes OneOf is
+`smear::schema::one-of-field-not-nullable`, and one with a default
+`smear::schema::one-of-field-has-default`, and `@oneOf` in an extension of an input object is
+`smear::schema::one-of-on-input-object-extension`. And every application a supplied package
+writes keeps GraphQL's own rules on directives, with GraphQL's codes: one at a location its
+directive's definition does not list is `smear::schema::unsupported-directive-location`, and one
+of a directive that is not repeatable, applied again where it is applied, a definition and its
+extensions being one location, is `smear::schema::duplicate-directive-use`, and an argument an
+application writes again is `smear::schema::duplicate-directive-argument-use`, and a directive
+that refers to itself, through the directives applied where it reaches and the types it names, is
+`smear::schema::self-referential-directive`, and `core`'s `@specifiedBy` on a scalar of the
+built-in library, not only on GraphQL's five, is `smear::schema::specified-by-on-built-in-scalar`.
+And the schema keeps GraphQL's own rules on its roots, with GraphQL's codes: a root operation type
+that is no object type is `smear::schema::root-operation-type-not-object`, and two roots of one
+type are `smear::schema::shared-root-operation-type`, and a schema extension the root package
+writes when it defines no schema, by a definition or a presumed query root, is
+`smear::schema::schema-extension-without-schema`, and a schema with no query root, neither written
+nor presumed, is `smear::schema::missing-query-root-operation-type`. So a root package with no
+query root is not ok, as in GraphQL: a library has none, and a consumer that analyzes one as the
+root package filters that code, as it filters any code it waives.
+An error that a phase or a rule reports marks the contributions, members and definitions that hold
+it, as their `has_errors()` says, whether the diagnostic ceiling keeps it or not. A syntax error
+marks nothing. A consumer's walk marks nothing, answers its own diagnostics under the same
+ceiling, and holds memory bounded by it.
+
+On every GraphQL document of smear's corpora the analyzer is held to `smear-schema`'s verdict, code
+for code, by a differential test that lists each divergence it allows and why.
 
 ## Feature flags
 

@@ -5,7 +5,11 @@
 //! built-in meaning. Each rule says nothing about what a phase already refused, marks what it
 //! reports, and quotes a name only as an excerpt. The fourth rule, that an enum takes no type
 //! parameter, is tested in `analysis_types`, beside the phase that types each use of the enum, and
-//! the rules after it, on what is judged of types, in `analysis_type_rules`.
+//! the rules after it, on what is judged of types, in `analysis_type_rules`. GraphQL's own rules on
+//! what a definition holds are tested in `analysis_definition_rules`, and those on directives and
+//! their applications in `analysis_directive_rules`; those on the schema, that a root operation
+//! type is an object type, that the roots have distinct types, that a schema extension extends a
+//! schema that is defined and that a schema has a query root, are tested here.
 //!
 //! Then the rule set itself: every code a rule lists fires on a fixture; and the walk the rules
 //! ride, over an analyzed program of two packages, written out hook by hook.
@@ -31,6 +35,10 @@ const OUTSIDE: &str = "smear::graphqlx::schema-outside-root";
 /// The code for an extension of a definition its package may not extend.
 const ORPHAN: &str = "smear::graphqlx::orphan-extension";
 
+/// GraphQL's code for the root package's extension that adds more than directives to an
+/// introspection type, which the analyzer shares.
+const INTROSPECTION: &str = "smear::schema::introspection-type-extension";
+
 /// The code for an enum that declares a type parameter.
 const GENERIC_ENUM: &str = "smear::graphqlx::generic-enum";
 
@@ -48,6 +56,81 @@ const NONZERO_ARGUMENT: &str = "smear::graphqlx::nonzero-argument";
 
 /// The code for a type parameter with the name of an earlier one.
 const DUPLICATE_TYPE_PARAMETER: &str = "smear::graphqlx::duplicate-type-parameter";
+
+/// GraphQL's codes for a member whose name begins with `__`, by what the member is.
+const RESERVED_FIELD_NAME: &str = "smear::schema::reserved-field-name";
+const RESERVED_ARGUMENT_NAME: &str = "smear::schema::reserved-argument-name";
+const RESERVED_ENUM_VALUE_NAME: &str = "smear::schema::reserved-enum-value-name";
+const RESERVED_INPUT_FIELD_NAME: &str = "smear::schema::reserved-input-field-name";
+const RESERVED_DIRECTIVE_ARGUMENT_NAME: &str = "smear::schema::reserved-directive-argument-name";
+
+/// GraphQL's codes for a member whose name an earlier member of its list has, by the list.
+const DUPLICATE_FIELD_NAME: &str = "smear::schema::duplicate-field-name";
+const DUPLICATE_ARGUMENT_NAME: &str = "smear::schema::duplicate-argument-name";
+const DUPLICATE_ENUM_VALUE: &str = "smear::schema::duplicate-enum-value";
+const DUPLICATE_INPUT_FIELD_NAME: &str = "smear::schema::duplicate-input-field-name";
+const DUPLICATE_DIRECTIVE_ARGUMENT_NAME: &str = "smear::schema::duplicate-directive-argument-name";
+
+/// GraphQL's codes for a definition that holds members and holds none, by its kind.
+const EMPTY_FIELDS_DEFINITION: &str = "smear::schema::empty-fields-definition";
+const EMPTY_UNION_MEMBERS: &str = "smear::schema::empty-union-members";
+const EMPTY_ENUM_VALUES: &str = "smear::schema::empty-enum-values";
+const EMPTY_INPUT_FIELDS: &str = "smear::schema::empty-input-fields";
+
+/// GraphQL's codes for a member typed by a definition of a kind its position does not take.
+const FIELD_TYPE_NOT_OUTPUT_TYPE: &str = "smear::schema::field-type-not-output-type";
+const ARGUMENT_TYPE_NOT_INPUT_TYPE: &str = "smear::schema::argument-type-not-input-type";
+const INPUT_FIELD_TYPE_NOT_INPUT_TYPE: &str = "smear::schema::input-field-type-not-input-type";
+const DIRECTIVE_ARGUMENT_TYPE_NOT_INPUT_TYPE: &str =
+  "smear::schema::directive-argument-type-not-input-type";
+
+/// GraphQL's code for an `implements` entry that names what is no interface.
+const IMPLEMENTS_NON_INTERFACE: &str = "smear::schema::implements-non-interface";
+
+/// GraphQL's code for an interface that implements itself.
+const SELF_IMPLEMENTING_INTERFACE: &str = "smear::schema::self-implementing-interface";
+
+/// GraphQL's code for a union member that is no object type.
+const UNION_MEMBER_NOT_OBJECT: &str = "smear::schema::union-member-not-object";
+
+/// GraphQL's codes for a required argument and a required input field that are deprecated.
+const DEPRECATED_REQUIRED_ARGUMENT: &str = "smear::schema::deprecated-required-argument";
+const DEPRECATED_REQUIRED_INPUT_FIELD: &str = "smear::schema::deprecated-required-input-field";
+
+/// GraphQL's codes for the three mistakes of a OneOf input object.
+const ONE_OF_FIELD_NOT_NULLABLE: &str = "smear::schema::one-of-field-not-nullable";
+const ONE_OF_FIELD_HAS_DEFAULT: &str = "smear::schema::one-of-field-has-default";
+const ONE_OF_ON_INPUT_OBJECT_EXTENSION: &str = "smear::schema::one-of-on-input-object-extension";
+
+/// GraphQL's code for a directive applied where its definition does not list.
+const UNSUPPORTED_DIRECTIVE_LOCATION: &str = "smear::schema::unsupported-directive-location";
+
+/// GraphQL's code for a directive that is not repeatable applied twice to one location.
+const DUPLICATE_DIRECTIVE_USE: &str = "smear::schema::duplicate-directive-use";
+
+/// GraphQL's code for an application that passes an argument twice.
+const DUPLICATE_DIRECTIVE_ARGUMENT_USE: &str = "smear::schema::duplicate-directive-argument-use";
+
+/// GraphQL's code for a directive that refers to itself.
+const SELF_REFERENTIAL_DIRECTIVE: &str = "smear::schema::self-referential-directive";
+
+/// GraphQL's code for `@specifiedBy` on a built-in scalar.
+const SPECIFIED_BY_ON_BUILT_IN_SCALAR: &str = "smear::schema::specified-by-on-built-in-scalar";
+
+/// GraphQL's code for a root operation type that is no object type.
+const ROOT_OPERATION_TYPE_NOT_OBJECT: &str = "smear::schema::root-operation-type-not-object";
+
+/// GraphQL's code for two root operations of one type.
+const SHARED_ROOT_OPERATION_TYPE: &str = "smear::schema::shared-root-operation-type";
+
+/// GraphQL's code for a schema extension with no schema to extend.
+const SCHEMA_EXTENSION_WITHOUT_SCHEMA: &str = "smear::schema::schema-extension-without-schema";
+
+/// The code of a type name that names nothing, a phase's.
+const UNDEFINED_TYPE: &str = "smear::schema::undefined-type";
+
+/// The code of a root operation that names nothing, a phase's.
+const UNDEFINED_ROOT: &str = "smear::schema::undefined-root-operation-type";
 
 /// What the orphan rule tells the author of an extension of another supplied package's definition.
 const THIRD_PARTY: &str = "a package extends its own definitions alone, so that a definition is \
@@ -71,10 +154,29 @@ const MORE_THAN_DIRECTIVES: &str = "an extension of a definition of `core`, `all
                                     directives and nothing else: remove what this one adds beside \
                                     them";
 
+/// What GraphQL's own refusal tells the root package when it adds more than directives to an
+/// introspection type: `smear-schema`'s help, word for word.
+const INTROSPECTION_HELP: &str = "an extension may add directives to an introspection type and \
+                                  nothing else; the `__`-prefixed types are the introspection \
+                                  system the specification defines.";
+
+/// The primary label of GraphQL's own refusal of an extension that adds more than directives to an
+/// introspection type: `smear-schema`'s phrase, word for word.
+const INTROSPECTION_LABEL: &str = "introspection type extension adds more than directives";
+
 /// What the orphan rule tells the root package when its extension of a built-in applies `@marker`,
 /// `@set` or `@map`.
 const MEANING: &str = "`@marker`, `@set` and `@map` say what a definition is, and what a built-in \
                        is is the language's to say: remove this directive";
+
+/// What GraphQL tells the author of a directive that is not repeatable applied twice to one
+/// location: `smear-schema`'s help, word for word.
+const DUPLICATE_DIRECTIVE_USE_HELP: &str = "declare the directive `repeatable`, or apply it once; \
+                                            a definition and its extensions are one location.";
+
+/// What GraphQL tells the author of a directive applied where its definition does not list:
+/// `smear-schema`'s help, word for word.
+const LOCATION_HELP: &str = "add the location to the directive's definition, or move the usage.";
 
 /// What the orphan rule tells the root package when it adds more than directives to a built-in its
 /// own definition replaces, which may write what the extension adds.
@@ -130,8 +232,45 @@ fn at(source: SourceId, text: &str, needle: &str, nth: usize) -> Location {
   Location::new(source.get(), SimpleSpan::new(start, start + needle.len()))
 }
 
-/// Each diagnostic's code, primary location, and first label's location, in the list's order.
+/// GraphQL's code for a schema with no query root. Most programs of this file are parts of a
+/// program and say nothing of the schema, so each reading below but `unwaived` leaves this code
+/// out, as a consumer that analyzes a library waives it; the rule's own tests read the whole list.
+const NO_QUERY_ROOT: &str = "smear::schema::missing-query-root-operation-type";
+
+/// The diagnostics of `analysis`, in the list's order, but for the missing query root.
+fn reported(analysis: &Analysis) -> Vec<&Diagnostic> {
+  analysis
+    .diagnostics()
+    .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() != NO_QUERY_ROOT)
+    .collect()
+}
+
+/// Whether `analysis` reports nothing but that its program has no query root.
+fn clean(analysis: &Analysis) -> bool {
+  let diagnostics = analysis.diagnostics();
+  let waived = diagnostics.len() - reported(analysis).len();
+  diagnostics.len() == waived && diagnostics.error_count() == waived
+}
+
+/// Each diagnostic's code, primary location, and first label's location, in the list's order, but
+/// for the missing query root.
 fn found(analysis: &Analysis) -> Vec<(&'static str, Location, Option<Location>)> {
+  reported(analysis)
+    .into_iter()
+    .map(|diagnostic: &Diagnostic| {
+      (
+        diagnostic.code().as_str(),
+        diagnostic.primary(),
+        diagnostic.label(0).map(|label| label.location()),
+      )
+    })
+    .collect()
+}
+
+/// Each diagnostic's code, primary location, and first label's location, in the list's order: the
+/// whole list, the missing query root among them.
+fn unwaived(analysis: &Analysis) -> Vec<(&'static str, Location, Option<Location>)> {
   analysis
     .diagnostics()
     .iter()
@@ -145,19 +284,44 @@ fn found(analysis: &Analysis) -> Vec<(&'static str, Location, Option<Location>)>
     .collect()
 }
 
-/// Each diagnostic's message, in the list's order.
+/// Where the `nth`, counting from 0, of the names `name` written right after `before` is in `text`,
+/// the file `source`: a name, so one followed by no letter, digit or `_`.
+fn named(source: SourceId, text: &str, before: &str, name: &str, nth: usize) -> Location {
+  let written = format!("{before}{name}");
+  let start = text
+    .match_indices(written.as_str())
+    .map(|(start, _): (usize, &str)| start + before.len())
+    .filter(|start: &usize| {
+      text[start + name.len()..]
+        .chars()
+        .next()
+        .is_none_or(|next: char| !(next.is_ascii_alphanumeric() || next == '_'))
+    })
+    .nth(nth)
+    .unwrap_or_else(|| panic!("`{written}` does not occur {} times", nth + 1));
+  Location::new(source.get(), SimpleSpan::new(start, start + name.len()))
+}
+
+/// Each diagnostic's code, in the list's order, but for the missing query root.
+fn codes(analysis: &Analysis) -> Vec<&'static str> {
+  reported(analysis)
+    .into_iter()
+    .map(|diagnostic: &Diagnostic| diagnostic.code().as_str())
+    .collect::<Vec<&'static str>>()
+}
+
+/// Each diagnostic's message, in the list's order, but for the missing query root.
 fn messages(analysis: &Analysis) -> Vec<String> {
-  analysis
-    .diagnostics()
-    .iter()
+  reported(analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| diagnostic.to_string())
     .collect::<Vec<String>>()
 }
 
-/// Each diagnostic's help, in the list's order.
+/// Each diagnostic's help, in the list's order, but for the missing query root.
 fn helps(analysis: &Analysis) -> Vec<Option<&str>> {
   let mut helps: Vec<Option<&str>> = Vec::new();
-  for diagnostic in analysis.diagnostics() {
+  for diagnostic in reported(analysis) {
     helps.push(diagnostic.help());
   }
   helps
@@ -295,8 +459,9 @@ fn no_schema_definition_is_no_diagnostic() {
   );
   assert_eq!(analysis.model().schema().contributions().count(), 0);
 
-  // A schema extension with no schema definition to extend is no rule's of this layer: it gives
-  // the schema its root, beside the one presumed.
+  // A schema extension beside a presumed `Query` extends a schema that is defined: omitting the
+  // schema definition beside an object type `Query` defines one. The extension gives the schema
+  // its root, beside the one presumed.
   let analysis = analyze_one(
     "type Query {\n  ok: Int\n}\ntype Change {\n  done: Int\n}\n\
      extend schema {\n  mutation: Change\n}\n",
@@ -445,6 +610,788 @@ fn the_root_package_defines_and_extends_the_schema_from_any_of_its_modules() {
   }
 }
 
+/// What GraphQL tells the author of a root operation type that is no object type.
+const ROOT_TYPE_HELP: &str = "a root operation type must be an object type: an interface or union \
+                              has no concrete field set to resolve.";
+
+#[test]
+fn a_root_operation_type_is_an_object_type() {
+  // Each of the three roots, written as an interface: each at its type.
+  let text = "interface Q {\n  q: Int\n}\ninterface M {\n  m: Int\n}\ninterface S {\n  s: Int\n}\n\
+              schema {\n  query: Q\n  mutation: M\n  subscription: S\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        ROOT_OPERATION_TYPE_NOT_OBJECT,
+        named(schema, text, "query: ", "Q", 0),
+        None
+      ),
+      (
+        ROOT_OPERATION_TYPE_NOT_OBJECT,
+        named(schema, text, "mutation: ", "M", 0),
+        None
+      ),
+      (
+        ROOT_OPERATION_TYPE_NOT_OBJECT,
+        named(schema, text, "subscription: ", "S", 0),
+        None
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let not_object = |operation: &str, name: &str, what: &str| -> String {
+    format!(
+      "the {operation} root operation type `{name}` is {what}, and a root operation type is an \
+       object type"
+    )
+  };
+  assert_eq!(
+    messages(&analysis),
+    [
+      not_object("query", "Q", "an interface"),
+      not_object("mutation", "M", "an interface"),
+      not_object("subscription", "S", "an interface"),
+    ]
+  );
+  for diagnostic in analysis.diagnostics() {
+    assert_eq!(
+      diagnostic.primary_label(),
+      Some("root operation type is not an object type")
+    );
+    assert_eq!(diagnostic.help(), Some(ROOT_TYPE_HELP));
+  }
+
+  // The query root as each other kind that is no object type, `core`'s `NonZero`, which an alias
+  // names, among them: each once, at the type, named by its definition.
+  for (text, written, name, what) in [
+    (
+      "type O {\n  o: Int\n}\nunion U = O\nschema {\n  query: U\n}\n",
+      "U",
+      "U",
+      "a union",
+    ),
+    ("scalar S\nschema {\n  query: S\n}\n", "S", "S", "a scalar"),
+    (
+      "enum E {\n  A\n}\nschema {\n  query: E\n}\n",
+      "E",
+      "E",
+      "an enum",
+    ),
+    (
+      "input In {\n  i: Int\n}\nschema {\n  query: In\n}\n",
+      "In",
+      "In",
+      "an input object",
+    ),
+    (
+      "schema {\n  query: NonZeroU32\n}\n",
+      "NonZeroU32",
+      "NonZero",
+      "a scalar",
+    ),
+  ] {
+    let analysis = analyze_one(text);
+    let schema = schema_file(&analysis);
+    assert_eq!(
+      found(&analysis),
+      [(
+        ROOT_OPERATION_TYPE_NOT_OBJECT,
+        named(schema, text, "query: ", written, 0),
+        None
+      )],
+      "{text}: {:#?}",
+      analysis.diagnostics()
+    );
+    assert_eq!(messages(&analysis), [not_object("query", name, what)]);
+  }
+
+  // A marker is an interface too, which the marker rule refuses at the same token.
+  let analysis = analyze_one("interface M @marker\nschema {\n  query: M\n}\n");
+  assert_eq!(
+    codes(&analysis),
+    [MARKER_MISUSE, ROOT_OPERATION_TYPE_NOT_OBJECT]
+  );
+  assert_eq!(messages(&analysis)[1], not_object("query", "M", "a marker"));
+
+  // An instantiation of a generic object type is an object type.
+  let analysis = analyze_one("type Root<T> {\n  r: T\n}\nschema {\n  query: Root<Int>\n}\n");
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
+fn the_root_operations_have_distinct_types() {
+  // Two of one type, at the later, labelled at the first; and all three, each later one labelled
+  // at the query's.
+  let text = "type Q {\n  q: Int\n}\nschema {\n  query: Q\n  mutation: Q\n  subscription: Q\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let query = Some(named(schema, text, "query: ", "Q", 0));
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        SHARED_ROOT_OPERATION_TYPE,
+        named(schema, text, "mutation: ", "Q", 0),
+        query
+      ),
+      (
+        SHARED_ROOT_OPERATION_TYPE,
+        named(schema, text, "subscription: ", "Q", 0),
+        query
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "the query and mutation root operations have one type, `Q`",
+      "the query and subscription root operations have one type, `Q`",
+    ]
+  );
+  for diagnostic in analysis.diagnostics() {
+    assert_eq!(
+      diagnostic.primary_label(),
+      Some("two root operations name the same type")
+    );
+    assert_eq!(
+      diagnostic.label(0).map(|label| label.text()),
+      Some("already a root operation type here")
+    );
+    assert_eq!(
+      diagnostic.help(),
+      Some(
+        "the three roots are the entry points of three different operation kinds, so each needs \
+         its own object type."
+      )
+    );
+  }
+
+  // One instantiation twice is one type; two instantiations of one definition are two.
+  let text = "type Root<T> {\n  r: T\n}\nschema {\n  query: Root<Int>\n  mutation: Root<Int>\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      SHARED_ROOT_OPERATION_TYPE,
+      at(schema, text, "Root<Int>", 1),
+      Some(at(schema, text, "Root<Int>", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let analysis = analyze_one(
+    "type Root<T> {\n  r: T\n}\nschema {\n  query: Root<Int>\n  mutation: Root<String>\n}\n",
+  );
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // A presumed root and an extension's written root of its definition: at the written one,
+  // labelled at the definition.
+  let text = "type Query {\n  ok: Int\n}\nextend schema {\n  mutation: Query\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      SHARED_ROOT_OPERATION_TYPE,
+      named(schema, text, "mutation: ", "Query", 0),
+      Some(named(schema, text, "type ", "Query", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  // And when the presumed one is the later: at the written one still, labelled at the presumed
+  // one's definition. With no `Query` presumed, the extension that writes the query root has no
+  // schema to extend, which is another rule's to say.
+  let text = "type Mutation {\n  m: Int\n}\nextend schema {\n  query: Mutation\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        SCHEMA_EXTENSION_WITHOUT_SCHEMA,
+        at(schema, text, "extend", 0),
+        None
+      ),
+      (
+        SHARED_ROOT_OPERATION_TYPE,
+        named(schema, text, "query: ", "Mutation", 0),
+        Some(named(schema, text, "type ", "Mutation", 0))
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // Two roots that are one interface are each no object type, and that is all.
+  let analysis =
+    analyze_one("interface I {\n  i: Int\n}\nschema {\n  query: I\n  mutation: I\n}\n");
+  assert_eq!(
+    codes(&analysis),
+    [
+      ROOT_OPERATION_TYPE_NOT_OBJECT,
+      ROOT_OPERATION_TYPE_NOT_OBJECT
+    ]
+  );
+}
+
+#[test]
+fn a_schema_extension_extends_a_schema_that_is_defined() {
+  // `smear-schema`'s fixture: no schema definition, and no `Query` presumed, so the extension
+  // extends nothing, although it gives the schema its query root.
+  let text = "type Q {\n  ok: Int\n}\nextend schema {\n  query: Q\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      SCHEMA_EXTENSION_WITHOUT_SCHEMA,
+      at(schema, text, "extend", 0),
+      None
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "the root package extends the schema, and has none to extend: it writes no schema \
+       definition, and no object type `Query` is presumed its query root"
+    ]
+  );
+  let diagnostic = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic");
+  assert_eq!(
+    diagnostic.primary_label(),
+    Some("schema extension has no schema to extend")
+  );
+  assert_eq!(
+    diagnostic.help(),
+    Some(
+      "`extend schema` adds to a schema the document defines: write a `schema` definition, or \
+       define the `Query` type that omitting one presumes."
+    )
+  );
+  assert!(matches!(
+    analysis.model().schema().root(RootOperation::Query),
+    Some(Root::Written(_))
+  ));
+
+  // Two such extensions are two.
+  let text = "type Q {\n  ok: Int\n}\ntype M {\n  m: Int\n}\nextend schema {\n  query: Q\n}\n\
+              extend schema {\n  mutation: M\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        SCHEMA_EXTENSION_WITHOUT_SCHEMA,
+        at(schema, text, "extend", 0),
+        None
+      ),
+      (
+        SCHEMA_EXTENSION_WITHOUT_SCHEMA,
+        at(schema, text, "extend", 1),
+        None
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // Beside a schema definition the file writes after it, and beside a presumed `Query`, the
+  // schema is defined.
+  for text in [
+    "extend schema {\n  mutation: M\n}\nschema {\n  query: Q\n}\ntype Q {\n  ok: Int\n}\n\
+     type M {\n  m: Int\n}\n",
+    "type Query {\n  ok: Int\n}\ntype M {\n  m: Int\n}\nextend schema {\n  mutation: M\n}\n",
+  ] {
+    let analysis = analyze_one(text);
+    assert!(
+      analysis.diagnostics().is_empty(),
+      "{text}: {:#?}",
+      analysis.diagnostics()
+    );
+  }
+
+  // An interface named `Query` is not presumed, so it defines no schema.
+  let text = "interface Query {\n  ok: Int\n}\ntype Q {\n  q: Int\n}\n\
+              extend schema {\n  query: Q\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(
+      SCHEMA_EXTENSION_WITHOUT_SCHEMA,
+      at(schema, text, "extend", 0),
+      None
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // A dependency's schema extension is the rule on schema items outside the root package's
+  // alone, beside the root package's own, which this rule refuses.
+  let ours = "type Q {\n  ok: Int\n}\nextend schema {\n  query: Q\n}\n";
+  let theirs = "type Point {\n  x: Int\n}\nextend schema {\n  mutation: Point\n}\n";
+  let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
+  let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
+  let analysis = analyze(&root, &[geo], &Limits::new());
+  let schema = schema_file(&analysis);
+  let geo_file = file(&analysis, 4, "geo.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        SCHEMA_EXTENSION_WITHOUT_SCHEMA,
+        at(schema, ours, "extend", 0),
+        None
+      ),
+      (OUTSIDE, at(geo_file, theirs, "extend", 0), None),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
+fn a_rule_of_this_part_says_nothing_where_a_phase_spoke() {
+  // A rule on the roots, which no contribution holds, says nothing beside a second root that names
+  // nothing, in the same schema definition or in a schema extension; beside an undefined type in a
+  // definition, which is none of the schema's contributions, it speaks.
+  for (text, expected) in [
+    (
+      "interface I {\n  i: Int\n}\nschema {\n  query: I\n  mutation: Missing\n}\n",
+      &[UNDEFINED_ROOT][..],
+    ),
+    (
+      "interface I {\n  i: Int\n}\nschema {\n  query: I\n}\nextend schema {\n  mutation: Missing\n}\n",
+      &[UNDEFINED_ROOT][..],
+    ),
+    (
+      "interface I {\n  i: Int\n}\nschema {\n  query: I\n}\ntype G {\n  x: Missing\n}\n",
+      &[ROOT_OPERATION_TYPE_NOT_OBJECT, UNDEFINED_TYPE][..],
+    ),
+    (
+      "type Q {\n  q: Int\n}\nschema {\n  query: Q\n  mutation: Q\n  subscription: Missing\n}\n",
+      &[UNDEFINED_ROOT][..],
+    ),
+    (
+      "type Q {\n  q: Int\n}\nschema {\n  query: Q\n  mutation: Q\n}\n\
+       extend schema {\n  subscription: Missing\n}\n",
+      &[UNDEFINED_ROOT][..],
+    ),
+    (
+      "type Q {\n  q: Int\n}\nschema {\n  query: Q\n  mutation: Q\n}\ntype G {\n  x: Missing\n}\n",
+      &[SHARED_ROOT_OPERATION_TYPE, UNDEFINED_TYPE][..],
+    ),
+    // A schema extension that holds the phase's error says nothing; one beside it, and one beside
+    // an undefined type in a definition, speak.
+    (
+      "type Q {\n  q: Int\n}\nextend schema {\n  query: Q\n  mutation: Missing\n}\n",
+      &[UNDEFINED_ROOT][..],
+    ),
+    (
+      "type Q {\n  q: Int\n}\nextend schema {\n  query: Q\n}\nextend schema {\n  mutation: Missing\n}\n",
+      &[SCHEMA_EXTENSION_WITHOUT_SCHEMA, UNDEFINED_ROOT][..],
+    ),
+    (
+      "type Q {\n  q: Int\n}\nextend schema {\n  query: Q\n}\ntype G {\n  x: Missing\n}\n",
+      &[SCHEMA_EXTENSION_WITHOUT_SCHEMA, UNDEFINED_TYPE][..],
+    ),
+  ] {
+    let analysis = analyze_one(text);
+    assert_eq!(codes(&analysis), expected, "{text}");
+  }
+}
+
+#[test]
+fn long_names_in_these_rules_are_quoted_as_excerpts() {
+  let name = "R".repeat(4096);
+  let texts = [
+    format!("interface {name} {{\n  i: Int\n}}\nschema {{\n  query: {name}\n}}\n"),
+    format!("type {name} {{\n  q: Int\n}}\nschema {{\n  query: {name}\n  mutation: {name}\n}}\n"),
+  ];
+  for text in &texts {
+    let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+      .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
+    let analysis = analyze(&root, &[], &Limits::new());
+    let messages = messages(&analysis);
+    assert_eq!(messages.len(), 1, "{:#?}", analysis.diagnostics());
+    assert!(messages[0].len() < 1024, "{}", messages[0]);
+  }
+}
+
+/// What GraphQL tells the author of a schema with no query root: `smear-schema`'s help, word for
+/// word.
+const NO_QUERY_ROOT_HELP: &str =
+  "define `type Query`, or name an existing object type with `schema { query: … }`.";
+
+/// The whole of the root package's package source, the first of its sources.
+fn root_package_source(analysis: &Analysis) -> Location {
+  let model = analysis.model();
+  let id = model
+    .package(model.root_package())
+    .sources()
+    .into_iter()
+    .next()
+    .expect("every package has a package source");
+  Location::entire(id.get())
+}
+
+#[test]
+fn a_schema_has_a_query_root() {
+  // `smear-schema`'s fixture: a type that is no query root, and nothing else. The schema is the
+  // root package's as a whole, so the diagnostic is at the whole of its package source, with no
+  // label, and not in its file, where it would lie within the type.
+  let analysis = analyze_one("type NotTheRoot {\n  ok: Int\n}");
+  assert_eq!(
+    unwaived(&analysis),
+    [(NO_QUERY_ROOT, root_package_source(&analysis), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let diagnostic = analysis
+    .diagnostics()
+    .iter()
+    .next()
+    .expect("one diagnostic");
+  assert_eq!(
+    diagnostic.to_string(),
+    "the schema has no query root operation type"
+  );
+  assert_eq!(
+    diagnostic.primary_label(),
+    Some("no query root operation type")
+  );
+  assert_eq!(diagnostic.labels(), 0);
+  assert_eq!(diagnostic.help(), Some(NO_QUERY_ROOT_HELP));
+  assert!(!analysis.is_ok());
+  assert_eq!(analysis.model().schema().root(RootOperation::Query), None);
+
+  // A root package with no file has none either.
+  let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert_eq!(
+    unwaived(&analysis),
+    [(NO_QUERY_ROOT, root_package_source(&analysis), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // A presumed `Query`, with no schema definition, and a written root with no `Query` at all.
+  for text in [
+    "type Query {\n  ok: Int\n}",
+    "schema {\n  query: Q\n}\ntype Q {\n  ok: Int\n}\n",
+  ] {
+    let analysis = analyze_one(text);
+    assert!(
+      analysis.diagnostics().is_empty(),
+      "{text}: {:#?}",
+      analysis.diagnostics()
+    );
+  }
+}
+
+#[test]
+fn a_schema_definition_with_no_query_root_is_reported_at_its_keyword() {
+  // A schema definition that writes no query root: at its `schema`, with no label.
+  let text = "schema {\n  mutation: M\n}\ntype M {\n  m: Int\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unwaived(&analysis),
+    [(NO_QUERY_ROOT, at(schema, text, "schema", 0), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // Beside an object named `Query`, which a written schema definition does not let be presumed:
+  // still one, at the definition.
+  let text = "schema {\n  mutation: M\n}\ntype M {\n  m: Int\n}\ntype Query {\n  ok: Int\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unwaived(&analysis),
+    [(NO_QUERY_ROOT, at(schema, text, "schema", 0), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(analysis.model().schema().root(RootOperation::Query), None);
+
+  // A second schema definition that writes the query root gives the schema nothing: still one, at
+  // the first, beside the second's own refusal.
+  let text = "schema {\n  mutation: M\n}\nschema {\n  query: Q\n}\ntype M {\n  m: Int\n}\n\
+              type Q {\n  q: Int\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let first = at(schema, text, "schema", 0);
+  assert_eq!(
+    unwaived(&analysis),
+    [
+      (NO_QUERY_ROOT, first, None),
+      (DUPLICATE, at(schema, text, "schema", 1), Some(first)),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
+fn only_an_object_the_root_module_declares_is_presumed() {
+  // An interface named `Query` is no object type.
+  let analysis = analyze_one("interface Query {\n  ok: Int\n}\n");
+  assert_eq!(
+    unwaived(&analysis),
+    [(NO_QUERY_ROOT, root_package_source(&analysis), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // In a `Directory` root, a module other than the root module declares it.
+  let root = package(
+    "app",
+    Layout::Directory,
+    &[("m/a.graphqlx", "type Query {\n  ok: Int\n}\n")],
+  );
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert_eq!(
+    unwaived(&analysis),
+    [(NO_QUERY_ROOT, root_package_source(&analysis), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // The root package declares none, and its dependency declares one.
+  let root = package(
+    "app",
+    Layout::Flat,
+    &[("schema.graphqlx", "type Other {\n  ok: Int\n}\n")],
+  )
+  .with_dependencies(["dep"]);
+  let dep = package(
+    "dep",
+    Layout::Flat,
+    &[("dep.graphqlx", "type Query {\n  ok: Int\n}\n")],
+  );
+  let analysis = analyze(&root, &[dep], &Limits::new());
+  assert_eq!(
+    unwaived(&analysis),
+    [(NO_QUERY_ROOT, root_package_source(&analysis), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // Every file of a `Flat` root is its root module: a `Query` its second file declares is
+  // presumed.
+  let root = package(
+    "app",
+    Layout::Flat,
+    &[
+      ("a.graphqlx", "type Other {\n  ok: Int\n}\n"),
+      ("b.graphqlx", "type Query {\n  ok: Int\n}\n"),
+    ],
+  );
+  let analysis = analyze(&root, &[], &Limits::new());
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert!(matches!(
+    analysis.model().schema().root(RootOperation::Query),
+    Some(Root::Presumed(_))
+  ));
+}
+
+#[test]
+fn a_written_root_is_a_root_whatever_it_names() {
+  // A query root that names nothing is name resolution's alone.
+  let text = "schema {\n  query: Missing\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unwaived(&analysis),
+    [(
+      UNDEFINED_ROOT,
+      named(schema, text, "query: ", "Missing", 0),
+      None
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // One that names an interface is the rule on the roots' kinds' alone.
+  let text = "interface I {\n  i: Int\n}\nschema {\n  query: I\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unwaived(&analysis),
+    [(
+      ROOT_OPERATION_TYPE_NOT_OBJECT,
+      named(schema, text, "query: ", "I", 0),
+      None
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // With no schema definition and no `Query`, the query root an extension writes is a root: the
+  // extension has no schema to extend, and that is all.
+  let text = "type Q {\n  q: Int\n}\nextend schema {\n  query: Q\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unwaived(&analysis),
+    [(
+      SCHEMA_EXTENSION_WITHOUT_SCHEMA,
+      at(schema, text, "extend", 0),
+      None
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+#[test]
+fn the_missing_root_marks_nothing_when_no_schema_is_written() {
+  // At the package source, which no extent holds: the verdict is no, and nothing is marked.
+  let analysis = analyze_one("type NotTheRoot {\n  ok: Int\n}\n");
+  assert!(!analysis.is_ok());
+  let model = analysis.model();
+  for id in model.defs() {
+    let definition = model.def(id);
+    assert!(
+      !definition.has_errors(),
+      "`{}` is marked",
+      definition.name()
+    );
+    for part in definition.contributions() {
+      assert!(
+        !part.has_errors(),
+        "a contribution of `{}` is marked",
+        definition.name()
+      );
+    }
+  }
+  assert_eq!(model.schema().contributions().count(), 0);
+
+  // At a schema definition's `schema`: its contribution holds the error, and no definition does.
+  let analysis = analyze_one("schema {\n  mutation: M\n}\ntype M {\n  m: Int\n}\n");
+  assert!(!analysis.is_ok());
+  let model = analysis.model();
+  assert_eq!(schema_errors(model), [true]);
+  assert!(
+    model
+      .defs()
+      .into_iter()
+      .all(|def: DefId| !model.def(def).has_errors())
+  );
+}
+
+#[test]
+fn a_phase_in_the_schema_definition_silences_it() {
+  // A mutation root that names nothing, in the schema definition that writes no query root: the
+  // phase's diagnostic alone, where GraphQL says both.
+  let text = "schema {\n  mutation: Missing\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unwaived(&analysis),
+    [(
+      UNDEFINED_ROOT,
+      named(schema, text, "mutation: ", "Missing", 0),
+      None
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // With no schema definition, the rule's diagnostic lies in no extent, and a phase's error in a
+  // definition silences nothing: both are said.
+  let text = "type T {\n  x: Missing\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    unwaived(&analysis),
+    [
+      (NO_QUERY_ROOT, root_package_source(&analysis), None),
+      (UNDEFINED_TYPE, at(schema, text, "Missing", 0), None),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+/// A library: an interface, and an object type that implements it.
+const LIBRARY: &str = "interface Shape {\n  area: Float\n}\n\
+                       type Circle implements Shape {\n  area: Float\n  radius: Float\n}\n";
+
+/// Every definition of `model` as its view prints it and whether it has errors, each followed by
+/// its contributions and its fields, each field with its type occurrence and whether it has errors.
+fn answers(model: &Model) -> Vec<String> {
+  let mut lines: Vec<String> = Vec::new();
+  for id in model.defs() {
+    let definition = model.def(id);
+    lines.push(format!("{definition:?} {}", definition.has_errors()));
+    for part in definition.contributions() {
+      lines.push(format!("  {part:?}"));
+    }
+    for field in definition.fields() {
+      let held = model.member(field);
+      lines.push(format!("  {held:?} {:?} {}", held.ty(), held.has_errors()));
+    }
+  }
+  lines
+}
+
+#[test]
+fn a_consumer_waives_the_missing_root_by_its_code() {
+  // A library analyzed as the root package is not ok, and that it has no query root is all it is
+  // told: a consumer that filters the code reads no other diagnostic.
+  let analysis = analyze_one(LIBRARY);
+  assert!(!analysis.is_ok());
+  assert_eq!(analysis.diagnostics().error_count(), 1);
+  let kept: Vec<&Diagnostic> = analysis
+    .diagnostics()
+    .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() != NO_QUERY_ROOT)
+    .collect();
+  assert!(kept.is_empty(), "{kept:#?}");
+
+  // And its model is whole: beside a query root written after it, which adds no definition, every
+  // definition, contribution and field answers as it does here.
+  let text = format!("{LIBRARY}schema {{\n  query: Circle\n}}\n");
+  let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+    .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
+  let rooted = analyze(&root, &[], &Limits::new());
+  assert!(
+    rooted.diagnostics().is_empty(),
+    "{:#?}",
+    rooted.diagnostics()
+  );
+  assert_eq!(answers(analysis.model()), answers(rooted.model()));
+}
+
 #[test]
 fn the_root_extending_a_dependencys_type_is_an_orphan() {
   // A dependency's type, and a dependency's directive.
@@ -482,7 +1429,7 @@ fn the_root_extending_a_dependencys_type_is_an_orphan() {
       "package `app` extends the directive `@tag`, which package `geo` defines",
     ]
   );
-  for diagnostic in analysis.diagnostics() {
+  for diagnostic in reported(&analysis) {
     assert_eq!(diagnostic.code(), DiagnosticKind::OrphanExtension.code());
     assert_eq!(diagnostic.primary_label(), Some("orphan extension"));
     assert_eq!(diagnostic.labels(), 1);
@@ -568,11 +1515,7 @@ fn a_package_extends_its_own_types_from_any_module() {
     ],
   );
   let analysis = analyze(&root, &[geo], &Limits::new());
-  assert!(
-    analysis.diagnostics().is_empty(),
-    "{:#?}",
-    analysis.diagnostics()
-  );
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   assert_eq!(
     contributions(model, def(model, "^::app::Shape")),
@@ -594,11 +1537,7 @@ fn the_root_adds_directives_to_a_built_in() {
               scalar Float\nextend scalar Float @x\n\
               extend scalar NonZero @x\nextend directive @deprecated @x\n";
   let analysis = analyze_one(text);
-  assert!(
-    analysis.diagnostics().is_empty(),
-    "{:#?}",
-    analysis.diagnostics()
-  );
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   // Each is a contribution of a built-in definition, which the rule read and let be.
   let model = analysis.model();
   let builtins = model.builtins();
@@ -627,7 +1566,8 @@ fn the_root_adds_directives_to_a_built_in() {
 fn the_root_adding_more_than_directives_to_a_built_in_is_an_orphan() {
   // An enum value to `Tier`, a field to `__Type`, and an `implements` entry to a scalar: to
   // `alloc`'s `string`; to `i32`, which has no position for a label to point at; and to `f64`,
-  // which the root package's own `Float` replaces.
+  // which the root package's own `Float` replaces. GraphQL refuses the field on `__Type` itself,
+  // and that refusal keeps GraphQL's code, message, label and help, at the same place.
   let text = "interface Marked @marker\n\
               extend enum Tier {\n  EXTRA\n}\n\
               extend type __Type {\n  extra: Int\n}\n\
@@ -643,7 +1583,7 @@ fn the_root_adding_more_than_directives_to_a_built_in_is_an_orphan() {
     [
       (ORPHAN, at(schema, text, "Tier", 0), named("^::core::Tier")),
       (
-        ORPHAN,
+        INTROSPECTION,
         at(schema, text, "__Type", 0),
         named("^::core::__Type")
       ),
@@ -675,7 +1615,7 @@ fn the_root_adding_more_than_directives_to_a_built_in_is_an_orphan() {
     messages(&analysis),
     [
       more("Tier", "core"),
-      more("__Type", "core"),
+      "this extension adds more than directives to the introspection type `__Type`".to_owned(),
       more("string", "alloc"),
       more("i32", "core"),
       more("f64", "core"),
@@ -687,15 +1627,160 @@ fn the_root_adding_more_than_directives_to_a_built_in_is_an_orphan() {
     helps(&analysis),
     [
       Some(MORE_THAN_DIRECTIVES),
-      Some(MORE_THAN_DIRECTIVES),
+      Some(INTROSPECTION_HELP),
       Some(MORE_THAN_DIRECTIVES),
       Some(MORE_THAN_DIRECTIVES),
       Some(MORE_THAN_DIRECTIVES_TO_ITS_OWN),
     ]
   );
-  for diagnostic in analysis.diagnostics() {
+  for diagnostic in reported(&analysis) {
+    // GraphQL's own refusal has GraphQL's label.
+    if diagnostic.code() == Code::new(INTROSPECTION) {
+      assert_eq!(diagnostic.primary_label(), Some(INTROSPECTION_LABEL));
+      continue;
+    }
     assert_eq!(diagnostic.primary_label(), Some("orphan extension"));
   }
+}
+
+#[test]
+fn the_roots_extension_of_a_meta_type_keeps_graphqls_code() {
+  // A field on `__Type`, an enum value on `__TypeKind` and an `implements` entry on `__Schema`:
+  // each is GraphQL's own refusal, at the extension's target, labelled at the meta-type's name.
+  // `__Schema` has the one field `Face` declares, so the entry would be no other mistake.
+  let text = "type Query {\n  ok: Int\n}\ninterface Face {\n  description: String\n}\n\
+              extend type __Type {\n  extra: Int\n}\n\
+              extend enum __TypeKind {\n  EXTRA\n}\n\
+              extend type __Schema implements Face\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let model = analysis.model();
+  let named = |name: &str| -> Option<Location> { Some(model.def(def(model, name)).location()) };
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        INTROSPECTION,
+        at(schema, text, "__Type", 0),
+        named("^::core::__Type")
+      ),
+      (
+        INTROSPECTION,
+        at(schema, text, "__TypeKind", 0),
+        named("^::core::__TypeKind")
+      ),
+      (
+        INTROSPECTION,
+        at(schema, text, "__Schema", 0),
+        named("^::core::__Schema")
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    messages(&analysis),
+    [
+      "this extension adds more than directives to the introspection type `__Type`",
+      "this extension adds more than directives to the introspection type `__TypeKind`",
+      "this extension adds more than directives to the introspection type `__Schema`",
+    ]
+  );
+  assert_eq!(helps(&analysis), [Some(INTROSPECTION_HELP); 3]);
+  for diagnostic in analysis.diagnostics() {
+    assert_eq!(diagnostic.primary_label(), Some(INTROSPECTION_LABEL));
+    assert_eq!(
+      diagnostic.label(0).map(|label| label.text()),
+      Some("the definition it extends")
+    );
+  }
+
+  // A directive alone is no refusal of either kind.
+  let analysis =
+    analyze_one("type Query {\n  ok: Int\n}\ndirective @x on OBJECT\nextend type __Type @x\n");
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // The same three written by a dependency are the orphan rule's, whatever they add.
+  let ours = "type Query {\n  ok: Int\n}\n";
+  let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
+  let theirs = "interface Face {\n  description: String\n}\n\
+                extend type __Type {\n  extra: Int\n}\n\
+                extend enum __TypeKind {\n  EXTRA\n}\n\
+                extend type __Schema implements Face\n";
+  let dep = package("dep", Layout::Flat, &[("dep.graphqlx", theirs)]);
+  let analysis = analyze(&root, &[dep], &Limits::new());
+  let dep_file = file(&analysis, 4, "dep.graphqlx");
+  let model = analysis.model();
+  let named = |name: &str| -> Option<Location> { Some(model.def(def(model, name)).location()) };
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        ORPHAN,
+        at(dep_file, theirs, "__Type", 0),
+        named("^::core::__Type")
+      ),
+      (
+        ORPHAN,
+        at(dep_file, theirs, "__TypeKind", 0),
+        named("^::core::__TypeKind")
+      ),
+      (
+        ORPHAN,
+        at(dep_file, theirs, "__Schema", 0),
+        named("^::core::__Schema")
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // A built-in that is no meta-type is the orphan rule's, from the root package too.
+  let text = "type Query {\n  ok: Int\n}\nextend enum Tier {\n  EXTRA\n}\n";
+  let analysis = analyze_one(text);
+  let schema = schema_file(&analysis);
+  let model = analysis.model();
+  assert_eq!(
+    found(&analysis),
+    [(
+      ORPHAN,
+      at(schema, text, "Tier", 0),
+      Some(model.def(def(model, "^::core::Tier")).location())
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // A dependency's own type named as GraphQL names its introspection types is no meta-type: the
+  // name is reserved where it is defined, and the root package's extension of it is an orphan.
+  let ours = "type Query {\n  ok: Int\n}\nextend type ^::dep::__Mine {\n  b: Int\n}\n";
+  let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
+  let theirs = "type __Mine {\n  a: Int\n}\n";
+  let dep = package("dep", Layout::Flat, &[("dep.graphqlx", theirs)]);
+  let analysis = analyze(&root, &[dep], &Limits::new());
+  let schema = schema_file(&analysis);
+  let dep_file = file(&analysis, 4, "dep.graphqlx");
+  assert_eq!(
+    found(&analysis),
+    [
+      (
+        ORPHAN,
+        at(schema, ours, "^::dep::__Mine", 0),
+        Some(at(dep_file, theirs, "__Mine", 0))
+      ),
+      (
+        "smear::schema::reserved-type-name",
+        at(dep_file, theirs, "__Mine", 0),
+        None
+      ),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
 }
 
 #[test]
@@ -759,7 +1844,9 @@ fn meaning(directive: &str, what: &str, built_in: &str) -> String {
 fn the_root_giving_a_built_in_a_built_in_meaning_is_an_orphan() {
   // `@set` on `core`'s `NonZero`, `@marker` on `core`'s `MapKey` and `@set` on `std`'s `HashMap`:
   // each refused where the directive is written, with a label at the definition, and none
-  // changes what the definition is.
+  // changes what the definition is. `core`'s own `MapKey` applies `@marker` already, and a
+  // definition and its extensions are one location, so GraphQL's own rule refuses the second
+  // `@marker` beside the orphan rule, labelled at `core`'s.
   let text =
     "extend scalar NonZero @set\nextend interface MapKey @marker\nextend scalar HashMap @set\n";
   let analysis = analyze_one(text);
@@ -768,6 +1855,14 @@ fn the_root_giving_a_built_in_a_built_in_meaning_is_an_orphan() {
   let builtins = model.builtins();
   let hash_map = def(model, "^::std::HashMap");
   let named = |id: DefId| -> Option<Location> { Some(model.def(id).location()) };
+  // Where the first application a definition holds, its own definition's, names its directive.
+  let first_applied = |id: DefId| -> Option<Location> {
+    model
+      .def(id)
+      .applications()
+      .first()
+      .map(|application: &ApplicationId| model.application(*application).path_location())
+  };
   assert_eq!(
     found(&analysis),
     [
@@ -781,6 +1876,11 @@ fn the_root_giving_a_built_in_a_built_in_meaning_is_an_orphan() {
         at(schema, text, "marker", 0),
         named(builtins.map_key())
       ),
+      (
+        DUPLICATE_DIRECTIVE_USE,
+        at(schema, text, "marker", 0),
+        first_applied(builtins.map_key())
+      ),
       (ORPHAN, at(schema, text, "set", 1), named(hash_map)),
     ],
     "{:#?}",
@@ -791,14 +1891,34 @@ fn the_root_giving_a_built_in_a_built_in_meaning_is_an_orphan() {
     [
       meaning("set", "type `NonZero`", "core"),
       meaning("marker", "type `MapKey`", "core"),
+      String::from(
+        "the directive `@marker` is applied to the type `MapKey` again, and it is not repeatable"
+      ),
       meaning("set", "type `HashMap`", "std"),
     ]
   );
   assert_eq!(
     helps(&analysis),
-    [Some(MEANING), Some(MEANING), Some(MEANING)]
+    [
+      Some(MEANING),
+      Some(MEANING),
+      Some(DUPLICATE_DIRECTIVE_USE_HELP),
+      Some(MEANING)
+    ]
   );
-  for diagnostic in analysis.diagnostics() {
+  for diagnostic in reported(&analysis) {
+    // GraphQL's own refusal has GraphQL's labels.
+    if diagnostic.code() == Code::new(DUPLICATE_DIRECTIVE_USE) {
+      assert_eq!(
+        diagnostic.primary_label(),
+        Some("directive is not repeatable")
+      );
+      assert_eq!(
+        diagnostic.label(0).map(|label| label.text()),
+        Some("first applied here")
+      );
+      continue;
+    }
     assert_eq!(diagnostic.primary_label(), Some("orphan extension"));
     assert_eq!(
       diagnostic.label(0).map(|label| label.text()),
@@ -844,48 +1964,76 @@ fn the_root_giving_a_built_in_a_built_in_meaning_is_an_orphan() {
     [Some(MORE_THAN_DIRECTIVES), Some(MEANING)]
   );
 
-  // `@set` on a directive could give it no meaning, and is refused all the same, once: what a
-  // built-in is cannot be changed by an extension, whatever the extension applies.
+  // `@set` on a directive could give it no meaning, and the orphan rule refuses it all the same,
+  // once: what a built-in is cannot be changed by an extension, whatever the extension applies.
+  // `@set` stands on a scalar alone, so the rule on directive locations refuses it too, at the same
+  // path.
   let text = "extend directive @deprecated @set\n";
   let analysis = analyze_one(text);
   let schema = schema_file(&analysis);
   let model = analysis.model();
   assert_eq!(
     found(&analysis),
-    [(
-      ORPHAN,
-      at(schema, text, "set", 0),
-      Some(model.def(model.builtins().deprecated()).location())
-    )],
+    [
+      (
+        ORPHAN,
+        at(schema, text, "set", 0),
+        Some(model.def(model.builtins().deprecated()).location())
+      ),
+      (
+        UNSUPPORTED_DIRECTIVE_LOCATION,
+        at(schema, text, "set", 0),
+        Some(model.def(model.builtins().set()).location())
+      ),
+    ],
     "{:#?}",
     analysis.diagnostics()
   );
   assert_eq!(
     messages(&analysis),
-    [meaning("set", "directive `@deprecated`", "core")]
+    [
+      meaning("set", "directive `@deprecated`", "core"),
+      String::from(
+        "the directive `@set` is applied to a directive definition, and its definition does not \
+         list `DIRECTIVE_DEFINITION`"
+      ),
+    ]
   );
-  assert_eq!(helps(&analysis), [Some(MEANING)]);
+  assert_eq!(helps(&analysis), [Some(MEANING), Some(LOCATION_HELP)]);
 
-  // Nor could `@marker` give a scalar one: refused once too.
+  // Nor could `@marker` give a scalar one: the orphan rule refuses it once too, and the rule on
+  // directive locations beside it, as `@marker` stands on an interface alone.
   let text = "extend scalar NonZero @marker\n";
   let analysis = analyze_one(text);
   let schema = schema_file(&analysis);
   let model = analysis.model();
   assert_eq!(
     found(&analysis),
-    [(
-      ORPHAN,
-      at(schema, text, "marker", 0),
-      Some(model.def(model.builtins().non_zero()).location())
-    )],
+    [
+      (
+        ORPHAN,
+        at(schema, text, "marker", 0),
+        Some(model.def(model.builtins().non_zero()).location())
+      ),
+      (
+        UNSUPPORTED_DIRECTIVE_LOCATION,
+        at(schema, text, "marker", 0),
+        Some(model.def(model.builtins().marker()).location())
+      ),
+    ],
     "{:#?}",
     analysis.diagnostics()
   );
   assert_eq!(
     messages(&analysis),
-    [meaning("marker", "type `NonZero`", "core")]
+    [
+      meaning("marker", "type `NonZero`", "core"),
+      String::from(
+        "the directive `@marker` is applied to a scalar, and its definition does not list `SCALAR`"
+      ),
+    ]
   );
-  assert_eq!(helps(&analysis), [Some(MEANING)]);
+  assert_eq!(helps(&analysis), [Some(MEANING), Some(LOCATION_HELP)]);
   assert!(!model.def(model.builtins().non_zero()).is_marker());
 
   // `core`'s `@set` under a name a `use` item gives it is still `core`'s `@set`: the directive is
@@ -906,20 +2054,41 @@ fn the_root_giving_a_built_in_a_built_in_meaning_is_an_orphan() {
   );
 
   // `@map`; `@set` on a primitive `core` materialises, which has no position for a label to point
-  // at; and two of the three in one extension, each reported where it is written.
+  // at; and two of the three in one extension, each reported where it is written. `BTreeMap`
+  // applies `@map`, and `HashSet` `@set`, in their own definitions, so each extension's is a
+  // second application to one location too, labelled at the library's.
   let text =
     "extend scalar BTreeMap @map\nextend scalar Int @set\nextend scalar HashSet @set @map\n";
   let analysis = analyze_one(text);
   let schema = schema_file(&analysis);
   let model = analysis.model();
-  let btree_map = Some(model.def(def(model, "^::alloc::BTreeMap")).location());
-  let hash_set = Some(model.def(def(model, "^::std::HashSet")).location());
+  let btree_map_def = def(model, "^::alloc::BTreeMap");
+  let hash_set_def = def(model, "^::std::HashSet");
+  let btree_map = Some(model.def(btree_map_def).location());
+  let hash_set = Some(model.def(hash_set_def).location());
+  let first_applied = |id: DefId| -> Option<Location> {
+    model
+      .def(id)
+      .applications()
+      .first()
+      .map(|application: &ApplicationId| model.application(*application).path_location())
+  };
   assert_eq!(
     found(&analysis),
     [
       (ORPHAN, at(schema, text, "map", 0), btree_map),
+      (
+        DUPLICATE_DIRECTIVE_USE,
+        at(schema, text, "map", 0),
+        first_applied(btree_map_def)
+      ),
       (ORPHAN, at(schema, text, "set", 0), None),
       (ORPHAN, at(schema, text, "set", 1), hash_set),
+      (
+        DUPLICATE_DIRECTIVE_USE,
+        at(schema, text, "set", 1),
+        first_applied(hash_set_def)
+      ),
       (ORPHAN, at(schema, text, "map", 1), hash_set),
     ],
     "{:#?}",
@@ -929,8 +2098,14 @@ fn the_root_giving_a_built_in_a_built_in_meaning_is_an_orphan() {
     messages(&analysis),
     [
       meaning("map", "type `BTreeMap`", "alloc"),
+      String::from(
+        "the directive `@map` is applied to the type `BTreeMap` again, and it is not repeatable"
+      ),
       meaning("set", "type `i32`", "core"),
       meaning("set", "type `HashSet`", "std"),
+      String::from(
+        "the directive `@set` is applied to the type `HashSet` again, and it is not repeatable"
+      ),
       meaning("map", "type `HashSet`", "std"),
     ]
   );
@@ -951,11 +2126,7 @@ fn what_gives_a_built_in_no_meaning_is_no_orphan_and_a_dependencys_extension_is_
   let text = "directive @set on SCALAR\nextend scalar NonZero @set\ndirective @x on SCALAR\n\
               extend scalar String @x\n";
   let analysis = analyze_one(text);
-  assert!(
-    analysis.diagnostics().is_empty(),
-    "{:#?}",
-    analysis.diagnostics()
-  );
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   assert_eq!(model.def(model.builtins().non_zero()).collection(), None);
 
@@ -1016,15 +2187,19 @@ fn what_gives_a_built_in_no_meaning_is_no_orphan_and_a_dependencys_extension_is_
 /// it, is no orphan, and nor is a directive it adds to a built-in. A `Flat` root package that adds
 /// more than directives to a built-in does meet the rule, as
 /// `the_root_adding_more_than_directives_to_a_built_in_is_an_orphan` shows.
+///
+/// `String` takes a directive of its own, and not `@d`: `@deprecated` takes a `String`, so `@d`
+/// applying `@deprecated` while `String` applied `@d` would put both on a cycle, which is the
+/// self-reference rule's.
 #[test]
 fn a_flat_package_extending_its_own_definitions_never_meets_the_orphan_rule() {
   let a = "type Query {\n  ok: Int\n}\ninterface Node {\n  id: ID\n}\nenum Color {\n  RED\n}\n\
            input Filter {\n  f: Int\n}\nunion Either = Query\nscalar Date\n\
-           directive @d on SCALAR | DIRECTIVE_DEFINITION\n";
+           directive @d on SCALAR | DIRECTIVE_DEFINITION\ndirective @s on SCALAR\n";
   let b = "extend type Query implements Node {\n  id: ID\n}\n\
            extend interface Node {\n  name: String\n}\nextend enum Color {\n  GREEN\n}\n\
            extend input Filter {\n  g: Int\n}\nextend union Either = Other\n\
-           extend scalar Date @d\nextend directive @d @deprecated\nextend scalar String @d\n\
+           extend scalar Date @d\nextend directive @d @deprecated\nextend scalar String @s\n\
            type Other {\n  ok: Int\n}\n";
   for files in [
     [("a.graphqlx", a), ("b.graphqlx", b)],
@@ -1255,6 +2430,7 @@ const FIXTURES: &[(Code, Fixture)] = &[
   (Code::new(DUPLICATE), two_schema_definitions),
   (Code::new(OUTSIDE), a_dependencys_schema_definition),
   (Code::new(ORPHAN), an_extension_of_a_dependencys_type),
+  (Code::new(INTROSPECTION), a_field_added_to_a_meta_type),
   (Code::new(GENERIC_ENUM), a_generic_enum),
   (Code::new(MARKER_MISUSE), a_marker_as_a_fields_type),
   (Code::new(COLLECTION_ARITY), a_set_of_two_type_parameters),
@@ -1264,6 +2440,110 @@ const FIXTURES: &[(Code, Fixture)] = &[
     Code::new(DUPLICATE_TYPE_PARAMETER),
     two_type_parameters_of_one_name,
   ),
+  (Code::new(RESERVED_FIELD_NAME), a_reserved_field_name),
+  (Code::new(RESERVED_ARGUMENT_NAME), a_reserved_argument_name),
+  (
+    Code::new(RESERVED_ENUM_VALUE_NAME),
+    a_reserved_enum_value_name,
+  ),
+  (
+    Code::new(RESERVED_INPUT_FIELD_NAME),
+    a_reserved_input_field_name,
+  ),
+  (
+    Code::new(RESERVED_DIRECTIVE_ARGUMENT_NAME),
+    a_reserved_directive_argument_name,
+  ),
+  (Code::new(DUPLICATE_FIELD_NAME), a_duplicate_field),
+  (Code::new(DUPLICATE_ARGUMENT_NAME), a_duplicate_argument),
+  (Code::new(DUPLICATE_ENUM_VALUE), a_duplicate_enum_value),
+  (
+    Code::new(DUPLICATE_INPUT_FIELD_NAME),
+    a_duplicate_input_field,
+  ),
+  (
+    Code::new(DUPLICATE_DIRECTIVE_ARGUMENT_NAME),
+    a_duplicate_directive_argument,
+  ),
+  (Code::new(EMPTY_FIELDS_DEFINITION), an_empty_type),
+  (Code::new(EMPTY_UNION_MEMBERS), an_empty_union),
+  (Code::new(EMPTY_ENUM_VALUES), an_empty_enum),
+  (Code::new(EMPTY_INPUT_FIELDS), an_empty_input_object),
+  (
+    Code::new(FIELD_TYPE_NOT_OUTPUT_TYPE),
+    a_field_typed_by_an_input,
+  ),
+  (
+    Code::new(ARGUMENT_TYPE_NOT_INPUT_TYPE),
+    an_argument_typed_by_an_object,
+  ),
+  (
+    Code::new(INPUT_FIELD_TYPE_NOT_INPUT_TYPE),
+    an_input_field_typed_by_an_object,
+  ),
+  (
+    Code::new(DIRECTIVE_ARGUMENT_TYPE_NOT_INPUT_TYPE),
+    a_directives_argument_typed_by_an_object,
+  ),
+  (
+    Code::new(IMPLEMENTS_NON_INTERFACE),
+    an_object_implementing_an_object,
+  ),
+  (
+    Code::new(SELF_IMPLEMENTING_INTERFACE),
+    an_interface_implementing_itself,
+  ),
+  (Code::new(UNION_MEMBER_NOT_OBJECT), a_union_of_an_interface),
+  (
+    Code::new(DEPRECATED_REQUIRED_ARGUMENT),
+    a_deprecated_required_argument,
+  ),
+  (
+    Code::new(DEPRECATED_REQUIRED_INPUT_FIELD),
+    a_deprecated_required_input_field,
+  ),
+  (
+    Code::new(ONE_OF_FIELD_NOT_NULLABLE),
+    a_one_of_field_that_is_non_null,
+  ),
+  (
+    Code::new(ONE_OF_FIELD_HAS_DEFAULT),
+    a_one_of_field_with_a_default,
+  ),
+  (
+    Code::new(ONE_OF_ON_INPUT_OBJECT_EXTENSION),
+    a_one_of_that_an_extension_provides,
+  ),
+  (
+    Code::new(UNSUPPORTED_DIRECTIVE_LOCATION),
+    a_directive_where_its_definition_does_not_list,
+  ),
+  (
+    Code::new(DUPLICATE_DIRECTIVE_USE),
+    a_directive_that_is_not_repeatable_applied_twice,
+  ),
+  (
+    Code::new(DUPLICATE_DIRECTIVE_ARGUMENT_USE),
+    an_application_that_passes_an_argument_twice,
+  ),
+  (
+    Code::new(SELF_REFERENTIAL_DIRECTIVE),
+    a_directive_that_refers_to_itself,
+  ),
+  (
+    Code::new(SPECIFIED_BY_ON_BUILT_IN_SCALAR),
+    a_built_in_scalar_specified_by_a_url,
+  ),
+  (
+    Code::new(ROOT_OPERATION_TYPE_NOT_OBJECT),
+    a_root_that_is_no_object,
+  ),
+  (Code::new(SHARED_ROOT_OPERATION_TYPE), two_roots_of_one_type),
+  (
+    Code::new(SCHEMA_EXTENSION_WITHOUT_SCHEMA),
+    a_schema_extension_with_no_schema,
+  ),
+  (Code::new(NO_QUERY_ROOT), a_schema_with_no_query_root),
 ];
 
 /// A root package that defines its schema twice.
@@ -1311,6 +2591,11 @@ fn an_extension_of_a_dependencys_type() -> Analysis {
   analyze(&root, &[geo], &Limits::new())
 }
 
+/// A root package that adds a field to `__Type`: `smear-schema`'s fixture for the kind.
+fn a_field_added_to_a_meta_type() -> Analysis {
+  analyze_one("type Query { ok: Int } extend type __Type { extra: Int }")
+}
+
 /// A root package that declares an enum with a type parameter.
 fn a_generic_enum() -> Analysis {
   analyze_one("enum Choice<T> {\n  YES\n  NO\n}\ntype Query {\n  choice: Choice<Int>\n}\n")
@@ -1339,6 +2624,187 @@ fn a_non_zero_float() -> Analysis {
 /// A root package that declares two type parameters of one name.
 fn two_type_parameters_of_one_name() -> Analysis {
   analyze_one("scalar Pair<T, T>\n")
+}
+
+// GraphQL's own refusals, each `smear-schema`'s fixture for its kind, copied as text.
+
+/// A field whose name begins with `__`.
+fn a_reserved_field_name() -> Analysis {
+  analyze_one("type Query { ok: Int __mine: Int }")
+}
+
+/// A field's argument whose name begins with `__`.
+fn a_reserved_argument_name() -> Analysis {
+  analyze_one("type Query { ok(__a: Int): Int }")
+}
+
+/// An enum value whose name begins with `__`.
+fn a_reserved_enum_value_name() -> Analysis {
+  analyze_one("type Query { ok: Int } enum E { __A }")
+}
+
+/// An input field whose name begins with `__`.
+fn a_reserved_input_field_name() -> Analysis {
+  analyze_one("type Query { ok: Int } input In { __a: Int }")
+}
+
+/// A directive's argument whose name begins with `__`.
+fn a_reserved_directive_argument_name() -> Analysis {
+  analyze_one("type Query { ok: Int } directive @d(__a: Int) on FIELD")
+}
+
+/// A field declared twice.
+fn a_duplicate_field() -> Analysis {
+  analyze_one("type Query { ok: Int dup: Int dup: String }")
+}
+
+/// A field's argument declared twice.
+fn a_duplicate_argument() -> Analysis {
+  analyze_one("type Query { ok(a: Int, a: String): Int }")
+}
+
+/// An enum value declared twice.
+fn a_duplicate_enum_value() -> Analysis {
+  analyze_one("type Query { ok: Int } enum E { A A }")
+}
+
+/// An input field declared twice.
+fn a_duplicate_input_field() -> Analysis {
+  analyze_one("type Query { ok: Int } input In { a: Int a: String }")
+}
+
+/// A directive's argument declared twice.
+fn a_duplicate_directive_argument() -> Analysis {
+  analyze_one("type Query { ok: Int } directive @d(a: Int, a: String) on FIELD")
+}
+
+/// An object type with no field.
+fn an_empty_type() -> Analysis {
+  analyze_one("type Query { ok: Int } type Empty")
+}
+
+/// A union with no member.
+fn an_empty_union() -> Analysis {
+  analyze_one("type Query { ok: Int } union U")
+}
+
+/// An enum with no value.
+fn an_empty_enum() -> Analysis {
+  analyze_one("type Query { ok: Int } enum E")
+}
+
+/// An input object with no field.
+fn an_empty_input_object() -> Analysis {
+  analyze_one("type Query { ok: Int } input In")
+}
+
+/// A field typed by an input object.
+fn a_field_typed_by_an_input() -> Analysis {
+  analyze_one("type Query { ok: In } input In { a: Int }")
+}
+
+/// A field's argument typed by an object.
+fn an_argument_typed_by_an_object() -> Analysis {
+  analyze_one("type Query { ok(a: Query): Int }")
+}
+
+/// An input field typed by an object.
+fn an_input_field_typed_by_an_object() -> Analysis {
+  analyze_one("type Query { ok: Int } input In { a: Query }")
+}
+
+/// A directive's argument typed by an object.
+fn a_directives_argument_typed_by_an_object() -> Analysis {
+  analyze_one("type Query { ok: Int } directive @d(a: Query) on FIELD")
+}
+
+/// An object that implements an object.
+fn an_object_implementing_an_object() -> Analysis {
+  analyze_one("type Query { ok: Int } type Thing { a: Int } type Other implements Thing { a: Int }")
+}
+
+/// An interface that implements itself.
+fn an_interface_implementing_itself() -> Analysis {
+  analyze_one("type Query { ok: Int } interface I implements I { a: Int }")
+}
+
+/// A union whose member is an interface.
+fn a_union_of_an_interface() -> Analysis {
+  analyze_one("type Query { ok: Int } interface I { a: Int } union U = I")
+}
+
+/// A required argument that is deprecated.
+fn a_deprecated_required_argument() -> Analysis {
+  analyze_one("type Query { ok(a: Int! @deprecated): Int }")
+}
+
+/// A required input field that is deprecated.
+fn a_deprecated_required_input_field() -> Analysis {
+  analyze_one("type Query { ok: Int } input In { a: Int! @deprecated }")
+}
+
+/// A OneOf input object's field that is non-null.
+fn a_one_of_field_that_is_non_null() -> Analysis {
+  analyze_one("type Query { ok: Int } input In @oneOf { a: Int! }")
+}
+
+/// A OneOf input object's field that declares a default.
+fn a_one_of_field_with_a_default() -> Analysis {
+  analyze_one("type Query { ok: Int } input In @oneOf { a: Int = 1 }")
+}
+
+/// An extension that applies `@oneOf` to an input object.
+fn a_one_of_that_an_extension_provides() -> Analysis {
+  analyze_one("type Query { ok: Int } input In { a: Int } extend input In @oneOf")
+}
+
+/// A directive applied where its definition does not list.
+fn a_directive_where_its_definition_does_not_list() -> Analysis {
+  analyze_one("directive @onEnum on ENUM\n     type Query @onEnum { ok: Int }")
+}
+
+/// A directive that is not repeatable applied twice to one type.
+fn a_directive_that_is_not_repeatable_applied_twice() -> Analysis {
+  analyze_one("directive @onObject on OBJECT\n     type Query @onObject @onObject { ok: Int }")
+}
+
+/// A root operation type that is an interface.
+fn a_root_that_is_no_object() -> Analysis {
+  analyze_one("interface Root { ok: Int } schema { query: Root }")
+}
+
+/// A schema extension with no schema to extend.
+fn a_schema_extension_with_no_schema() -> Analysis {
+  analyze_one("type Q { ok: Int } extend schema { query: Q }")
+}
+
+/// Two root operations of one type.
+fn two_roots_of_one_type() -> Analysis {
+  analyze_one("type Query { ok: Int } schema { query: Query mutation: Query }")
+}
+
+/// A schema with no query root.
+fn a_schema_with_no_query_root() -> Analysis {
+  analyze_one("type NotTheRoot { ok: Int }")
+}
+
+/// A directive that refers to itself, through the input object its argument takes.
+fn a_directive_that_refers_to_itself() -> Analysis {
+  analyze_one(
+    "type Query { ok: Int }\n     directive @d(a: In) on INPUT_FIELD_DEFINITION\n     input In { x: Int @d }",
+  )
+}
+
+/// `@specifiedBy` on `Int`, which the root package spells out.
+fn a_built_in_scalar_specified_by_a_url() -> Analysis {
+  analyze_one("type Query { ok: Int } scalar Int @specifiedBy(url: \"https://example.invalid\")")
+}
+
+/// An application that passes an argument twice.
+fn an_application_that_passes_an_argument_twice() -> Analysis {
+  analyze_one(
+    "directive @onObject(a: Int) on OBJECT\n     type Query @onObject(a: 1, a: 2) { ok: Int }",
+  )
 }
 
 /// Liveness: every code of every rule of the set `analyze` runs has a fixture and fires on it, and

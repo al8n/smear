@@ -212,7 +212,7 @@ fn every_first_record(src: &str) -> [(&'static str, Record); 4] {
 /// where no cap reaches it.
 #[test]
 fn a_literal_keeps_sixteen_errors_and_counts_the_rest() {
-  let sixteen = vec![SyntaxErrorKind::UnknownEscape; 16];
+  let sixteen = [SyntaxErrorKind::UnknownEscape; 16];
   for (src, omitted, unterminated) in [
     (format!("\"{}\"", "\\q".repeat(1000)), 984, false),
     (format!("\"{}\"", "\\q".repeat(1001)), 985, false),

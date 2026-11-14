@@ -14,6 +14,27 @@ use smear::{
   lexer::tokora::SimpleSpan,
 };
 
+/// GraphQL's code for a schema with no query root. The programs of this file are parts of a
+/// program and say nothing of the schema, so each reading below leaves this code out, as a
+/// consumer that analyzes a library waives it.
+const NO_QUERY_ROOT: &str = "smear::schema::missing-query-root-operation-type";
+
+/// The diagnostics of `analysis`, in the list's order, but for the missing query root.
+fn reported(analysis: &Analysis) -> Vec<&Diagnostic> {
+  analysis
+    .diagnostics()
+    .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() != NO_QUERY_ROOT)
+    .collect()
+}
+
+/// Whether `analysis` reports nothing but that its program has no query root.
+fn clean(analysis: &Analysis) -> bool {
+  let diagnostics = analysis.diagnostics();
+  let waived = diagnostics.len() - reported(analysis).len();
+  diagnostics.len() == waived && diagnostics.error_count() == waived
+}
+
 /// A package named `name` of `layout` at tier `Std`, holding `files`, `(path, text)`.
 fn package(
   name: &str,
@@ -55,11 +76,11 @@ fn at(source: SourceId, text: &str, needle: &str, nth: usize) -> Location {
   Location::new(source.get(), SimpleSpan::new(start, start + needle.len()))
 }
 
-/// Where each diagnostic points, every one of them `smear::schema::undefined-type`.
+/// Where each diagnostic points, every one of them `smear::schema::undefined-type`, but for the
+/// missing query root.
 fn undefined(analysis: &Analysis) -> Vec<Location> {
-  analysis
-    .diagnostics()
-    .iter()
+  reported(analysis)
+    .into_iter()
     .map(|diagnostic: &Diagnostic| {
       assert_eq!(
         diagnostic.code().as_str(),
@@ -94,12 +115,7 @@ fn names(model: &Model, module: ModuleId) -> Vec<&str> {
 fn the_built_in_library_analyzes_with_no_diagnostic() {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
   let analysis = analyze(&root, &[], &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
-  assert!(
-    analysis.diagnostics().is_empty(),
-    "{:#?}",
-    analysis.diagnostics()
-  );
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   let model = analysis.model();
   let texts = analysis.sources().bind(&root, &[]);
@@ -122,7 +138,10 @@ fn the_built_in_library_analyzes_with_no_diagnostic() {
 /// The three shapes the built-in library writes that no parser test holds exactly, each alone in a
 /// file of a root package, so that a failure names its shape: a bare generic scalar before a
 /// described definition; enum values spelled as GraphQL's directive locations and type kinds; and
-/// an interface with a directive and no fields before a described definition.
+/// an interface with a directive and no fields before a described definition. The interface
+/// applies `core`'s `@marker`, as the library's `MapKey` does, so it is the marker the library's
+/// is, which holds no field. The shape's own described directive is named otherwise, so that it
+/// does not take `@marker`'s name from `core`'s.
 #[test]
 fn each_shape_the_library_relies_on_parses_alone() {
   let shapes: [(&str, &str, &[&str]); 3] = [
@@ -144,8 +163,8 @@ fn each_shape_the_library_relies_on_parses_alone() {
     (
       "bodiless.graphqlx",
       "\"\"\"\nA marker.\n\"\"\"\ninterface MapKey @marker\n\n\"Tiers.\"\nenum Tier {\n  \
-       \"No allocator.\"\n  CORE\n}\n\n\"Marks.\"\ndirective @marker on INTERFACE\n",
-      &["MapKey", "Tier", "marker"],
+       \"No allocator.\"\n  CORE\n}\n\n\"Marks.\"\ndirective @mark on INTERFACE\n",
+      &["MapKey", "Tier", "mark"],
     ),
   ];
   for (path, text, declared) in shapes {
@@ -447,10 +466,22 @@ fn a_root_module_replaces_graphql_built_ins_and_they_keep_their_ids() {
   .with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", ELSEWHERE)]);
   let analysis = analyze(&root, &[geo], &Limits::new());
-  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  // The one diagnostic is GraphQL's own refusal of the `@specifiedBy` the root's `Int` applies: the
+  // replacement is the built-in, which takes none.
+  let found: Vec<(&str, Location)> = reported(&analysis)
+    .into_iter()
+    .map(|diagnostic: &Diagnostic| (diagnostic.code().as_str(), diagnostic.primary()))
+    .collect();
+  assert_eq!(
+    found,
+    [(
+      "smear::schema::specified-by-on-built-in-scalar",
+      at(schema, REPLACES, "specifiedBy", 0)
+    )]
+  );
   let model = analysis.model();
   let builtins = model.builtins();
-  let schema = file(&analysis, 3, "schema.graphqlx");
 
   // `Int` is `i32`'s, which is materialised although no type position writes it.
   let int = builtins
@@ -519,10 +550,9 @@ fn only_the_first_scalar_of_a_graphql_name_replaces_and_only_a_scalar() {
   let schema = file(&analysis, 3, "schema.graphqlx");
 
   // The second `Int` is a second declaration of the name, which binds the first, the replacement.
-  let diagnostics: Vec<(&str, Location, Option<Location>)> = analysis
-    .diagnostics()
-    .iter()
-    .map(|diagnostic| {
+  let diagnostics: Vec<(&str, Location, Option<Location>)> = reported(&analysis)
+    .into_iter()
+    .map(|diagnostic: &Diagnostic| {
       (
         diagnostic.code().as_str(),
         diagnostic.primary(),

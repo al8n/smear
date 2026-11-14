@@ -114,6 +114,7 @@ SchemaErrorKind::ImplementsNonInterface = smear::schema::implements-non-interfac
 SchemaErrorKind::InputFieldTypeNotInputType = smear::schema::input-field-type-not-input-type
 SchemaErrorKind::InputObjectDefaultValueCycle = smear::schema::input-object-default-value-cycle
 SchemaErrorKind::InterfaceFieldNotDeprecated = smear::schema::interface-field-not-deprecated
+SchemaErrorKind::IntrospectionTypeExtension = smear::schema::introspection-type-extension
 SchemaErrorKind::InvalidDefaultValue = smear::schema::invalid-default-value
 SchemaErrorKind::InvalidDirectiveArgumentValue = smear::schema::invalid-directive-argument-value
 SchemaErrorKind::InvalidInterfaceFieldArgumentType = smear::schema::invalid-interface-field-argument-type

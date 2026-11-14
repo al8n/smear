@@ -231,7 +231,9 @@ All notable changes to Smear are documented in this file.
   its id. `Builtins`' accessors answer a `DefId`. Two definitions of one name in one namespace of a
   module (`smear::schema::duplicate-type-name`, `duplicate-directive-definition`), a supplied name
   that begins with `__` (`reserved-type-name`, `reserved-directive-name`), and a type named as a
-  child module (`module-type-collision`) are reported. A file that holds only white space,
+  child module (`module-type-collision`) are reported; a type of the root package's root module
+  named as one of GraphQL's eight introspection types redefines it, as GraphQL says, and is
+  `redefined-built-in-type` and no reserved name. A file that holds only white space,
   commas, byte order marks and comments is accepted and declares nothing, before any parser
   layer reads it, so it has no entry in `Trees`; the lossless layer, handed such a text, answers a
   tree with one syntax error. `Limits::max_definitions` bounds every
@@ -364,9 +366,12 @@ All notable changes to Smear are documented in this file.
   package defines is the new `smear::graphqlx::orphan-extension`, at its target path, with a
   label at the definition's name; and so is an extension of a definition of `core`, `alloc` or
   `std`, a GraphQL built-in the root package replaces among them, unless the root package writes it
-  and it adds directives and nothing else; in the root package's extension of a built-in it did not
-  write, each application of `core`'s `@marker`, `@set` or `@map` is `orphan-extension` too, at its
-  path, since what a built-in is is the language's to say. And an enum takes no type parameter: an
+  and it adds directives and nothing else, though the root package's that adds more to one of
+  GraphQL's introspection types keeps GraphQL's own code,
+  `smear::schema::introspection-type-extension`; in the root package's extension of a built-in it
+  did not write, each application of `core`'s `@marker`, `@set` or `@map` is `orphan-extension`
+  too, at its path, since what a built-in is is the language's to say. And an enum takes no type
+  parameter: an
   enum that declares one is the new `smear::graphqlx::generic-enum`, at its first type parameter's
   name, and each use of it is still typed. And a marker is used as a marker: one that declares a
   field, once, at the first its own package wrote; one named anywhere but as the outermost type of
@@ -384,8 +389,67 @@ All notable changes to Smear are documented in this file.
   is written, which is then all a map or a set keyed by it is refused with. And a definition's type
   parameters have distinct names, and so do the names an extension's own list gives them: a type
   parameter with the name of an earlier one is the new `smear::graphqlx::duplicate-type-parameter`,
-  at its name, with a label at the first of that name. A rule says nothing about a contribution a
-  phase already refused something in. A new `test-support` feature, which `smear/test-support`
+  at its name, with a label at the first of that name. And what a definition a supplied package
+  wrote holds keeps GraphQL's own rules, with GraphQL's codes, a GraphQL built-in the root package
+  replaces among those definitions: a member whose name begins with `__` is
+  `smear::schema::reserved-field-name`, `reserved-argument-name`, `reserved-enum-value-name`,
+  `reserved-input-field-name` or `reserved-directive-argument-name`, by what it is; and a member
+  whose name an earlier member of its list has, a definition's own members and its extensions'
+  being one list and a field's arguments another, is `duplicate-field-name`,
+  `duplicate-argument-name`, `duplicate-enum-value`, `duplicate-input-field-name` or
+  `duplicate-directive-argument-name`, with a label at the first; and an object, or an interface
+  that is no marker, with no field, a union with no member, an enum with no value and an input
+  object with no field, its extensions' members counted, is `empty-fields-definition`,
+  `empty-union-members`, `empty-enum-values` or `empty-input-fields`; and a field whose type's
+  base, under its lists, is an input object, and an argument, an input field or a directive's
+  argument whose base is an object, an interface or a union, are `field-type-not-output-type`,
+  `argument-type-not-input-type`, `input-field-type-not-input-type` or
+  `directive-argument-type-not-input-type`, at the base; and an `implements` entry of an object or
+  an interface that names what is no interface, a type parameter among them, is
+  `implements-non-interface`; and an interface on a cycle of `implements` entries, of any length,
+  is `self-implementing-interface`; and a union member that names what is no object type is
+  `union-member-not-object`; and an argument or an input field written non-null, with no default,
+  that applies `core`'s `@deprecated`, told by its definition and not its spelling, is
+  `deprecated-required-argument` or `deprecated-required-input-field`; and an input object is OneOf
+  when the package that wrote it applies `core`'s `@oneOf` to it, in its definition or in an
+  extension of its own, and a field of one written non-null is `one-of-field-not-nullable`, and one
+  that declares a default `one-of-field-has-default`; and each `@oneOf` an extension of an input
+  object applies is `one-of-on-input-object-extension`. And every application a supplied package
+  writes keeps GraphQL's own rules on directives, with GraphQL's codes: one at a location its
+  directive's definition does not list, a built-in's own directive or a program's, is
+  `smear::schema::unsupported-directive-location`, at its path, with a label at the directive's
+  definition; and one of a directive that is not repeatable, applied again where it is applied, a
+  definition and its extensions being one location, `core`'s own definition among them, is
+  `duplicate-directive-use`, at its path, with a label at the first; and an argument an
+  application writes again, its directive declaring it, is `duplicate-directive-argument-use`, at
+  its name, with a label at the first; and a directive that refers to itself is
+  `self-referential-directive`, at its name, over one graph of the definitions, in which a
+  definition reaches the directives applied to it and, for a directive, to its arguments, or for
+  another definition to its input fields and enum values, and every definition a type in a
+  directive's arguments, an input field, those applications' type arguments or its own type
+  parameters' defaults names, a scalar that is no collection hiding its type arguments; a
+  directive of `core` that a program puts on such a cycle, as `scalar String @specifiedBy(…)` puts
+  `@specifiedBy`, is reported at its own name, in `core`'s source; and `core`'s `@specifiedBy`
+  on a scalar of the built-in library, by its definition or by an extension, is
+  `specified-by-on-built-in-scalar`, at its path: GraphQL's five, which the root package's own
+  `scalar Int` replaces and keeps, and every other scalar of the library, `u64`, `bytes` and
+  `HashMap` among them, which the language specifies itself. And the schema keeps GraphQL's own
+  rules on its roots, with GraphQL's codes: a written root operation type whose type names a
+  definition that is no object type, of any of the three operations, an alias such as
+  `NonZeroU32` among them, is `smear::schema::root-operation-type-not-object`, at the type; an
+  instantiation of a generic object type is one; and of the roots that are object types, presumed
+  or written, one that is one type with an earlier one, `Root<Int>` twice among them and
+  `Root<Int>` beside `Root<String>` not, is `smear::schema::shared-root-operation-type`, at a
+  written root's type, with a label at the other; and when the root package writes no schema
+  definition and no object type `Query` of its root module is presumed its query root, each schema
+  extension it writes is `smear::schema::schema-extension-without-schema`, at its `extend`; and a
+  schema with no query root, neither written nor presumed, is
+  `smear::schema::missing-query-root-operation-type`, so a root package with no query root is not
+  ok, as in GraphQL, and a consumer that analyzes a library as the root package filters that code.
+  A rule says nothing about a contribution a phase already refused something in, and a rule on the roots, which no contribution holds, nothing
+  while any of the schema's contributions does. On every GraphQL document of smear's corpora the analyzer
+  is held to `smear-schema`'s verdict, code for code, by a differential test that lists each
+  divergence it allows. A new `test-support` feature, which `smear/test-support`
   forwards, compiles a hidden door to the crate-private model builder, and to analyses of the models
   it builds, for `smear`'s own tests; it is not API.
 - `smear`!, `smear-lexer`! and `smear-parser`!: the five features
@@ -411,6 +475,13 @@ All notable changes to Smear are documented in this file.
   `LexerErrorData::Omitted` counting the rest, and consume the whole comment;
   the lossless error token covers the whole comment. `str` and `HipStr` sources
   are unchanged (#251).
+- `smear-schema`!: an extension of an introspection type adds directives and nothing else, which
+  is a verdict change of a published crate. A document that extends one of the eight
+  `__`-prefixed introspection types with a member, an `implements` entry, a union member or an
+  enum value built in 0.0.1, and is refused now as the new
+  `SchemaErrorKind::IntrospectionTypeExtension`, at the type the extension names, code
+  `smear::schema::introspection-type-extension`. The refused extension contributes nothing, its
+  directives included. An extension that adds directives alone still builds.
 - `smear-schema`: `SchemaErrorKind::UnreadableText` is no longer reachable from
   a parsed document. The kind is kept.
 - Builds on tokora 0.13.1 and smol-bytes 0.2. Paths through the

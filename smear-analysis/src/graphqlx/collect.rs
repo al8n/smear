@@ -34,9 +34,9 @@
 //! which only a parser newer than the walk can make, is reported once per file, at the first such
 //! item, in every build; a debug build also refuses it once the walk ends.
 //!
-//! The walk is written once, generic over the slice type of a parsed document, and called alike
-//! for a document of text and a document of bytes: nothing it does depends on which parser made a
-//! document.
+//! The walk is written generic over the slice type of a parsed document, and nothing it does
+//! depends on which parser made a document. Every document it is handed is one of text: a byte text
+//! that is not UTF-8 has none.
 
 use std::{
   collections::{BTreeMap, BTreeSet},
@@ -59,7 +59,7 @@ use super::{
   limits::Limits,
   model::{DefKind, Primitive},
   package::Layout,
-  parse::{Documents, Parsed},
+  parse::Documents,
   set::{FileView, PackageView, ROOT},
   source::SourceMap,
   tree::{Declared, Tree},
@@ -89,12 +89,11 @@ pub(crate) struct Collected<'d, 'a> {
   pub(crate) written: BTreeMap<(u8, u32), Primitive>,
 }
 
-/// One document's items, flattened, of the parser that made the document.
+/// One document's items, flattened. Every document is one of text: a byte text that is not UTF-8
+/// has none.
 pub(crate) enum Items<'d, 'a> {
   /// A document of text.
   Text(Vec<&'d TypeSystemItem<&'a str>>),
-  /// A document of bytes that are not UTF-8.
-  Bytes(Vec<&'d TypeSystemItem<&'a [u8]>>),
 }
 
 /// An item the walk kept: the module it is in, its source, and its index among that source's
@@ -215,14 +214,8 @@ pub(crate) fn items<'d, 'a: 'd>(
         break;
       }
       let slot = source.get() as usize;
-      match documents.get(source) {
-        Some(Parsed::Text(document)) => {
-          items[slot] = Some(Items::Text(walk.document(document, source, module)));
-        }
-        Some(Parsed::Bytes(document)) => {
-          items[slot] = Some(Items::Bytes(walk.document(document, source, module)));
-        }
-        None => {}
+      if let Some(document) = documents.get(source) {
+        items[slot] = Some(Items::Text(walk.document(document, source, module)));
       }
     }
   }

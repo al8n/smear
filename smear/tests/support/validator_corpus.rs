@@ -597,6 +597,11 @@ pub const SCHEMA_FIXTURES: &[(SchemaErrorKind, &str, &[SchemaErrorKind])] = &[
     &[SchemaErrorKind::RedefinedBuiltInType],
   ),
   (
+    SchemaErrorKind::IntrospectionTypeExtension,
+    "type Query { ok: Int } extend type __Type { extra: Int }",
+    &[SchemaErrorKind::IntrospectionTypeExtension],
+  ),
+  (
     SchemaErrorKind::ReservedTypeName,
     "type Query { ok: Int } type __Mine { a: Int }",
     &[SchemaErrorKind::ReservedTypeName],
