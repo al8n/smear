@@ -138,11 +138,12 @@
 //! alone, where it names a type, and chooses once for each language at a position and for each
 //! type and language on the schema: anything else is `smear::graphqlx::repr-misuse`. And a
 //! package uses nothing above the tier it declares: a list in a `core` package, another package's
-//! definition that needs more, another package's directive applied with type arguments left to
-//! defaults that need more, `@heap` in a `core` package and an extern's `tier` above its
+//! definition that needs more, `@heap` in a `core` package and an extern's `tier` above its
 //! package's are each `smear::graphqlx::tier`, where they are written, so that in an analysis
-//! that is ok every definition requires at most its package's tier. A rule says nothing about a
-//! contribution a phase already refused something in.
+//! that is ok every definition requires at most its package's tier. What a directive definition
+//! writes and an application's type arguments are compile-time metadata, and are not judged, an
+//! input object a directive's argument names being judged where it is written. A rule says
+//! nothing about a contribution a phase already refused something in.
 //!
 //! An error that a phase or one of those rules reports marks the contributions, members and
 //! definitions that hold where it points, whether the ceiling keeps the diagnostic or not, and

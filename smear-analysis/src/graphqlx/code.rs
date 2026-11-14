@@ -244,7 +244,9 @@ pub enum DiagnosticKind {
   /// with a label at a default that raised it; `core`'s `@heap` on a field, an argument or an input
   /// field in a `core` package, at its path; and an extern whose `tier` is above the tier of the
   /// package that declares its scalar, at that `tier`. A use of a definition of the package's own
-  /// is not reported: what raises that definition is, where the package wrote it.
+  /// is not reported: what raises that definition is, where the package wrote it. What a directive
+  /// definition writes and an application's type arguments are compile-time metadata, and are not
+  /// judged, an input object a directive's argument names being judged where it is written.
   Tier,
 
   // -- Resources ---------------------------------------------------------------------------------

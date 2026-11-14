@@ -5,8 +5,9 @@
 //!   replaces among them, keeps the tag its package gave it, and is never computed again.
 //! - A scalar a supplied package defines requires the greatest of its externs' tiers, and `core`
 //!   with none: a custom scalar, and a collection that declares no host type, need no allocator.
-//! - An enum and a directive a supplied package defines require `core`: a directive's arguments
-//!   count nowhere.
+//! - An enum and a directive a supplied package defines require `core`: a directive's arguments,
+//!   and its type parameters' defaults and bounds, count nowhere. The type an application's type
+//!   arguments make is a type of its directive, which no position has, and feeds no definition.
 //! - An object or an interface a supplied package defines requires the greatest of the tiers of the
 //!   types of its fields and of their arguments, an input object of its input fields' types, and a
 //!   union of its members' types; a position that applies `core`'s `@heap`, told by the definition

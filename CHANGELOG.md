@@ -530,13 +530,15 @@ All notable changes to Smear are documented in this file.
   new `smear::graphqlx::repr-misuse`. The model keeps `@repr` as its applications, with their
   typed arguments, read through `Builtins::repr`. And a package uses nothing above the tier it
   declares: below `std`, a list in a `core` package, an occurrence of another package's definition
-  that needs more, counting the defaults it leaves out and capped at that package's tier, an
-  application of another package's generic directive whose type arguments left to its defaults
-  need more, counted and capped likewise and reported at its path,
+  that needs more, counting the defaults it leaves out and capped at that package's tier,
   `core`'s `@heap` on a field, an argument or an input field of a `core` package, and an extern's
   `tier` above its package's are each the new `smear::graphqlx::tier`, where it is written; a use
-  of the package's own definition is not, what raises it being reported where it is written. A
-  rule says nothing about a contribution a
+  of the package's own definition is not, what raises it being reported where it is written.
+  Compile-time metadata counts nowhere and is not judged: what a directive definition writes, its
+  arguments' types and its type parameters' defaults and bounds, and the type arguments of an
+  application of any directive, written or filled from its directive's defaults, with every type
+  nested in them; an input object a directive's argument names is a definition like any other, and
+  its fields are judged where they are written. A rule says nothing about a contribution a
   phase already refused something in. A new `test-support` feature, which `smear/test-support`
   forwards, compiles a hidden door to the crate-private model builder, and to analyses of the models
   it builds, for `smear`'s own tests; it is not API.
