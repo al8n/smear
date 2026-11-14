@@ -202,7 +202,7 @@ All notable changes to Smear are documented in this file.
     fixed order that permuting the dependencies or a package's files does not change: packages,
     modules, definitions and their contributions, members, type occurrences and interned types,
     values, directive applications, the schema and the built-ins, with `canonical_name`, a
-    definition's name across versions, `lookup` and `module_by_path`. `Model::instantiations`
+    definition's name across analyses, `lookup` and `module_by_path`. `Model::instantiations`
     lists the closed instantiations the program writes, and `satisfies` and `satisfies_ty` answer
     what a type satisfies. `Application::ty` and `Application::ty_args` answer an application's
     type and complete type arguments, defaults filled; `Def::externs` a scalar's host types and
@@ -216,9 +216,10 @@ All notable changes to Smear are documented in this file.
     occurrence is typed, defaults filled, its count of type arguments and the bounds of every
     instantiation the program writes judged; every value is coerced to the type expected where
     it stands, defaults copied and a cycle of them refused, a generic definition's values at each
-    closed instantiation; each scalar is bound to its host types; each definition is checked
-    against the interfaces it implements, transitively and under type arguments, its entries and
-    members told apart as types; and every definition and type gets its tier.
+    closed instantiation a supplied package writes; each scalar is bound to its host types; each
+    definition is checked against the interfaces it implements, transitively and under type
+    arguments, its entries and members told apart as types; and every definition and type gets its
+    tier.
   - **The rules.** 33 rules, each a visitor on the public trait, judge what the supplied packages
     wrote once the phases have written the model: smear's own rules on GraphQLx, under eleven
     `smear::graphqlx` codes, and the type-system rules GraphQLx shares with GraphQL in this
@@ -229,18 +230,20 @@ All notable changes to Smear are documented in this file.
     `smear::graphqlx::unbounded-instantiation`, following each directive application through its
     complete type arguments.
   - **The verdict.** `Analysis::is_ok` is whether no error was reported, kept by the diagnostic
-    ceiling or not. On every GraphQL document of smear's corpora, each given as the one file of a
-    `Flat` package, it is the verdict `smear-schema` gives, but for three capacity ceilings of
-    `smear-schema`'s representation that GraphQLx does not have; a differential test holds that,
-    counting each of GraphQL's codes on both sides, and lists by document each count it lets
-    differ, every one on a document both refuse. A root package with no query root is not ok.
+    ceiling or not, and no syntax error was counted that a parser did not lend. On every GraphQL
+    document of smear's corpora, each given as the one file of a `Flat` package, it is the verdict
+    `smear-schema` gives, but for three capacity ceilings of `smear-schema`'s representation that
+    GraphQLx does not have; a differential test holds that, counting each of GraphQL's codes on
+    both sides, and beside the three ceilings lists by document each count it lets differ, every
+    one on a document both refuse. A root package with no query root is not ok.
   - **Codes.** `DiagnosticKind` lists the 39 codes of the analyzer's own family, `smear::graphqlx`,
     in `DiagnosticKind::ALL`, all errors but the warning `shadowed-primitive`; `graphqlx::schema`
     holds the 68 `smear::schema` codes it shares with GraphQL's own validator as public constants,
     in `schema::ALL`; and a file that does not parse keeps the parser's `smear::syntax` code.
     `Diagnostic::builder` is public, so a consumer's findings join smear's in one ordered list,
-    which keeps the least under a ceiling and counts every error. An error a phase or a rule
-    reports marks what holds where it points, as each `has_errors()` says.
+    which counts every error; an analysis's list and a walk's keep the least under a ceiling. An
+    error a phase or a rule reports, a syntax error aside, marks what holds where it points, as each
+    `has_errors()` says.
   - **A consumer's rules.** `Visitor` has a hook for each entity, each with an empty default body,
     and `visit` walks an analysis's model for one over the packages `Packages` selects, handing
     each hook a `Cx` that says where the walk is, an occurrence's `Site` included. Visitors compose

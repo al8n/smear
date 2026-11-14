@@ -22,20 +22,20 @@ a GraphQLx program against smear's own rules and the rules GraphQLx shares with 
 - **The diagnostics,** in one total order under a ceiling, each with a stable code, and the source
   map that pairs them with the caller's texts again for a renderer.
 - **The verdict,** `Analysis::is_ok`: whether any error was reported, whether the ceiling kept it
-  or not.
+  or not, or counted by a parser that did not lend it.
 
 ## What it checks
 
 | Step | What it does | Codes |
 |---|---|---|
 | The package set | Numbers the packages and their sources, and checks their names, file paths, dependencies and size | `smear::graphqlx`: 7 |
-| Parsing | Reads every file with the parser layer chosen | `smear::syntax`: the parser's; `smear::graphqlx`: 1 |
+| Parsing | Reads every file that holds a token with the parser layer chosen | `smear::syntax`: the parser's; `smear::graphqlx`: 1 |
 | Collection | Builds each package's module tree and collects what each module declares | `smear::graphqlx`: 4 |
 | Declaration | Numbers every module and definition, and checks each module's names | `smear::schema`: 5; `smear::graphqlx`: 1 |
 | Name resolution | Builds every module's scope, resolves its `use` items, and resolves each path where it stands | `smear::schema`: 6; `smear::graphqlx`: 11 |
 | Lowering | Writes what each definition holds: its contributions, type parameters, members, type occurrences and applications, its values as written, and the schema | `smear::schema`: 4; `smear::graphqlx`: 4 |
 | Instantiation | Gives every type occurrence its type and every application its complete type arguments, and judges the bounds of every instantiation the program writes | `smear::graphqlx`: 4 |
-| Coercion | Coerces every value to the type expected where it stands, filling what is left out from its default | `smear::schema`: 6; `smear::graphqlx`: 4 |
+| Coercion | Coerces every value to the type expected where it stands, filling what is left out from its default; a value of a custom scalar that is no collection but `null`, or of a type that still names a type parameter, is kept as written | `smear::schema`: 6; `smear::graphqlx`: 4 |
 | Binding | Binds each scalar to its host types | none |
 | Implementation | Checks what each definition says it implements, transitively and field by field, and a union's members | `smear::schema`: 9; `smear::graphqlx`: 1 |
 | Tiers | Gives every definition and every type the tier it requires | none |

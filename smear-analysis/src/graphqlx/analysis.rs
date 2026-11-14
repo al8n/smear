@@ -33,8 +33,8 @@ use super::{
 /// What one analysis found: the model, the diagnostics, and the source map.
 ///
 /// It has no type parameter and no lifetime: it is the same type whatever text type the packages
-/// were supplied in, and it borrows nothing from them. Whatever was refused, the model holds all
-/// that collection admitted, and the diagnostics say what collection left out;
+/// were supplied in, and it borrows nothing from them. Whatever was refused, the model holds every
+/// definition collection admitted, and the diagnostics say what a refusal left out;
 /// [`is_ok`](Self::is_ok) is the verdict.
 ///
 /// Two analyses are equal when their models, their diagnostics (the list, the error count and
@@ -474,7 +474,8 @@ impl Analysis {
 ///   An `implements` entry of an object or an interface that names what is no interface, a type
 ///   parameter among them, is `implements-non-interface`, at the entry. An interface on a cycle
 ///   of `implements` entries, of any length, is `self-implementing-interface`, at its name. A
-///   union member that names what is no object type is `union-member-not-object`, at the member.
+///   union member that names a definition that is no object type is `union-member-not-object`, at
+///   the member; one that is a type parameter is not judged, nor is what an instantiation gives it.
 ///   An argument or an input field written non-null, with no default, that applies `core`'s
 ///   `@deprecated` is `deprecated-required-argument` or `deprecated-required-input-field`, at its
 ///   name, with a label at the `@deprecated`; and so is an instantiation that gives a non-null type

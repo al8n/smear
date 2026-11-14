@@ -181,9 +181,10 @@ impl Model {
   /// Substitution is not followed: a written `Page<User>` is listed, and a `Cursor<User>` that
   /// `Page`'s fields would need is listed only where the program writes one. A code generator that
   /// monomorphises computes that closure from these.
-  /// [`UnboundedInstantiation`](crate::graphqlx::UnboundedInstantiation) says whether that closure
-  /// is finite. A directive has none here: an application is no type occurrence, and its
-  /// instantiation is [`Application::ty`](crate::graphqlx::Application::ty).
+  /// [`UnboundedInstantiation`](crate::graphqlx::UnboundedInstantiation), walked over every
+  /// supplied package, refuses every growth that could make that closure infinite. A directive has
+  /// none here: an application is no type occurrence, and its instantiation is
+  /// [`Application::ty`](crate::graphqlx::Application::ty).
   ///
   /// # Panics
   ///

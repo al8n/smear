@@ -7,8 +7,8 @@
 //!
 //! A [`Package`] is a name, a [`Layout`], a [`Tier`], its [`SourceFile`]s, the names of the
 //! packages it depends on, and optionally an [`IntegerProvider`]. A file's text is any
-//! [`SourceText`]: `&str`, `&[u8]`, or one of the owned or shared texts behind the source
-//! features. [`Limits`] bounds what an analysis may spend.
+//! [`SourceText`]: `&str`, `&[u8]`, or one of the texts behind the source features. [`Limits`]
+//! bounds what an analysis may spend.
 //!
 //! The analysis is Sans-I/O: the caller walks its directories, applies its include rules, reads
 //! its files and reads its manifest, and supplies every package up front.
@@ -19,11 +19,12 @@
 //! None of the three has a type parameter or a lifetime, whatever text type went in.
 //!
 //! [`Analysis::is_ok`] is the verdict: whether no error was reported, counted whether the
-//! diagnostic ceiling kept it or not. On every GraphQL document of smear's corpora, each given as
-//! the one file of a `Flat` package, it is the verdict `smear-schema` gives, but for three capacity
-//! ceilings of `smear-schema`'s representation that GraphQLx does not have. A differential test
-//! holds that. It counts each of GraphQL's codes on both sides, and lists by document each count
-//! it lets differ, every one on a document both refuse. That is what this release's rules give,
+//! diagnostic ceiling kept it or not, and no syntax error was counted that a parser did not lend.
+//! On every GraphQL document of smear's corpora, each given as the one file of a `Flat` package,
+//! it is the verdict `smear-schema` gives, but for three capacity ceilings of `smear-schema`'s
+//! representation that GraphQLx does not have. A differential test holds that. It counts each of
+//! GraphQL's codes on both sides, and beside the three ceilings lists by document each count it
+//! lets differ, every one on a document both refuse. That is what this release's rules give,
 //! and no promise: GraphQLx is not bound to GraphQL's rules, and a GraphQL document whose one
 //! mistake is a type the prelude declares, `string` or `i32`, is ok here and refused there. A root
 //! package with no query root is not ok, as in GraphQL: a library has none, and a consumer that
@@ -47,28 +48,28 @@
 //!
 //! # The phases
 //!
-//! [`analyze`] runs these in order, each writing part of the model, and then smear's rules, which
-//! only read it; a phase reports what could not be built as written.
+//! [`analyze`] runs these in order, which build the model between them, and then smear's rules,
+//! which only read it; a phase reports what could not be built as written.
 //!
 //! | Step | What it writes or judges | Its codes |
 //! |---|---|---|
 //! | The package set | The packages and their sources, numbered; each supplied package's name, file paths and dependencies, and the supplied sources' size, past which no supplied file is parsed | `smear::graphqlx`: `duplicate-file-path`, `invalid-file-path`, `invalid-package-name`, `reserved-package-name`, `duplicate-package-name`, `missing-dependency`, `resource-limit` |
-//! | Parsing | Every supplied file, read by the parser layer chosen into the document the model is lowered from; a file of nothing but what the lexer skips declares nothing | `smear::syntax`: the parser's own; `smear::graphqlx`: `resource-limit`, for a file a layer answered neither a document nor an error for |
+//! | Parsing | Every supplied file that holds a token, read by the parser layer chosen into the document the model is lowered from; a file of nothing but what the lexer skips declares nothing, and reaches no layer | `smear::syntax`: the parser's own; `smear::graphqlx`: `resource-limit`, for a file a layer answered neither a document nor an error for |
 //! | Collection | Each package's module tree, from its directories and its inline `mod`s, and every item each module declares | `smear::graphqlx`: `invalid-directory-name`, `module-defined-twice`, `unknown-item`, `resource-limit` |
 //! | Declaration | Every module and every definition, numbered, the built-in library's and the primitives the program writes included; a GraphQL built-in the root package's root module defines again, replaced; each module's names | `smear::schema`: `duplicate-type-name`, `duplicate-directive-definition`, `reserved-type-name`, `reserved-directive-name`, `redefined-built-in-type`; `smear::graphqlx`: `module-type-collision` |
 //! | Name resolution | Every module's scope, its `use` items resolved to a fixpoint; and each path, resolved where it stands for the phases after it | `smear::schema`: `undefined-type`, `undefined-directive`, `undefined-extension-target`, `undefined-implements-interface`, `undefined-union-member`, `undefined-root-operation-type`; `smear::graphqlx`: `unknown-package`, `unresolved-path`, `ambiguous-glob`, `url-unsupported`, `file-path-use`, `use-resolution-changed`, `use-declaration-collision`, `use-name-collision`, `shadowed-primitive`, `unknown-item`, `resource-limit` |
 //! | Lowering | What each definition holds beyond its identity: its contributions, its type parameters and bounds, a directive's locations, and its members; every type occurrence and application, its path resolved where it is written; every value, as written; and the schema's contributions and roots | `smear::schema`: `extension-kind-mismatch`, `undefined-extension-target`, `undefined-directive-argument`, `duplicate-root-operation-type`; `smear::graphqlx`: `generic-arity`, `invalid-bound`, `unresolved-path`, `unknown-item` |
 //! | Instantiation | Each definition's built-in meaning and its defaults; every occurrence's type, each type interned once; each application's complete type arguments; and the bounds of every instantiation the program writes | `smear::graphqlx`: `generic-arity`, `generic-default`, `unsatisfied-bound`, `resource-limit` |
-//! | Coercion | Every value, by the type expected where it stands, an argument or a field left out filled from its default; and a generic definition's values, at each closed instantiation of it | `smear::schema`: `invalid-default-value`, `invalid-directive-argument-value`, `missing-required-directive-argument`, `undefined-input-object-field`, `missing-required-input-object-field`, `input-object-default-value-cycle`; `smear::graphqlx`: `width-overflow`, `nonzero-zero`, `collection-literal`, `resource-limit` |
+//! | Coercion | Every value, by the type expected where it stands, an argument or a field left out filled from its default; and a generic definition's values, at each closed instantiation of it a supplied package writes | `smear::schema`: `invalid-default-value`, `invalid-directive-argument-value`, `missing-required-directive-argument`, `undefined-input-object-field`, `missing-required-input-object-field`, `input-object-default-value-cycle`; `smear::graphqlx`: `width-overflow`, `nonzero-zero`, `collection-literal`, `resource-limit` |
 //! | Binding | Each scalar's host types, from the `@extern`s its own package writes on it | none |
-//! | Implementation | What each definition says it is: its `implements` entries, transitively, with the fields and arguments each interface asks for, and a union's members; and each instantiation's entries and members, and the arguments it makes required | `smear::schema`: `duplicate-implements-interface`, `duplicate-union-member`, `missing-transitive-interface`, `missing-interface-field`, `invalid-interface-field-type`, `interface-field-not-deprecated`, `missing-interface-field-argument`, `invalid-interface-field-argument-type`, `unexpected-required-argument`; `smear::graphqlx`: `resource-limit` |
+//! | Implementation | What each definition says it is: its `implements` entries, transitively, with the fields and arguments each interface asks for, and a union's members; and each written instantiation's entries and members, and the arguments it makes required | `smear::schema`: `duplicate-implements-interface`, `duplicate-union-member`, `missing-transitive-interface`, `missing-interface-field`, `invalid-interface-field-type`, `interface-field-not-deprecated`, `missing-interface-field-argument`, `invalid-interface-field-argument-type`, `unexpected-required-argument`; `smear::graphqlx`: `resource-limit` |
 //! | Tiers | The tier every definition and every type requires | none |
 //!
 //! # The model
 //!
-//! The [`Model`] is dense tables, read through views, each a `Copy` pair of the model and an id
-//! that answers borrows of the model. It owns every spelling it answers with, so a consumer that
-//! reads the model alone never holds the sources.
+//! The [`Model`] is dense tables, read through `Copy` views, most of them a pair of the model and
+//! an id, that answer borrows of the model. It owns every spelling it answers with, so a consumer
+//! that reads the model alone never holds the sources.
 //!
 //! [`Model::packages`] and [`Model::package`] answer each package, a [`PackageInfo`]: its name,
 //! kind, tier, layout, sources, dependencies, integer provider and root module;
@@ -84,11 +85,12 @@
 //! bounds; its `implements` entries, union members and applications; a directive definition's
 //! locations and whether it is repeatable; its members, by kind; what the language makes of it, an
 //! intrinsic primitive, or a marker or a collection when its own package says so; a scalar's host
-//! types, each `@extern` its own package writes on it, an [`Extern`]; and its
-//! [`tier`](Def::tier), the least of `core`, `alloc` and `std` that holds everything it uses. A
-//! definition, a contribution and a member each answer `has_errors()`: whether a phase or a rule
-//! refused something in it. GraphQL's introspection meta-types are definitions of
-//! [`Origin::Compat`], which a code generator skips.
+//! types, each `@extern` its own package writes on it whose values fit, an [`Extern`], a built-in
+//! having none; and its [`tier`](Def::tier), the least of `core`, `alloc` and `std` that holds what
+//! its members, its union members and its host types need, a built-in's being its package's and a
+//! directive's `core`. A definition, a contribution and a member each answer `has_errors()`:
+//! whether a phase or a rule reported an error in it, a syntax error aside. GraphQL's
+//! introspection meta-types are definitions of [`Origin::Compat`], which a code generator skips.
 //!
 //! [`Model::member`] answers each field, argument, input field and enum value, a [`Member`]: its
 //! kind, name, owner, parent, location, extent and description, its type, its default, a field's
@@ -101,21 +103,23 @@
 //! substituted and an alias such as `NonZeroU32` expanded, with its nullness, its tier and whether
 //! it is closed. [`Model::instantiations`] lists the closed instantiations of a generic definition
 //! that the program's occurrences resolve to, and [`Model::satisfies`] and [`Model::satisfies_ty`]
-//! answer what a type satisfies, read off what it declares.
+//! answer what a type satisfies, read off what it declares, and for `core`'s `MapKey` off what it
+//! is.
 //!
 //! [`Model::value`] answers each value, a [`Value`], coerced to the type expected where it stands,
 //! each nested value one of its own: a [`ValueKind`], with its location, its type, the path a
 //! value written as a path writes, and whether the author wrote it or a default filled it. An input
 //! object's fields are found by name, a set's elements and a map's entries are each coerced against
-//! their collection's types, a `TypeRef` value is the definition its path names, and a custom
-//! scalar's value but `null` is kept as written.
+//! their collection's types, a `TypeRef` value is the definition its path names, and a value of a
+//! custom scalar that is no collection but `null`, of a type that still names a type parameter, or
+//! of a type that can take none is kept as written, a [`ValueKind::Literal`].
 //!
 //! [`Model::application`] answers each directive application, an [`Application`]: its directive,
 //! its type arguments and its path as written, its location, and its arguments in its directive's
 //! order, each written or filled from its definition's default, an [`ApplicationArgument`]. An
-//! application of a generic directive has a type, its directive's instantiation,
-//! [`Application::ty`], and complete type arguments, [`Application::ty_args`]: the written ones,
-//! then those its directive's defaults fill.
+//! application of a generic directive whose type arguments complete has a type, its directive's
+//! instantiation, [`Application::ty`], and complete type arguments, [`Application::ty_args`]: the
+//! written ones, then those its directive's defaults fill.
 //!
 //! [`Model::schema`] answers the schema, a [`Schema`], the root package's whether or not it writes
 //! one: its roots, written or presumed, its applications, its description and its contributions.
@@ -125,24 +129,26 @@
 //!
 //! [`Model::canonical_name`] names a definition by the path that reaches it from any package that
 //! may reach its own, `^::package::module::path::Name`, and `@^::package::module::path::name` for a
-//! directive: its identity across analyses and versions. [`Model::lookup`] finds a definition by
-//! that name in a [`Namespace`], and [`Model::name`] spells a [`Sym`].
+//! directive: spelled from names alone, no id among them, it is its identity across analyses.
+//! [`Model::lookup`] finds a definition by that name in a [`Namespace`], and [`Model::name`] spells
+//! a [`Sym`].
 //!
 //! # When the analysis is ok
 //!
-//! On an analysis that [`is_ok`](Analysis::is_ok), the model holds these, and a census holds them
-//! over smear's corpora:
+//! On an analysis that [`is_ok`](Analysis::is_ok), the model holds these, and a census checks over
+//! smear's corpora what a walk of the model shows of them, the bounds and the rules aside:
 //!
 //! - no [`TypeExprKind::Unresolved`], [`ValueKind::Unresolved`] or [`Resolution::Unresolved`]
 //!   appears, and no occurrence or value has the unresolved type, [`TyKind::Unresolved`];
 //! - the members of a definition have distinct names in each of its lists, and so do a field's
 //!   arguments;
-//! - every named occurrence writes a count of type arguments its definition takes, so its type has
-//!   one argument for each type parameter, and every bound holds at every instantiation the
-//!   program writes;
+//! - every named occurrence writes a count of type arguments its definition takes, but for an
+//!   alias such as `NonZeroU32`, which writes none; its type, with an alias expanded and the
+//!   defaults filled, has one argument for each type parameter of its definition; and every bound
+//!   holds at every instantiation the program writes;
 //! - every application's arguments are its directive's, in its order, each at most once, every
 //!   required one present, each value coerced to its argument's type under the application's type
-//!   arguments;
+//!   arguments, or kept as written while that type still names a type parameter;
 //! - every definition's [`tier`](Def::tier) is at most its package's, GraphQL's meta-types aside;
 //! - every rule of the table under "Rules" holds, the type-system rules GraphQLx shares with
 //!   GraphQL in this release among them.
@@ -157,25 +163,32 @@
 //!
 //! # When it is not ok
 //!
-//! The model is still complete for what collection admits: every definition collection kept is in
-//! it, a refused one included, with its members, applications and values. Collection keeps nothing
-//! of a file whose path the package set refused, an invalid path or one that two files share, nor
-//! of a file under a directory that is not a Name or that passes
-//! [`max_module_depth`](Limits::max_module_depth) or [`max_modules`](Limits::max_modules), nor of
-//! a `mod` whose module passes the same two limits, nor of what comes after the first definition
-//! that passes [`max_definitions`](Limits::max_definitions); and it keeps no item of a kind it
-//! does not know. A file that was not parsed holds nothing either, whether the parser refused it
-//! or the supplied sources passed [`max_source_bytes`](Limits::max_source_bytes). A phase reports
-//! an error whenever any of this happens, so such an analysis is not ok. What could not be built
-//! is one of four shapes:
-//! [`TypeExprKind::Unresolved`], [`ValueKind::Unresolved`], [`Resolution::Unresolved`], and the
-//! unresolved type, [`TyKind::Unresolved`], which a resolved occurrence also has when it holds one
-//! that has it, or when its type could not be built. Each lies within the extent of an error a
-//! phase reported, which says why: within the contribution that holds it, but for a copy of a
-//! default, whose error is where the default is written, or at the application, the literal or the
-//! instantiation's occurrence whose type arguments it does not fit, which may stand in another
-//! definition. So a consumer that waives only codes that rules report meets none of them once no
-//! other error remains.
+//! The model still holds every definition collection kept, a refused one included, with its
+//! members and applications and the values written in them, but for what a refusal leaves out: an
+//! extension whose target names nothing, names a definition of another kind or is an alias
+//! contributes nothing; an application whose directive names nothing has no type argument and no
+//! argument; an argument, or an object literal's field, that its definition does not declare is
+//! not kept; and a value that does not fit, or the part of one that a limit stops, is one
+//! unresolved row that holds nothing. Collection keeps nothing of a file whose path the package
+//! set refused, an invalid path or one that two files share, nor of a file under a directory that
+//! is not a Name or that passes [`max_module_depth`](Limits::max_module_depth) or
+//! [`max_modules`](Limits::max_modules), nor of a `mod` whose module passes the same two limits,
+//! nor of what comes after the first definition that passes
+//! [`max_definitions`](Limits::max_definitions); and it keeps no item, nor what a part of one
+//! names, of a kind it does not know. A file that was not parsed holds nothing either, whether the
+//! parser refused it or the supplied sources passed [`max_source_bytes`](Limits::max_source_bytes).
+//! A phase reports an error whenever any of this happens, so such an analysis is not ok.
+//!
+//! What could not be built is one of four shapes: [`TypeExprKind::Unresolved`],
+//! [`ValueKind::Unresolved`], [`Resolution::Unresolved`], and the unresolved type,
+//! [`TyKind::Unresolved`], which a resolved occurrence also has when it holds one that has it, or
+//! when its type could not be built, and a value has when the type expected where it stands is
+//! unresolved. Each lies within the extent of an error a phase reported, which says why: within
+//! the contribution that holds it, but for a copy of a default, whose error is where the default is
+//! written, or at the application, the literal or the instantiation's occurrence whose type
+//! arguments it does not fit, and for a value of an unresolved type, whose error is where that type
+//! is written; either may stand in another definition. So a consumer that waives only codes that
+//! rules report meets none of them once no other error remains.
 //!
 //! An error that a phase or one of smear's rules reports marks the contributions, members and
 //! definitions that hold where it points, whether the ceiling keeps the diagnostic or not, and
@@ -188,17 +201,18 @@
 //! A [`Diagnostic`] answers tokora's diagnostic contract, and [`Diagnostic::builder`] is public: a
 //! consumer reports its own findings with its own codes, at the analysis's sources or at source
 //! ids of its own, and they render exactly as smear's do. [`Diagnostics`] keeps them in one total
-//! order, under a ceiling that keeps the least of them. A message of smear's quotes a name or a
-//! path from the input only by a bounded excerpt of it.
+//! order, an analysis's and a walk's under a ceiling that keeps the least of them. A message of
+//! smear's quotes a name or a path from the input only by a bounded excerpt of it.
 //!
-//! Every diagnostic has a code, `smear::<family>::<rule>`, and the code is its key: a consumer
-//! filters and waives by code, and a message, a label or a help may be reworded in any release.
-//! The analysis reports three families: its own, `smear::graphqlx`, which [`DiagnosticKind`] lists
-//! in [`DiagnosticKind::ALL`]; GraphQL's own, `smear::schema`, for each rule that is GraphQL's rule
-//! too, under `smear-schema`'s code so that a consumer sees one vocabulary across the two
-//! dialects, each a constant of [`schema`] and all of them in [`schema::ALL`]; and the parser's,
-//! `smear::syntax`, for a file that does not parse. A code is a phase's or a rule's, never both.
-//! Every code is an error but `smear::graphqlx::shadowed-primitive`, a warning, and
+//! Every diagnostic smear reports has a code, `smear::<family>::<rule>`, and the code is its key: a
+//! consumer filters and waives by code, and a message, a label or a help may be reworded in any
+//! release. The analysis reports three families: its own, `smear::graphqlx`, which
+//! [`DiagnosticKind`] lists in [`DiagnosticKind::ALL`]; GraphQL's own, `smear::schema`, for each
+//! rule that is GraphQL's rule too, under `smear-schema`'s code so that a consumer sees one
+//! vocabulary across the two dialects, each a constant of [`schema`] and all of them in
+//! [`schema::ALL`]; and the parser's, `smear::syntax`, for a file that does not parse. A code is a
+//! phase's or a rule's, never both. Every code is an error but
+//! `smear::graphqlx::shadowed-primitive`, a warning, and
 //! [`DiagnosticKind::UnboundedInstantiation`] is the one `analyze` never reports.
 //!
 //! A consumer of this crate alone names `tokora`'s `Code`, `Location` and `Severity` itself, so the
@@ -247,8 +261,9 @@
 //! `smear::graphqlx::resource-limit`, never a panic, but for the diagnostic ceiling and the
 //! near-miss budget, which limit what the analysis says and not what it accepts. Each is a `u32`
 //! count, and `0` admits none of what it counts, but that every package has its root module and
-//! the built-in library is always declared whole, its types, bounds, values and implementations
-//! costing nothing against these bounds.
+//! the built-in library is always declared whole, its types built whatever the generic depth,
+//! instantiation and substitution bounds, and its bounds, its own values and its implementations
+//! costing nothing to judge, complete or check.
 //!
 //! | Bound | Default | What it counts | At `0` |
 //! |---|---|---|---|
@@ -262,7 +277,7 @@
 //! | [`max_generic_depth`](Limits::max_generic_depth) | 64 | How deeply one type nests once substitution has filled it | No list, and no type with an argument, that a supplied package writes |
 //! | [`max_instantiations`](Limits::max_instantiations) | 2^16 | The distinct instantiations of generic definitions the analysis interns | No instantiation a supplied package needs |
 //! | [`max_substitutions`](Limits::max_substitutions) | 2^20 | The steps of substitution, filling the type arguments a use leaves out | No type argument a supplied package leaves out is filled |
-//! | [`max_bound_steps`](Limits::max_bound_steps) | 2^20 | The steps judging bounds takes | Every instantiation of a definition with a bound is reported, a `HashMap` among them |
+//! | [`max_bound_steps`](Limits::max_bound_steps) | 2^20 | The steps judging bounds takes | Every written instantiation of a definition with a bound is reported, a `HashMap` among them |
 //! | [`max_value_steps`](Limits::max_value_steps) | 2^20 | The steps completing values beyond what is written takes | No default fills an argument or a field, no written value stands for a list, and no decimal integer of more than 38 significant digits is read |
 //! | [`max_implementation_steps`](Limits::max_implementation_steps) | 2^20 | The steps checking implementations takes | Every definition that implements an interface or a marker with an entry or a field to look at is reported |
 //! | [`max_source_bytes`](Limits::max_source_bytes) | 2^26, 64 MiB | The bytes of source the supplied packages hold together | No supplied byte of source |
@@ -284,7 +299,7 @@
 //!
 //! [`analyze`] runs smear's own rules through the same walk over the supplied packages, once its
 //! phases have written the model. Each refuses what this table says, under its codes, and says
-//! nothing about a contribution a phase already refused something in.
+//! nothing about a contribution in which a phase reported an error, a syntax error aside.
 //!
 //! | Its codes | What it refuses |
 //! |---|---|
@@ -303,7 +318,7 @@
 //! | `smear::schema`: `field-type-not-output-type`, `argument-type-not-input-type`, `input-field-type-not-input-type`, `directive-argument-type-not-input-type` | A member typed by a definition of a kind its position does not take, a collection's arguments there included; and an instantiation, or an application, that gives a type parameter such a type where the parameter stands |
 //! | `smear::schema`: `implements-non-interface` | An `implements` entry of an object or an interface that names what is no interface |
 //! | `smear::schema`: `self-implementing-interface` | An interface on a cycle of `implements` entries |
-//! | `smear::schema`: `union-member-not-object` | A union member that is no object type |
+//! | `smear::schema`: `union-member-not-object` | A union member that names a definition that is no object type; a member that is a type parameter is not judged, nor is what an instantiation gives it |
 //! | `smear::schema`: `deprecated-required-argument`, `deprecated-required-input-field` | A required argument or input field that applies `@deprecated`, and an instantiation that makes such a member required |
 //! | `smear::schema`: `one-of-field-not-nullable` | A field of a OneOf input object written non-null, and an instantiation that makes one non-null |
 //! | `smear::schema`: `one-of-field-has-default` | A field of a OneOf input object with a default |
@@ -315,12 +330,12 @@
 //! | `smear::schema`: `specified-by-on-built-in-scalar` | `@specifiedBy` on a scalar of the built-in library |
 //! | `smear::schema`: `root-operation-type-not-object` | A root operation type that is no object type |
 //! | `smear::schema`: `shared-root-operation-type` | Two roots of one type |
-//! | `smear::schema`: `schema-extension-without-schema` | A schema extension the root package writes when it defines no schema |
+//! | `smear::schema`: `schema-extension-without-schema` | A schema extension the root package writes when it writes no schema definition and no query root is presumed |
 //! | `smear::schema`: `missing-query-root-operation-type` | A schema with no query root, neither written nor presumed |
 //! | `smear::graphqlx`: `extern-misuse` | An `@extern` whose `lang` an earlier one of its scalar has, and one the root package writes on a GraphQL built-in it replaces |
 //! | `smear::graphqlx`: `repr-misuse` | An `@repr` on the schema with no `for`, one elsewhere that writes `for`, and one that chooses twice for a language at a position, or for a type and a language on the schema |
 //! | `smear::graphqlx`: `tier` | Below `std`, a use above the tier its package declares: a list in a `core` package, another package's definition that needs more, `@heap` in a `core` package, an extern's `tier` above its package's. What a directive definition writes and an application's type arguments are compile-time metadata and count nowhere, an input object a directive's argument names being judged where it is written |
-//! | `smear::schema`: `circular-non-null-input-field`, `circular-one-of-input-field` | An input object that requires a value of itself, through fields each non-null and no list, or by way of a OneOf none of whose fields can be given a finite value, a generic input object requiring what its type arguments must hold |
+//! | `smear::schema`: `circular-non-null-input-field`, `circular-one-of-input-field` | An input object that requires a value of itself, through fields each non-null and no list, or by way of a OneOf none of whose fields can be given a finite value, a generic input object requiring what its type arguments must hold; never one a finite value satisfies, and in a program with type parameters it may miss one |
 //!
 //! # A rule a backend composes
 //!
@@ -336,8 +351,9 @@
 //! length, never its text: the texts stay with the caller, and [`SourceMap::bind`] pairs the map
 //! with them again for a renderer, finding each file by its package and its path. The built-in
 //! packages `core`, `alloc` and `std` have [`PackageId`]s and sources like any other, and smear
-//! supplies their texts itself. A renderer is handed each source's path and text through
-//! [`SourceMap::bind`]'s [`Bound`], in id order, the consumer's own sources after them.
+//! supplies their texts itself. A renderer is handed each source's path and, when it can be read,
+//! its text through [`SourceMap::bind`]'s [`Bound`], in id order, the consumer's own sources after
+//! them.
 //!
 //! ```
 //! use smear_analysis::graphqlx::{Layout, Limits, Package, SourceFile, SourceId, Tier, analyze};
@@ -362,11 +378,12 @@
 //!
 //! # Layers and trees
 //!
-//! [`analyze_with`] answers the same analysis with the parser the caller chose, a GraphQLx parser
-//! layer, and the [`Trees`] that layer kept beside it, one for each file it read. Each
-//! contribution, member and inline module answers its extent, where it is written in its file
-//! ([`Contribution::extent`], [`Member::extent`], [`Module::extent`]), and [`Trees::node`] answers
-//! the node of a kept tree that an extent was written as.
+//! [`analyze_with`] runs the analysis [`analyze`] runs with the parser the caller chose, a GraphQLx
+//! parser layer, and answers beside it the [`Trees`] that layer kept, one for each file it read.
+//! Each contribution, member and inline module answers its extent, where it is written in its file
+//! ([`Contribution::extent`], [`Member::extent`], [`Module::extent`]), but for a primitive `core`
+//! makes that no definition of the root package's replaces, which has no text of its own; and
+//! [`Trees::node`] answers the node of a kept tree that an extent was written as.
 //!
 //! # Determinism
 //!
@@ -379,25 +396,27 @@
 //! order the walk of [`visit`] reaches them under [`Packages::All`]; and types as they are
 //! interned, a type's arguments before it. A [`Sym`] orders nothing. Permuting the dependencies,
 //! or a package's files, changes no id and no diagnostic. Ids are stable within one analysis, and
-//! not across versions of smear: across versions a definition is known by its canonical name.
+//! not across versions of smear; across analyses a definition is known by its canonical name, which
+//! no id enters.
 //!
 //! # What is not here
 //!
 //! The model does not hold: `use` bindings and an index of every path and what it resolved to,
-//! which a language server will add; derived types such as filters and orderings; wire ids or
+//! which a language server needs; derived types such as filters and orderings; wire ids or
 //! stable numbers; GraphQLx's own introspection; a type that keeps the source texts beside the
 //! analysis; a canonical coordinate for a member, since canonical names are definitions'; and the
 //! closure of instantiations under substitution: [`Model::instantiations`] lists the ones the
 //! program writes, a code generator that monomorphises computes the rest, and
-//! [`UnboundedInstantiation`] says whether that closure is finite.
+//! [`UnboundedInstantiation`], walked over every supplied package, refuses every growth that could
+//! make that closure infinite.
 //!
 //! # Stability
 //!
 //! This crate makes no semver promise yet: smear has no downstream user, so a release may change
 //! any path, signature or answer of it, and which programs it accepts, and the CHANGELOG says each
 //! change. What a reader can lean on in the release it reads: on an analysis that is ok the model
-//! holds the invariants above, which a census holds over smear's corpora; and a diagnostic's code
-//! is its key, which no rewording of its message changes.
+//! holds the invariants above, which a census checks, in part, over smear's corpora; and a
+//! diagnostic's code is its key, which no rewording of its message changes.
 
 mod analysis;
 mod bind;
