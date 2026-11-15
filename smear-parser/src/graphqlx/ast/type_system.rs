@@ -20,13 +20,15 @@ use super::{
   ExtensionName, Name, OperationType, Type, TypePath, WhereClause,
 };
 
-pub use crate::generic::{
-  EnumTypeExtensionData, InputObjectTypeExtensionData, ScalarTypeExtensionData,
-  UnionTypeExtensionData,
-};
-pub use crate::type_system::{
-  ExecutableDirectiveLocation, InterfaceTypeExtensionData, Location, ObjectTypeExtensionData,
-  SchemaExtensionData, TypeSystemDirectiveLocation,
+pub use crate::{
+  generic::{
+    EnumTypeExtensionData, InputObjectTypeExtensionData, ScalarTypeExtensionData,
+    UnionTypeExtensionData,
+  },
+  type_system::{
+    ExecutableDirectiveLocation, InterfaceTypeExtensionData, Location, ObjectTypeExtensionData,
+    SchemaExtensionData, TypeSystemDirectiveLocation,
+  },
 };
 
 /// A GraphQLx list of directive locations.

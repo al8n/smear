@@ -47,6 +47,7 @@
 //! `proto` supply the content directly; the variant is where that would land, and a driver's
 //! `match` would not have to change.
 
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use tokora::SimpleSpan;
 
 use smear_parser::graphql::ast::{Field, InputValue, SelectionSet};
@@ -118,8 +119,83 @@ impl ReqId {
   }
 }
 
+/// A named variable in a GraphQL request, consisting of its name and the value supplied for it.
+#[derive(Debug, Clone, Copy)]
+pub struct NamedVariable<'a, V> {
+  pub(crate) name: &'a str,
+  pub(crate) value: V,
+}
+
+impl<'a, V> NamedVariable<'a, V> {
+  /// Creates a new named variable with the given name and value.
+  #[inline]
+  pub const fn new(name: &'a str, value: V) -> Self {
+    Self { name, value }
+  }
+
+  /// Returns the name of the variable.
+  #[inline]
+  pub const fn name(&self) -> &'a str {
+    self.name
+  }
+
+  /// Set the name of the variable.
+  #[inline]
+  pub fn set_name(&mut self, name: &'a str) -> &mut Self {
+    self.name = name;
+    self
+  }
+
+  /// Set the value of the variable.
+  #[inline]
+  pub fn set_value(&mut self, value: V) -> &mut Self {
+    self.value = value;
+    self
+  }
+
+  /// Set the name of the variable.
+  #[inline]
+  pub const fn with_name(mut self, name: &'a str) -> Self {
+    self.name = name;
+    self
+  }
+
+  /// Sets the value of the variable and returns the modified instance.
+  #[inline]
+  pub fn with_value(mut self, value: V) -> Self {
+    self.value = value;
+    self
+  }
+
+  /// Returns the value of the variable.
+  #[inline]
+  pub const fn value(&self) -> &V {
+    &self.value
+  }
+
+  /// Returns a mutable reference to the value of the variable.
+  #[inline]
+  pub const fn value_mut(&mut self) -> &mut V {
+    &mut self.value
+  }
+
+  /// Consumes the named variable and returns its value.
+  #[inline]
+  pub fn into_value(self) -> V {
+    self.value
+  }
+
+  /// Returns the named variable as a tuple of its name and value.
+  #[inline]
+  pub fn into_parts(self) -> (&'a str, V) {
+    (self.name, self.value)
+  }
+}
+
 /// Where an argument's value comes from, after draft §6.4.1 has decided.
-#[derive(Debug)]
+#[derive(Debug, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum ArgumentSource<'a, S, V> {
   /// The document wrote a literal. It may still be the `null` literal — for a nullable argument
@@ -169,14 +245,11 @@ pub enum ArgumentSource<'a, S, V> {
   /// or a pooled buffer, is handed back inside the operation rather than at the end of it. A
   /// driver that needs it for longer takes its own copy while the request is readable, which the
   /// borrow already requires of anything read out of a [`FieldRequest`].
-  Variable {
-    /// The variable's name, without the `$`.
-    name: &'a str,
-    /// Its value, exactly as [`Values::variable`](super::Values::variable) returned it.
-    value: V,
-  },
+  Variable(NamedVariable<'a, V>),
   /// No value reached the argument and the schema declares a default, so draft §6.4.1 step 5.b
   /// or 5.d says the default applies.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   SchemaDefault,
 }
 

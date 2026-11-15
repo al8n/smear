@@ -80,14 +80,12 @@ license = "Apache-2.0 OR MIT"
 rust-version = "1.95"
 
 [workspace.dependencies]
-# The key carries the major, so the crate is named `bytes_1` in code and a second major of the same
-# crate can sit beside it. A member inherits the whole entry, `package` included.
 bstr_1 = { package = "bstr", version = "1", default-features = false }
 bytes_1 = { package = "bytes", version = "1", default-features = false }
 smol-bytes_0_2 = { package = "smol-bytes", version = "0.2", default-features = false }
 derive_more = { version = "2", default-features = false, features = ["unwrap", "is_variant", "try_unwrap", "from", "into", "deref", "deref_mut", "as_ref", "display"] }
 
-tokora = { version = "0.13.1", default-features = false, features = ["logos", "unstable-raw", "combinators"] }
+tokora = { version = "0.13", default-features = false, features = ["logos", "unstable-raw", "combinators"] }
 
 paste = "1"
 thiserror = { version = "2", default-features = false }
@@ -100,6 +98,7 @@ smear-parser = { path = "smear-parser", version = "0.0.1", default-features = fa
 smear-compiler = { path = "smear-compiler", version = "0.0.1", default-features = false }
 smear-schema = { path = "smear-schema", version = "0.0.1", default-features = false }
 smear-semantics = { path = "smear-semantics", version = "0.0.1", default-features = false }
+serde = { version = "1", default-features = false, features = ["derive"] }
 
 [workspace.lints.rust]
 # `priority = -1` because `unused_extern_crates` below is a MEMBER of this group, and cargo

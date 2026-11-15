@@ -133,7 +133,6 @@ impl<'a, S> Table<'a, S> {
   /// itself the work being charged for, exactly as the merge engine's argument scan is charged
   /// off lengths it reads before it compares anything. Saturating, which the poison in
   /// [`Visits::take`] then turns into a refusal rather than into an accepted `u32::MAX`.
-  /// al8n/smear#196.
   pub(super) fn charge(
     &mut self,
     definitions: &'a [DescribedExecutableDefinition<S>],

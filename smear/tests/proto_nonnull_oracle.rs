@@ -868,7 +868,7 @@ fn answer(
           literal.source().trim_matches('"').to_owned()
         }
         Some(ArgumentSource::Literal(other)) => format!("{other:?}"),
-        Some(ArgumentSource::Variable { value, .. }) => match value {
+        Some(ArgumentSource::Variable(v)) => match v.value() {
           Val::Str(text) => text.clone(),
           Val::Null => "null".to_owned(),
           Val::Data => "undefined".to_owned(),

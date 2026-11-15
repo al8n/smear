@@ -211,6 +211,9 @@
 
 use core::fmt;
 
+use std::boxed::Box;
+
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use smear_schema::diagnostic::Diagnose;
 use tokora::SimpleSpan;
 
@@ -294,14 +297,20 @@ impl<V> core::error::Error for TooLarge<V> {}
 /// [`Resource`](crate::Resource) records why widening it would hand a [`Full`](crate::Full) a type
 /// claiming more than it can ever hold. An entry's own map is refused by those same two, so they
 /// arrive here wrapped, as [`Extensions`](Self::Extensions), and [`Ceiling`] is unchanged.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Unwrap, TryUnwrap)]
 #[non_exhaustive]
 pub enum RequestErrorCeiling {
   /// [`Limits::max_request_errors`] has no room for another entry.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Errors,
   /// [`Limits::max_request_error_message_bytes`] has no room for the entry's message.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   MessageBytes,
   /// [`Limits::max_request_error_locations`] has no room for the entry's `locations`.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Locations,
   /// One of the two extension ceilings has no room for the entry's own draft §7.1.6 `extensions`
   /// map, and this is which.
@@ -355,9 +364,9 @@ impl core::error::Error for RequestErrorCeiling {}
 /// See [`RequestErrorResult`]'s second example, which builds two of these and lists them.
 pub struct RequestError<V> {
   /// Draft §7.1.6's `message`, boxed at its exact length.
-  message: std::boxed::Box<str>,
+  message: Box<str>,
   /// Draft §7.1.6's `locations`, as spans into the requested document, boxed at their exact count.
-  locations: std::boxed::Box<[SimpleSpan]>,
+  locations: Box<[SimpleSpan]>,
   /// Draft §7.1.6's per-error `extensions`, absent until the driver attaches one.
   extensions: Option<Extensions<V>>,
 }
@@ -581,6 +590,9 @@ impl<V> core::error::Error for RefusedEntry<V> {}
 /// **Not `#[non_exhaustive]`**, for the rule [`Node`](crate::Node) records: whatever matches on it
 /// has to answer for every kind of entry, and a third kind must break that `match` rather than fall
 /// into a catch-all.
+#[derive(IsVariant, TryUnwrap, Unwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum RequestErrorEntry<'r, V> {
   /// The executor's draft §6.1 refusal, as [`Executor::start`](crate::Executor::start) returned
   /// it.

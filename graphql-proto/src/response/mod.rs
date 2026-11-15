@@ -63,6 +63,7 @@ use core::fmt;
 
 use std::collections::TryReserveError;
 
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use smear_schema::{DirectiveLocation, PackedType, Schema, Sym, Text, TypeId, TypeKind};
 
 #[cfg(all(test, feature = "std"))]
@@ -377,7 +378,7 @@ pub(super) enum Key {
 }
 
 /// One segment of a draft §7.1.2 response path.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Unwrap, TryUnwrap)]
 pub enum Segment<'r> {
   /// A field's response key — its alias when it has one, otherwise its name.
   Field(&'r str),
@@ -1038,8 +1039,13 @@ fn allow_allocations() {
 /// rather than fall into a catch-all that writes a response the executor did not produce. The three
 /// introspection variants were added that way, and every exhaustive matcher in this repository was
 /// made to name them.
+#[derive(IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum Node<'r, V> {
   /// The `null` literal.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Null,
   /// A serialised leaf.
   Leaf(&'r V),

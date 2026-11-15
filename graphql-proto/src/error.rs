@@ -48,6 +48,7 @@
 
 use core::fmt;
 
+use derive_more::IsVariant;
 use tokora::SimpleSpan;
 
 use smear_schema::{PackedType, Schema, Sym, TypeId};
@@ -321,7 +322,7 @@ pub(super) struct Row {
 ///
 /// Separate from the message on purpose: the message is prose that may be improved, and a driver
 /// that matched on it would break when it was.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum Kind {
   /// The driver reported it.
@@ -429,7 +430,7 @@ pub enum Kind {
 /// so a shorter page does not move it and re-sending the same document never will.
 /// [`InternedBytes`](Resource::InternedBytes) is about the names — response keys and runtime type
 /// names — which neither of the other two remedies touches.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum Resource {
   /// [`Limits::max_response_slots`](super::Limits::max_response_slots) has no room for another
@@ -941,3 +942,5 @@ impl<V> fmt::Display for Error<'_, V> {
     }
   }
 }
+
+impl<V> core::error::Error for Error<'_, V> {}

@@ -472,7 +472,7 @@ impl Visits {
   /// not two — the byte charges that made the poison necessary were added to both ledgers, and the
   /// poison was added to only one. What this one must *not* do is spend the remainder on the
   /// refusal: the degrading callers above depend on a refused charge leaving the budget where it
-  /// was. al8n/smear#196.
+  /// was.
   #[inline]
   #[must_use]
   pub(super) fn take(&mut self, work: u32) -> bool {

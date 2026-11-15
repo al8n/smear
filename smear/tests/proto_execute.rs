@@ -1063,9 +1063,9 @@ fn a_variable_argument_delivers_the_value_that_passed_the_check() {
     let id = request.id();
     let delivered = match request.arguments() {
       [argument] => match argument.source() {
-        ArgumentSource::Variable { name, value } => {
-          assert_eq!(*name, "n");
-          value.clone()
+        ArgumentSource::Variable(v) => {
+          assert_eq!(v.name(), "n");
+          v.value().clone()
         }
         other => panic!("`count` is a bare variable and arrived as {other:?}"),
       },
@@ -2044,9 +2044,9 @@ fn answering_a_request_releases_its_argument_value() {
   let id = request.id();
   match request.arguments() {
     [argument] => match argument.source() {
-      ArgumentSource::Variable { name, value } => {
-        assert_eq!(*name, "text");
-        assert!(matches!(value.payload, Payload::Str("V")));
+      ArgumentSource::Variable(v) => {
+        assert_eq!(v.name(), "text");
+        assert!(matches!(v.value().payload, Payload::Str("V")));
       }
       other => panic!("`text` is a bare variable and arrived as {other:?}"),
     },

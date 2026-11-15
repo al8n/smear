@@ -114,6 +114,9 @@
 //! no feature gates it.
 
 use core::fmt;
+use std::vec::Vec;
+
+use smol_bytes_0_2::Utf8Bytes;
 
 use crate::Limits;
 
@@ -157,6 +160,14 @@ pub struct Full<V> {
 }
 
 impl<V> Full<V> {
+  #[inline]
+  const fn new(c: Ceiling, v: V) -> Self {
+    Self {
+      ceiling: c,
+      value: v,
+    }
+  }
+
   /// Returns which ceiling refused.
   #[inline]
   pub const fn ceiling(&self) -> Ceiling {
@@ -214,7 +225,7 @@ impl<V: fmt::Debug> core::error::Error for Full<V> {}
 /// hasher, a `no_std` story for it and a non-deterministic iteration order, to save nothing at this
 /// size.
 pub struct Extensions<V> {
-  entries: std::vec::Vec<(std::boxed::Box<str>, V)>,
+  entries: Vec<(Utf8Bytes, V)>,
   key_bytes: u32,
   max_entries: u32,
   max_key_bytes: u32,
@@ -238,7 +249,7 @@ impl<V> Extensions<V> {
   #[must_use]
   pub const fn new(limits: &Limits) -> Self {
     Self {
-      entries: std::vec::Vec::new(),
+      entries: Vec::new(),
       key_bytes: 0,
       max_entries: limits.max_extension_entries.get(),
       max_key_bytes: limits.max_extension_key_bytes.get(),
@@ -264,17 +275,11 @@ impl<V> Extensions<V> {
     if let Some((_, slot)) = self.entries.iter_mut().find(|(name, _)| &**name == key) {
       return Ok(Some(core::mem::replace(slot, value)));
     }
-    if self.entries.len() as u64 >= u64::from(self.max_entries) {
-      return Err(Full {
-        ceiling: Ceiling::Entries,
-        value,
-      });
+    if self.entries.len() as u64 >= self.max_entries as u64 {
+      return Err(Full::new(Ceiling::Entries, value));
     }
-    if u64::from(self.key_bytes) + key.len() as u64 > u64::from(self.max_key_bytes) {
-      return Err(Full {
-        ceiling: Ceiling::KeyBytes,
-        value,
-      });
+    if self.key_bytes as u64 + key.len() as u64 > self.max_key_bytes as u64 {
+      return Err(Full::new(Ceiling::KeyBytes, value));
     }
     self.key_bytes += key.len() as u32;
     self.entries.push((key.into(), value));
@@ -374,7 +379,7 @@ impl<V> Extensions<V> {
   /// re-attach that. Re-deriving the allocation here keeps acceptance exactly as documented and
   /// makes the ceiling mean what it says.
   ///
-  /// Nothing is cloned. [`std::vec::Vec::shrink_to_fit`] moves the entries into the smaller
+  /// Nothing is cloned. [`Vec::shrink_to_fit`] moves the entries into the smaller
   /// allocation, so no `V: Clone` bound appears anywhere and a driver's handle is neither
   /// duplicated nor dropped. The cost is one reallocation, on the one path where the spine is over
   /// the ceiling.
@@ -393,12 +398,12 @@ impl<V> Extensions<V> {
 impl<'e, V> IntoIterator for &'e Extensions<V> {
   type Item = (&'e str, &'e V);
   type IntoIter = core::iter::Map<
-    core::slice::Iter<'e, (std::boxed::Box<str>, V)>,
-    fn(&'e (std::boxed::Box<str>, V)) -> (&'e str, &'e V),
+    core::slice::Iter<'e, (Utf8Bytes, V)>,
+    fn(&'e (Utf8Bytes, V)) -> (&'e str, &'e V),
   >;
 
   fn into_iter(self) -> Self::IntoIter {
-    fn pair<V>(entry: &(std::boxed::Box<str>, V)) -> (&str, &V) {
+    fn pair<V>(entry: &(Utf8Bytes, V)) -> (&str, &V) {
       (&entry.0, &entry.1)
     }
     self.entries.iter().map(pair as fn(_) -> _)

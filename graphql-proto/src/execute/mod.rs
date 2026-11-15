@@ -70,6 +70,9 @@
 
 use core::{fmt, num::NonZeroU32};
 
+use std::vec::Vec;
+
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use tokora::{SimpleSpan, span::AsSpan};
 
 use smear_parser::graphql::ast::{
@@ -77,6 +80,8 @@ use smear_parser::graphql::ast::{
   SelectionSet,
 };
 use smear_schema::{PackedType, RootOperation, Schema, Sym, TypeId, TypeKind, builtin};
+
+use crate::request::NamedVariable;
 
 use super::{
   Argument, ArgumentSource, Error, Extensions, FieldRequest, Leaf, Node, ReqId, ResponseStream,
@@ -91,8 +96,138 @@ use super::{
 };
 
 mod introspect;
+
 #[cfg(test)]
 mod tests;
+
+/// Enough concurrency that a driver never has to think about the knob, low enough that a runaway
+/// document cannot make the executor hand out unbounded work.
+const DEFAULT_IN_FLIGHT: NonZeroU32 = NonZeroU32::new(256).expect("256 is not zero");
+
+/// Larger than any response a schema designer meant to return, small enough to be a bound.
+///
+/// A million positions is far past a page of results and past most bulk exports; a response that
+/// genuinely needs more is a service that should say so by raising this. It is a ceiling on a
+/// pathological answer, not a tuning knob — which is why it is generous. A driver whose value type
+/// is large, or that runs where memory is tight, should lower it: the cost of a position is one
+/// slot plus one metadata row, and a slot holds the driver's own `V` inline.
+const DEFAULT_RESPONSE_SLOTS: NonZeroU32 = NonZeroU32::new(1 << 20).expect("2^20 is not zero");
+
+/// Four entries per position, which is generous for a document that merges and unreachable for one
+/// that does not: a group of one costs two entries — one merged selection and one location — so an
+/// ordinary response spends this at twice the rate it spends positions and still runs out of
+/// positions first.
+const DEFAULT_RESPONSE_METADATA: NonZeroU32 = NonZeroU32::new(1 << 22).expect("2^22 is not zero");
+
+/// Sixteen million units of draft §6.3 collection work.
+///
+/// # The unit is not a selection any more, and this number was chosen when it was
+///
+/// al8n/smear#113 set `2^24` against a budget of one unit per selection *examined*, and against
+/// that unit the old sentence here — "a document large enough to spend it has to *be* large, and
+/// the parser and the network have opinions about that long before this does" — was arithmetic:
+/// selections cost bytes, so the ceiling was a ceiling on document size and the network reached it
+/// first. al8n/smear#143 widened the unit to charge every entry a name lookup compares, and left
+/// both the constant and that sentence alone. A comparison count is not linear in document size, so
+/// the argument stopped describing the thing it was attached to — which is the failure mode worth
+/// naming: **the unit moved and the rationale did not.**
+///
+/// # What the number means now, measured rather than argued (al8n/smear#172, al8n/smear#196)
+///
+/// Since [`hash_bytes`](smear_schema::hash_bytes) gained its avalanche step and its fold between
+/// rounds, 4,096 distinct response keys cost 1.73–1.77 units each — one selection plus about three
+/// quarters of a comparison, summed over every table size the interner grows through — across
+/// thirty-three families that cross the radix a counter is written in against the width it is
+/// padded to, which is what decides where a spelling's varying bytes sit relative to a chunk
+/// boundary. "Every ordinary naming scheme tried" is what the previous sentence said, and it was
+/// true of the five that were tried and false of the ones that were not; the axis is here so that
+/// the claim is about a population. They scale at ×1.99 to ×2.02 per doubling out to 65,536 keys,
+/// where `field{i}` measures 114,764 units and `h{i:0>8}` 114,496. So this ceiling admits something
+/// over nine million response keys, and no honest document reaches it:
+/// [`max_response_slots`](Limits::max_response_slots) refuses at 2^20 positions first. Measured
+/// against `Limits::default()`, `k{i}`, `field{i}`, `h{i:0>8}` and
+/// `user{i:0>4}Name` documents are all served to 1,048,575 keys and all refused at 1,048,576 —
+/// which is the slot ceiling, not this one.
+///
+/// **Before the finalizer that boundary was a lottery on how a client spelled its aliases.** The
+/// same four schemes were served to 1,048,575, 968,252, 880,714 and 976,545 keys respectively: this
+/// ceiling bit first for three of the four, at a point set by which bytes of a name happened to
+/// distinguish it. Uniformity is what the finalizer bought here; the *bound* was never at stake,
+/// since a constructed pile-up spends this budget either way.
+///
+/// # What draft §6.4.1's argument charge costs against this number
+///
+/// The unit widened again after the paragraphs above were written, and this one is here so that
+/// the same failure — the unit moving and the rationale not — does not happen a third time. Every
+/// argument a request *writes* is charged its bytes at every position its field is coerced at. An
+/// honest document does not notice: a written argument name is a handful of bytes, so one unit
+/// each, against a response the slot ceiling already caps at `2^20` positions. A document that
+/// writes eleven arguments at every one of a million positions would reach this ceiling, and it
+/// has to *be* tens of megabytes to say so, which is the original argument holding for the one
+/// factor it was ever true of.
+///
+/// **The other factor of that scan is not charged here and must not be.** `declared` is the
+/// schema's; at one unit per declared argument per position this ceiling refuses a full-occupancy
+/// response at about thirteen of them, and public schemas write ten-argument fields. It is bounded
+/// at schema build by [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) instead, which is
+/// what keeps this number a statement about the client's document and not about the operator's SDL.
+///
+/// # Tightening it is a separate decision, and deliberately not taken here
+///
+/// A ceiling eight million keys past what any other ceiling admits is not doing much work, and
+/// lowering it is only safe now: with the fold unfinished, `2^19` refused an honestly named
+/// `h{i:0>8}` document at 5,777 keys — 75 kilobytes — which is a false refusal of legitimate input.
+/// But *what* it should be is a question about the population the default is derived over, and no
+/// measurement here answers it. The argument charge does not move that question: it is the same
+/// ledger over a population the same size, and the measurement that would settle the number has to
+/// cover both.
+const DEFAULT_SELECTION_VISITS: NonZeroU32 = NonZeroU32::new(1 << 24).expect("2^24 is not zero");
+
+/// Sixteen megabytes: room for every distinct name a large document and schema can name, plus a
+/// great many driver messages, and three orders of magnitude below where a `u32` offset stops
+/// working.
+const DEFAULT_INTERNED_BYTES: NonZeroU32 = NonZeroU32::new(1 << 24).expect("2^24 is not zero");
+
+/// Entries in one draft §7.1.7 `extensions` map.
+///
+/// Small on purpose, and it is not the shape of the other ceilings here. Those bound populations
+/// the *document* or the *response* grows into, and are sized so that no realistic request meets
+/// them. This bounds protocol metadata a service writes about itself — tracing, cost, cache hints,
+/// a deprecation notice — which is a handful of keys chosen by the implementer at design time, not
+/// a quantity that scales with anything. A service that genuinely needs more says so.
+const DEFAULT_EXTENSION_ENTRIES: NonZeroU32 = NonZeroU32::new(64).expect("64 is not zero");
+
+/// Key bytes across one draft §7.1.7 `extensions` map, which with the entry count bounds the scan.
+const DEFAULT_EXTENSION_KEY_BYTES: NonZeroU32 = NonZeroU32::new(4096).expect("4096 is not zero");
+
+/// Entries in one draft §7.1.3 request error result.
+///
+/// Sized from the reference implementation's own stops, so that a driver porting them is never
+/// refused by this one first. `graphql-js` 16.11.0's `validate` stops at `maxErrors`, 100 unless
+/// the caller says otherwise — its documentation: "Attackers can send pathologically invalid
+/// queries to induce a DoS attack, so by default `maxErrors` set to 100 errors" — and then appends
+/// one more error saying so, for 101. `execute` coerces variables under `maxCoercionErrors`, 50,
+/// and its overflow error makes 51. 128 is the next power of two above both.
+const DEFAULT_REQUEST_ERRORS: NonZeroU32 = NonZeroU32::new(128).expect("128 is not zero");
+
+/// Bytes of message in one driver-supplied request error.
+///
+/// A specified message is a sentence over the names it quotes, and the names are the document's:
+/// draft §2.1.9 puts no length on a `Name`. So the length a message reaches is the client's to
+/// choose, and the ceiling says how much of its own document a client can have quoted back at it —
+/// four kibibytes is room for any sentence and the names it needs, and refuses one whose bulk is a
+/// name the client made long on purpose. Matching `max_extension_key_bytes` is not a coincidence:
+/// both are text a service writes about a request rather than text a response is made of.
+const DEFAULT_REQUEST_ERROR_MESSAGE_BYTES: NonZeroU32 =
+  NonZeroU32::new(4096).expect("4096 is not zero");
+
+/// Draft §7.1.6 `locations` on one driver-supplied request error.
+///
+/// One or two is the ordinary count — a node, or a node and the one it conflicts with — and the
+/// count is the document's to grow: `graphql-js` 16.11.0's `UniqueArgumentNamesRule` reports every
+/// duplicate of an argument as one error's `nodes`. Sixty-four spans is a kibibyte on a 64-bit
+/// target, which is the size of the bound and not a guess at a distribution.
+const DEFAULT_REQUEST_ERROR_LOCATIONS: NonZeroU32 = NonZeroU32::new(64).expect("64 is not zero");
 
 /// What the executor will not do, whatever the document or the driver asks.
 ///
@@ -511,147 +646,85 @@ mod tests;
 /// assert_eq!(pool_of_eight.max_in_flight().get(), 8);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Limits {
+  #[cfg_attr(feature = "serde", serde(default = "default_max_inflight"))]
   pub(crate) max_in_flight: NonZeroU32,
+  #[cfg_attr(feature = "serde", serde(default = "default_max_response_slots"))]
   pub(crate) max_response_slots: NonZeroU32,
+  #[cfg_attr(feature = "serde", serde(default = "default_max_response_metadata"))]
   pub(crate) max_response_metadata: NonZeroU32,
+  #[cfg_attr(feature = "serde", serde(default = "default_max_selection_visits"))]
   pub(crate) max_selection_visits: NonZeroU32,
+  #[cfg_attr(feature = "serde", serde(default = "default_max_interned_bytes"))]
   pub(crate) max_interned_bytes: NonZeroU32,
+  #[cfg_attr(feature = "serde", serde(default = "default_max_extension_entries"))]
   pub(crate) max_extension_entries: NonZeroU32,
+  #[cfg_attr(feature = "serde", serde(default = "default_max_extension_key_bytes"))]
   pub(crate) max_extension_key_bytes: NonZeroU32,
+  #[cfg_attr(feature = "serde", serde(default = "default_max_request_errors"))]
   pub(crate) max_request_errors: NonZeroU32,
+  #[cfg_attr(
+    feature = "serde",
+    serde(default = "default_max_request_error_message_bytes")
+  )]
   pub(crate) max_request_error_message_bytes: NonZeroU32,
+  #[cfg_attr(
+    feature = "serde",
+    serde(default = "default_max_request_error_locations")
+  )]
   pub(crate) max_request_error_locations: NonZeroU32,
 }
 
-/// Enough concurrency that a driver never has to think about the knob, low enough that a runaway
-/// document cannot make the executor hand out unbounded work.
-const DEFAULT_IN_FLIGHT: NonZeroU32 = NonZeroU32::new(256).expect("256 is not zero");
+#[inline(always)]
+const fn default_max_inflight() -> NonZeroU32 {
+  DEFAULT_IN_FLIGHT
+}
 
-/// Larger than any response a schema designer meant to return, small enough to be a bound.
-///
-/// A million positions is far past a page of results and past most bulk exports; a response that
-/// genuinely needs more is a service that should say so by raising this. It is a ceiling on a
-/// pathological answer, not a tuning knob — which is why it is generous. A driver whose value type
-/// is large, or that runs where memory is tight, should lower it: the cost of a position is one
-/// slot plus one metadata row, and a slot holds the driver's own `V` inline.
-const DEFAULT_RESPONSE_SLOTS: NonZeroU32 = NonZeroU32::new(1 << 20).expect("2^20 is not zero");
+#[inline(always)]
+const fn default_max_response_slots() -> NonZeroU32 {
+  DEFAULT_RESPONSE_SLOTS
+}
 
-/// Four entries per position, which is generous for a document that merges and unreachable for one
-/// that does not: a group of one costs two entries — one merged selection and one location — so an
-/// ordinary response spends this at twice the rate it spends positions and still runs out of
-/// positions first.
-const DEFAULT_RESPONSE_METADATA: NonZeroU32 = NonZeroU32::new(1 << 22).expect("2^22 is not zero");
+#[inline(always)]
+const fn default_max_response_metadata() -> NonZeroU32 {
+  DEFAULT_RESPONSE_METADATA
+}
 
-/// Sixteen million units of draft §6.3 collection work.
-///
-/// # The unit is not a selection any more, and this number was chosen when it was
-///
-/// al8n/smear#113 set `2^24` against a budget of one unit per selection *examined*, and against
-/// that unit the old sentence here — "a document large enough to spend it has to *be* large, and
-/// the parser and the network have opinions about that long before this does" — was arithmetic:
-/// selections cost bytes, so the ceiling was a ceiling on document size and the network reached it
-/// first. al8n/smear#143 widened the unit to charge every entry a name lookup compares, and left
-/// both the constant and that sentence alone. A comparison count is not linear in document size, so
-/// the argument stopped describing the thing it was attached to — which is the failure mode worth
-/// naming: **the unit moved and the rationale did not.**
-///
-/// # What the number means now, measured rather than argued (al8n/smear#172, al8n/smear#196)
-///
-/// Since [`hash_bytes`](smear_schema::hash_bytes) gained its avalanche step and its fold between
-/// rounds, 4,096 distinct response keys cost 1.73–1.77 units each — one selection plus about three
-/// quarters of a comparison, summed over every table size the interner grows through — across
-/// thirty-three families that cross the radix a counter is written in against the width it is
-/// padded to, which is what decides where a spelling's varying bytes sit relative to a chunk
-/// boundary. "Every ordinary naming scheme tried" is what the previous sentence said, and it was
-/// true of the five that were tried and false of the ones that were not; the axis is here so that
-/// the claim is about a population. They scale at ×1.99 to ×2.02 per doubling out to 65,536 keys,
-/// where `field{i}` measures 114,764 units and `h{i:0>8}` 114,496. So this ceiling admits something
-/// over nine million response keys, and no honest document reaches it:
-/// [`max_response_slots`](Limits::max_response_slots) refuses at 2^20 positions first. Measured
-/// against `Limits::default()`, `k{i}`, `field{i}`, `h{i:0>8}` and
-/// `user{i:0>4}Name` documents are all served to 1,048,575 keys and all refused at 1,048,576 —
-/// which is the slot ceiling, not this one.
-///
-/// **Before the finalizer that boundary was a lottery on how a client spelled its aliases.** The
-/// same four schemes were served to 1,048,575, 968,252, 880,714 and 976,545 keys respectively: this
-/// ceiling bit first for three of the four, at a point set by which bytes of a name happened to
-/// distinguish it. Uniformity is what the finalizer bought here; the *bound* was never at stake,
-/// since a constructed pile-up spends this budget either way.
-///
-/// # What draft §6.4.1's argument charge costs against this number
-///
-/// The unit widened again after the paragraphs above were written, and this one is here so that
-/// the same failure — the unit moving and the rationale not — does not happen a third time. Every
-/// argument a request *writes* is charged its bytes at every position its field is coerced at. An
-/// honest document does not notice: a written argument name is a handful of bytes, so one unit
-/// each, against a response the slot ceiling already caps at `2^20` positions. A document that
-/// writes eleven arguments at every one of a million positions would reach this ceiling, and it
-/// has to *be* tens of megabytes to say so, which is the original argument holding for the one
-/// factor it was ever true of.
-///
-/// **The other factor of that scan is not charged here and must not be.** `declared` is the
-/// schema's; at one unit per declared argument per position this ceiling refuses a full-occupancy
-/// response at about thirteen of them, and public schemas write ten-argument fields. It is bounded
-/// at schema build by [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) instead, which is
-/// what keeps this number a statement about the client's document and not about the operator's SDL.
-///
-/// # Tightening it is a separate decision, and deliberately not taken here
-///
-/// A ceiling eight million keys past what any other ceiling admits is not doing much work, and
-/// lowering it is only safe now: with the fold unfinished, `2^19` refused an honestly named
-/// `h{i:0>8}` document at 5,777 keys — 75 kilobytes — which is a false refusal of legitimate input.
-/// But *what* it should be is a question about the population the default is derived over, and no
-/// measurement here answers it. The argument charge does not move that question: it is the same
-/// ledger over a population the same size, and the measurement that would settle the number has to
-/// cover both.
-const DEFAULT_SELECTION_VISITS: NonZeroU32 = NonZeroU32::new(1 << 24).expect("2^24 is not zero");
+#[inline(always)]
+const fn default_max_selection_visits() -> NonZeroU32 {
+  DEFAULT_SELECTION_VISITS
+}
 
-/// Sixteen megabytes: room for every distinct name a large document and schema can name, plus a
-/// great many driver messages, and three orders of magnitude below where a `u32` offset stops
-/// working.
-const DEFAULT_INTERNED_BYTES: NonZeroU32 = NonZeroU32::new(1 << 24).expect("2^24 is not zero");
+#[inline(always)]
+const fn default_max_interned_bytes() -> NonZeroU32 {
+  DEFAULT_INTERNED_BYTES
+}
 
-/// Entries in one draft §7.1.7 `extensions` map.
-///
-/// Small on purpose, and it is not the shape of the other ceilings here. Those bound populations
-/// the *document* or the *response* grows into, and are sized so that no realistic request meets
-/// them. This bounds protocol metadata a service writes about itself — tracing, cost, cache hints,
-/// a deprecation notice — which is a handful of keys chosen by the implementer at design time, not
-/// a quantity that scales with anything. A service that genuinely needs more says so.
-const DEFAULT_EXTENSION_ENTRIES: NonZeroU32 = NonZeroU32::new(64).expect("64 is not zero");
+#[inline(always)]
+const fn default_max_extension_entries() -> NonZeroU32 {
+  DEFAULT_EXTENSION_ENTRIES
+}
 
-/// Key bytes across one draft §7.1.7 `extensions` map, which with the entry count bounds the scan.
-const DEFAULT_EXTENSION_KEY_BYTES: NonZeroU32 = NonZeroU32::new(4096).expect("4096 is not zero");
+#[inline(always)]
+const fn default_max_extension_key_bytes() -> NonZeroU32 {
+  DEFAULT_EXTENSION_KEY_BYTES
+}
 
-/// Entries in one draft §7.1.3 request error result.
-///
-/// Sized from the reference implementation's own stops, so that a driver porting them is never
-/// refused by this one first. `graphql-js` 16.11.0's `validate` stops at `maxErrors`, 100 unless
-/// the caller says otherwise — its documentation: "Attackers can send pathologically invalid
-/// queries to induce a DoS attack, so by default `maxErrors` set to 100 errors" — and then appends
-/// one more error saying so, for 101. `execute` coerces variables under `maxCoercionErrors`, 50,
-/// and its overflow error makes 51. 128 is the next power of two above both.
-const DEFAULT_REQUEST_ERRORS: NonZeroU32 = NonZeroU32::new(128).expect("128 is not zero");
+#[inline(always)]
+const fn default_max_request_errors() -> NonZeroU32 {
+  DEFAULT_REQUEST_ERRORS
+}
 
-/// Bytes of message in one driver-supplied request error.
-///
-/// A specified message is a sentence over the names it quotes, and the names are the document's:
-/// draft §2.1.9 puts no length on a `Name`. So the length a message reaches is the client's to
-/// choose, and the ceiling says how much of its own document a client can have quoted back at it —
-/// four kibibytes is room for any sentence and the names it needs, and refuses one whose bulk is a
-/// name the client made long on purpose. Matching `max_extension_key_bytes` is not a coincidence:
-/// both are text a service writes about a request rather than text a response is made of.
-const DEFAULT_REQUEST_ERROR_MESSAGE_BYTES: NonZeroU32 =
-  NonZeroU32::new(4096).expect("4096 is not zero");
+#[inline(always)]
+const fn default_max_request_error_message_bytes() -> NonZeroU32 {
+  DEFAULT_REQUEST_ERROR_MESSAGE_BYTES
+}
 
-/// Draft §7.1.6 `locations` on one driver-supplied request error.
-///
-/// One or two is the ordinary count — a node, or a node and the one it conflicts with — and the
-/// count is the document's to grow: `graphql-js` 16.11.0's `UniqueArgumentNamesRule` reports every
-/// duplicate of an argument as one error's `nodes`. Sixty-four spans is a kibibyte on a 64-bit
-/// target, which is the size of the bound and not a guess at a distribution.
-const DEFAULT_REQUEST_ERROR_LOCATIONS: NonZeroU32 = NonZeroU32::new(64).expect("64 is not zero");
+#[inline(always)]
+const fn default_max_request_error_locations() -> NonZeroU32 {
+  DEFAULT_REQUEST_ERROR_LOCATIONS
+}
 
 impl Default for Limits {
   #[inline]
@@ -1388,7 +1461,7 @@ enum Coercion {
 /// this type still lists exactly the one error `start` raised, because that is all the executor
 /// raises. [`RequestErrorResult`](super::RequestErrorResult)'s header has the two kinds of entry
 /// and who raises each.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
 #[non_exhaustive]
 pub enum StartError {
   /// The document holds no operation at all.
@@ -1574,7 +1647,9 @@ impl core::error::Error for StartError {}
 /// The map is returned in every variant rather than dropped, for the reason a refused
 /// [`Extensions::insert`] returns its value: an entry may be a wasm or FFI handle, and a refusal
 /// that closes one has done more than refuse.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, IsVariant, TryUnwrap, Unwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum SetExtensionsError<V> {
   /// No operation is running: [`Executor::start`] has not been called, or the last one refused.
@@ -1635,6 +1710,9 @@ impl<V: fmt::Debug> core::error::Error for SetExtensionsError<V> {}
 /// without a map. A driver that ignores the `Err` therefore loses nothing the response was owed:
 /// an error there was a field for is recorded either way, and the map's values are back in its
 /// hands.
+#[derive(IsVariant, TryUnwrap, Unwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum UnattachedExtensions<V> {
   /// The map is larger than this executor's
@@ -2030,7 +2108,7 @@ where
   schema_field: Option<Sym>,
   type_field: Option<Sym>,
 
-  slots: std::vec::Vec<Slot<V::Value>>,
+  slots: Vec<Slot<V::Value>>,
   /// The greatest [`Slot::depth`] any position in `slots` carries.
   ///
   /// A high-water mark and not a scan, for the reason [`Slot::depth`] is a field and not a walk:
@@ -2047,9 +2125,9 @@ where
   /// turn by [`Limits::max_response_slots`] like the slab it is a fact about. `Response::depth`
   /// says the same thing to a caller.
   max_depth: u32,
-  meta: std::vec::Vec<Meta<'a, S>>,
-  merged: std::vec::Vec<&'a Field<S>>,
-  locations: std::vec::Vec<SimpleSpan>,
+  meta: Vec<Meta<'a, S>>,
+  merged: Vec<&'a Field<S>>,
+  locations: Vec<SimpleSpan>,
   interner: Interner,
   /// Definitions the draft §6.1 operation lookup has read, over the executor's whole life.
   ///
@@ -2060,7 +2138,7 @@ where
   /// lookup read nothing.
   #[cfg(test)]
   operation_definitions_walked: u64,
-  errors: std::vec::Vec<Row>,
+  errors: Vec<Row>,
   /// Draft §7.1.6's per-error `extensions` maps, which a [`Row`] indexes by position.
   ///
   /// # A side table, so the error that carries no map pays for none
@@ -2082,7 +2160,7 @@ where
   /// Each map arrived re-checked against this executor's two extension ceilings and with its spine
   /// re-derived, so what this holds is bounded by `max_response_slots` maps of bounded size —
   /// [`Limits::max_extension_entries`] states the product.
-  error_extensions: std::vec::Vec<Extensions<V::Value>>,
+  error_extensions: Vec<Extensions<V::Value>>,
   /// The draft §7.1.7 *Extensions* entry for this operation, or `None` when the response has none.
   ///
   /// # `proto` owns the top level, the driver owns every value under it
@@ -2107,7 +2185,7 @@ where
   /// names.
   extensions: Option<Extensions<V::Value>>,
 
-  inflight: std::vec::Vec<Entry>,
+  inflight: Vec<Entry>,
   epoch: u64,
   free: u32,
   live: u32,
@@ -2184,7 +2262,7 @@ where
 
   /// Everything one draft §6.3 collection reuses from the last. See `collect::Scratch`.
   scratch: Scratch<'a, S>,
-  scratch_sets: std::vec::Vec<&'a SelectionSet<S>>,
+  scratch_sets: Vec<&'a SelectionSet<S>>,
   /// What is left of [`Limits::max_selection_visits`] for this operation.
   visits: Visits,
   /// Draft §6.4.1's surviving arguments, for the one request `poll_resolve` is offering.
@@ -2201,7 +2279,7 @@ where
   ///
   /// It has exactly one reader, and [`retire_arguments`](Self::retire_arguments) is what that
   /// buys.
-  scratch_args: std::vec::Vec<Argument<'a, S, V::Value>>,
+  scratch_args: Vec<Argument<'a, S, V::Value>>,
   /// How deep into each written argument's spelling draft §6.4.1's scan has already been charged,
   /// in [`byte_units`](crate::collect::byte_units), parallel to the entries the scan has admitted.
   ///
@@ -2216,7 +2294,7 @@ where
   ///
   /// Cleared with `scratch_args` at every coercion, so it is one field's population and never an
   /// operation's.
-  arg_prefix: std::vec::Vec<u32>,
+  arg_prefix: Vec<u32>,
 }
 
 impl<'a, S, V> Executor<'a, S, V>
@@ -2253,18 +2331,18 @@ where
       typename: schema.sym(builtin::TYPENAME_FIELD.as_bytes()),
       schema_field: schema.sym(builtin::SCHEMA_FIELD.as_bytes()),
       type_field: schema.sym(builtin::TYPE_FIELD.as_bytes()),
-      slots: std::vec::Vec::new(),
+      slots: Vec::new(),
       max_depth: 0,
-      meta: std::vec::Vec::new(),
-      merged: std::vec::Vec::new(),
-      locations: std::vec::Vec::new(),
+      meta: Vec::new(),
+      merged: Vec::new(),
+      locations: Vec::new(),
       interner: Interner::new(limits.max_interned_bytes.get()),
       #[cfg(test)]
       operation_definitions_walked: 0,
-      errors: std::vec::Vec::new(),
-      error_extensions: std::vec::Vec::new(),
+      errors: Vec::new(),
+      error_extensions: Vec::new(),
       extensions: None,
-      inflight: std::vec::Vec::new(),
+      inflight: Vec::new(),
       epoch: 0,
       free: NONE,
       live: 0,
@@ -2275,13 +2353,13 @@ where
       phase: Phase::Idle,
       started: false,
       delivered: false,
-      scratch_sets: std::vec::Vec::new(),
+      scratch_sets: Vec::new(),
       deferred: NONE,
       serial_next: NONE,
       serial_steps: 0,
       visits: Visits::new(limits.max_selection_visits.get()),
-      scratch_args: std::vec::Vec::new(),
-      arg_prefix: std::vec::Vec::new(),
+      scratch_args: Vec::new(),
+      arg_prefix: Vec::new(),
     }
   }
 
@@ -4444,10 +4522,10 @@ where
       let source = match (variable, supplied.map(|argument| argument.value())) {
         // The inner `Some` is the reader: `has_value` is true, so the key was readable and the
         // driver answered about it. An unreadable one never reaches here — it left at step 5.d.
-        (Some((Some(variable), Some(value))), _) => ArgumentSource::Variable {
+        (Some((Some(variable), Some(value))), _) => ArgumentSource::Variable(NamedVariable {
           name: variable,
           value,
-        },
+        }),
         (None, Some(literal)) => ArgumentSource::Literal(literal),
         // `has_value` is true, so one of the arms above always matches: a variable with no value
         // returned at the step 5.d branch above — whether the driver said so or the spelling was

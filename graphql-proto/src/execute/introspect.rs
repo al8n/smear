@@ -629,7 +629,7 @@ where
     let read = match self.scratch_args.first().map(|argument| &argument.source) {
       None | Some(ArgumentSource::SchemaDefault) => Some(false),
       Some(ArgumentSource::Literal(InputValue::Boolean(literal))) => Some(literal.value()),
-      Some(ArgumentSource::Variable { value, .. }) => ctx.as_bool(value),
+      Some(ArgumentSource::Variable(v)) => ctx.as_bool(v.value()),
       Some(ArgumentSource::Literal(_)) => None,
     };
     // The values are this walk's to drop: it is their only reader, and it has read them.
@@ -657,7 +657,7 @@ where
       Some(ArgumentSource::Literal(InputValue::String(literal))) => {
         literal_type(schema, literal.source().as_ref(), &mut self.visits)
       }
-      Some(ArgumentSource::Variable { value, .. }) => match ctx.as_str(value) {
+      Some(ArgumentSource::Variable(v)) => match ctx.as_str(v.value()) {
         Some(name) if self.visits.take_bytes(name.len()) => {
           Read::Named(schema.type_by_name(name.as_bytes()).map(|(id, _)| id))
         }
