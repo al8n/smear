@@ -338,9 +338,9 @@ dependencies = [
 
 [[package]]
 name = "tokora"
-version = "0.13.1"
+version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9a76ef510012ae64b721ed1afc6668d82d7793be0436eb99f8c7ea20bf23060"
+checksum = "ebda3cea5b9be8d2070e89bd5a8084f27acbf653d477dbb4f3b68c6e2b388087"
 dependencies = [
  "ascii",
  "deranged",
