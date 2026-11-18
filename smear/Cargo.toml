@@ -99,7 +99,9 @@ parser = ["dep:smear-parser"]
 # which is where the §3 pass lives, and the edge to `smear-semantics`, the kernels that pass runs
 # on, so the feature fence in `src/lib.rs` can read them. The schema representation itself is
 # `core` + `alloc`, which the `smear-noatomic` workspace member holds to by compiling those very
-# files for `thumbv6m-none-eabi` with an empty `[dependencies]` table of its own.
+# files for `thumbv6m-none-eabi` with an empty `[dependencies]` table of its own. What every build
+# with a tier already has is the base this is measured against: `smear-schema`'s owned-text seam
+# brings smol-bytes, and `bytes` under it, on a target with pointer-width atomics.
 validator = ["parser", "graphql", "dep:smear-compiler", "smear-schema/build", "dep:smear-semantics"]
 
 # Draft §6 execution (`smear::proto`): the Sans-I/O query executor.
@@ -109,12 +111,14 @@ validator = ["parser", "graphql", "dep:smear-compiler", "smear-schema/build", "d
 # §7.1.2's whole *request*-error phase is over before an `Executor` exists, which is why no method
 # on one returns a validation failure.
 #
-# `graphql-proto` itself adds no THIRD-PARTY dependency and defines no value type of its own: the
-# driver's representation reaches it through the `proto::Values` trait, so it is `core` + `alloc`
-# for the same reason the schema representation is, and it takes `smear-schema` with default
-# features off so reading a schema does not pull the front end.
+# `graphql-proto` defines no value type of its own: the driver's representation reaches it through
+# the `proto::Values` trait, so it is `core` + `alloc` for the same reason the schema representation
+# is, and it takes `smear-schema` with default features off so reading a schema does not pull the
+# front end. It brings one THIRD-PARTY crate for its draft §7.1.7 maps, `indexmap` — with
+# `hashbrown` and `equivalent` beneath it, and `foldhash` for the hasher where `std` is off — and
+# both of its tiers turn that on, so a build with no tier compiles none of them.
 #
-# TWO THIRD-PARTY CRATES ARRIVE HERE ANYWAY, and they are this crate's rather than that one's:
+# TWO MORE THIRD-PARTY CRATES ARRIVE HERE, and they are this crate's rather than that one's:
 # `smear::json` — the draft §7.2.1 writer, which is a module of THIS package because it needs both
 # the response and the values — renders numbers with `itoa` and `zmij`. The `[dependencies]` block
 # has why those two and why neither undoes the point of the module. They hang off `proto` rather

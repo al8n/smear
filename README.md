@@ -369,7 +369,7 @@ parser cannot exist without it, and a gate that can only ever be on is not a gat
 | `graphqlx` | Extended GraphQL, in the lexer and parser. Semver-exempt until the dialect stabilises | ✓ |
 | `parser` | `smear::parser` — the combinators and the ASTs. Off, `smear-parser` is not in the graph at all and the umbrella is the lexer alone | ✓ |
 | `validator` | `smear::validator` — the draft §5 rules, plus `smear-schema`'s `build` feature for the §3 pass. Implies `parser` and `graphql`. Adds no third-party dependency | |
-| `proto` | `smear::proto` — draft §6 query, serial mutation and subscription execution as a Sans-I/O state machine. It returns a response tree that `smear::json` writes as §7.2.1 JSON. Implies `validator`, because execution is entered with a document the §5 rules have already accepted. Adds no third-party dependency and defines no value type: the driver's own representation reaches it through a trait | |
+| `proto` | `smear::proto` — draft §6 query, serial mutation and subscription execution as a Sans-I/O state machine. It returns a response tree that `smear::json` writes as §7.2.1 JSON. Implies `validator`, because execution is entered with a document the §5 rules have already accepted. Adds `indexmap` for the §7.1.7 `extensions` maps — with `foldhash` as their hasher where `std` is off — and `itoa` and `zmij` for `smear::json`'s numbers. Defines no value type: the driver's own representation reaches it through a trait | |
 | `introspection` | `Schema::from_introspection`, building a schema from a draft §4 response. Implies `validator`; needs `std` or `alloc`, which it does not imply. Adds no third-party dependency | |
 | `analysis` | `smear::analysis` — the GraphQLx schema analyzer: GraphQLx packages in, a resolved model and its diagnostics out, and rules as visitors over the model, smear's own and a consumer's. Implies `parser` and `graphqlx`; needs `std` or `alloc`, which it does not imply. Adds no third-party dependency | |
 | `serde` | `Serialize` and `Deserialize` for `proto::Limits`, so a deployment can read the executor's ceilings from its own configuration; a field the input leaves out takes its default. Takes effect with `proto`, which it does not imply, and implies no tier. Adds `serde` | |
@@ -387,6 +387,10 @@ No feature but `default` switches a tier on: not a capability (`graphql`, `graph
 `bytes_1`, `hipstr_0_8` and `smol-bytes_0_2` bring in a crate that links `alloc` on its own. So a
 `default-features = false` consumer names `std` or `alloc` itself, and names `std` beside
 `rowan_0_17`, because the lossless tower is written against the standard library.
+
+A tier brings two crates of its own, and "adds no third-party dependency" above is measured against
+them: on a target with pointer-width atomics, `smear-schema` holds the text it shares with `proto`
+in smol-bytes 0.2, which brings `bytes` 1. With no tier, neither is compiled.
 
 The five dependency features carry the major of the crate they enable, and the dependency is named
 the same way, so a second major of one of them can be added beside it. The unversioned names —
