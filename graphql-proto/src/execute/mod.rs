@@ -651,6 +651,9 @@ const DEFAULT_REQUEST_ERROR_LOCATIONS: NonZeroU32 = NonZeroU32::new(64).expect("
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+// A field the input leaves out takes its default, so a misspelt key must be an error: dropped
+// silently it would leave the ceiling the caller meant to tighten at its default.
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct Limits {
   #[cfg_attr(feature = "serde", serde(default = "default_max_inflight"))]
   pub(crate) max_in_flight: NonZeroU32,

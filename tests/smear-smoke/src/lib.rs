@@ -1521,6 +1521,38 @@ mod tests {
     );
   }
 
+  /// A ceiling the document leaves out takes its default, and a key that names no ceiling is
+  /// refused, so a misspelling cannot silently select the default it meant to replace.
+  #[test]
+  fn the_protocol_limits_refuse_an_unknown_key() {
+    use core::num::NonZeroU32;
+
+    use smear::proto::Limits;
+
+    let tightened = toml::from_str::<Limits>("max_response_slots = 1024")
+      .expect("a document naming one ceiling reads");
+    assert_eq!(
+      tightened.max_response_slots(),
+      NonZeroU32::new(1024).expect("1024 is not zero")
+    );
+    // Every other ceiling is the default, so the whole value is the default with that one change.
+    assert_eq!(
+      tightened,
+      Limits::default().with_max_response_slots(NonZeroU32::new(1024).expect("1024 is not zero"))
+    );
+
+    // `max_response_slot` is `max_response_slots` misspelt.
+    let refused = toml::from_str::<Limits>("max_response_slot = 1024")
+      .expect_err("a key that names no ceiling is refused");
+    assert!(
+      refused.to_string().contains("max_response_slot"),
+      "the error names the unknown key: {refused}"
+    );
+    // A misspelling beside a valid key is refused too, not skipped.
+    toml::from_str::<Limits>("max_in_flight = 8\nmax_response_slot = 1024")
+      .expect_err("an unknown key beside a known one is refused");
+  }
+
   /// The source-lattice conformance assertion, run as a test so a failure names itself rather
   /// than appearing as "the workspace does not build".
   ///

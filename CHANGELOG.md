@@ -21,7 +21,8 @@ All notable changes to Smear are documented in this file.
   `unwrap_*` and `try_unwrap_*`, by value, by reference and by mutable reference. `Error`
   implements `core::error::Error`.
 - `graphql-proto` and `smear`: a `serde` feature derives `Serialize` and `Deserialize` for
-  `Limits`, and a field the input leaves out takes its default. `smear/serde` forwards it, and
+  `Limits`, and a field the input leaves out takes its default. A key that names no ceiling is
+  refused, so a misspelt one cannot leave a default in place. `smear/serde` forwards it, and
   implies neither `proto` nor a tier.
 - `graphql-proto` and `smear-schema`: a tier brings dependencies. `graphql-proto` depends on
   `indexmap` with either tier and on foldhash with `alloc`, and `smear-schema` on smol-bytes 0.2
