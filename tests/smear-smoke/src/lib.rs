@@ -596,6 +596,23 @@ pub fn graphql_execute(sdl: &str, query: &str, value: Option<&str>) -> (Option<S
   (leaf, errors)
 }
 
+/// `serde` — `proto`'s [`Limits`] serialises and deserialises itself, so a deployment can keep its
+/// ceilings in a configuration file. The feature turns on no tier and not `proto`; with both on, it
+/// derives the two traits.
+///
+/// Written as bounds rather than a call so the probe IS the two trait implementations.
+///
+/// [`Limits`]: smear::proto::Limits
+pub fn serde_limits() -> &'static str {
+  fn assert_serde<T>() -> &'static str
+  where
+    T: serde::Serialize + for<'de> serde::Deserialize<'de>,
+  {
+    core::any::type_name::<T>()
+  }
+  assert_serde::<smear::proto::Limits>()
+}
+
 /// `rowan_0_17` — the lossless CST tower, reachable through the crate named `smear` for the first time
 /// (#81). A `parse_document` -> [`Parse`] -> `SyntaxNode` round trip.
 ///
@@ -1485,6 +1502,24 @@ pub mod exported_macro {
 #[cfg(test)]
 mod tests {
   use std::collections::BTreeSet;
+
+  /// `serde`, driven across the dependency edge: the default `Limits` round-trips through a TOML
+  /// document, and a document that names no ceiling reads as the defaults, field by field.
+  #[test]
+  fn the_protocol_limits_round_trip_through_serde() {
+    use smear::proto::Limits;
+
+    assert!(super::serde_limits().ends_with("Limits"));
+    let written = toml::to_string(&Limits::default()).expect("the default limits serialise");
+    assert_eq!(
+      toml::from_str::<Limits>(&written).expect("the written limits read back"),
+      Limits::default()
+    );
+    assert_eq!(
+      toml::from_str::<Limits>("").expect("a document with no ceiling reads"),
+      Limits::default()
+    );
+  }
 
   /// The source-lattice conformance assertion, run as a test so a failure names itself rather
   /// than appearing as "the workspace does not build".
