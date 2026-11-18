@@ -28,7 +28,7 @@
 
 use std::{collections::BTreeMap, string::String, vec, vec::Vec};
 
-use smear_lexer::decode_string_value;
+use smear_lexer::decode_string_value_to_string;
 use tokora::diagnostic::Location;
 
 use super::{
@@ -185,7 +185,7 @@ impl<'d> Tree<'d> {
           if let Some((spelling, location)) = declared.description {
             text.clear();
             // A description the lexer read always decodes; one that did not is left absent.
-            if decode_string_value(spelling, &mut text).is_ok() {
+            if decode_string_value_to_string(spelling, &mut text).is_ok() {
               builder.set_module_description(id, &text, location);
             }
           }

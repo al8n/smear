@@ -68,7 +68,7 @@
 
 use std::{collections::BTreeMap, format, string::String, vec, vec::Vec};
 
-use smear_lexer::decode_string_value;
+use smear_lexer::decode_string_value_to_string;
 use smear_parser::graphqlx::ast::{
   Name, PathRoot, TypeSystemItem, UsePrefix, UseTree, UseTreeKind,
 };
@@ -1273,7 +1273,7 @@ impl<'x> Run<'_, 'x> {
       return Err(Why::Flat);
     }
     self.text.clear();
-    if decode_string_value(raw, &mut self.text).is_err() {
+    if decode_string_value_to_string(raw, &mut self.text).is_err() {
       return Err(Why::NotRelative);
     }
     if is_url(&self.text) {

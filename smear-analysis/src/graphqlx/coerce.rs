@@ -335,7 +335,7 @@ use std::{
   vec::Vec,
 };
 
-use smear_lexer::decode_string_value;
+use smear_lexer::decode_string_value_to_string;
 use smear_semantics::duplicates::Duplicates;
 use tokora::{
   SimpleSpan,
@@ -4471,7 +4471,9 @@ impl<'p> Coercion<'_, 'p, '_> {
     match raw.kind {
       RawKind::String => {
         self.scratch.clear();
-        if decode_string_value(self.raw.text(source, raw.span), &mut self.scratch).is_err() {
+        if decode_string_value_to_string(self.raw.text(source, raw.span), &mut self.scratch)
+          .is_err()
+        {
           return Err(refused(Why::Kind));
         }
         Ok(self.builder.keep_bytes(self.scratch.as_bytes()))
@@ -4860,11 +4862,12 @@ impl<'p> Coercion<'_, 'p, '_> {
       return cooked;
     }
     self.scratch.clear();
-    let cooked = if decode_string_value(self.written(node, source), &mut self.scratch).is_ok() {
-      Some(self.builder.keep_text(&self.scratch))
-    } else {
-      None
-    };
+    let cooked =
+      if decode_string_value_to_string(self.written(node, source), &mut self.scratch).is_ok() {
+        Some(self.builder.keep_text(&self.scratch))
+      } else {
+        None
+      };
     self.update(slot, |kept: &mut Kept| kept.cooked = Some(cooked));
     cooked
   }

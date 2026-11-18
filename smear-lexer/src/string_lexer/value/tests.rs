@@ -14,24 +14,46 @@ use core::fmt;
 use std::{borrow::Cow, format, string::String, vec::Vec};
 
 use super::{
-  super::LitStr, StringValueError, decode_string_value, string_value_len, string_value_pieces,
-  string_value_pieces_from_str,
+  super::LitStr, StringValueError, decode_string_value, decode_string_value_to_string,
+  string_value_len, string_value_pieces, string_value_pieces_from_str,
 };
 
 /// Decodes a spelling, or panics with the refusal.
+///
+/// Through both decoding doors, which must agree: the generic one, and the `String` one, whose room
+/// must be the value's length exactly.
 fn decoded(spelling: &str) -> String {
   let mut out = String::new();
   decode_string_value(spelling.as_bytes(), &mut out)
     .unwrap_or_else(|error| panic!("`{spelling}` denotes a value: {error}"));
+  let mut reserved = String::new();
+  decode_string_value_to_string(spelling.as_bytes(), &mut reserved)
+    .unwrap_or_else(|error| panic!("`{spelling}` denotes a value: {error}"));
+  assert_eq!(reserved, out, "the two doors disagree on `{spelling}`");
+  assert_eq!(
+    reserved.capacity(),
+    reserved.len(),
+    "the `String` door reserved past the value of `{spelling}`"
+  );
   out
 }
 
-/// The refusal a spelling produces.
+/// The refusal a spelling produces, the same from every door, which writes and reserves nothing.
 fn refused(spelling: &[u8]) -> StringValueError {
   let mut out = String::from("kept");
   let error = decode_string_value(spelling, &mut out).expect_err("the spelling denotes no value");
   assert_eq!(out, "kept", "a refusal appended something");
   assert_eq!(string_value_len(spelling), Err(error));
+  let mut reserved = String::from("kept");
+  assert_eq!(
+    decode_string_value_to_string(spelling, &mut reserved),
+    Err(error)
+  );
+  assert_eq!(
+    reserved, "kept",
+    "a refusal appended something to a `String`"
+  );
+  assert_eq!(reserved.capacity(), "kept".len(), "a refusal reserved room");
   error
 }
 
@@ -356,6 +378,44 @@ fn decoding_appends_to_what_is_there() {
   decode_string_value(br#""a\u{1F600}b""#, &mut out).expect("a value");
   decode_string_value(b"\"\"\"\n  c\n\"\"\"", &mut out).expect("a value");
   assert_eq!(out, "> a\u{1f600}bc");
+}
+
+/// The `String` door reserves the value's exact length before it writes, so a long run and the
+/// escape after it land in one allocation.
+///
+/// This is the shape that doubles a `String` handed to the generic door: the run is written as one
+/// piece, the `String` grows to fit it, and the escape's one byte then outgrows that room. Through
+/// the `String` door a fresh `String` holds room for the value alone, a scratch `String` with room
+/// for the run and not the escape grows to the value's length rather than to twice its room, and a
+/// `String` that already holds text grows by the value's length past it.
+#[test]
+fn the_string_door_reserves_the_value_once_and_exactly() {
+  const RUN: usize = 4096;
+  let spelling = format!("\"{}\\n\"", "a".repeat(RUN));
+  let value = format!("{}\n", "a".repeat(RUN));
+
+  let mut fresh = String::new();
+  decode_string_value_to_string(spelling.as_bytes(), &mut fresh).expect("a value");
+  assert_eq!(fresh, value);
+  assert_eq!(fresh.capacity(), value.len(), "a fresh `String`");
+
+  let mut scratch = String::with_capacity(RUN);
+  decode_string_value_to_string(spelling.as_bytes(), &mut scratch).expect("a value");
+  assert_eq!(scratch, value);
+  assert_eq!(
+    scratch.capacity(),
+    value.len(),
+    "a scratch `String` with room for the run alone"
+  );
+
+  let mut held = String::from("> ");
+  decode_string_value_to_string(spelling.as_bytes(), &mut held).expect("a value");
+  assert_eq!(held, format!("> {value}"));
+  assert_eq!(
+    held.capacity(),
+    held.len(),
+    "a `String` that already held text"
+  );
 }
 
 /// A writer with room for `room` bytes: it refuses the first write that would pass them, and

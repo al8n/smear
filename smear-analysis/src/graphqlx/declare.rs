@@ -37,7 +37,7 @@
 
 use std::{collections::BTreeMap, format, string::String, vec, vec::Vec};
 
-use smear_lexer::decode_string_value;
+use smear_lexer::decode_string_value_to_string;
 use smear_semantics::duplicates::Duplicates;
 use tokora::diagnostic::Location;
 
@@ -544,7 +544,7 @@ fn describe(
   if let Some((spelling, location)) = description {
     text.clear();
     // A description the lexer read always decodes; one that did not is left absent.
-    if decode_string_value(spelling, text).is_ok() {
+    if decode_string_value_to_string(spelling, text).is_ok() {
       builder.set_def_description(def, text.as_str(), location);
     }
   }

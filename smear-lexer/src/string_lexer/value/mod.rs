@@ -42,14 +42,16 @@
 //! spelling's own bytes, one escape's character, a line feed between two block lines — and never
 //! splits a character across two of them. [`string_value_len`] adds them up, which is how an arena
 //! is reserved from the decoded length before a byte of it is written, and [`decode_string_value`]
-//! writes them to any `fmt::Write`. A printer that re-encodes the value walks the pieces too and
-//! needs no buffer of its own.
+//! writes them to any `fmt::Write`. [`decode_string_value_to_string`] does both for a `String`: it
+//! reserves the decoded length, then writes the pieces into that room. A printer that re-encodes
+//! the value walks the pieces too and needs no buffer of its own.
 //!
 //! A caller can refuse a piece, as a `fmt::Write` refuses a write, and the walk stops at the
 //! refusal, so the rest of a long literal is neither decoded nor handed to a writer that has
 //! already failed.
 
 use core::{fmt, ops::Range};
+use std::string::String;
 
 use super::escape::{Escape, escape};
 use crate::error::StringValueError;
@@ -116,7 +118,8 @@ pub fn string_value_pieces_from_str(
 /// Returns the length in bytes of the value a `StringValue` spelling denotes.
 ///
 /// An exact count, not a bound, because it is the same walk with the bytes added up instead of
-/// written. A `String` that reserves it before [`decode_string_value`] grows once.
+/// written. [`decode_string_value_to_string`] reserves it before it writes, so its `String` grows
+/// once.
 ///
 /// # Errors
 ///
@@ -135,8 +138,8 @@ pub fn string_value_len(spelling: &[u8]) -> Result<usize, StringValueError> {
 ///
 /// The spelling is checked whole before a byte is written, so a refused spelling writes nothing. A
 /// writer that fails midway has received a prefix of the value, and the answer is
-/// [`StringValueError::Sink`]. A `String` caller that wants one allocation reserves
-/// [`string_value_len`] first.
+/// [`StringValueError::Sink`]. A `String` caller that wants one allocation calls
+/// [`decode_string_value_to_string`], which reserves the value's length first.
 ///
 /// Any [`core::fmt::Write`] takes the value: a `String`, a `&mut dyn fmt::Write`, or the
 /// [`fmt::Formatter`] a `Display` implementation is handed.
@@ -153,6 +156,34 @@ where
   // The checking walk: it meets every refusal of the spelling before a byte reaches `out`.
   string_value_len(spelling)?;
   string_value_pieces(spelling, |piece| out.write_str(piece))
+}
+
+/// Appends the value a `StringValue` spelling denotes to a `String`, reserving exactly its length
+/// first.
+///
+/// [`decode_string_value`] for the writer that can be told how much is coming. The spelling is
+/// measured with [`string_value_len`] before a byte is written, `out` reserves exactly that many
+/// more bytes, and the walk copies the value in: one allocation at most, and none when `out`
+/// already has the room. The generic door cannot say how much is coming, so a `String` handed to
+/// it grows as the pieces arrive, and the last piece of a long value can reallocate it to twice the
+/// room the value needs.
+///
+/// # Errors
+///
+/// The spelling's refusals, as [`string_value_pieces`] gives them, with nothing appended and
+/// nothing reserved. Never [`StringValueError::Sink`]: a `String` takes every piece.
+pub fn decode_string_value_to_string(
+  spelling: &[u8],
+  out: &mut String,
+) -> Result<(), StringValueError> {
+  let len = string_value_len(spelling)?;
+  out.reserve_exact(len);
+  // The measuring walk accepted the spelling, and a `String` takes every piece, so this walk
+  // appends exactly `len` bytes and answers `Ok`.
+  string_value_pieces(spelling, |piece| {
+    out.push_str(piece);
+    Ok(())
+  })
 }
 
 /// Where a spelling's content lies between its delimiters, and whether they are a block string's.

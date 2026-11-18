@@ -567,7 +567,7 @@ pub const EXEMPTIONS: &[Exemption] = &[
     kind: Kind::Verdict,
     element: None,
     issue: None,
-    reason: "Why `decode_string_value` and its three siblings refused a `StringValue` spelling a \
+    reason: "Why `decode_string_value` and its four siblings refused a `StringValue` spelling a \
              caller handed them, or why the writer a caller handed `decode_string_value`, or the \
              callback it handed a piece walk, stopped taking the value. A decoder \
              outcome rather than a parse position: none of the three refusals of a spelling is \

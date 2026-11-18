@@ -146,7 +146,7 @@ use std::{
 };
 
 use smear_lexer::{
-  decode_string_value,
+  decode_string_value_to_string,
   graphqlx::{LitFloat, LitInt},
 };
 use smear_parser::graphqlx::ast::{
@@ -1029,7 +1029,7 @@ impl Lowering<'_, '_, '_> {
     };
     self.text.clear();
     // A description the lexer read always decodes; one that did not is left absent.
-    if decode_string_value(written.source().as_ref(), &mut self.text).is_ok() {
+    if decode_string_value_to_string(written.source().as_ref(), &mut self.text).is_ok() {
       self.builder.set_member_description(
         member,
         self.text.as_str(),
@@ -2122,7 +2122,7 @@ impl Lowering<'_, '_, '_> {
     {
       self.text.clear();
       // A description the lexer read always decodes; one that did not is left absent.
-      if decode_string_value(spelling, &mut self.text).is_ok() {
+      if decode_string_value_to_string(spelling, &mut self.text).is_ok() {
         self
           .builder
           .set_schema_description(self.text.as_str(), location);

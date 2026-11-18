@@ -972,6 +972,7 @@ impl<Char> TryFrom<StringErrors<Char>> for StringError<Char> {
 
 /// Why a `StringValue` spelling denotes no value — what
 /// [`decode_string_value`](crate::decode_string_value),
+/// [`decode_string_value_to_string`](crate::decode_string_value_to_string),
 /// [`string_value_len`](crate::string_value_len),
 /// [`string_value_pieces`](crate::string_value_pieces) and
 /// [`string_value_pieces_from_str`](crate::string_value_pieces_from_str) refuse — or why

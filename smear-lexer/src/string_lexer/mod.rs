@@ -13,7 +13,8 @@ pub use block::{LitBlockStr, LitComplexBlockStr};
 pub(crate) use inline::skip_inline_str_simd;
 pub use inline::{LitComplexInlineStr, LitInlineStr};
 pub use value::{
-  decode_string_value, string_value_len, string_value_pieces, string_value_pieces_from_str,
+  decode_string_value, decode_string_value_to_string, string_value_len, string_value_pieces,
+  string_value_pieces_from_str,
 };
 
 /// Generates one literal carrier: a private `source`, the line facts the lexer measured on *that*
