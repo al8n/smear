@@ -4,6 +4,29 @@ All notable changes to Smear are documented in this file.
 
 ## [Unreleased]
 
+- `graphql-proto`!: `Extensions` holds its entries in an `IndexMap` and finds a key by its hash,
+  with `std::hash::RandomState` under `std` and foldhash at a fixed, public seed without it,
+  where it scanned. Iteration is still insertion order, `remove` keeps the remaining entries in
+  order, and two maps are still equal only with the same entries in the same order. A key is
+  held inline up to 62 bytes where the target has pointer-width atomics. `Extensions::new` is no
+  longer `const`. `Extensions::iter` returns `ExtensionsIter`, which can be named and runs from
+  both ends as well as knowing its length, and `&Extensions` iterates as it, where
+  `IntoIterator`'s iterator type spelled the storage.
+- `graphql-proto`!: `ArgumentSource::Variable` carries a `NamedVariable`, exported at the crate
+  root, where it had the fields `name` and `value`: `name()`, `value()` and `into_parts()` read
+  them, and `new` with the `set_*` and `with_*` methods builds one. `StartError`'s
+  `SourceFieldArgumentBudget` carries its ceiling as `SourceFieldArgumentBudget(u32)`, where it
+  had the field `limit`.
+- `graphql-proto`: the public enums derive their `is_*` predicates, and each one with data
+  `unwrap_*` and `try_unwrap_*`, by value, by reference and by mutable reference. `Error`
+  implements `core::error::Error`.
+- `graphql-proto` and `smear`: a `serde` feature derives `Serialize` and `Deserialize` for
+  `Limits`, and a field the input leaves out takes its default. `smear/serde` forwards it, and
+  implies neither `proto` nor a tier.
+- `graphql-proto` and `smear-schema`: a tier brings dependencies. `graphql-proto` depends on
+  `indexmap` with either tier and on foldhash with `alloc`, and `smear-schema` on smol-bytes 0.2
+  with either tier where the target has pointer-width atomics. A build with no tier compiles none
+  of them.
 - `smear-schema` and `smear-compiler`: an `Int` literal stands for a `Float` only while a finite
   double holds its value, as `Float`'s input coercion requires (§3.5.2). `Schema::build` and
   `Rule::ValuesOfCorrectType` refuse one of magnitude `2^1024 - 2^970` or more, the least integer
