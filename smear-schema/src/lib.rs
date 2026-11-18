@@ -183,8 +183,8 @@ pub use repr::{
   DefaultKind, Deprecation, DirectiveDef, DirectiveLocation, DirectiveLocations, DirectiveMeta,
   EnumValueMeta, FieldDef, FieldMeta, InputValueDef, InputValueMeta, MAX_DIRECTIVE_ARGUMENTS,
   MAX_FIELD_ARGUMENTS, MAX_SYMBOLS, MAX_WRAPPERS, NameIndex, PackedType, Range32, RootOperation,
-  Schema, Sym, Text, TypeDef, TypeFlags, TypeId, TypeKind, TypeMeta, is_name, is_name_tail,
-  is_reserved,
+  Schema, Sym, Text, TypeDef, TypeFlags, TypeId, TypeKind, TypeMeta, TypeRef, is_name,
+  is_name_tail, is_reserved,
 };
 
 /// The features this crate was compiled with, as constants the umbrella asserts against.
