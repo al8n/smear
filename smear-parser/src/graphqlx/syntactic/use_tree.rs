@@ -36,7 +36,7 @@ use super::{
   leading_path_separator, name, path_root, peek_kind, try_name, unexpected_here,
 };
 use crate::{
-  combinator::{ParseCtx, TokenSpannedExt, asterisk, try_double_colon},
+  combinator::{ParseCtx, asterisk, try_double_colon},
   graphqlx::{
     GraphQLx,
     ast::{
@@ -366,7 +366,7 @@ where
     // `Nested`, as a selection set collects into: the container is where a deep tree's release
     // lives.
     .collect_with(Nested::empty())
-    .token_spanned()
+    .spanned_trimmed()
     .parse_input(inp)
     .map(|Spanned { span, data }| (span, data))
 }

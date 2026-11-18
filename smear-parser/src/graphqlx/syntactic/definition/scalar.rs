@@ -25,7 +25,7 @@ where
     ParseAttempt::Decline => None,
   };
   Ok(ScalarTypeDefinition::new(
-    SimpleSpan::new(start, extent_end(inp)),
+    SimpleSpan::new(start, inp.span().end()),
     name,
     implements,
     directives,

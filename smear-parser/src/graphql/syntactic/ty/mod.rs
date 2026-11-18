@@ -15,7 +15,7 @@ use tokora::{
 
 use super::{GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken};
 use crate::{
-  combinator::{ParseCtx, TokenSpannedExt, try_bang},
+  combinator::{ParseCtx, try_bang},
   graphql::{
     GraphQL,
     ast::{ListType, Name, NamedType, Type},
@@ -107,7 +107,7 @@ where
     }
   })
   .then(try_bang)
-  .token_spanned()
+  .spanned_trimmed()
   .map(
     |Spanned {
        span,

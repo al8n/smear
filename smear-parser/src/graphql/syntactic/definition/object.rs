@@ -26,7 +26,7 @@ where
     ParseAttempt::Decline => None,
   };
   Ok(ObjectTypeDefinition::new(
-    SimpleSpan::new(start, extent_end(inp)),
+    SimpleSpan::new(start, inp.span().end()),
     name,
     implements,
     directives,

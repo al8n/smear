@@ -48,12 +48,12 @@ definition_parser!(
   RootOperationTypeDefinition<GraphqlxSlice<'inp, Src>>,
   [contextual],
   {
-    let node_start = extent_start(inp)?;
+    let node_start = inp.cursor_trimmed()?;
     let operation_type = operation_type(inp)?;
     take_colon(inp)?;
     let name = type_path(inp)?;
     Ok(RootOperationTypeDefinition::new(
-      extent_since(inp, node_start),
+      inp.span_since_trimmed(&node_start),
       operation_type,
       name,
     ))
@@ -74,7 +74,7 @@ definition_parser!(
       .at_least(1)
       .delimited_by_braces()
       .collect_with(Vec::new())
-      .token_spanned()
+      .spanned_trimmed()
       .parse_input(inp)
       .map(|Spanned { span, data }| RootOperationTypesDefinition::new(span, data))
   }

@@ -28,7 +28,7 @@ use super::{
   fragment_name, try_name,
 };
 use crate::{
-  combinator::{ParseCtx, TokenSpannedExt, at, try_colon, try_spread},
+  combinator::{ParseCtx, at, try_colon, try_spread},
   graphql::{
     GraphQL,
     ast::{
@@ -588,7 +588,7 @@ selection_parser!(
       // `Nested`, by way of `Default`, exactly as the value productions collect theirs: the
       // container is where a selection set's release lives.
       .collect_with(Default::default())
-      .token_spanned()
+      .spanned_trimmed()
       .parse_input(inp)
       .map(|Spanned { span, data }| SelectionSet::new(span, data))
   }

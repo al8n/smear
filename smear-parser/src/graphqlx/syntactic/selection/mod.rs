@@ -24,7 +24,7 @@ use super::{
   unexpected_here,
 };
 use crate::{
-  combinator::{ParseCtx, TokenSpannedExt, at, try_colon, try_spread},
+  combinator::{ParseCtx, at, try_colon, try_spread},
   graphqlx::{
     GraphQLx,
     ast::{
@@ -190,7 +190,7 @@ selection_parser!(
   {
     take_on
       .ignore_then(super::generic::type_path)
-      .token_spanned()
+      .spanned_trimmed()
       .map(|Spanned { span, data }| TypeCondition::new(span, data))
       .parse_input(inp)
   }
@@ -638,7 +638,7 @@ selection_parser!(
       // `Nested`, by way of `Default`, exactly as the value productions collect theirs: the
       // container is where a selection set's release lives.
       .collect_with(Default::default())
-      .token_spanned()
+      .spanned_trimmed()
       .parse_input(inp)
       .map(|Spanned { span, data }| SelectionSet::new(span, data))
   }

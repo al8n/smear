@@ -16,7 +16,7 @@ definition_parser!(
       .at_least(1)
       .delimited_by_braces()
       .collect_with(Vec::new())
-      .token_spanned()
+      .spanned_trimmed()
       .parse_input(inp)
       .map(|Spanned { span, data }| InputFieldsDefinition::new(span, data))
   }
@@ -55,7 +55,7 @@ where
     ParseAttempt::Decline => None,
   };
   Ok(InputObjectTypeDefinition::new(
-    SimpleSpan::new(start, extent_end(inp)),
+    SimpleSpan::new(start, inp.span().end()),
     name,
     directives,
     fields_definition,

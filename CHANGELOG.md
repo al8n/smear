@@ -357,6 +357,12 @@ All notable changes to Smear are documented in this file.
   `smol-bytes` feature of `smear`, `smear-lexer` and `smear-parser` now enables
   tokora's `smol-bytes_0_2` integration instead of `smol_bytes_0_1`, so the four
   smol-bytes source types are smol-bytes 0.2's. Supersedes #235.
+- `smear-parser`!: the token-extent span vocabulary leaves `combinator`: `extent_start`,
+  `extent_end`, `extent_since`, `TokenSpanned` and `TokenSpannedExt`. tokora 0.13.2's trimmed
+  spans give the same answers, and the parsers now use them: `ParseInput::spanned_trimmed` for
+  `.token_spanned()`, `InputRef::cursor_trimmed` and `InputRef::span_since_trimmed` for the start
+  and the span, and `InputRef::span().end()` for `extent_end`. Every span the parsers report is
+  unchanged. The workspace requires tokora 0.13.2.
 - **Diagnostics follow tokora 0.13: label and help text is borrowed from the
   diagnostic.** `Diagnose::label` on every smear error type returns
   `Option<Label<'_>>`; `primary_label` and `help` are unchanged in what they

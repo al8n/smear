@@ -29,7 +29,7 @@ use super::{
   selection::selection_set,
 };
 use crate::{
-  combinator::{ParseCtx, TokenSpannedExt, extent_since, extent_start},
+  combinator::ParseCtx,
   graphql::{
     GraphQL,
     ast::{
@@ -276,7 +276,7 @@ document_parser!(
   inp,
   DescribedDefinition<GraphqlSlice<'inp, Src>>,
   {
-    let node_start = extent_start(inp)?;
+    let node_start = inp.cursor_trimmed()?;
     let description = match StringValue::try_graphql(inp)? {
       ParseAttempt::Accept(value) => Some(value),
       ParseAttempt::Decline => None,
@@ -288,7 +288,7 @@ document_parser!(
     }
     let definition = definition(inp)?;
     Ok(Described::new(
-      extent_since(inp, node_start),
+      inp.span_since_trimmed(&node_start),
       description,
       definition,
     ))
@@ -437,7 +437,7 @@ document_parser!(
       .at_least(1)
       .collect_with(Vec::new())
       .map(|definitions: Vec<DefinitionOrExtension<GraphqlSlice<'inp, Src>>>| definitions)
-      .token_spanned()
+      .spanned_trimmed()
       .parse_input(inp)?;
     Ok(Document::new(span, definitions))
   }

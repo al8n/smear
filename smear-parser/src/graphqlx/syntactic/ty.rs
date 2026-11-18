@@ -22,7 +22,7 @@ use super::{
   leading_path_separator, path, path_after_first, peek_kind, unexpected_here,
 };
 use crate::{
-  combinator::{ParseCtx, TokenSpannedExt, extent_since, extent_start, try_bang},
+  combinator::{ParseCtx, try_bang},
   graphqlx::{
     GraphQLx,
     ast::{DefinitionTypePath, Nest, Type, TypeGenerics},
@@ -86,7 +86,7 @@ where
     .at_least(1)
     .delimited_by_angles()
     .collect_with(Vec::new())
-    .token_spanned()
+    .spanned_trimmed()
     .parse_input(inp)
     .map(|Spanned { span, data }| TypeGenerics::new(span, data))
 }
@@ -184,7 +184,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  let node_start = extent_start(inp)?;
+  let node_start = inp.cursor_trimmed()?;
   let identifier_head =
     |Spanned { span, data: token }: Spanned<GraphqlxToken<'inp, Src>, SimpleSpan>,
      inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| match token {
@@ -211,7 +211,7 @@ where
     },
   };
   let required = matches!(try_bang(inp)?, ParseAttempt::Accept(_));
-  let span = extent_since(inp, node_start);
+  let span = inp.span_since_trimmed(&node_start);
   Ok(match core {
     TypeCore::Path(path, generics) => {
       // A path's arguments are the second way a GraphQLx type nests, so the list that closes the

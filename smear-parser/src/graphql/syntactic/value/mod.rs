@@ -29,7 +29,7 @@ use smear_lexer::graphql::{ContextualKeyword, syntactic::SyntacticTokenKind};
 
 use super::{GraphqlError, GraphqlInput, GraphqlLexer, GraphqlSlice, GraphqlToken, name};
 use crate::{
-  combinator::{ParseCtx, TokenSpannedExt, colon, dollar, equal},
+  combinator::{ParseCtx, colon, dollar, equal},
   graphql::{
     GraphQL,
     ast::{
@@ -736,7 +736,7 @@ numeric_value_parser!(
       .repeated_while::<_, U1>(decide_value_head::<_, Ctx>)
       .delimited_by_brackets()
       .collect_with(Default::default())
-      .token_spanned()
+      .spanned_trimmed()
       .parse_input(inp)
       .map(|Spanned { span, data: values }| ListNode::new(span, values))
   }
@@ -752,7 +752,7 @@ numeric_value_parser!(
       .repeated_while::<_, U1>(decide_value_head::<_, Ctx>)
       .delimited_by_brackets()
       .collect_with(Default::default())
-      .token_spanned()
+      .spanned_trimmed()
       .parse_input(inp)
       .map(|Spanned { span, data: values }| ListNode::new(span, values))
   }
@@ -791,7 +791,7 @@ numeric_value_parser!(
       )?;
       value_with::<Src, Ctx, N>(inp)
     })
-    .token_spanned()
+    .spanned_trimmed()
     .map(
       |Spanned {
          span,
@@ -835,7 +835,7 @@ numeric_value_parser!(
       )?;
       const_value_with::<Src, Ctx, N>(inp)
     })
-    .token_spanned()
+    .spanned_trimmed()
     .map(
       |Spanned {
          span,
@@ -856,7 +856,7 @@ numeric_value_parser!(
       .repeated_while::<_, U1>(decide_object_field_head::<_, Ctx>)
       .delimited_by_braces()
       .collect_with(Default::default())
-      .token_spanned()
+      .spanned_trimmed()
       .parse_input(inp)
       .map(|Spanned { span, data: fields }| ObjectNode::new(span, fields))
   }
@@ -872,7 +872,7 @@ numeric_value_parser!(
       .repeated_while::<_, U1>(decide_object_field_head::<_, Ctx>)
       .delimited_by_braces()
       .collect_with(Default::default())
-      .token_spanned()
+      .spanned_trimmed()
       .parse_input(inp)
       .map(|Spanned { span, data: fields }| ObjectNode::new(span, fields))
   }
@@ -1192,7 +1192,7 @@ numeric_value_parser!(
 
     equal
       .ignore_then(validated_const_tail)
-      .token_spanned()
+      .spanned_trimmed()
       .map(|Spanned { span, data: value }| DefaultInputValueNode::new(span, value))
       .parse_input(inp)
   }

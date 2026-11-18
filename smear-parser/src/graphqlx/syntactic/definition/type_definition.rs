@@ -99,11 +99,11 @@ definition_parser!(
   Described<TypeDefinition<GraphqlxSlice<'inp, Src>>, GraphqlxSlice<'inp, Src>>,
   [contextual],
   {
-    let node_start = extent_start(inp)?;
+    let node_start = inp.cursor_trimmed()?;
     let description = description(inp)?;
     let definition = type_definition(inp)?;
     Ok(Described::new(
-      extent_since(inp, node_start),
+      inp.span_since_trimmed(&node_start),
       description,
       definition,
     ))

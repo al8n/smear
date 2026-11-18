@@ -11,14 +11,14 @@ definition_parser!(
   FieldDefinition<GraphqlSlice<'inp, Src>>,
   [contextual],
   {
-    let node_start = extent_start(inp)?;
+    let node_start = inp.cursor_trimmed()?;
     let description = description(inp)?;
     let name = take_name(inp)?;
     let arguments_definition = try_arguments_definition(inp)?.into();
     take_colon(inp)?;
     let ty = take_type(inp)?;
     let directives = optional_const_directives(inp)?;
-    let span = extent_since(inp, node_start);
+    let span = inp.span_since_trimmed(&node_start);
     Ok(Described::new(
       span,
       description,
@@ -41,7 +41,7 @@ definition_parser!(
       .at_least(1)
       .delimited_by_braces()
       .collect_with(Vec::new())
-      .token_spanned()
+      .spanned_trimmed()
       .parse_input(inp)
       .map(|Spanned { span, data }| FieldsDefinition::new(span, data))
   }
