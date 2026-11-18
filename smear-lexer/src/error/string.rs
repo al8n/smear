@@ -972,9 +972,10 @@ impl<Char> TryFrom<StringErrors<Char>> for StringError<Char> {
 
 /// Why a `StringValue` spelling denotes no value — what
 /// [`decode_string_value`](crate::decode_string_value),
-/// [`string_value_len`](crate::string_value_len) and
-/// [`string_value_pieces`](crate::string_value_pieces) refuse — or why `decode_string_value` or
-/// `string_value_pieces` stopped handing it out.
+/// [`string_value_len`](crate::string_value_len),
+/// [`string_value_pieces`](crate::string_value_pieces) and
+/// [`string_value_pieces_from_str`](crate::string_value_pieces_from_str) refuse — or why
+/// `decode_string_value` or a piece walk stopped handing it out.
 ///
 /// None of the three refusals of a spelling is reachable from a spelling the parsers lexed. A
 /// missing delimiter and a bad escape are what the lexer itself refuses, and so is content that is
@@ -1008,7 +1009,8 @@ pub enum StringValueError {
   /// The writer [`decode_string_value`](crate::decode_string_value) was handed refused a write. It
   /// holds a prefix of the value, and nothing was written to it after the refusal.
   ///
-  /// Or the callback [`string_value_pieces`](crate::string_value_pieces) was handed refused a
+  /// Or the callback [`string_value_pieces`](crate::string_value_pieces) or
+  /// [`string_value_pieces_from_str`](crate::string_value_pieces_from_str) was handed refused a
   /// piece, the last one it was handed: the walk stopped there.
   ///
   /// [`core::fmt::Error`] carries nothing, so neither does this: a `fmt::Write` implementation

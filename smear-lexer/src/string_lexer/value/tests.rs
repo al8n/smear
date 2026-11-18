@@ -15,6 +15,7 @@ use std::{borrow::Cow, format, string::String, vec::Vec};
 
 use super::{
   super::LitStr, StringValueError, decode_string_value, string_value_len, string_value_pieces,
+  string_value_pieces_from_str,
 };
 
 /// Decodes a spelling, or panics with the refusal.
@@ -133,42 +134,99 @@ fn a_block_string_is_block_string_value() {
 /// the two must not differ.
 #[test]
 fn the_byte_decoder_agrees_with_the_cow_conversions() {
-  const CORPUS: &[&str] = &[
-    r#""""#,
-    r#""A""#,
-    r#""a\"b""#,
-    r#""a\\b""#,
-    r#""a\/b""#,
-    r#""\b\f\n\r\t""#,
-    // The fixed-width `\u` escapes, with `\u{5c}` spelling their backslash.
-    "\"\u{5c}u0041\"",
-    "\"\u{5c}u00e9\"",
-    "\"\u{5c}ud83d\u{5c}ude00\"",
-    "\"\u{e9}\u{1f600}\"",
-    r#""\u{1F600}""#,
-    r#""caf\u{e9} \u{1f600}""#,
-    "\"caf\u{e9}\"",
-    r#""""""""#,
-    r#""""plain""""#,
-    "\"\"\"\n    Hello,\n      World!\n\n    Yours,\n      GraphQL.\n    \"\"\"",
-    "\"\"\"\n    Hello,\n      World!\n\n    Yours,\n      GraphQL.\n\"\"\"",
-    "\"\"\"\n  a\n    \n  b\n\"\"\"",
-    "\"\"\"\n    a\n  \n    b\n\"\"\"",
-    "\"\"\"a\n\"\"\"",
-    "\"\"\"\na\n\"\"\"",
-    "\"\"\"\ncontent\n\n\"\"\"",
-    "\"\"\"a\n  b\n    c\n\"\"\"",
-    "\"\"\"\n\t\ta\n\t\t\tb\n\"\"\"",
-    "\"\"\"  keeps first line indent\n  and dedents this\n\"\"\"",
-    "\"\"\"\r\n  a\r\n  b\r\n\"\"\"",
-    "\"\"\"a\r\nb\rc\n\"\"\"",
-    "\"\"\"\n   \n  \n\"\"\"",
-    r#""""a\"""b""""#,
-    r#""""a\nb""""#,
-  ];
-
   for literal in CORPUS {
     assert_eq!(decoded(literal), cooked(literal), "`{literal}`");
+  }
+}
+
+/// Literals the lexer accepts, spelling every escape and every block-string shape: the corpus the
+/// doors into the walks are compared over.
+const CORPUS: &[&str] = &[
+  r#""""#,
+  r#""A""#,
+  r#""a\"b""#,
+  r#""a\\b""#,
+  r#""a\/b""#,
+  r#""\b\f\n\r\t""#,
+  // The fixed-width `\u` escapes, with `\u{5c}` spelling their backslash.
+  "\"\u{5c}u0041\"",
+  "\"\u{5c}u00e9\"",
+  "\"\u{5c}ud83d\u{5c}ude00\"",
+  "\"\u{e9}\u{1f600}\"",
+  r#""\u{1F600}""#,
+  r#""caf\u{e9} \u{1f600}""#,
+  "\"caf\u{e9}\"",
+  r#""""""""#,
+  r#""""plain""""#,
+  "\"\"\"\n    Hello,\n      World!\n\n    Yours,\n      GraphQL.\n    \"\"\"",
+  "\"\"\"\n    Hello,\n      World!\n\n    Yours,\n      GraphQL.\n\"\"\"",
+  "\"\"\"\n  a\n    \n  b\n\"\"\"",
+  "\"\"\"\n    a\n  \n    b\n\"\"\"",
+  "\"\"\"a\n\"\"\"",
+  "\"\"\"\na\n\"\"\"",
+  "\"\"\"\ncontent\n\n\"\"\"",
+  "\"\"\"a\n  b\n    c\n\"\"\"",
+  "\"\"\"\n\t\ta\n\t\t\tb\n\"\"\"",
+  "\"\"\"  keeps first line indent\n  and dedents this\n\"\"\"",
+  "\"\"\"\r\n  a\r\n  b\r\n\"\"\"",
+  "\"\"\"a\r\nb\rc\n\"\"\"",
+  "\"\"\"\n   \n  \n\"\"\"",
+  r#""""a\"""b""""#,
+  r#""""a\nb""""#,
+];
+
+/// Every piece a door hands out for a spelling, in order, and the door's answer.
+type Handed = (Vec<String>, Result<(), StringValueError>);
+
+/// What [`string_value_pieces`] hands out for `spelling`.
+fn through_bytes(spelling: &str) -> Handed {
+  let mut pieces = Vec::new();
+  let answer = string_value_pieces(spelling.as_bytes(), |piece| {
+    pieces.push(String::from(piece));
+    Ok(())
+  });
+  (pieces, answer)
+}
+
+/// What [`string_value_pieces_from_str`] hands out for `spelling`.
+fn through_text(spelling: &str) -> Handed {
+  let mut pieces = Vec::new();
+  let answer = string_value_pieces_from_str(spelling, |piece| {
+    pieces.push(String::from(piece));
+    Ok(())
+  });
+  (pieces, answer)
+}
+
+/// The text door hands out what the byte door does: the same pieces in the same order, and the
+/// same answer.
+///
+/// The two doors run one walk and differ only in the UTF-8 check the text door leaves to `&str`.
+/// What each does on its own is cut the delimiters off and pick the reading, and a cut one byte
+/// out, or the other reading, would hand out other pieces. The refused spellings are compared
+/// pieces and all, because a refusal of the spelling comes after the pieces before it.
+#[test]
+fn the_text_door_hands_out_what_the_byte_door_does() {
+  // No delimiters, or a backslash that begins no escape, after the pieces before it.
+  const REFUSED: &[&str] = &[
+    "",
+    "abc",
+    "\"",
+    "\"\"\"",
+    "\"\"\"abc\"",
+    r#""ab\q""#,
+    r#""a\nb\qc""#,
+  ];
+
+  for spelling in CORPUS {
+    let (pieces, answer) = through_bytes(spelling);
+    assert_eq!(answer, Ok(()), "`{spelling}` denotes a value");
+    assert_eq!(through_text(spelling), (pieces, answer), "`{spelling}`");
+  }
+  for spelling in REFUSED {
+    let (pieces, answer) = through_bytes(spelling);
+    assert!(answer.is_err(), "`{spelling}` denotes no value");
+    assert_eq!(through_text(spelling), (pieces, answer), "`{spelling}`");
   }
 }
 

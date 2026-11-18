@@ -332,8 +332,9 @@ fn a_block_literal_gets_draft_2_9_4() {
 /// The two share one implementation, `smear-lexer`'s reading of a `StringValue`, and
 /// `tests/json_writer.rs` holds that reading to `apollo-parser`, which shares no code with it.
 /// What this pins is that the two doors into it agree. The writer hands the
-/// spelling to `string_value_pieces` and escapes each piece as it arrives; the conversion takes
-/// the delimiters off a lexed literal and builds the value whole, for `Json::string` to escape.
+/// spelling to `string_value_pieces_from_str` and escapes each piece as it arrives; the conversion
+/// takes the delimiters off a lexed literal and builds the value whole, for `Json::string` to
+/// escape.
 ///
 /// The corpus spells the braced escape and the block-string shapes, and converts the `Plain`
 /// variant through the same door as the `Complex` one. That is #163's repair of the conversion,

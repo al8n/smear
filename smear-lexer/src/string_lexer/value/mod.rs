@@ -7,17 +7,17 @@
 //! conversion. That door does not reach a caller that holds the spelling alone, and the callers
 //! that matter do: a parsed `StringValue` publishes its source and nothing the lexer measured,
 //! `smear-schema`'s builder is generic over `S: AsRef<[u8]>`, and an executor answering
-//! `__type(name:)` meets the literal in a document of any source type. So the three public
-//! functions here take the spelling — delimiters included — and apply §2.9.1's escapes or
-//! §2.9.4's `BlockStringValue()` themselves.
+//! `__type(name:)` meets the literal in a document of any source type. So the public functions
+//! here take the spelling — delimiters included — and apply §2.9.1's escapes or §2.9.4's
+//! `BlockStringValue()` themselves.
 //!
 //! # One reading behind every door
 //!
 //! The walks here are the only ones. The `Cow` conversions run them over a lexed carrier's body,
-//! and `smear`'s JSON writer runs them through [`string_value_pieces`]. The inline walk reads every
-//! escape with the one escape reader, `escape`, and its caller says what a backslash that begins
-//! no escape is: a refusal here, and content in the `Cow` conversion, which answers on a literal
-//! the lexer already accepted and so must neither panic nor refuse.
+//! and `smear`'s JSON writer runs them through [`string_value_pieces_from_str`]. The inline walk
+//! reads every escape with the one escape reader, `escape`, and its caller says what a backslash
+//! that begins no escape is: a refusal here, and content in the `Cow` conversion, which answers on
+//! a literal the lexer already accepted and so must neither panic nor refuse.
 //!
 //! # Bytes in, text out
 //!
@@ -28,6 +28,13 @@
 //! make. The parsers' byte lexer refuses a string literal that is not UTF-8 (smear#246), so a
 //! spelling they lexed passes that check; [`StringValueError::NotUtf8`] answers a spelling from
 //! anywhere else.
+//!
+//! A caller that holds the spelling as text already has what that check establishes, so
+//! [`string_value_pieces_from_str`] takes a `&str` and leaves the check out. It is the same walk
+//! behind a second door, and the two doors differ in nothing else. The check reads the whole
+//! content before the first piece is handed out, so making it again over text would spend a read
+//! of the whole literal even on a caller that refuses the first piece: the JSON writer, whose sink
+//! can refuse any write, is that caller.
 //!
 //! # Pieces, and the callers that want them
 //!
@@ -42,7 +49,7 @@
 //! refusal, so the rest of a long literal is neither decoded nor handed to a writer that has
 //! already failed.
 
-use core::fmt;
+use core::{fmt, ops::Range};
 
 use super::escape::{Escape, escape};
 use crate::error::StringValueError;
@@ -63,6 +70,10 @@ use crate::error::StringValueError;
 /// and the walk stops there: nothing after the refused piece is decoded or handed out. A caller
 /// that takes every piece answers `Ok(())`.
 ///
+/// The content between the delimiters is checked for UTF-8 before the first piece is handed out.
+/// A spelling already held as text has passed that check, and [`string_value_pieces_from_str`]
+/// walks it without making it again.
+///
 /// # Errors
 ///
 /// [`StringValueError`]: a spelling with no delimiters, content that is not UTF-8, or a backslash
@@ -75,7 +86,31 @@ pub fn string_value_pieces(
   spelling: &[u8],
   mut piece: impl FnMut(&str) -> fmt::Result,
 ) -> Result<(), StringValueError> {
-  walk(spelling, &mut piece)
+  let (content, block) = delimited(spelling)?;
+  // The one check the text door leaves out.
+  let content = core::str::from_utf8(&spelling[content]).map_err(|_| StringValueError::NotUtf8)?;
+  walk(content, block, &mut piece)
+}
+
+/// Walks the value a `StringValue` spelling denotes, one piece at a time, from a spelling already
+/// held as text: [`string_value_pieces`] for a `&str`.
+///
+/// The same walk, handing out the same pieces with the same answers, less the UTF-8 check the byte
+/// door makes over the content before its first piece, which a `&str` has already passed. So
+/// refusing an early piece of a long inline value costs a read of the spelling up to that piece,
+/// not of all of it. A block value is the exception at either door: every line's indentation is
+/// measured before the first line can be handed out.
+///
+/// # Errors
+///
+/// As [`string_value_pieces`], except that [`StringValueError::NotUtf8`] cannot happen: a `&str` is
+/// UTF-8.
+pub fn string_value_pieces_from_str(
+  spelling: &str,
+  mut piece: impl FnMut(&str) -> fmt::Result,
+) -> Result<(), StringValueError> {
+  let (content, block) = delimited(spelling.as_bytes())?;
+  walk(&spelling[content], block, &mut piece)
 }
 
 /// Returns the length in bytes of the value a `StringValue` spelling denotes.
@@ -117,26 +152,32 @@ where
 {
   // The checking walk: it meets every refusal of the spelling before a byte reaches `out`.
   string_value_len(spelling)?;
-  walk(spelling, &mut |piece: &str| out.write_str(piece))
+  string_value_pieces(spelling, |piece| out.write_str(piece))
 }
 
-/// The walk behind every door here: the delimiters come off, the content is checked for UTF-8, and
-/// the inline or the block reading hands the value to `piece`, which can refuse a piece.
+/// Where a spelling's content lies between its delimiters, and whether they are a block string's.
+///
+/// The delimiters are ASCII quotes, so both ends of the range fall on character boundaries of a
+/// spelling that is text: the text door cuts its content out with nothing to check.
+fn delimited(spelling: &[u8]) -> Result<(Range<usize>, bool), StringValueError> {
+  match spelling {
+    [b'"', b'"', b'"', .., b'"', b'"', b'"'] => Ok((3..spelling.len() - 3, true)),
+    // `"""` opens a block string and nothing else, so a spelling that starts with one and does not
+    // end with one is no string at all rather than an inline one holding quotes.
+    [b'"', b'"', b'"', ..] => Err(StringValueError::Unquoted),
+    [b'"', .., b'"'] => Ok((1..spelling.len() - 1, false)),
+    _ => Err(StringValueError::Unquoted),
+  }
+}
+
+/// The walk behind both piece doors, over the content between the delimiters: the inline or the
+/// block reading hands the value to `piece`, which can refuse a piece.
 ///
 /// A refused piece stops the walk with [`StringValueError::Sink`].
-fn walk<F>(spelling: &[u8], piece: &mut F) -> Result<(), StringValueError>
+fn walk<F>(content: &str, block: bool, piece: &mut F) -> Result<(), StringValueError>
 where
   F: FnMut(&str) -> fmt::Result,
 {
-  let (content, block) = match spelling {
-    [b'"', b'"', b'"', content @ .., b'"', b'"', b'"'] => (content, true),
-    // `"""` opens a block string and nothing else, so a spelling that starts with one and does not
-    // end with one is no string at all rather than an inline one holding quotes.
-    [b'"', b'"', b'"', ..] => return Err(StringValueError::Unquoted),
-    [b'"', content @ .., b'"'] => (content, false),
-    _ => return Err(StringValueError::Unquoted),
-  };
-  let content = core::str::from_utf8(content).map_err(|_| StringValueError::NotUtf8)?;
   if block {
     block_value(content, piece).map_err(|fmt::Error| StringValueError::Sink)
   } else {
@@ -148,8 +189,8 @@ where
 #[derive(Clone, Copy)]
 pub(crate) enum Invalid {
   /// The spelling is refused, with [`StringValueError::InvalidEscape`], once the run before the
-  /// backslash is handed out: the decoder's answer, and through [`string_value_pieces`] the JSON
-  /// writer's.
+  /// backslash is handed out: the decoder's answer, and through [`string_value_pieces_from_str`]
+  /// the JSON writer's.
   Refuse,
   /// The backslash is content, and the walk reads on from the byte after it: the `Cow`
   /// conversion's answer. That conversion runs on a literal the lexer already accepted, so it is

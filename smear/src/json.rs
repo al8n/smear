@@ -94,11 +94,11 @@
 //! And the two that are listed to be closed rather than tracked. **Operating-system resources** —
 //! descriptors, handles, threads, locks — is empty by construction: this module's whole import list
 //! is [`core::fmt`], `std::vec::Vec`, [`itoa`], [`zmij`] and `smear-lexer`'s
-//! [`string_value_pieces`], and it opens, spawns and locks nothing. **Non-termination** is not a
-//! fifth resource but a way of making any of the four infinite, and it needs a cycle: the response
-//! tree is the executor's slabs, which are a tree by construction, and a materialised value is an
-//! owned tree over `Vec` with no shared and no interior-mutable node, so neither can contain one. A
-//! driver's own `WriteJson` can, and that is the driver's.
+//! [`string_value_pieces_from_str`], and it opens, spawns and locks nothing. **Non-termination** is
+//! not a fifth resource but a way of making any of the four infinite, and it needs a cycle: the
+//! response tree is the executor's slabs, which are a tree by construction, and a materialised
+//! value is an owned tree over `Vec` with no shared and no interior-mutable node, so neither can
+//! contain one. A driver's own `WriteJson` can, and that is the driver's.
 //!
 //! **Static storage is deliberately not on the list, and it is the one to check next.** A `Vec` in
 //! a `static` or a thread-local is (2) plus *retention*: a peak that is freed with the call is
@@ -168,7 +168,7 @@
 
 use core::fmt;
 
-use smear_lexer::string_value_pieces;
+use smear_lexer::string_value_pieces_from_str;
 
 pub use response::{
   write_request_error_result, write_request_error_result_with, write_response, write_response_with,
@@ -474,11 +474,13 @@ impl<W: fmt::Write> Json<W> {
   /// that is what makes materialisation allocate nothing — so something has to apply draft §2.9.1's
   /// escapes and draft §2.9.4's block-string algorithm before a JSON string can be written.
   ///
-  /// That is `smear-lexer`'s [`string_value_pieces`], the one reading of a `StringValue` in this
-  /// workspace, which the lexer's own `Cow<str>` conversions run too. It hands the value out a
-  /// piece at a time, and each piece is escaped into the sink as it arrives: the literal is walked
-  /// once, and no `String` is built for it. A `Cow` conversion would cost a **`String` per literal
-  /// that needed cooking**, and the allocation gates in this module's tests are what say this door
+  /// That is `smear-lexer`'s reading of a `StringValue`, the one in this workspace, which the
+  /// lexer's own `Cow<str>` conversions run too. The writer takes it at
+  /// [`string_value_pieces_from_str`], its door for a spelling that is already text, so the literal
+  /// is not read through for UTF-8 before the walk starts. The walk hands the value out a piece at
+  /// a time, and each piece is escaped into the sink as it arrives: the literal is walked once, and
+  /// no `String` is built for it. A `Cow` conversion would cost a **`String` per literal that
+  /// needed cooking**, and the allocation gates in this module's tests are what say this door
   /// costs none.
   ///
   /// # Escapes, and what is refused
@@ -650,18 +652,19 @@ fn write_control<W: fmt::Write>(out: &mut W, byte: u8) -> fmt::Result {
   out.write_char(HEX[usize::from(byte & 0x0f)] as char)
 }
 
-/// Writes the value of a GraphQL string literal, JSON-escaped, as `string_value_pieces` hands it
-/// out a piece at a time.
+/// Writes the value of a GraphQL string literal, JSON-escaped, as `string_value_pieces_from_str`
+/// hands it out a piece at a time.
 ///
 /// The sink's first refusal ends the walk: nothing after the refused piece is decoded, and the
-/// refusal is the answer.
+/// refusal is the answer. The literal is a `&str`, so the walk takes it at the text door and does
+/// not read it through for UTF-8 before the first piece reaches the sink.
 fn cook<W: fmt::Write>(out: &mut W, literal: &str) -> Result<(), Error> {
-  string_value_pieces(literal.as_bytes(), |piece| escape(out, piece)).map_err(|refusal| {
+  string_value_pieces_from_str(literal, |piece| escape(out, piece)).map_err(|refusal| {
     if refusal.is_sink() {
       Error::Sink
     } else {
       // Every other refusal is of the spelling, so of a literal no lexer produced: an escape it
-      // would refuse, no delimiters, or content that is not UTF-8, which a `&str` cannot hold.
+      // would refuse, or no delimiters. The text door never answers `NotUtf8`.
       Error::MalformedEscape
     }
   })
