@@ -105,6 +105,26 @@ All notable changes to Smear are documented in this file.
   it; `Context::None`, which could only return `()`, has no `unwrap_*`. `Rule` and
   `SchemaErrorKind`, of more than sixteen variants, and the enums under `repr` derive nothing new.
   Both crates take `derive_more` as a dependency for it, with no feature in front of it.
+- `smear-analysis`!: the model's variants hold named payloads or the one value they stand for,
+  where nine had fields, exported at `graphqlx` beside the enums. `TypeExprKind::Named` and
+  `TyKind::Named` carry a `NamedTypeExpr` and a `NamedTy`, each with `def()` and `args()`;
+  `TypeExprKind::Param` and `TyKind::Param` a `TypeParamRef`, with `def()` and `index()`;
+  `ValueKind::Enum` an `EnumValueRef`, with `def()` and `value()`; `Primitive::Int` an
+  `IntPrimitive`, with `is_signed()` and `width()`, built as before by `Primitive::signed` and
+  `Primitive::unsigned`; and `List(element)` of both type kinds and `ValueKind::Type(def)` carry
+  the id. A pattern reads `TyKind::Named(named)` and `named.def()`, where it named the fields.
+  The nine variant-level `#[non_exhaustive]` are gone: a payload's private fields refuse a
+  construction and an exhaustive pattern as they did. The public enums derive their `is_*`
+  predicates, and each one with data `unwrap_*` and `try_unwrap_*`, by value, by reference and by
+  mutable reference; a unit variant has none, which could only return `()`. `TyKind`,
+  `TypeExprKind`, `ValueKind`, `Primitive`, `Resolution`, `Root` and `PathRoot` take all three,
+  and `DefKind`, `Origin`, `Collection`, `MemberKind`, `PackageKind`, `ModuleKind`, `Namespace`,
+  `RootOperation`, `LiteralKind`, `Layout`, `Tier`, `Packages` and `Site` the predicates alone.
+  `DirectiveLocation` and `DiagnosticKind`, of more than sixteen variants, derive nothing new.
+  `smear-analysis` takes `derive_more` as a dependency for it, with no feature in front of it.
+  The hidden test-support door follows: `ModelBuilder::set_object` takes `&[ObjectEntry]`, which
+  `ObjectEntry::new` builds, and `counts` answers a `Counts { members, type_exprs, values,
+  applications }` where it answered a four-tuple.
 - `smear-schema` and `smear-compiler`: an `Int` literal stands for a `Float` only while a finite
   double holds its value, as `Float`'s input coercion requires (§3.5.2). `Schema::build` and
   `Rule::ValuesOfCorrectType` refuse one of magnitude `2^1024 - 2^970` or more, the least integer
