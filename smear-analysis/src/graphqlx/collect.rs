@@ -57,13 +57,13 @@ use super::{
   diagnostic::{Diagnostic, Excerpt, Reporter},
   id::{SourceId, dense},
   limits::Limits,
-  model::{DefKind, Primitive},
+  model::{DefKind, Primitive, Rank},
   package::Layout,
   parse::Documents,
   set::{FileView, PackageView, ROOT},
   source::SourceMap,
   tree::{Declared, Tree},
-  widths::Widths,
+  widths::{Widths, WidthsFound},
 };
 
 /// What the walk found: every module, everything each module declares, and every primitive the
@@ -86,7 +86,7 @@ pub(crate) struct Collected<'d, 'a> {
   pub(crate) schemas: Vec<Placed>,
   /// Every primitive a placed file writes where its package may have it, or a root package's
   /// definition makes, keyed by its place among `core`'s materialised definitions.
-  pub(crate) written: BTreeMap<(u8, u32), Primitive>,
+  pub(crate) written: BTreeMap<Rank, Primitive>,
 }
 
 /// One document's items, flattened. Every document is one of text: a byte text that is not UTF-8
@@ -235,7 +235,7 @@ pub(crate) fn items<'d, 'a: 'd>(
       }
     }
   }
-  let (written, unknown) = walk.widths.finish();
+  let WidthsFound { written, unknown } = walk.widths.finish();
   debug_assert_eq!(
     walk.unknown.saturating_add(unknown),
     0,
@@ -294,6 +294,15 @@ struct Frame<'d, S> {
   module: u32,
 }
 
+/// A name in its namespace.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct NamespacedName<'d> {
+  /// The rank of the namespace.
+  namespace: u8,
+  /// The name, as spelled.
+  name: &'d [u8],
+}
+
 /// What the walk keeps: the tree it grows, where it reports, the package it is in, what it counts
 /// against the definition limit, and what it has found.
 struct Walk<'d, 'r> {
@@ -315,7 +324,7 @@ struct Walk<'d, 'r> {
   root: u32,
   /// The names of GraphQL's built-ins that the root package's root module has defined so far, each
   /// in its namespace: only the first definition of each such name replaces a built-in.
-  graphql_names: BTreeSet<(u8, &'d [u8])>,
+  graphql_names: BTreeSet<NamespacedName<'d>>,
   /// How many definitions the model will hold so far.
   defined: u32,
   /// `Limits::max_definitions`.
@@ -552,7 +561,10 @@ impl<'d> Walk<'d, '_> {
     if self.package != ROOT
       || module != self.root
       || !replaceable(space, spelling)
-      || !self.graphql_names.insert((space, spelling))
+      || !self.graphql_names.insert(NamespacedName {
+        namespace: space,
+        name: spelling,
+      })
     {
       return None;
     }

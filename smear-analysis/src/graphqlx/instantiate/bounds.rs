@@ -76,7 +76,9 @@ use crate::graphqlx::{
   code::DiagnosticKind,
   diagnostic::{Diagnostic, Excerpt},
   id::{ApplicationId, DefId, TyId, TypeExprId, dense},
-  model::{DefKind, Keys, Occurrence, Resolution, Shape, Steps, TypeBound, Written},
+  model::{
+    Applied, DefKind, Keys, Occurrence, Resolution, Shape, Steps, TypeBound, Written, WrittenParam,
+  },
   types::{Limit, Stop},
 };
 
@@ -106,7 +108,16 @@ pub(super) struct Judging {
   verdicts: BTreeMap<TyId, Verdict>,
   /// Each pair of an argument and an interface type asked, with whether the argument satisfies
   /// it. Keyed by the pair, which a verdict looks up before it asks the routine.
-  pairs: BTreeMap<(TyId, TyId), bool>,
+  pairs: BTreeMap<BoundKey, bool>,
+}
+
+/// A pair of an argument and an interface type, as the pairs asked are keyed.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct BoundKey {
+  /// The argument.
+  argument: TyId,
+  /// The interface type.
+  interface: TyId,
 }
 
 impl Judging {
@@ -153,7 +164,12 @@ impl Typing<'_> {
   /// directive's: one lookup of its type's verdict, which is made the first time it is asked, and
   /// shared with every other application of the type.
   fn judge_application(&mut self, judging: &mut Judging, application: ApplicationId) {
-    let Some((Resolution::Resolved(directive), _, at)) = self.builder.applied(application) else {
+    let Some(Applied {
+      directive: Resolution::Resolved(directive),
+      at,
+      ..
+    }) = self.builder.applied(application)
+    else {
       return;
     };
     // A directive with no type parameter, an application whose count was refused, and one that
@@ -304,7 +320,11 @@ impl Typing<'_> {
       else {
         continue;
       };
-      let holds = match judging.pairs.get(&(argument, goal)).copied() {
+      let key = BoundKey {
+        argument,
+        interface: goal,
+      };
+      let holds = match judging.pairs.get(&key).copied() {
         Some(holds) => holds,
         None => {
           let left = self.types.bound_steps.left();
@@ -320,7 +340,7 @@ impl Typing<'_> {
           let Some(holds) = answer else {
             return Verdict::Stopped(Stop::Steps);
           };
-          judging.pairs.insert((argument, goal), holds);
+          judging.pairs.insert(key, holds);
           holds
         }
       };
@@ -385,7 +405,7 @@ impl Typing<'_> {
       return;
     };
     let bounding = bounding.location;
-    let Some((name, _, default)) = self.builder.type_param(def, parameter) else {
+    let Some(WrittenParam { name, default, .. }) = self.builder.type_param(def, parameter) else {
       return;
     };
     // The type argument where it is written, or else the default that filled it.
@@ -404,7 +424,7 @@ impl Typing<'_> {
       .get(parameter as usize)
       .and_then(|argument: &TyId| self.builder.ty_shape(*argument))
     {
-      Some(Shape::Param { .. }) => PARAM_HELP,
+      Some(Shape::Param(_)) => PARAM_HELP,
       Some(Shape::List(_)) => LIST_HELP,
       Some(Shape::Named(_) | Shape::Unresolved) | None => NAMED_HELP,
     };

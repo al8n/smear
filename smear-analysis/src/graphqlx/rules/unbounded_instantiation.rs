@@ -399,6 +399,15 @@ enum Tail {
 /// The graph cannot be numbered in a `u32`.
 struct Overflow;
 
+/// An edge that does not grow: from its first node into its second.
+#[derive(Clone, Copy)]
+struct Edge {
+  /// The node it leaves.
+  from: u32,
+  /// The node it enters.
+  to: u32,
+}
+
 /// The graph `begin` builds over one model, and what it finds there.
 struct Build<'a> {
   /// The model it is built over.
@@ -412,7 +421,7 @@ struct Build<'a> {
   /// What the build found of each type, by id.
   found: Vec<Found>,
   /// The edges that do not grow, each from its first node into its second.
-  plain: Vec<(u32, u32)>,
+  plain: Vec<Edge>,
   /// The edges that grow.
   growing: Vec<Growing>,
   /// The occurrences still to walk.
@@ -522,14 +531,14 @@ impl<'a> Build<'a> {
   /// argument or as its element. It does not grow.
   fn contain(&mut self, tail: Tail, holder: u32) {
     let (Tail::Param(from) | Tail::Type(from)) = tail;
-    self.plain.push((from, holder));
+    self.plain.push(Edge { from, to: holder });
   }
 
   /// The edge from what `tail` leaves into the type parameter whose node is `to`, held by `holder`
   /// at `index`. It grows when `tail` is an open type that is no bare parameter.
   fn pass(&mut self, tail: Tail, to: u32, holder: TyId, index: u32) {
     match tail {
-      Tail::Param(from) => self.plain.push((from, to)),
+      Tail::Param(from) => self.plain.push(Edge { from, to }),
       Tail::Type(from) => self.growing.push(Growing {
         from,
         to,
@@ -674,7 +683,7 @@ impl<'a> Build<'a> {
     let nodes = self.next as usize;
     // Node `n`'s row starts at `starts[n]` and ends at `starts[n + 1]`.
     let mut starts: Vec<usize> = vec![0; nodes.checked_add(1).ok_or(Overflow)?];
-    for &(from, _) in &self.plain {
+    for &Edge { from, .. } in &self.plain {
       count(&mut starts, from);
     }
     for edge in &self.growing {
@@ -687,7 +696,7 @@ impl<'a> Build<'a> {
     }
     let mut targets: Vec<u32> = vec![0; total];
     let mut cursors: Vec<usize> = starts.clone();
-    for &(from, to) in &self.plain {
+    for &Edge { from, to } in &self.plain {
       place(&mut cursors, &mut targets, from, to);
     }
     for edge in &self.growing {

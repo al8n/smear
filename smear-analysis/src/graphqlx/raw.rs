@@ -18,7 +18,7 @@ use tokora::{SimpleSpan, diagnostic::Location};
 
 use super::{
   id::{ApplicationId, MemberId, ModuleId, Sym, dense},
-  model::{PathRoot, Segments},
+  model::{PathRoot, Run, Segments},
   resolve::{Resolved, Root},
 };
 
@@ -86,7 +86,7 @@ pub(crate) struct RawPath {
   pub(crate) root: Root,
   /// Its segments, each a symbol and where it is written: where its run of the table's segments
   /// starts, and how long it is.
-  pub(crate) segments: (u32, u32),
+  pub(crate) segments: Run,
   /// The generic parameter in scope that its first segment names, when it has no root: a
   /// parameter shadows every module name, and only a first segment can be one.
   pub(crate) param: Option<u32>,
@@ -180,7 +180,10 @@ impl<'p> RawValues<'p> {
     self.paths.push(RawPath {
       written,
       root,
-      segments: (dense(start), dense(self.segments.len() - start)),
+      segments: Run {
+        start: dense(start),
+        len: dense(self.segments.len() - start),
+      },
       param,
       kept: None,
       prefix: None,
@@ -231,11 +234,6 @@ impl<'p> RawValues<'p> {
   /// The segments of `path`, each with where it is written: none for a run past the table, which
   /// no path has.
   pub(crate) fn path_segments(&self, path: RawPath) -> &[(Sym, SimpleSpan)] {
-    let (start, len) = path.segments;
-    let start = start as usize;
-    self
-      .segments
-      .get(start..start.saturating_add(len as usize))
-      .unwrap_or_default()
+    path.segments.of(&self.segments)
   }
 }

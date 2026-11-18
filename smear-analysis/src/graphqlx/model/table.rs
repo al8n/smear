@@ -28,11 +28,11 @@ use super::{
 
 /// A run of consecutive entries in one pool: a child list, as `repr`'s `Range32` is one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(super) struct Run {
+pub(crate) struct Run {
   /// The index of the run's first entry.
-  pub(super) start: u32,
+  pub(crate) start: u32,
   /// How many entries the run holds.
-  pub(super) len: u32,
+  pub(crate) len: u32,
 }
 
 impl Run {
@@ -45,7 +45,7 @@ impl Run {
   /// The run's entries in `pool`, or none when the run is out of `pool`'s bounds, which only a run
   /// of another model can be.
   #[inline]
-  pub(super) fn of<T>(self, pool: &[T]) -> &[T] {
+  pub(crate) fn of<T>(self, pool: &[T]) -> &[T] {
     let start = self.start as usize;
     pool.get(start..start + self.len as usize).unwrap_or(&[])
   }

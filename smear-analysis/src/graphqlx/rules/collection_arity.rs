@@ -49,7 +49,13 @@ pub(super) struct CollectionArity;
 
 /// The first application of a collection's directive, and whether a phase reported an error in
 /// the contribution that holds it.
-type First = Option<(ApplicationId, bool)>;
+#[derive(Clone, Copy)]
+struct First {
+  /// The application.
+  application: ApplicationId,
+  /// Whether a phase reported an error in the contribution that holds it.
+  reported: bool,
+}
 
 impl Visitor for CollectionArity {
   fn enter_def(&mut self, cx: &mut Cx<'_>, def: DefId) {
@@ -68,10 +74,10 @@ impl Visitor for CollectionArity {
     }
     let builtins = model.builtins();
     let (set, map) = (builtins.set(), builtins.map());
-    let mut first_set: First = None;
-    let mut first_map: First = None;
+    let mut first_set: Option<First> = None;
+    let mut first_map: Option<First> = None;
     // The later of the two firsts, once both are met.
-    let mut later: First = None;
+    let mut later: Option<First> = None;
     for part in definition.contributions() {
       for &application in part.applications() {
         let applied = model.application(application);
@@ -82,7 +88,10 @@ impl Visitor for CollectionArity {
         let Resolution::Resolved(directive) = applied.directive() else {
           continue;
         };
-        let met = Some((application, part.has_errors()));
+        let met = Some(First {
+          application,
+          reported: part.has_errors(),
+        });
         if directive == set && first_set.is_none() {
           first_set = met;
           if first_map.is_some() {
@@ -128,7 +137,10 @@ impl Visitor for CollectionArity {
       ),
       _ => return,
     };
-    let (application, refused) = at;
+    let First {
+      application,
+      reported: refused,
+    } = at;
     if refused {
       return;
     }

@@ -120,7 +120,7 @@ fn an_ok_corpus_file_has_no_unresolved_value() {
       continue;
     }
     let model = analysis.model();
-    let (_, _, values, _) = test_support::counts(model);
+    let test_support::Counts { values, .. } = test_support::counts(model);
     for index in 0..values {
       assert!(
         !matches!(
@@ -149,7 +149,7 @@ fn an_ok_corpus_file_keeps_a_literal_only_where_nothing_is_coerced() {
       continue;
     }
     let model = analysis.model();
-    let (_, _, values, _) = test_support::counts(model);
+    let test_support::Counts { values, .. } = test_support::counts(model);
     for index in 0..values {
       let value = model.value(ValueId::new(index));
       if !matches!(value.kind(), ValueKind::Literal(_)) {
@@ -437,7 +437,12 @@ fn must_reach(analysis: &Analysis, packages: Packages) -> Reach {
     covers(packages, model.package(package).kind())
   };
   let covered = |package: PackageId| -> bool { covers(packages, model.package(package).kind()) };
-  let (members, type_exprs, values, applications) = test_support::counts(model);
+  let test_support::Counts {
+    members,
+    type_exprs,
+    values,
+    applications,
+  } = test_support::counts(model);
 
   let entered: Vec<bool> = model
     .defs()
@@ -643,7 +648,12 @@ fn census(analysis: &Analysis, what: &str) {
     // Over every package, what the walk must reach is every row of every table.
     if packages == Packages::All {
       let model = analysis.model();
-      let (members, type_exprs, values, applications) = test_support::counts(model);
+      let test_support::Counts {
+        members,
+        type_exprs,
+        values,
+        applications,
+      } = test_support::counts(model);
       for (wanted, count, kind) in [
         (&expected.packages, model.packages().len(), "package"),
         (&expected.modules, model.modules().len(), "module"),
@@ -888,7 +898,7 @@ fn tolerant(analysis: &Analysis, what: &str) {
   // read as a consumer reads them; the members' ids run from 0 to the count the test-support door
   // answers, for no public range holds every member.
   let model = analysis.model();
-  let (members, _, _, _) = test_support::counts(model);
+  let test_support::Counts { members, .. } = test_support::counts(model);
   let mut extents: Vec<Location> = Vec::new();
   for def in model.defs() {
     for part in model.def(def).contributions() {

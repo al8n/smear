@@ -328,6 +328,7 @@
 //! spelling with no diagnostic.
 
 use std::{
+  borrow::Cow,
   collections::{BTreeMap, BTreeSet},
   format,
   string::String,
@@ -345,15 +346,17 @@ use super::{
   builtin::{ALLOC, CORE, DIRECTIVE, TYPE},
   code::{DiagnosticKind, schema},
   declare::Declarations,
-  diagnostic::{Diagnostic, Excerpt, Reporter},
-  id::{ApplicationId, DefId, MemberId, SourceId, Sym, TyId, TypeExprId, ValueId, dense},
+  diagnostic::{Diagnostic, Excerpt, Message, Reporter},
+  id::{
+    ApplicationId, DefId, MemberId, PoolRange, SourceId, Sym, TyId, TypeExprId, ValueId, dense,
+  },
   instantiate::{applies, binding, own_package},
   model::{
-    Bytes, Collection, DefKind, IntPrimitive, LiteralKind, ModelBuilder, Primitive, Resolution,
-    Shape, Text, Written,
+    Applied, Bytes, Collection, DefKind, IntPrimitive, LiteralKind, ModelBuilder, ObjectEntry,
+    Primitive, Resolution, Shape, Text, TypeParamRef, Written,
   },
   raw::{FloatSpelling, Radix, RawArgument, RawKind, RawNode, RawPath, RawTree, RawValues, UNREAD},
-  resolve::{Position, Request, Resolved, Root, Scopes, Segment, Wanted},
+  resolve::{ParamName, Position, Request, Resolved, Root, Scopes, Segment, Wanted},
   set::ROOT,
   source::SourceMap,
   types::{Counter, Limit, Stop, Types},
@@ -363,6 +366,7 @@ mod number;
 mod spelling;
 
 use number::{Float, Scanned};
+use spelling::Growth;
 
 /// The width an integer is read in where a float is expected: an integer longer than one of this
 /// many bits is no finite float.
@@ -636,8 +640,8 @@ struct Expected {
 #[derive(Clone, Copy)]
 struct Input {
   def: DefId,
-  defaults: (u32, u32),
-  required: (u32, u32),
+  defaults: PoolRange,
+  required: PoolRange,
 }
 
 /// What a generic definition holds that each closed instantiation of it checks, a type's written
@@ -969,9 +973,9 @@ enum Why {
   /// A path that names no value of the enum `def`: `name`, its last segment, is none of its
   /// values.
   NoValue(NoSuchValue),
-  /// A decimal integer of `digits` significant digits whose conversion, `cost` steps, the budget
-  /// could not pay for.
-  Costly(CostlyDigits),
+  /// A decimal integer of this many significant digits whose conversion the budget could not pay
+  /// for: it costs [`number::decimal_cost`] steps.
+  Costly(u64),
   /// `null` for `field`, a required field of the input object `def`.
   Required(RequiredField),
   /// A literal of the OneOf input object `def` that writes `written` fields, not one.
@@ -992,15 +996,6 @@ struct NoSuchValue {
   def: DefId,
   /// The path's last segment.
   name: Sym,
-}
-
-/// An integer whose conversion the budget could not pay for: [`Why::Costly`]'s payload.
-#[derive(Clone, Copy)]
-struct CostlyDigits {
-  /// How many significant digits it has.
-  digits: u64,
-  /// What its conversion costs, in steps.
-  cost: u32,
 }
 
 /// A required field given `null`: [`Why::Required`]'s payload.
@@ -1091,6 +1086,15 @@ struct Converted {
   power: bool,
 }
 
+/// An integer once converted: whether it is written below zero, and its magnitude.
+#[derive(Clone, Copy)]
+struct SignedConversion {
+  /// Whether it is written with `-`.
+  negative: bool,
+  /// Its magnitude.
+  converted: Converted,
+}
+
 /// What coercion has read of one node, each part read the first time it is asked for and kept, so
 /// that no literal is read twice and no text kept twice.
 #[derive(Clone, Copy, Default)]
@@ -1128,7 +1132,7 @@ const _: () = assert!(core::mem::size_of::<Kept>() <= 128);
 struct Spelling {
   text: Text,
   start: u32,
-  growths: (u32, u32),
+  growths: PoolRange,
 }
 
 /// A node to make: the node, the type it is made against, the tree it is of, and how.
@@ -1205,6 +1209,108 @@ struct CloseObjectTask {
   entries: usize,
 }
 
+/// A required field of an input object: [`Coercion::required`]'s row.
+#[derive(Clone, Copy)]
+struct RequiredFlag {
+  /// The field.
+  field: MemberId,
+  /// Whether it may be required, and no more: its type is a bare nullable type parameter of its
+  /// input object, required where its type under the object's arguments is non-null.
+  may_be_required: bool,
+}
+
+/// What is read of an object literal, by its node and the input object it was read against.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct ObjectKey {
+  /// The literal's node.
+  node: u32,
+  /// The input object.
+  def: DefId,
+}
+
+/// A member's type as it is written, and the instantiation's nullable form it is rebuilt under.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct RebuildKey {
+  /// The type the member is written with.
+  written: TyId,
+  /// The instantiation's nullable form.
+  instantiation: TyId,
+}
+
+/// A row of an open value, and its node: the row's identity, when it has one.
+#[derive(Clone, Copy)]
+struct Identity {
+  /// The row's identity.
+  ident: Option<Ident>,
+  /// The node.
+  node: u32,
+}
+
+/// An element or a key of the set or the map being searched that has an identity, and its node.
+#[derive(Clone, Copy)]
+struct Keyed {
+  /// Its run of `key_bytes`.
+  key: PoolRange,
+  /// Its node.
+  node: u32,
+}
+
+/// An element or a key held twice, and the first that holds it.
+#[derive(Clone, Copy)]
+struct Twice {
+  /// The node of the element or the key that holds it again.
+  node: u32,
+  /// The node of the first that holds it.
+  first: u32,
+}
+
+/// A directive that has listed arguments, with its run of [`Coercion::listed`].
+#[derive(Clone, Copy)]
+struct DirectiveRun {
+  /// The directive.
+  directive: DefId,
+  /// Its run of `listed`.
+  run: PoolRange,
+}
+
+/// A default counted so far: its tree, and the type it is counted against.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct CountKey {
+  /// The default's tree.
+  tree: u32,
+  /// The type it is counted against.
+  ty: Option<TyId>,
+}
+
+/// A set or a map literal a judged count searched: its node, and the type its identities were read
+/// against.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct SearchKey {
+  /// The literal's node.
+  node: u32,
+  /// The type its identities were read against.
+  ty: TyId,
+}
+
+/// How many levels of list a list type is, and the type under them.
+#[derive(Clone, Copy)]
+struct ListLevels {
+  /// How many levels of list it is.
+  depth: u32,
+  /// The type under them, which is no list.
+  element: TyId,
+}
+
+/// The type a member is written with, as instantiation typed it, and whether it is written
+/// non-null.
+#[derive(Clone, Copy)]
+struct MemberOccurrence {
+  /// The type, when the member has one.
+  ty: Option<TyId>,
+  /// Whether it is written with `!`.
+  non_null: bool,
+}
+
 /// What coercion keeps while it writes.
 struct Coercion<'c, 'p, 'x> {
   builder: &'c mut ModelBuilder,
@@ -1230,21 +1336,21 @@ struct Coercion<'c, 'p, 'x> {
   both: Vec<DefId>,
   /// Each input object's defaulted fields, each with its default's tree, one run each, in member
   /// order.
-  defaulted: Vec<(MemberId, u32)>,
+  defaulted: Vec<DefaultedField>,
   /// Each input object's required fields, one run each, in member order: each field, and whether
   /// it may be required, a bare nullable type parameter of its input object, required where its
   /// type under the object's arguments is non-null.
-  required: Vec<(MemberId, bool)>,
+  required: Vec<RequiredFlag>,
   /// Each input object that has a defaulted or a required field, with its runs, by `DefId`.
   inputs: Vec<Input>,
   /// The fields each object literal read so far sets, one run each, sorted by the field.
   set_fields: Vec<SetField>,
   /// What is read of each object literal read so far, by its node and the input object it was
   /// read against.
-  objects: BTreeMap<(u32, DefId), Fields>,
+  objects: BTreeMap<ObjectKey, Fields>,
   /// The entries of the input objects that are open, each its field, where its name is written,
   /// and its value once its row is made.
-  entries: Vec<(MemberId, Option<Location>, ValueId)>,
+  entries: Vec<ObjectEntry>,
   /// The first source of a supplied package: every source below it is the built-in library's.
   supplied: u32,
   /// `Limits::max_value_steps`, and the steps spent: completing values, and reading types and
@@ -1253,7 +1359,7 @@ struct Coercion<'c, 'p, 'x> {
   /// Each member's type read under an instantiation's arguments so far, by the type it is written
   /// with and the instantiation's nullable form: the type rebuilt, `None` for a type that is not
   /// rebuilt, or what stopped the rebuild.
-  rebuilds: BTreeMap<(TyId, TyId), Result<Option<TyId>, Stop>>,
+  rebuilds: BTreeMap<RebuildKey, Result<Option<TyId>, Stop>>,
   /// Each non-null instantiation read so far, an environment or a written occurrence's type, by
   /// its id: its nullable form, found once off its arguments.
   nullables: BTreeMap<TyId, TyId>,
@@ -1265,7 +1371,7 @@ struct Coercion<'c, 'p, 'x> {
   /// Where each spelling kept grew, each sequence of it that is not UTF-8 one U+FFFD: the offset in
   /// its root's span just past the sequence, and how much longer the copy is up to there; one run
   /// for each spelling, in offset order.
-  growths: Vec<(u32, u32)>,
+  growths: Vec<Growth>,
   /// Every integer's magnitude converted so far.
   magnitudes: Vec<u8>,
   /// The limbs of the decimal integer being converted.
@@ -1283,16 +1389,16 @@ struct Coercion<'c, 'p, 'x> {
   /// after it.
   items: Vec<ValueId>,
   /// Beside each of `items`, the row's identity, when it has one, and its node.
-  idents: Vec<(Option<Ident>, u32)>,
+  idents: Vec<Identity>,
   /// The entries of the map being closed, each a key and its value.
   pairs: Vec<(ValueId, ValueId)>,
   /// The identities of the set or the map being searched, rendered.
   key_bytes: Vec<u8>,
   /// Each element or key of the set or the map being searched that has an identity: its run of
   /// `key_bytes`, and its node.
-  keyed: Vec<(u32, u32, u32)>,
+  keyed: Vec<Keyed>,
   /// Each element or key held twice, and the first that holds it: their nodes.
-  twice: Vec<(u32, u32)>,
+  twice: Vec<Twice>,
   /// The children of the list being opened.
   children: Vec<u32>,
   /// The segments of the path being kept.
@@ -1302,12 +1408,12 @@ struct Coercion<'c, 'p, 'x> {
   listed: Vec<Listed>,
   /// Each directive that has such arguments, with its run of `listed`, by `DefId`: what an
   /// application looks its directive's run up by.
-  runs: Vec<(DefId, u32, u32)>,
+  runs: Vec<DirectiveRun>,
   /// Each default counted so far, by its tree and the type it is counted against: its count.
-  counts: BTreeMap<(u32, Option<TyId>), Count>,
+  counts: BTreeMap<CountKey, Count>,
   /// The counts, by the same key, made under a type their default is not written against whose
   /// copy does not fit it.
-  unfit: BTreeSet<(u32, Option<TyId>)>,
+  unfit: BTreeSet<CountKey>,
   /// What the count being made has still to count: nodes, and reads of other counts.
   counting: Vec<Counted>,
   /// The defaults the count being made is counting: the one asked for first, and each later one
@@ -1325,7 +1431,7 @@ struct Coercion<'c, 'p, 'x> {
   held: Vec<Option<Ident>>,
   /// Each set or map literal a judged count searched for an element or a key held twice, by its
   /// node and the type its identities were read against: whether it holds each once.
-  searched: BTreeMap<(u32, TyId), bool>,
+  searched: BTreeMap<SearchKey, bool>,
   /// The generic definition whose values the walk is making, when it is in one: a type, or a
   /// directive.
   owner: Option<DefId>,
@@ -1350,7 +1456,7 @@ struct Coercion<'c, 'p, 'x> {
   copied: u64,
   /// How many levels of list each list type read so far is, and the type under them: what a lone
   /// value's count reads.
-  levels: BTreeMap<TyId, (u32, TyId)>,
+  levels: BTreeMap<TyId, ListLevels>,
   /// The list types whose levels are being read.
   chain: Vec<TyId>,
 }
@@ -1382,20 +1488,26 @@ impl<'p> Coercion<'_, 'p, '_> {
 
   /// The type `member` is written with, as instantiation typed it, and whether it is written
   /// non-null.
-  fn member_occurrence(&self, member: MemberId) -> (Option<TyId>, bool) {
+  fn member_occurrence(&self, member: MemberId) -> MemberOccurrence {
     let occurrence = self
       .builder
       .member_ty(member)
       .and_then(|ty: TypeExprId| self.builder.occurrence(ty));
     match occurrence {
-      Some(occurrence) => (occurrence.ty, occurrence.non_null),
-      None => (None, false),
+      Some(occurrence) => MemberOccurrence {
+        ty: occurrence.ty,
+        non_null: occurrence.non_null,
+      },
+      None => MemberOccurrence {
+        ty: None,
+        non_null: false,
+      },
     }
   }
 
   /// The type `member` is written with, as instantiation typed it.
   fn member_type(&self, member: MemberId) -> Option<TyId> {
-    self.member_occurrence(member).0
+    self.member_occurrence(member).ty
   }
 
   /// The type `member`'s value takes under `env`, when it is given: a named type of `owner`, the
@@ -1412,7 +1524,10 @@ impl<'p> Coercion<'_, 'p, '_> {
     env: Option<(TyId, DefId)>,
     library: bool,
   ) -> Result<Expected, Stop> {
-    let (written, non_null) = self.member_occurrence(member);
+    let MemberOccurrence {
+      ty: written,
+      non_null,
+    } = self.member_occurrence(member);
     let unbuilt = Expected {
       ty: written,
       rebuilt: false,
@@ -1451,7 +1566,11 @@ impl<'p> Coercion<'_, 'p, '_> {
     library: bool,
   ) -> Result<Option<TyId>, Stop> {
     let nullable = self.nullable(env, owner);
-    if let Some(&made) = self.rebuilds.get(&(written, nullable)) {
+    let key = RebuildKey {
+      written,
+      instantiation: nullable,
+    };
+    if let Some(&made) = self.rebuilds.get(&key) {
       return made;
     }
     let made = self.types.derived.rebuild(
@@ -1462,7 +1581,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       nullable,
       owner,
     );
-    self.rebuilds.insert((written, nullable), made);
+    self.rebuilds.insert(key, made);
     made
   }
 
@@ -1511,7 +1630,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     };
     let param = matches!(
       self.builder.ty_shape(ty),
-      Some(Shape::Param { def: named, .. }) if named == def
+      Some(Shape::Param(TypeParamRef { def: named, .. })) if named == def
     );
     if param && !self.builder.ty_non_null(ty) {
       self.recorded.push(Recorded {
@@ -1585,10 +1704,18 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
     for index in 0..self.builder.application_count() {
       let application = ApplicationId::new(index);
-      let (Some((Resolution::Resolved(def), _, at)), Some(ty)) = (
+      let (
+        Some(Applied {
+          directive: Resolution::Resolved(def),
+          at,
+          ..
+        }),
+        Some(ty),
+      ) = (
         self.builder.applied(application),
         self.builder.application_ty(application),
-      ) else {
+      )
+      else {
         continue;
       };
       self.instantiation(at, def, ty);
@@ -1659,7 +1786,10 @@ impl<'p> Coercion<'_, 'p, '_> {
       };
       match self.count(tree, Some(under), true, true) {
         Count::Rows(_) | Count::Poisoned | Count::Counting => {
-          if self.unfit.contains(&(tree, Some(under))) {
+          if self.unfit.contains(&CountKey {
+            tree,
+            ty: Some(under),
+          }) {
             return Checked::Unfit(dense(row));
           }
         }
@@ -1736,7 +1866,12 @@ impl<'p> Coercion<'_, 'p, '_> {
     application: ApplicationId,
     argument: MemberId,
   ) {
-    let Some((resolution, _, path)) = self.builder.applied(application) else {
+    let Some(Applied {
+      directive: resolution,
+      at: path,
+      ..
+    }) = self.builder.applied(application)
+    else {
       return;
     };
     let directive: &[u8] = match resolution {
@@ -1774,19 +1909,21 @@ impl<'p> Coercion<'_, 'p, '_> {
       ("", "instantiated")
     };
     let name = Excerpt(self.builder.def_name(def));
-    let (message, help) = match stop {
-      Stop::Steps => (
-        format!(
+    let message = match stop {
+      Stop::Steps => Message {
+        text: format!(
           "the values `{sigil}{name}` holds could not be checked under the type arguments it is \
            {verb} with here within `Limits::max_value_steps`, {}, the steps the analysis may take \
            to complete values",
           self.values.max()
         ),
-        "raise the limit with `Limits::with_max_value_steps`, or instantiate fewer types",
-      ),
+        help: Cow::Borrowed(
+          "raise the limit with `Limits::with_max_value_steps`, or instantiate fewer types",
+        ),
+      },
       Stop::Built(_) => self.stopped(stop, &format!("a value `{sigil}{name}` holds takes")),
     };
-    self.limit(at, message, help);
+    self.limit(at, message);
   }
 
   /// Whether `ty` is a named type of `def`.
@@ -1797,11 +1934,11 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// Whether the type `member`, of `owner`, is written with is a bare nullable type parameter of
   /// `owner`: a member that may be required, as its type under an instantiation's arguments says.
   fn bare_param(&self, member: MemberId, owner: DefId) -> bool {
-    let (ty, non_null) = self.member_occurrence(member);
+    let MemberOccurrence { ty, non_null } = self.member_occurrence(member);
     !non_null
       && matches!(
         ty.and_then(|ty: TyId| self.builder.ty_shape(ty)),
-        Some(Shape::Param { def, .. }) if def == owner
+        Some(Shape::Param(TypeParamRef { def, .. })) if def == owner
       )
   }
 
@@ -1818,19 +1955,23 @@ impl<'p> Coercion<'_, 'p, '_> {
       .arguments
       .partition_point(|argument: &RawArgument| argument.application < application);
     let (directive, at) = match self.builder.applied(application) {
-      Some((Resolution::Resolved(def), _, at)) => (Some(def), at),
+      Some(Applied {
+        directive: Resolution::Resolved(def),
+        at,
+        ..
+      }) => (Some(def), at),
       _ => (None, Location::entire(0)),
     };
     let (mut listed, end) = directive
       .and_then(|def: DefId| {
         self
           .runs
-          .binary_search_by_key(&def, |&(owner, _, _): &(DefId, u32, u32)| owner)
+          .binary_search_by_key(&def, |run: &DirectiveRun| run.directive)
           .ok()
       })
       .and_then(|row: usize| self.runs.get(row).copied())
-      .map_or((0, 0), |(_, start, end): (DefId, u32, u32)| {
-        (start as usize, end as usize)
+      .map_or((0, 0), |entry: DirectiveRun| {
+        (entry.run.start as usize, entry.run.end as usize)
       });
     let library = at.source() < self.supplied;
     // Its directive's instantiation, when it has one: its arguments are read under it.
@@ -2011,7 +2152,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         if !names.insert(name) {
           continue;
         }
-        let (_, non_null) = self.member_occurrence(argument);
+        let MemberOccurrence { non_null, .. } = self.member_occurrence(argument);
         let left = match self.raw.defaults.get(&argument).copied() {
           Some(tree) => Left::Default(tree),
           None if non_null => Left::Required,
@@ -2037,7 +2178,10 @@ impl<'p> Coercion<'_, 'p, '_> {
         }
       }
       if end > start {
-        self.runs.push((def, start, end));
+        self.runs.push(DirectiveRun {
+          directive: def,
+          run: PoolRange { start, end },
+        });
       }
     }
   }
@@ -2066,12 +2210,18 @@ impl<'p> Coercion<'_, 'p, '_> {
         if !names.insert(name) {
           continue;
         }
-        let (_, non_null) = self.member_occurrence(field);
+        let MemberOccurrence { non_null, .. } = self.member_occurrence(field);
         match self.raw.defaults.get(&field).copied() {
-          Some(tree) if !one_of => self.defaulted.push((field, tree)),
+          Some(tree) if !one_of => self.defaulted.push(DefaultedField { field, tree }),
           Some(_) => {}
-          None if non_null => self.required.push((field, false)),
-          None if self.bare_param(field, def) => self.required.push((field, true)),
+          None if non_null => self.required.push(RequiredFlag {
+            field,
+            may_be_required: false,
+          }),
+          None if self.bare_param(field, def) => self.required.push(RequiredFlag {
+            field,
+            may_be_required: true,
+          }),
           None => {}
         }
       }
@@ -2080,8 +2230,14 @@ impl<'p> Coercion<'_, 'p, '_> {
       if defaults_end > defaults || required_end > required {
         self.inputs.push(Input {
           def,
-          defaults: (defaults, defaults_end),
-          required: (required, required_end),
+          defaults: PoolRange {
+            start: defaults,
+            end: defaults_end,
+          },
+          required: PoolRange {
+            start: required,
+            end: required_end,
+          },
         });
       }
     }
@@ -2092,12 +2248,12 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// one of them.
   fn list_cycled(&mut self) {
     for input in &self.inputs {
-      let (start, end) = input.defaults;
-      let run: &[(MemberId, u32)] = self
+      let PoolRange { start, end } = input.defaults;
+      let run: &[DefaultedField] = self
         .defaulted
         .get(start as usize..end as usize)
         .unwrap_or(&[]);
-      for &(field, tree) in run {
+      for &DefaultedField { field, tree } in run {
         self.cycled.insert(tree, (field, input.def));
       }
     }
@@ -2122,7 +2278,7 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// the default is written against: the count then judges whether the copy fits it, and whether
   /// what an absent one's count reached fits it.
   fn ask(&mut self, tree: u32, ty: Option<TyId>, library: bool, judged: bool) -> Asked {
-    if !library && self.counts.contains_key(&(tree, ty)) && !self.charge(1) {
+    if !library && self.counts.contains_key(&CountKey { tree, ty }) && !self.charge(1) {
       return Asked::Starved;
     }
     match self.count(tree, ty, !library, judged) {
@@ -2133,7 +2289,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         self.paid = self.paid.saturating_add(u64::from(rows));
         Asked::Copy(CopiedRows {
           rows,
-          fits: !self.unfit.contains(&(tree, ty)),
+          fits: !self.unfit.contains(&CountKey { tree, ty }),
         })
       }
       Count::Past => Asked::Starved,
@@ -2144,7 +2300,7 @@ impl<'p> Coercion<'_, 'p, '_> {
           return Asked::Starved;
         }
         Asked::Absent(AbsentRows {
-          fits: !self.unfit.contains(&(tree, ty)),
+          fits: !self.unfit.contains(&CountKey { tree, ty }),
         })
       }
     }
@@ -2181,7 +2337,7 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// written one would, and each judged count it reads fits. A count that is not judged fits: its
   /// default was judged where it is written. What does not fit is kept beside the count.
   fn count(&mut self, tree: u32, ty: Option<TyId>, charged: bool, judged: bool) -> Count {
-    if let Some(&kept) = self.counts.get(&(tree, ty)) {
+    if let Some(&kept) = self.counts.get(&CountKey { tree, ty }) {
       return kept;
     }
     self.counting.clear();
@@ -2200,9 +2356,18 @@ impl<'p> Coercion<'_, 'p, '_> {
         } else {
           Count::Rows(frame.rows)
         };
-        self.counts.insert((frame.tree, frame.ty), done);
+        self.counts.insert(
+          CountKey {
+            tree: frame.tree,
+            ty: frame.ty,
+          },
+          done,
+        );
         if !frame.fits {
-          self.unfit.insert((frame.tree, frame.ty));
+          self.unfit.insert(CountKey {
+            tree: frame.tree,
+            ty: frame.ty,
+          });
         }
         if self.frames.is_empty() {
           return done;
@@ -2235,9 +2400,9 @@ impl<'p> Coercion<'_, 'p, '_> {
         // it judges: the read is passed over.
         Counted::Fill(FillCount { judged: false, .. }) if self.poisoned() => Ok(()),
         Counted::Fill(FillCount { tree, ty, judged }) => {
-          match self.counts.get(&(tree, ty)).copied() {
+          match self.counts.get(&CountKey { tree, ty }).copied() {
             Some(Count::Rows(rows)) => {
-              if self.unfit.contains(&(tree, ty)) {
+              if self.unfit.contains(&CountKey { tree, ty }) {
                 self.misfit();
               }
               self.add_rows(rows, charged)
@@ -2253,7 +2418,7 @@ impl<'p> Coercion<'_, 'p, '_> {
               Ok(())
             }
             Some(Count::Poisoned) => {
-              if self.unfit.contains(&(tree, ty)) {
+              if self.unfit.contains(&CountKey { tree, ty }) {
                 self.misfit();
               }
               self.poison();
@@ -2275,7 +2440,7 @@ impl<'p> Coercion<'_, 'p, '_> {
           Ok(once) => {
             // What a search finds depends on its literal and the type its identities are read
             // against alone, and is kept by the two.
-            self.searched.insert((node, of), once);
+            self.searched.insert(SearchKey { node, ty: of }, once);
             if !once {
               self.misfit();
             }
@@ -2293,7 +2458,7 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// Opens a frame for the default whose tree is `tree`, against `ty`, judged when `judged`: it is
   /// being counted from now on, and its tree's root is the next node counted.
   fn open(&mut self, tree: u32, ty: Option<TyId>, judged: bool) {
-    self.counts.insert((tree, ty), Count::Counting);
+    self.counts.insert(CountKey { tree, ty }, Count::Counting);
     let base = self.counting.len();
     self.frames.push(Frame {
       tree,
@@ -2322,7 +2487,13 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// Keeps `verdict` as the count of every default being counted, and ends the count: its answer.
   fn verdict(&mut self, verdict: Count) -> Count {
     while let Some(frame) = self.frames.pop() {
-      self.counts.insert((frame.tree, frame.ty), verdict);
+      self.counts.insert(
+        CountKey {
+          tree: frame.tree,
+          ty: frame.ty,
+        },
+        verdict,
+      );
     }
     self.counting.clear();
     self.held.clear();
@@ -2473,21 +2644,32 @@ impl<'p> Coercion<'_, 'p, '_> {
         }
       }
       Class::List(element) => {
-        self.count_items(node, raw, (element, element), None, pay)?;
+        let types = MapTypes {
+          key: element,
+          value: element,
+        };
+        self.count_items(node, raw, types, None, pay)?;
       }
       Class::Set(element) => {
         let searched = judged.then_some((Held::Set, element));
-        self.count_items(node, raw, (element, element), searched, pay)?;
+        let types = MapTypes {
+          key: element,
+          value: element,
+        };
+        self.count_items(node, raw, types, searched, pay)?;
       }
-      Class::Map(MapTypes { key, value }) => {
+      Class::Map(types) => {
         // A last key with no value is dropped, as the copy drops it: looked at, it is paid for.
-        let searched = judged.then_some((Held::Map, key));
-        if self.count_items(node, raw, (key, value), searched, pay)? % 2 == 1 {
+        let searched = judged.then_some((Held::Map, types.key));
+        if self.count_items(node, raw, types, searched, pay)? % 2 == 1 {
           let _ = self.counting.pop();
         }
       }
       Class::Lone(element) => {
-        let (levels, under) = self.list_levels(element);
+        let ListLevels {
+          depth: levels,
+          element: under,
+        } = self.list_levels(element);
         self.add_rows(levels, charged)?;
         if self.is_list(under) {
           // A list type whose element was not interned before it, which interning never makes:
@@ -2613,11 +2795,15 @@ impl<'p> Coercion<'_, 'p, '_> {
     let Some(input) = self.input(def) else {
       return Ok(true);
     };
-    let (start, end) = input.required;
+    let PoolRange { start, end } = input.required;
     let set_end = fields.start.saturating_add(fields.len);
     let mut set = fields.start;
     for row in start..end {
-      let Some(&(field, maybe)) = self.required.get(row as usize) else {
+      let Some(&RequiredFlag {
+        field,
+        may_be_required: maybe,
+      }) = self.required.get(row as usize)
+      else {
         break;
       };
       while set < set_end
@@ -2676,10 +2862,16 @@ impl<'p> Coercion<'_, 'p, '_> {
       }
       let from = dense(self.key_bytes.len());
       self.render(ident);
-      self.keyed.push((from, dense(self.key_bytes.len()), 0));
+      self.keyed.push(Keyed {
+        key: PoolRange {
+          start: from,
+          end: dense(self.key_bytes.len()),
+        },
+        node: 0,
+      });
     }
     let keys: &[u8] = &self.key_bytes;
-    let keyed: &[(u32, u32, u32)] = &self.keyed;
+    let keyed: &[Keyed] = &self.keyed;
     let mut duplicates: Duplicates<&[u8]> =
       Duplicates::over(keyed.len(), |position: usize| key_at(keys, keyed, position));
     let twice = (0..keyed.len()).any(|position: usize| {
@@ -2718,7 +2910,8 @@ impl<'p> Coercion<'_, 'p, '_> {
   }
 
   /// Pushes each child of `node`, whose node is `raw`, to be counted: those at even places against
-  /// `types.0`, and those at odd places against `types.1`. When `searched` says the node is a set
+  /// `types.key`, and those at odd places against `types.value`; for a list or a set, both are the
+  /// element's. When `searched` says the node is a set
   /// or a map a judged count searches, and the type its identities are read against, each child
   /// has a slot for its identity, under the entry that searches them; unless a search of the node
   /// against that type was made already, whose verdict is read instead. When `pay`, each child is
@@ -2728,13 +2921,13 @@ impl<'p> Coercion<'_, 'p, '_> {
     &mut self,
     node: u32,
     raw: RawNode,
-    types: (TyId, TyId),
+    types: MapTypes,
     searched: Option<(Held, TyId)>,
     pay: bool,
   ) -> Result<u32, Count> {
     let mut slots = false;
     if let Some((held, of)) = searched {
-      match self.searched.get(&(node, of)).copied() {
+      match self.searched.get(&SearchKey { node, ty: of }).copied() {
         Some(true) => {}
         Some(false) => self.misfit(),
         None => {
@@ -2755,7 +2948,11 @@ impl<'p> Coercion<'_, 'p, '_> {
       if pay && !self.charge(1) {
         return Err(Count::Past);
       }
-      let ty = if pushed % 2 == 1 { types.1 } else { types.0 };
+      let ty = if pushed % 2 == 1 {
+        types.value
+      } else {
+        types.key
+      };
       let slot = slots.then(|| {
         let slot = dense(self.held.len());
         self.held.push(None);
@@ -2784,9 +2981,14 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// The merge of `fields`, what an object literal sets, with the defaults of the input object
   /// `def`.
   fn merge(&self, def: DefId, fields: Fields) -> Merge {
-    let (default, default_end) = self
+    let PoolRange {
+      start: default,
+      end: default_end,
+    } = self
       .input(def)
-      .map_or((0, 0), |input: Input| input.defaults);
+      .map_or(PoolRange { start: 0, end: 0 }, |input: Input| {
+        input.defaults
+      });
     Merge {
       set: fields.start,
       set_end: fields.start.saturating_add(fields.len),
@@ -2810,7 +3012,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       None
     };
     match (set, default) {
-      (Some(set), Some((field, _))) if set.field <= field => {
+      (Some(set), Some(DefaultedField { field, .. })) if set.field <= field => {
         merge.set = merge.set.saturating_add(1);
         if set.field == field {
           merge.default = merge.default.saturating_add(1);
@@ -2821,9 +3023,9 @@ impl<'p> Coercion<'_, 'p, '_> {
         merge.set = merge.set.saturating_add(1);
         Some(Next::Set(set))
       }
-      (_, Some((field, tree))) => {
+      (_, Some(default)) => {
         merge.default = merge.default.saturating_add(1);
-        Some(Next::Default(DefaultedField { field, tree }))
+        Some(Next::Default(default))
       }
       (None, None) => None,
     }
@@ -2832,10 +3034,13 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// How many levels of list `ty` is before its element is no list, and the type under them: 0
   /// and `ty` itself for a type that is no list. Each list type's answer is kept once read, so the
   /// types of one program are walked once in all.
-  fn list_levels(&mut self, ty: TyId) -> (u32, TyId) {
+  fn list_levels(&mut self, ty: TyId) -> ListLevels {
     self.chain.clear();
     let mut at = ty;
-    let (mut levels, under) = loop {
+    let ListLevels {
+      depth: mut levels,
+      element: under,
+    } = loop {
       if let Some(&kept) = self.levels.get(&at) {
         break kept;
       }
@@ -2845,14 +3050,28 @@ impl<'p> Coercion<'_, 'p, '_> {
           self.chain.push(at);
           at = element;
         }
-        _ => break (0, at),
+        _ => {
+          break ListLevels {
+            depth: 0,
+            element: at,
+          };
+        }
       }
     };
     while let Some(list) = self.chain.pop() {
       levels = levels.saturating_add(1);
-      self.levels.insert(list, (levels, under));
+      self.levels.insert(
+        list,
+        ListLevels {
+          depth: levels,
+          element: under,
+        },
+      );
     }
-    (levels, under)
+    ListLevels {
+      depth: levels,
+      element: under,
+    }
   }
 
   /// Whether `ty` is a list type.
@@ -2864,7 +3083,10 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// label at the argument's declaration.
   fn missing(&mut self, application: ApplicationId, argument: MemberId, at: Location) {
     let directive: &[u8] = match self.builder.applied(application) {
-      Some((Resolution::Resolved(def), _, _)) => self.builder.def_name(def),
+      Some(Applied {
+        directive: Resolution::Resolved(def),
+        ..
+      }) => self.builder.def_name(def),
       _ => b"",
     };
     let name: &[u8] = match self.builder.member_name(argument) {
@@ -2890,71 +3112,77 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// Reports that the arguments the application whose path is at `at` leaves out are past the
   /// budget, or, as `stop` says, take a type that cannot be built under its type arguments.
   fn starved(&mut self, at: Location, stop: Stop) {
-    let (message, help) = match stop {
-      Stop::Steps => (
-        format!(
+    let message = match stop {
+      Stop::Steps => Message {
+        text: format!(
           "the arguments this application leaves out pass `Limits::max_value_steps`, {}, the \
            steps the analysis may take to complete values, and are not filled",
           self.values.max()
         ),
-        "raise the limit with `Limits::with_max_value_steps`, or write the arguments",
-      ),
+        help: Cow::Borrowed(
+          "raise the limit with `Limits::with_max_value_steps`, or write the arguments",
+        ),
+      },
       Stop::Built(_) => self.stopped(stop, "the arguments this application leaves out take"),
     };
-    self.limit(at, message, help);
+    self.limit(at, message);
   }
 
-  /// Reports `resource-limit` at `at`, saying `message`, with `help`.
-  fn limit(&mut self, at: Location, message: String, help: &'static str) {
+  /// Reports `resource-limit` at `at`, saying `message`, with its help.
+  fn limit(&mut self, at: Location, message: Message) {
     let kind = DiagnosticKind::ResourceLimit;
     self.reporter.report(
       Diagnostic::builder(kind.code(), at)
         .severity(kind.severity())
-        .message(message)
+        .message(message.text)
         .primary_label(kind.title())
-        .help(help)
+        .help(message.help)
         .build(),
     );
   }
 
   /// What a report says, and its help, of a type `what` names, followed by its verb, that `stop`
   /// kept from being read under type arguments.
-  fn stopped(&self, stop: Stop, what: &str) -> (String, &'static str) {
+  fn stopped(&self, stop: Stop, what: &str) -> Message {
     let limits = self.types.limits();
     match stop {
-      Stop::Steps => (
-        format!(
+      Stop::Steps => Message {
+        text: format!(
           "{what} a type that could not be read under these type arguments within \
            `Limits::max_value_steps`, {}, the steps the analysis may take to complete values",
           self.values.max()
         ),
-        "raise the limit with `Limits::with_max_value_steps`",
-      ),
-      Stop::Built(Limit::Depth) => (
-        format!(
+        help: Cow::Borrowed("raise the limit with `Limits::with_max_value_steps`"),
+      },
+      Stop::Built(Limit::Depth) => Message {
+        text: format!(
           "{what} a type that, under these type arguments, nests deeper than \
            `Limits::max_generic_depth`, {}, admits",
           limits.max_generic_depth()
         ),
-        "raise the bound with `Limits::with_max_generic_depth`, or nest types less deeply",
-      ),
-      Stop::Built(Limit::Instantiations) => (
-        format!(
+        help: Cow::Borrowed(
+          "raise the bound with `Limits::with_max_generic_depth`, or nest types less deeply",
+        ),
+      },
+      Stop::Built(Limit::Instantiations) => Message {
+        text: format!(
           "{what} a type that, under these type arguments, is one more instantiation of a \
            generic definition than `Limits::max_instantiations`, {}, admits",
           limits.max_instantiations()
         ),
-        "raise the bound with `Limits::with_max_instantiations`, or instantiate fewer types",
-      ),
+        help: Cow::Borrowed(
+          "raise the bound with `Limits::with_max_instantiations`, or instantiate fewer types",
+        ),
+      },
       // The match's arm alone: a rebuild fills nothing, and never draws on this limit.
-      Stop::Built(Limit::Substitutions) => (
-        format!(
+      Stop::Built(Limit::Substitutions) => Message {
+        text: format!(
           "{what} a type that could not be read under these type arguments within \
            `Limits::max_substitutions`, {}",
           limits.max_substitutions()
         ),
-        "raise the bound with `Limits::with_max_substitutions`",
-      ),
+        help: Cow::Borrowed("raise the bound with `Limits::with_max_substitutions`"),
+      },
     }
   }
 
@@ -3081,8 +3309,8 @@ impl<'p> Coercion<'_, 'p, '_> {
       self.builder.set_value_ty(id, ty);
     }
     self.path(id, node.kind);
-    let (message, help) = self.stopped(stop, "this value takes");
-    self.limit(at, message, help);
+    let message = self.stopped(stop, "this value takes");
+    self.limit(at, message);
     Some(id)
   }
 
@@ -3103,7 +3331,10 @@ impl<'p> Coercion<'_, 'p, '_> {
       self.builder.set_value_ty(id, ty);
     }
     let directive: &[u8] = match self.builder.applied(application) {
-      Some((Resolution::Resolved(def), _, _)) => self.builder.def_name(def),
+      Some(Applied {
+        directive: Resolution::Resolved(def),
+        ..
+      }) => self.builder.def_name(def),
       _ => b"",
     };
     let name = argument.name;
@@ -3193,9 +3424,25 @@ impl<'p> Coercion<'_, 'p, '_> {
         ty,
         mode,
       ),
-      Class::List(element) => self.open_items(id, making, Held::List, (element, element)),
-      Class::Set(element) => self.open_items(id, making, Held::Set, (element, element)),
-      Class::Map(MapTypes { key, value }) => self.open_items(id, making, Held::Map, (key, value)),
+      Class::List(element) => self.open_items(
+        id,
+        making,
+        Held::List,
+        MapTypes {
+          key: element,
+          value: element,
+        },
+      ),
+      Class::Set(element) => self.open_items(
+        id,
+        making,
+        Held::Set,
+        MapTypes {
+          key: element,
+          value: element,
+        },
+      ),
+      Class::Map(types) => self.open_items(id, making, Held::Map, types),
       Class::Lone(element) => {
         if mode.written() && source >= self.supplied && !self.charge(1) {
           self.path(id, raw.kind);
@@ -3219,7 +3466,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         match self.leaf(Some(id), node, tree, base) {
           Ok(ident) => {
             if let Some(last) = self.idents.last_mut() {
-              last.0 = ident;
+              last.ident = ident;
             }
           }
           Err(refused) => self.refuse(refused, source, ty, mode),
@@ -3230,9 +3477,9 @@ impl<'p> Coercion<'_, 'p, '_> {
 
   /// Pushes the task that closes `id`, the row of `making`'s node, a list, a set or a map as `held`
   /// says, then a task for each of the node's children over it, so that the first is made first:
-  /// each against `types.0`; in a map, each key against `types.0` and each value against
-  /// `types.1`, a last key with no value dropped.
-  fn open_items(&mut self, id: ValueId, making: Making, held: Held, types: (TyId, TyId)) {
+  /// each against `types.key`; in a map, each key against `types.key` and each value against
+  /// `types.value`, a last key with no value dropped. For a list or a set, both are the element's.
+  fn open_items(&mut self, id: ValueId, making: Making, held: Held, types: MapTypes) {
     let Some(raw) = self.raw.nodes.get(making.node as usize).copied() else {
       return;
     };
@@ -3261,7 +3508,10 @@ impl<'p> Coercion<'_, 'p, '_> {
       }
       child = next;
     }
-    let (first, second) = types;
+    let MapTypes {
+      key: first,
+      value: second,
+    } = types;
     let made = match held {
       Held::Map => self.children.len() - self.children.len() % 2,
       Held::List | Held::Set => self.children.len(),
@@ -3316,31 +3566,42 @@ impl<'p> Coercion<'_, 'p, '_> {
       Held::List | Held::Set => 1,
     };
     let mut at = from;
-    while let Some(&(ident, node)) = self.idents.get(at) {
+    while let Some(&Identity { ident, node }) = self.idents.get(at) {
       at = at.saturating_add(step);
       let Some(ident) = ident else {
         continue;
       };
       let start = dense(self.key_bytes.len());
       self.render(ident);
-      self.keyed.push((start, dense(self.key_bytes.len()), node));
+      self.keyed.push(Keyed {
+        key: PoolRange {
+          start,
+          end: dense(self.key_bytes.len()),
+        },
+        node,
+      });
     }
     {
       // The keys borrow the buffer: the pairs are gathered first, and reported after.
       let keys: &[u8] = &self.key_bytes;
-      let keyed: &[(u32, u32, u32)] = &self.keyed;
+      let keyed: &[Keyed] = &self.keyed;
       let mut duplicates: Duplicates<&[u8]> =
         Duplicates::over(keyed.len(), |position: usize| key_at(keys, keyed, position));
-      for (position, &(_, _, node)) in keyed.iter().enumerate() {
+      for (position, &Keyed { node, .. }) in keyed.iter().enumerate() {
         if let Some(first) = duplicates.first(position, key_at(keys, keyed, position))
-          && let Some(&(_, _, held_first)) = keyed.get(first)
+          && let Some(&Keyed {
+            node: held_first, ..
+          }) = keyed.get(first)
         {
-          self.twice.push((node, held_first));
+          self.twice.push(Twice {
+            node,
+            first: held_first,
+          });
         }
       }
     }
     for index in 0..self.twice.len() {
-      if let Some(&(later, first)) = self.twice.get(index) {
+      if let Some(&Twice { node: later, first }) = self.twice.get(index) {
         self.held_again(later, first, held, source);
       }
     }
@@ -3547,7 +3808,11 @@ impl<'p> Coercion<'_, 'p, '_> {
           continue;
         }
       }
-      self.entries.push((field, None, ValueId::new(0)));
+      self.entries.push(ObjectEntry {
+        field,
+        name: None,
+        value: ValueId::new(0),
+      });
       self.stack.push(Task::Make(Making {
         node: default_tree.root,
         ty,
@@ -3574,7 +3839,11 @@ impl<'p> Coercion<'_, 'p, '_> {
     env: Option<(TyId, DefId)>,
   ) -> Task {
     let name = Location::new(making.tree.source, set.name);
-    self.entries.push((set.field, Some(name), ValueId::new(0)));
+    self.entries.push(ObjectEntry {
+      field: set.field,
+      name: Some(name),
+      value: ValueId::new(0),
+    });
     let library = making.tree.source < self.supplied;
     let expected = match self.under(set.field, env, library) {
       Ok(expected) => expected,
@@ -3620,7 +3889,7 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// field it looks at, one its input object does not declare included, before it looks at it, and
   /// `None` is the budget that cannot pay, nothing kept. A reading kept costs nothing more.
   fn fields_of(&mut self, node: u32, def: DefId, first: u32, charged: bool) -> Option<Fields> {
-    if let Some(&kept) = self.objects.get(&(node, def)) {
+    if let Some(&kept) = self.objects.get(&ObjectKey { node, def }) {
       return Some(kept);
     }
     let start = self.set_fields.len();
@@ -3668,7 +3937,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       len: dense(self.set_fields.len().saturating_sub(start)),
       written,
     };
-    self.objects.insert((node, def), kept);
+    self.objects.insert(ObjectKey { node, def }, kept);
     Some(kept)
   }
 
@@ -3753,11 +4022,15 @@ impl<'p> Coercion<'_, 'p, '_> {
     let Some(input) = self.input(def) else {
       return true;
     };
-    let (start, end) = input.required;
+    let PoolRange { start, end } = input.required;
     let set_end = fields.start.saturating_add(fields.len);
     let mut set = fields.start;
     for row in start..end {
-      let Some(&(field, maybe)) = self.required.get(row as usize) else {
+      let Some(&RequiredFlag {
+        field,
+        may_be_required: maybe,
+      }) = self.required.get(row as usize)
+      else {
         break;
       };
       // The fields it sets are in member order too: pass those before this one.
@@ -3824,18 +4097,20 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// Reports that the fields the object literal at `at` leaves out are past the budget, or, as
   /// `stop` says, take a type that cannot be built under its input object's type arguments.
   fn object_starved(&mut self, at: Location, stop: Stop) {
-    let (message, help) = match stop {
-      Stop::Steps => (
-        format!(
+    let message = match stop {
+      Stop::Steps => Message {
+        text: format!(
           "the fields this literal leaves out pass `Limits::max_value_steps`, {}, the steps the \
            analysis may take to complete values, and are not filled",
           self.values.max()
         ),
-        "raise the limit with `Limits::with_max_value_steps`, or write the fields",
-      ),
+        help: Cow::Borrowed(
+          "raise the limit with `Limits::with_max_value_steps`, or write the fields",
+        ),
+      },
       Stop::Built(_) => self.stopped(stop, "the fields this literal leaves out take"),
     };
-    self.limit(at, message, help);
+    self.limit(at, message);
   }
 
   /// Makes the row of `making`'s node one unresolved row, typed with its type, with the path the
@@ -3866,7 +4141,7 @@ impl<'p> Coercion<'_, 'p, '_> {
   fn push(&mut self, at: Location, mode: Mode, node: u32) -> ValueId {
     let id = self.builder.push_value(at, mode.written());
     self.items.push(id);
-    self.idents.push((None, node));
+    self.idents.push(Identity { ident: None, node });
     if !mode.written() {
       self.copied = self.copied.saturating_add(1);
     }
@@ -3880,7 +4155,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     let open = self.entries.get_mut(entries..).unwrap_or_default();
     let filled = open.len().min(made.len());
     for (entry, &value) in open.iter_mut().zip(made) {
-      entry.2 = value;
+      entry.value = value;
     }
     self.builder.set_object(
       object,
@@ -3917,7 +4192,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         RawKind::List => Class::List(element),
         _ => Class::Lone(element),
       },
-      Some(Shape::Param { .. } | Shape::Unresolved) | None => return Class::NoValue,
+      Some(Shape::Param(_) | Shape::Unresolved) | None => return Class::NoValue,
     };
     if matches!(kind, RawKind::Null) {
       return if builder.ty_non_null(ty) {
@@ -4049,7 +4324,10 @@ impl<'p> Coercion<'_, 'p, '_> {
         Ok(Some(Ident::Text(text)))
       }
       (Base::Int(range), RawKind::Int(radix)) => {
-        let (negative, converted) = self.int(id, node, tree, radix, range)?;
+        let SignedConversion {
+          negative,
+          converted,
+        } = self.int(id, node, tree, radix, range)?;
         Ok(Some(Ident::Int(Digits {
           negative: negative && converted.len != 0,
           start: converted.start,
@@ -4057,7 +4335,10 @@ impl<'p> Coercion<'_, 'p, '_> {
         })))
       }
       (Base::Id, RawKind::Int(radix)) => {
-        let (negative, converted) = self.int(id, node, tree, radix, ID_RANGE)?;
+        let SignedConversion {
+          negative,
+          converted,
+        } = self.int(id, node, tree, radix, ID_RANGE)?;
         Ok(Some(Ident::Decimal(Digits {
           negative: negative && converted.len != 0,
           start: converted.start,
@@ -4102,7 +4383,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     tree: RawTree,
     radix: Radix,
     range: Range,
-  ) -> Result<(bool, Converted), Refused> {
+  ) -> Result<SignedConversion, Refused> {
     let source = tree.source;
     let refused = move |why: Why| Refused { node, why };
     let scanned = self
@@ -4116,10 +4397,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       return Err(refused(out));
     }
     let Some(converted) = self.converted(node, source, radix, scanned) else {
-      return Err(refused(Why::Costly(CostlyDigits {
-        digits: scanned.significant,
-        cost: number::decimal_cost(scanned.significant),
-      })));
+      return Err(refused(Why::Costly(scanned.significant)));
     };
     if !number::fits(
       scanned.negative,
@@ -4134,7 +4412,10 @@ impl<'p> Coercion<'_, 'p, '_> {
       let row = self.int_row(node, tree, scanned.negative, converted);
       self.builder.give_int(id, row);
     }
-    Ok((scanned.negative, converted))
+    Ok(SignedConversion {
+      negative: scanned.negative,
+      converted,
+    })
   }
 
   /// Makes `id` the float `node`, one of `tree`'s, a float or an integer, reads as in `f32` when
@@ -4335,10 +4616,13 @@ impl<'p> Coercion<'_, 'p, '_> {
         at: Location::new(tree.source, span),
       })
       .collect();
-    let one: [(&[u8], u32); 1];
-    let params: &[(&[u8], u32)] = match (path.param, written.first()) {
+    let one: [ParamName<'_>; 1];
+    let params: &[ParamName<'_>] = match (path.param, written.first()) {
       (Some(index), Some(&(first, _))) => {
-        one = [(builder.spelling(first), index)];
+        one = [ParamName {
+          spelling: builder.spelling(first),
+          index,
+        }];
         &one
       }
       _ => &[],
@@ -4488,7 +4772,10 @@ impl<'p> Coercion<'_, 'p, '_> {
     let kept = Spelling {
       text,
       start: dense(span.start()),
-      growths: (first, dense(self.growths.len())),
+      growths: PoolRange {
+        start: first,
+        end: dense(self.growths.len()),
+      },
     };
     self.spellings.insert(tree.root, kept);
     kept
@@ -4497,10 +4784,10 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// Where the byte `at` of its source, inside the root span of the spelling `kept`, is in its
   /// copy.
   fn spelled_at(&self, kept: Spelling, at: usize) -> u32 {
-    let (first, end) = kept.growths;
-    let growths: &[(u32, u32)] = self
+    let PoolRange { start, end } = kept.growths;
+    let growths: &[Growth] = self
       .growths
-      .get(first as usize..end as usize)
+      .get(start as usize..end as usize)
       .unwrap_or_default();
     spelling::offset(growths, dense(at).saturating_sub(kept.start))
   }
@@ -4819,7 +5106,8 @@ impl<'p> Coercion<'_, 'p, '_> {
           near,
         )
       }
-      Why::Costly(CostlyDigits { digits, cost }) => {
+      Why::Costly(digits) => {
+        let cost = number::decimal_cost(digits);
         let max = self.values.max();
         (
           Coded::Kind(DiagnosticKind::ResourceLimit),
@@ -4896,11 +5184,11 @@ impl<'p> Coercion<'_, 'p, '_> {
         )
       }
       Why::Unbuilt(stop) => {
-        let (message, help) = self.stopped(stop, "this value takes");
+        let Message { text, help } = self.stopped(stop, "this value takes");
         (
           Coded::Kind(DiagnosticKind::ResourceLimit),
-          message,
-          Some(String::from(help)),
+          text,
+          Some(help.into_owned()),
         )
       }
     };
@@ -4950,10 +5238,10 @@ fn unbuilt_count(stop: Stop) -> Count {
 }
 
 /// The key at `position` of `keyed`, its run of `keys`: none past either.
-fn key_at<'k>(keys: &'k [u8], keyed: &[(u32, u32, u32)], position: usize) -> &'k [u8] {
+fn key_at<'k>(keys: &'k [u8], keyed: &[Keyed], position: usize) -> &'k [u8] {
   keyed
     .get(position)
-    .and_then(|&(start, end, _): &(u32, u32, u32)| keys.get(start as usize..end as usize))
+    .and_then(|keyed: &Keyed| keys.get(keyed.key.start as usize..keyed.key.end as usize))
     .unwrap_or_default()
 }
 

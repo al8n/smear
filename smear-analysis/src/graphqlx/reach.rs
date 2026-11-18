@@ -61,7 +61,16 @@ pub(crate) struct Reach {
   /// Each type asked about, with its answer.
   asked: BTreeMap<TyId, Answer>,
   /// The types still to answer, each with whether its children were pushed above it.
-  stack: Vec<(TyId, bool)>,
+  stack: Vec<Visit>,
+}
+
+/// A type still to answer: [`Reach`]'s stack holds them.
+#[derive(Clone, Copy)]
+struct Visit {
+  /// The type.
+  ty: TyId,
+  /// Whether its children were pushed above it.
+  expanded: bool,
 }
 
 /// What [`Reach`] answers for a type, made once from its children's answers.
@@ -222,16 +231,29 @@ impl Reach {
       return *answer;
     }
     self.stack.clear();
-    self.stack.push((ty, false));
-    while let Some((next, pushed)) = self.stack.pop() {
+    self.stack.push(Visit {
+      ty,
+      expanded: false,
+    });
+    while let Some(Visit {
+      ty: next,
+      expanded: pushed,
+    }) = self.stack.pop()
+    {
       if self.asked.contains_key(&next) {
         continue;
       }
       let answer = match model.ty(next).kind() {
         TyKind::List(element) => {
           if !pushed {
-            self.stack.push((next, true));
-            self.stack.push((element, false));
+            self.stack.push(Visit {
+              ty: next,
+              expanded: true,
+            });
+            self.stack.push(Visit {
+              ty: element,
+              expanded: false,
+            });
             continue;
           }
           // A list holds what its element holds, and names what its element names.
@@ -247,10 +269,16 @@ impl Reach {
             // input object that a value of it holds.
             let held = |index: usize| -> bool { !input || positions.holds(def, dense(index)) };
             if !pushed {
-              self.stack.push((next, true));
+              self.stack.push(Visit {
+                ty: next,
+                expanded: true,
+              });
               for (index, arg) in args.iter().enumerate().rev() {
                 if held(index) {
-                  self.stack.push((*arg, false));
+                  self.stack.push(Visit {
+                    ty: *arg,
+                    expanded: false,
+                  });
                 }
               }
               continue;

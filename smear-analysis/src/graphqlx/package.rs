@@ -77,8 +77,17 @@ pub enum Tier {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct IntegerProvider {
   name: &'static str,
-  signed: (u32, u32),
-  unsigned: (u32, u32),
+  signed: WidthRange,
+  unsigned: WidthRange,
+}
+
+/// The widths, in bits, a provider supplies of one signedness: from `min` to `max`, both included.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct WidthRange {
+  /// The narrowest width.
+  pub(crate) min: u32,
+  /// The widest width.
+  pub(crate) max: u32,
 }
 
 impl IntegerProvider {
@@ -88,8 +97,8 @@ impl IntegerProvider {
   pub const fn numo() -> Self {
     Self {
       name: "numo",
-      signed: (0, 65536),
-      unsigned: (0, 65536),
+      signed: WidthRange { min: 0, max: 65536 },
+      unsigned: WidthRange { min: 0, max: 65536 },
     }
   }
 
@@ -102,26 +111,35 @@ impl IntegerProvider {
   /// The signed widths, in bits, the provider supplies.
   #[inline]
   pub const fn signed(&self) -> RangeInclusive<u32> {
-    RangeInclusive::new(self.signed.0, self.signed.1)
+    RangeInclusive::new(self.signed.min, self.signed.max)
   }
 
   /// The unsigned widths, in bits, the provider supplies.
   #[inline]
   pub const fn unsigned(&self) -> RangeInclusive<u32> {
-    RangeInclusive::new(self.unsigned.0, self.unsigned.1)
+    RangeInclusive::new(self.unsigned.min, self.unsigned.max)
   }
 
   /// Everything the provider holds, as one key the package order breaks ties with.
   #[inline]
-  pub(crate) const fn key(&self) -> (&str, u32, u32, u32, u32) {
-    (
-      self.name,
-      self.signed.0,
-      self.signed.1,
-      self.unsigned.0,
-      self.unsigned.1,
-    )
+  pub(crate) const fn key(&self) -> ProviderKey<'_> {
+    ProviderKey {
+      name: self.name,
+      signed: self.signed,
+      unsigned: self.unsigned,
+    }
   }
+}
+
+/// Everything a provider holds, as the package order breaks ties with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct ProviderKey<'a> {
+  /// The provider's name.
+  pub(crate) name: &'a str,
+  /// The signed widths it supplies.
+  pub(crate) signed: WidthRange,
+  /// The unsigned widths it supplies.
+  pub(crate) unsigned: WidthRange,
 }
 
 /// One package: its name, how its files map to modules, its tier, its files, the packages it

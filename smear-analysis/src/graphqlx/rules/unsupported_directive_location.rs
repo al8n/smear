@@ -65,7 +65,11 @@ impl Visitor for UnsupportedDirectiveLocation {
     let Resolution::Resolved(directive) = applied.directive() else {
       return;
     };
-    let (location, what, keyword) = place(cx);
+    let Place {
+      location,
+      what,
+      written: keyword,
+    } = place(cx);
     let listed = usize::try_from(directive.get())
       .ok()
       .and_then(|index: usize| self.masks.get(index))
@@ -92,52 +96,91 @@ impl Visitor for UnsupportedDirectiveLocation {
   }
 }
 
+/// Where an application stands: its location, what it is applied to, for the message, and the
+/// location as a definition writes it.
+struct Place {
+  /// The location.
+  location: DirectiveLocation,
+  /// What it is applied to, for the message.
+  what: &'static str,
+  /// The location as a definition writes it.
+  written: &'static str,
+}
+
 /// The location the application the walk has reached stands at, `cx` saying where that is: what
 /// it is applied to, for the message, and the location as a definition writes it.
 ///
 /// An application stands on the innermost member the walk is in, a field's argument within it; on
 /// the definition the walk is in when it is in no member; and on the schema when it is in neither.
-fn place(cx: &Cx<'_>) -> (DirectiveLocation, &'static str, &'static str) {
+fn place(cx: &Cx<'_>) -> Place {
   let model = cx.model();
   if let Some(member) = cx.member() {
     return match model.member(member).kind() {
-      MemberKind::Field => (
-        DirectiveLocation::FieldDefinition,
-        "a field",
-        "FIELD_DEFINITION",
-      ),
-      MemberKind::Argument => (
-        DirectiveLocation::ArgumentDefinition,
-        "an argument",
-        "ARGUMENT_DEFINITION",
-      ),
-      MemberKind::InputField => (
-        DirectiveLocation::InputFieldDefinition,
-        "an input field",
-        "INPUT_FIELD_DEFINITION",
-      ),
-      MemberKind::EnumValue => (DirectiveLocation::EnumValue, "an enum value", "ENUM_VALUE"),
+      MemberKind::Field => Place {
+        location: DirectiveLocation::FieldDefinition,
+        what: "a field",
+        written: "FIELD_DEFINITION",
+      },
+      MemberKind::Argument => Place {
+        location: DirectiveLocation::ArgumentDefinition,
+        what: "an argument",
+        written: "ARGUMENT_DEFINITION",
+      },
+      MemberKind::InputField => Place {
+        location: DirectiveLocation::InputFieldDefinition,
+        what: "an input field",
+        written: "INPUT_FIELD_DEFINITION",
+      },
+      MemberKind::EnumValue => Place {
+        location: DirectiveLocation::EnumValue,
+        what: "an enum value",
+        written: "ENUM_VALUE",
+      },
     };
   }
   let Some(def) = cx.def() else {
-    return (DirectiveLocation::Schema, "the schema", "SCHEMA");
+    return Place {
+      location: DirectiveLocation::Schema,
+      what: "the schema",
+      written: "SCHEMA",
+    };
   };
   match model.def(def).kind() {
-    DefKind::Scalar => (DirectiveLocation::Scalar, "a scalar", "SCALAR"),
-    DefKind::Object => (DirectiveLocation::Object, "an object type", "OBJECT"),
-    DefKind::Interface => (DirectiveLocation::Interface, "an interface", "INTERFACE"),
-    DefKind::Union => (DirectiveLocation::Union, "a union", "UNION"),
-    DefKind::Enum => (DirectiveLocation::Enum, "an enum", "ENUM"),
-    DefKind::InputObject => (
-      DirectiveLocation::InputObject,
-      "an input object",
-      "INPUT_OBJECT",
-    ),
-    DefKind::Directive => (
-      DirectiveLocation::DirectiveDefinition,
-      "a directive definition",
-      "DIRECTIVE_DEFINITION",
-    ),
+    DefKind::Scalar => Place {
+      location: DirectiveLocation::Scalar,
+      what: "a scalar",
+      written: "SCALAR",
+    },
+    DefKind::Object => Place {
+      location: DirectiveLocation::Object,
+      what: "an object type",
+      written: "OBJECT",
+    },
+    DefKind::Interface => Place {
+      location: DirectiveLocation::Interface,
+      what: "an interface",
+      written: "INTERFACE",
+    },
+    DefKind::Union => Place {
+      location: DirectiveLocation::Union,
+      what: "a union",
+      written: "UNION",
+    },
+    DefKind::Enum => Place {
+      location: DirectiveLocation::Enum,
+      what: "an enum",
+      written: "ENUM",
+    },
+    DefKind::InputObject => Place {
+      location: DirectiveLocation::InputObject,
+      what: "an input object",
+      written: "INPUT_OBJECT",
+    },
+    DefKind::Directive => Place {
+      location: DirectiveLocation::DirectiveDefinition,
+      what: "a directive definition",
+      written: "DIRECTIVE_DEFINITION",
+    },
   }
 }
 

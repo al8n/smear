@@ -56,7 +56,7 @@
 
 use crate::graphqlx::{
   id::{DefId, TyId, dense},
-  model::{DefKind, Occurrence, Shape, TypeBound, Written},
+  model::{DefKind, Occurrence, Shape, TypeBound, TypeParamRef, Written},
   types::Stop,
 };
 
@@ -84,7 +84,7 @@ pub(super) enum Alternative {
 
 /// Two types, in the order the relation asks them: [`Alternative::Arguments`]'s and
 /// [`Alternative::Pair`]'s payload.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct TyPair {
   /// The type that must be the subtype: the relation's first.
   pub(super) left: TyId,
@@ -154,7 +154,11 @@ impl Implementing<'_> {
         .get(frame.alt as usize)
         .copied()
         .and_then(|alternative: Alternative| self.pair_of(alternative, frame.next));
-      let Some((sub, sup)) = pair else {
+      let Some(TyPair {
+        left: sub,
+        right: sup,
+      }) = pair
+      else {
         // Past the alternative's last pair: every one held.
         if let Some(holds) = self.close(true) {
           return Ok(holds);
@@ -178,19 +182,16 @@ impl Implementing<'_> {
   }
 
   /// The pair at `next` of `alternative`, read in place: none past its last.
-  fn pair_of(&self, alternative: Alternative, next: u32) -> Option<(TyId, TyId)> {
+  fn pair_of(&self, alternative: Alternative, next: u32) -> Option<TyPair> {
     match alternative {
-      Alternative::Pair(TyPair {
-        left: sub,
-        right: sup,
-      }) => (next == 0).then_some((sub, sup)),
+      Alternative::Pair(pair) => (next == 0).then_some(pair),
       Alternative::Arguments(TyPair {
         left: sub,
         right: sup,
       }) => {
-        let sub = self.builder.ty_args(sub).get(next as usize).copied()?;
-        let sup = self.builder.ty_args(sup).get(next as usize).copied()?;
-        Some((sub, sup))
+        let left = self.builder.ty_args(sub).get(next as usize).copied()?;
+        let right = self.builder.ty_args(sup).get(next as usize).copied()?;
+        Some(TyPair { left, right })
       }
     }
   }
@@ -210,7 +211,10 @@ impl Implementing<'_> {
     let index = dense(self.frames.len().saturating_sub(1));
     let frame = self.frames.pop()?;
     self.alternatives.truncate(frame.start as usize);
-    let key = (frame.sub, frame.sup);
+    let key = TyPair {
+      left: frame.sub,
+      right: frame.sup,
+    };
     if holds {
       self.pairs.insert(key, Answer::Holds);
     } else if frame.low >= index {
@@ -234,7 +238,10 @@ impl Implementing<'_> {
   /// Lets go of every frame a stop leaves, the open mark of each removed.
   fn unwind(&mut self) {
     while let Some(frame) = self.frames.pop() {
-      self.pairs.remove(&(frame.sub, frame.sup));
+      self.pairs.remove(&TyPair {
+        left: frame.sub,
+        right: frame.sup,
+      });
     }
     self.alternatives.clear();
   }
@@ -248,7 +255,11 @@ impl Implementing<'_> {
     if sub == sup {
       return Ok(Asked::Known(true));
     }
-    match self.pairs.get(&(sub, sup)).copied() {
+    let key = TyPair {
+      left: sub,
+      right: sup,
+    };
+    match self.pairs.get(&key).copied() {
       Some(Answer::Holds) => return Ok(Asked::Known(true)),
       Some(Answer::Fails) => return Ok(Asked::Known(false)),
       Some(Answer::Open(index)) => return Ok(Asked::Open(index)),
@@ -277,14 +288,14 @@ impl Implementing<'_> {
           next: 0,
           low: index,
         });
-        self.pairs.insert((sub, sup), Answer::Open(index));
+        self.pairs.insert(key, Answer::Open(index));
         return Ok(Asked::Opened);
       }
       None => false,
     };
     self.alternatives.truncate(start as usize);
     let answer = if holds { Answer::Holds } else { Answer::Fails };
-    self.pairs.insert((sub, sup), answer);
+    self.pairs.insert(key, answer);
     Ok(Asked::Known(holds))
   }
 
@@ -310,13 +321,7 @@ impl Implementing<'_> {
         Ok(None)
       }
       (Shape::List(_), _) | (_, Shape::List(_)) => Ok(Some(false)),
-      (
-        Shape::Param { def, index },
-        Shape::Param {
-          def: wanted,
-          index: at,
-        },
-      ) => Ok(Some(def == wanted && index == at)),
+      (Shape::Param(below), Shape::Param(above)) => Ok(Some(below == above)),
       (Shape::Named(holder), Shape::Named(target)) if holder == target => {
         self.alternatives.push(Alternative::Arguments(TyPair {
           left: sub,
@@ -328,7 +333,9 @@ impl Implementing<'_> {
         Some(DefKind::Interface) => {
           match below {
             Shape::Named(holder) => self.entry_alternatives(holder, sub, sup, target)?,
-            Shape::Param { def, index } => self.bound_alternatives(def, index, sup, target)?,
+            Shape::Param(TypeParamRef { def, index }) => {
+              self.bound_alternatives(def, index, sup, target)?
+            }
             Shape::List(_) | Shape::Unresolved => {}
           }
           Ok(None)
@@ -340,7 +347,7 @@ impl Implementing<'_> {
         Some(_) | None => Ok(Some(false)),
       },
       // The unresolved type was answered above.
-      (_, Shape::Param { .. } | Shape::Unresolved) => Ok(Some(false)),
+      (_, Shape::Param(_) | Shape::Unresolved) => Ok(Some(false)),
     }
   }
 
@@ -479,13 +486,7 @@ impl Implementing<'_> {
       };
       let fits = match (below, self.builder.ty_shape(member)) {
         (Shape::Named(holder), Some(Shape::Named(named))) => holder == named,
-        (
-          Shape::Param { def, index },
-          Some(Shape::Param {
-            def: owner,
-            index: slot,
-          }),
-        ) => def == owner && index == slot,
+        (Shape::Param(param), Some(Shape::Param(owner))) => param == owner,
         _ => false,
       };
       if fits {

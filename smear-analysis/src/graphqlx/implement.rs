@@ -142,14 +142,17 @@ use super::{
   code::{DiagnosticKind, schema},
   declare::Declarations,
   diagnostic::{Diagnostic, DiagnosticBuilder, Excerpt, Reporter},
-  id::{ApplicationId, DefId, MemberId, PackageId, Sym, TyId, TypeExprId, dense},
+  id::{ApplicationId, DefId, MemberId, PackageId, PoolRange, Sym, TyId, TypeExprId, dense},
   instantiate::{binding, own_package},
-  model::{DefKind, ModelBuilder, Occurrence, Resolution, Shape, Written},
+  model::{
+    Applied, DefKind, ModelBuilder, Occurrence, Resolution, Shape, TypeParamRef, Written,
+    WrittenParam,
+  },
   source::SourceMap,
   types::{Counter, Limit, Stop, Types},
 };
 
-use subtype::{Alternative, Answer, Frame};
+use subtype::{Alternative, Answer, Frame, TyPair};
 
 mod subtype;
 
@@ -240,8 +243,8 @@ struct Root {
 /// A listed definition's distinct written entries and members, each list a run of `distinct`.
 #[derive(Clone, Copy)]
 struct Listed {
-  entries: (u32, u32),
-  members: (u32, u32),
+  entries: PoolRange,
+  members: PoolRange,
 }
 
 /// What comparing an instantiation's entries and members under its arguments came to.
@@ -302,6 +305,26 @@ enum Made {
   Stopped(Stop),
 }
 
+/// A type rebuilt under a named type's arguments: the type, and the named type.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct UnderKey {
+  /// The type rebuilt.
+  ty: TyId,
+  /// The named type whose arguments it is rebuilt under.
+  named: TyId,
+}
+
+/// An item of a list that has the type of an earlier one.
+#[derive(Clone, Copy)]
+struct Duplicate {
+  /// The later item.
+  later: TypeExprId,
+  /// The first item of the type.
+  first: TypeExprId,
+  /// The type they share.
+  ty: TyId,
+}
+
 /// What the phase keeps from one definition to the next, beside the type services, whose rebuild
 /// it pays for from its own budget.
 struct Implementing<'p> {
@@ -317,17 +340,17 @@ struct Implementing<'p> {
   steps: Counter,
   /// Each type rebuilt under a named type's arguments, by the two, with what it became, what
   /// stopped it included: a second asks nothing.
-  rebuilds: BTreeMap<(TyId, TyId), Result<Option<TyId>, Stop>>,
+  rebuilds: BTreeMap<UnderKey, Result<Option<TyId>, Stop>>,
   /// Whether each field compared applies `@deprecated`, by the field: read once.
   deprecations: BTreeMap<MemberId, bool>,
   /// The arguments of each field compared, by the field: its run of `argument_names`, built once.
-  argument_runs: BTreeMap<MemberId, (u32, u32)>,
+  argument_runs: BTreeMap<MemberId, PoolRange>,
   /// Each field's arguments, a run for each field, by name and then id, so that the first of a
   /// name is the one found.
   argument_names: Vec<(Sym, MemberId)>,
   /// Each pair of types the relation answered, by the pair, or marked open while its frame is on
   /// the stack.
-  pairs: BTreeMap<(TyId, TyId), Answer>,
+  pairs: BTreeMap<TyPair, Answer>,
   /// The relation's frames, one for each pair being answered.
   frames: Vec<Frame>,
   /// The alternatives of the frames on the stack, each frame's a run.
@@ -339,7 +362,7 @@ struct Implementing<'p> {
   members: Vec<(TypeExprId, TyId)>,
   /// The written duplicates of the list being checked: each later item, the first of its type,
   /// and the type.
-  twice: Vec<(TypeExprId, TypeExprId, TyId)>,
+  twice: Vec<Duplicate>,
   /// The definition being checked's roots, in order.
   roots: Vec<Root>,
   /// The types of its roots, each once.
@@ -437,11 +460,11 @@ impl Implementing<'_> {
       if let Some(earlier) = seen.first(position, ty)
         && let Some(&(first, _)) = items.get(earlier)
       {
-        self.twice.push((later, first, ty));
+        self.twice.push(Duplicate { later, first, ty });
       }
     }
     for index in 0..self.twice.len() {
-      let Some(&(later, first, ty)) = self.twice.get(index) else {
+      let Some(&Duplicate { later, first, ty }) = self.twice.get(index) else {
         break;
       };
       self.report_written(def, list, later, first, ty);
@@ -706,14 +729,14 @@ impl Implementing<'_> {
       return None;
     }
     match self.builder.ty_shape(occurrence.ty?)? {
-      Shape::Param { def: owner, index } if owner == def => Some(index),
+      Shape::Param(TypeParamRef { def: owner, index }) if owner == def => Some(index),
       _ => None,
     }
   }
 
   /// The run of `argument_names` that indexes the arguments of `field` by name: built the first
   /// time it is asked for, and kept.
-  fn argument_run(&mut self, field: MemberId) -> (u32, u32) {
+  fn argument_run(&mut self, field: MemberId) -> PoolRange {
     if let Some(&run) = self.argument_runs.get(&field) {
       return run;
     }
@@ -726,14 +749,19 @@ impl Implementing<'_> {
     if let Some(run) = self.argument_names.get_mut(start..) {
       run.sort_unstable();
     }
-    let run = (dense(start), dense(self.argument_names.len()));
+    let run = PoolRange {
+      start: dense(start),
+      end: dense(self.argument_names.len()),
+    };
     self.argument_runs.insert(field, run);
     run
   }
 
   /// The first argument named `name` of the run `run` of `argument_names`.
-  fn argument_named(&self, run: (u32, u32), name: Sym) -> Option<MemberId> {
-    let arguments = self.argument_names.get(run.0 as usize..run.1 as usize)?;
+  fn argument_named(&self, run: PoolRange, name: Sym) -> Option<MemberId> {
+    let arguments = self
+      .argument_names
+      .get(run.start as usize..run.end as usize)?;
     let at = arguments.partition_point(|&(written, _): &(Sym, MemberId)| written < name);
     match arguments.get(at) {
       Some(&(written, argument)) if written == name => Some(argument),
@@ -803,7 +831,7 @@ impl Implementing<'_> {
       .any(|application: &ApplicationId| {
         matches!(
           builder.applied(*application),
-          Some((Resolution::Resolved(directive), _, _)) if directive == wanted
+          Some(Applied { directive: Resolution::Resolved(directive), .. }) if directive == wanted
         )
       });
     self.deprecations.insert(member, found);
@@ -838,7 +866,11 @@ impl Implementing<'_> {
     if self.builder.ty_closed(open) {
       return Ok(Some(open));
     }
-    if let Some(&made) = self.rebuilds.get(&(open, ty)) {
+    let key = UnderKey {
+      ty: open,
+      named: ty,
+    };
+    if let Some(&made) = self.rebuilds.get(&key) {
       return made;
     }
     // The built-in library writes no `implements` entry, no union and no interface with a field,
@@ -847,7 +879,7 @@ impl Implementing<'_> {
       .types
       .derived
       .rebuild(self.builder, &mut self.steps, false, open, ty, def);
-    self.rebuilds.insert((open, ty), made);
+    self.rebuilds.insert(key, made);
     made
   }
 
@@ -1054,7 +1086,7 @@ impl Implementing<'_> {
 
   /// Appends to `distinct` the items of the list `list`, as gathered, each the first of its type:
   /// a written duplicate is reported where it is written, and not again. Answers their run.
-  fn push_distinct(&mut self, list: List) -> (u32, u32) {
+  fn push_distinct(&mut self, list: List) -> PoolRange {
     let start = dense(self.distinct.len());
     let items: &[(TypeExprId, TyId)] = match list {
       List::Implements => &self.entries,
@@ -1070,7 +1102,10 @@ impl Implementing<'_> {
         self.distinct.push((item, ty));
       }
     }
-    (start, dense(self.distinct.len()))
+    PoolRange {
+      start,
+      end: dense(self.distinct.len()),
+    }
   }
 
   /// The verdict of `ty`, a named type of the listed definition `def`: kept once made, by the type
@@ -1109,9 +1144,9 @@ impl Implementing<'_> {
   /// The first two of the run `run` of `distinct`, each under the arguments of `ty`, a named type
   /// of `def`, that are one type, the earlier first: each item a step, and its rebuild the
   /// phase's. One that cannot be rebuilt there is compared with nothing.
-  fn meeting(&mut self, ty: TyId, def: DefId, run: (u32, u32)) -> Result<Option<Twin>, Stop> {
+  fn meeting(&mut self, ty: TyId, def: DefId, run: PoolRange) -> Result<Option<Twin>, Stop> {
     self.under.clear();
-    for at in run.0..run.1 {
+    for at in run.start..run.end {
       if !self.steps.charge(1) {
         return Err(Stop::Steps);
       }
@@ -1539,8 +1574,8 @@ fn own_items(
 fn type_name(builder: &ModelBuilder, ty: TyId) -> &[u8] {
   match builder.ty_shape(ty) {
     Some(Shape::Named(def)) => builder.def_name(def),
-    Some(Shape::Param { def, index }) => match builder.type_param(def, index) {
-      Some((name, _, _)) => builder.spelling(name),
+    Some(Shape::Param(TypeParamRef { def, index })) => match builder.type_param(def, index) {
+      Some(WrittenParam { name, .. }) => builder.spelling(name),
       None => &[],
     },
     Some(Shape::List(_) | Shape::Unresolved) | None => &[],

@@ -45,7 +45,7 @@
 mod phases;
 mod read;
 
-pub(crate) use read::{Occurrence, Shape, Stored, Written};
+pub(crate) use read::{Applied, Occurrence, Shape, Stored, Written, WrittenParam};
 
 /// A run of the text arena: a text kept once, which any number of rows may share.
 #[derive(Clone, Copy)]
@@ -1038,15 +1038,14 @@ impl ModelBuilder {
   /// Makes `value` the input object of `entries`: each the input field it sets, where the field's
   /// name is written (`None` for a field a default filled), and the field's value, appended after
   /// `value`.
-  pub fn set_object(&mut self, value: ValueId, entries: &[(MemberId, Option<Location>, ValueId)]) {
+  pub fn set_object(&mut self, value: ValueId, entries: &[ObjectEntry]) {
     let start = dense(self.model.object_entries.len());
-    for &(field, name, item) in entries {
-      debug_assert!(item > value, "what a value holds is appended after it");
-      self.model.object_entries.push(ObjectEntry {
-        field,
-        name,
-        value: item,
-      });
+    for &entry in entries {
+      debug_assert!(
+        entry.value > value,
+        "what a value holds is appended after it"
+      );
+      self.model.object_entries.push(entry);
     }
     let row = self.value_row(value);
     row.shape = VALUE_OBJECT;
@@ -1418,10 +1417,14 @@ impl Model {
   /// A location that covers a whole source lies within no extent, and an extent that covers a
   /// whole source holds nothing: what has no position of its own marks nothing.
   pub(crate) fn mark(&mut self, marks: &[Location]) {
-    let mut spans: Vec<(u32, usize, usize)> = Vec::with_capacity(marks.len());
+    let mut spans: Vec<Mark> = Vec::with_capacity(marks.len());
     for at in marks {
       if let Some(span) = at.span() {
-        spans.push((at.source(), span.start(), span.end()));
+        spans.push(Mark {
+          source: at.source(),
+          start: span.start(),
+          end: span.end(),
+        });
       }
     }
     if spans.is_empty() {
@@ -1444,12 +1447,27 @@ impl Model {
 /// What the aliases are sorted and kept once by: the module, the namespace of the definition the
 /// alias names, then the name. A module's second names for types come before its second names for
 /// directives.
-fn alias_key(defs: &[DefRow], row: &AliasRow) -> (ModuleId, u8, Sym) {
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct AliasKey {
+  /// The module that gives the second name.
+  module: ModuleId,
+  /// The namespace of the definition it names: 0 for a type, 1 for a directive.
+  namespace: u8,
+  /// The second name.
+  name: Sym,
+}
+
+/// What `row` is sorted and kept once by.
+fn alias_key(defs: &[DefRow], row: &AliasRow) -> AliasKey {
   let namespace = match Namespace::of(defs[row.def.get() as usize].kind) {
     Namespace::Type => 0,
     Namespace::Directive => 1,
   };
-  (row.module, namespace, row.name)
+  AliasKey {
+    module: row.module,
+    namespace,
+    name: row.name,
+  }
 }
 
 /// The one type every unresolved occurrence has.
@@ -1492,21 +1510,31 @@ fn type_key(
   key
 }
 
+/// A location an error was reported at: its source and its span.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct Mark {
+  /// The source.
+  source: u32,
+  /// Where the span starts.
+  start: usize,
+  /// Where the span ends.
+  end: usize,
+}
+
 /// Whether one of `marks`, sorted by source and then span, lies within `extent`.
 ///
 /// A location that covers a whole source lies within no extent, and an extent that covers a whole
 /// source holds no mark: what has no position of its own marks nothing.
-fn holds_any(marks: &[(u32, usize, usize)], extent: Location) -> bool {
+fn holds_any(marks: &[Mark], extent: Location) -> bool {
   let Some(span) = extent.span() else {
     return false;
   };
   let (source, start, end) = (extent.source(), span.start(), span.end());
-  let first =
-    marks.partition_point(|mark: &(u32, usize, usize)| (mark.0, mark.1) < (source, start));
+  let first = marks.partition_point(|mark: &Mark| (mark.source, mark.start) < (source, start));
   marks[first..]
     .iter()
-    .take_while(|mark: &&(u32, usize, usize)| mark.0 == source && mark.1 <= end)
-    .any(|mark: &(u32, usize, usize)| mark.2 <= end)
+    .take_while(|mark: &&Mark| mark.source == source && mark.start <= end)
+    .any(|mark: &Mark| mark.end <= end)
 }
 
 /// A contribution at `location`, spanning `extent`, that has contributed nothing yet: an

@@ -1552,7 +1552,11 @@ fn reversing_files_and_dependencies_changes_no_value_and_no_diagnostic() {
     let analysis = analyze(&root, &dependencies, &Limits::new());
     let model = analysis.model();
     let mut text = String::new();
-    let (_, _, count, applications) = test_support::counts(model);
+    let test_support::Counts {
+      values: count,
+      applications,
+      ..
+    } = test_support::counts(model);
     for index in 0..count {
       let value = model.value(ValueId::new(index));
       text.push_str(&format!(

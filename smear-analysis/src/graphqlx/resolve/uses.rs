@@ -87,8 +87,9 @@ use crate::graphqlx::{
 };
 
 use super::{
-  Bound, ExplicitKey, Failure, FoundTarget, Glob, KindMismatch, Level, Lookup, ModuleWanted,
-  ModuleWithin, NotInModule, Position, Query, Scopes, Target, Wanted, Why, Within, quoted,
+  Bound, ExplicitKey, Failure, FoundTarget, Glob, GlobKey, KindMismatch, Level, Lookup,
+  ModuleWanted, ModuleWithin, NotInModule, Position, Query, Scopes, Target, Wanted, Why, Within,
+  quoted,
 };
 
 /// Resolves every `use` item of `declarations` into `scopes`, module by module, and reports what
@@ -533,13 +534,25 @@ impl<'x> Run<'_, 'x> {
   /// name, and every one that gives a name another item than the first binding of it does.
   fn collisions(&mut self) {
     let module = self.module;
-    let from: ExplicitKey = (module, 0, Sym::new(0), 0, 0);
-    let to: ExplicitKey = (module, u8::MAX, Sym::new(u32::MAX), u32::MAX, u32::MAX);
+    let from = ExplicitKey {
+      module,
+      namespace: 0,
+      name: Sym::new(0),
+      item: 0,
+      order: 0,
+    };
+    let to = ExplicitKey {
+      module,
+      namespace: u8::MAX,
+      name: Sym::new(u32::MAX),
+      item: u32::MAX,
+      order: u32::MAX,
+    };
     let bound: Vec<(u8, Sym, Bound)> = self
       .scopes
       .explicit
       .range(from..=to)
-      .map(|(key, bound): (&ExplicitKey, &Bound)| (key.1, key.2, *bound))
+      .map(|(key, bound): (&ExplicitKey, &Bound)| (key.namespace, key.name, *bound))
       .collect();
     let mut first: Option<(u8, Sym, Bound)> = None;
     for (namespace, sym, binding) in bound {
@@ -1152,11 +1165,31 @@ impl<'x> Run<'_, 'x> {
     let first = self
       .scopes
       .explicit
-      .range((module, namespace, sym, 0, 0)..=(module, namespace, sym, u32::MAX, u32::MAX))
+      .range(
+        ExplicitKey {
+          module,
+          namespace,
+          name: sym,
+          item: 0,
+          order: 0,
+        }..=ExplicitKey {
+          module,
+          namespace,
+          name: sym,
+          item: u32::MAX,
+          order: u32::MAX,
+        },
+      )
       .next()
       .is_none();
     self.scopes.explicit.insert(
-      (module, namespace, sym, cursor.item, cursor.seq),
+      ExplicitKey {
+        module,
+        namespace,
+        name: sym,
+        item: cursor.item,
+        order: cursor.seq,
+      },
       Bound { target, at },
     );
     cursor.seq = cursor.seq.saturating_add(1);
@@ -1170,7 +1203,10 @@ impl<'x> Run<'_, 'x> {
   /// first glob that would give the module a row past `Limits::max_globs` is reported, once for the
   /// module, and every glob that would makes no row.
   fn glob(&mut self, cursor: &Cursor, target: ModuleId, at: Location) {
-    let key = (self.module, target);
+    let key = GlobKey {
+      module: self.module,
+      target,
+    };
     if let Some(row) = self.scopes.globs.get_mut(&key) {
       if row.item != cursor.item {
         row.shared = true;

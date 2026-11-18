@@ -129,21 +129,32 @@ impl Primitive {
   /// Its place among `core`'s materialised definitions: `bool`, `f32`, `f64`, then the signed
   /// widths ascending, then the unsigned widths ascending. Two primitives share it only when they
   /// are one.
-  pub(crate) const fn rank(self) -> (u8, u32) {
+  pub(crate) const fn rank(self) -> Rank {
     match self {
-      Self::Bool => (0, 0),
-      Self::F32 => (1, 0),
-      Self::F64 => (2, 0),
+      Self::Bool => Rank { kind: 0, width: 0 },
+      Self::F32 => Rank { kind: 1, width: 0 },
+      Self::F64 => Rank { kind: 2, width: 0 },
       Self::Int(IntPrimitive {
         signed: true,
         width,
-      }) => (3, width),
+      }) => Rank { kind: 3, width },
       Self::Int(IntPrimitive {
         signed: false,
         width,
-      }) => (4, width),
+      }) => Rank { kind: 4, width },
     }
   }
+}
+
+/// A primitive's place among `core`'s materialised definitions: [`Primitive::rank`]'s answer. It
+/// orders as the definitions' ids do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct Rank {
+  /// Which kind of primitive: `bool` is 0, `f32` 1, `f64` 2, a signed integer 3 and an unsigned
+  /// integer 4.
+  pub(crate) kind: u8,
+  /// The width of an integer, and 0 for the others.
+  pub(crate) width: u32,
 }
 
 /// An integer primitive, `iN` or `uN`: [`Primitive::Int`]'s payload. Built with

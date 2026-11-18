@@ -170,7 +170,7 @@ use super::{
     DefKind, DirectiveLocation, MemberKind, ModelBuilder, PathRoot, Root, RootOperation, Written,
   },
   raw::{FloatSpelling, Radix, RawArgument, RawField, RawKind, RawValues},
-  resolve::{self, NonZeroAlias, Position, Request, Resolved, Scopes, Wanted},
+  resolve::{self, NonZeroAlias, ParamName, Position, Request, Resolved, Scopes, Wanted},
   set::{PackageView, ROOT},
   source::SourceMap,
 };
@@ -403,7 +403,7 @@ struct Site<'p> {
   /// The source it is written in.
   source: SourceId,
   /// The generic parameters in scope, by spelling, each with its position.
-  params: &'p [(&'p [u8], u32)],
+  params: &'p [ParamName<'p>],
 }
 
 /// What the second walk reads of one item that writes a contribution: each part `None`, or
@@ -1086,7 +1086,7 @@ impl Lowering<'_, '_, '_> {
       self.param_names(declarations, item, &mut names);
       runs.push((from, names.len()));
     }
-    let mut tables: Vec<Vec<(&[u8], u32)>> = Vec::with_capacity(runs.len());
+    let mut tables: Vec<Vec<ParamName<'_>>> = Vec::with_capacity(runs.len());
     for &(from, to) in &runs {
       tables.push(resolve::params(names.get(from..to).unwrap_or_default()));
     }
@@ -1991,7 +1991,7 @@ impl Lowering<'_, '_, '_> {
     let at = occurrence.location;
     let refused = match occurrence.written {
       Written::Named(def) => self.builder.def_kind(def) != Some(DefKind::Interface),
-      Written::Param { .. } | Written::List(_) => true,
+      Written::Param(_) | Written::List(_) => true,
       Written::Unresolved => false,
     };
     if refused {

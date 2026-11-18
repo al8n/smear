@@ -2,7 +2,7 @@
 //! [`Diagnostics`], the list of them in one total order.
 
 use core::cmp::Ordering;
-use std::{borrow::Cow, collections::BinaryHeap, vec::Vec};
+use std::{borrow::Cow, collections::BinaryHeap, string::String, vec::Vec};
 
 use tokora::diagnostic::{Code, Diagnose, Label, Location, PathSegment, Severity};
 
@@ -159,6 +159,15 @@ impl core::fmt::Display for Excerpt<'_> {
     f.write_str("…")?;
     write_lossy(f, &bytes[tail..])
   }
+}
+
+/// A finding's message and its help, as a phase composes them before it reports.
+pub(crate) struct Message {
+  /// What the finding says, composed from the input, so owned.
+  pub(crate) text: String,
+  /// What the reader can do about it: a literal where it is the same for every input, composed
+  /// where it quotes one.
+  pub(crate) help: Cow<'static, str>,
 }
 
 /// The offset `at` into `bytes`, moved back to the first byte of the character it falls inside:

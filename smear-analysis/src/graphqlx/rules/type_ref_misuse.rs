@@ -60,7 +60,7 @@ use crate::graphqlx::{
   NamedTy, NamedTypeExpr, Site, TyId, TyKind, TypeExprId, TypeExprKind, Visitor,
   diagnostic::Excerpt,
   id::dense,
-  positions::{Derived, Fill, Place, Positions, Taking, parameter, taking},
+  positions::{Derived, DerivedFill, Fill, Place, Positions, Taking, parameter, taking},
   reach::Reach,
 };
 
@@ -305,7 +305,14 @@ impl TypeRefMisuse {
         slot: filled,
         ty: derived,
         verdict: Held { slot, field },
-      }) => (slot, field, Some((filled, derived))),
+      }) => (
+        slot,
+        field,
+        Some(DerivedFill {
+          slot: filled,
+          ty: derived,
+        }),
+      ),
     };
     let Taking {
       def: taker,

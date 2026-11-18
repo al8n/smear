@@ -250,7 +250,7 @@ fn an_application_with_no_complete_type_arguments_has_none() {
     ])
   );
   let model = analysis.model();
-  let (_, _, _, applications) = test_support::counts(model);
+  let test_support::Counts { applications, .. } = test_support::counts(model);
   for index in 0..applications {
     let application = ApplicationId::new(index);
     assert!(
@@ -1585,7 +1585,11 @@ fn an_ok_analysis_under_type_arguments_has_no_unresolved_value() {
 /// type arguments and every diagnostic.
 fn rendered(analysis: &Analysis) -> String {
   let model = analysis.model();
-  let (_, _, values, applications) = test_support::counts(model);
+  let test_support::Counts {
+    values,
+    applications,
+    ..
+  } = test_support::counts(model);
   let mut text = String::new();
   for index in 0..values {
     text.push_str(&format!("{index} {}\n", valued(model, ValueId::new(index))));

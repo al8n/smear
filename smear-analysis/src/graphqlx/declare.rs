@@ -43,14 +43,14 @@ use tokora::diagnostic::Location;
 
 use super::{
   builtin::{
-    ALIASES, BUILT_INS, BuiltinDefinition, BuiltinName, CORE, META_TYPES, Replaced, TYPE, Target,
-    namespace, spelled,
+    ALIASES, BUILT_INS, BuiltinAlias, BuiltinDefinition, BuiltinName, CORE, META_TYPES, Replaced,
+    TYPE, Target, namespace, spelled,
   },
   code::{DiagnosticKind, schema},
   collect::{Collected, Found, Items, Placed},
   diagnostic::{Diagnostic, Excerpt, Reporter},
   id::{DefId, ModuleId, SourceId, Sym},
-  model::{DefKind, ModelBuilder, ModuleKind, Origin, Primitive},
+  model::{DefKind, ModelBuilder, ModuleKind, Origin, Primitive, Rank},
   set::ROOT,
   source::SourceMap,
   tree::{Declared, Node, Tree},
@@ -186,7 +186,11 @@ pub(crate) fn declarations<'d, 'a>(
     mut written,
   } = collected;
   let modules: Vec<ModuleId> = tree.push(builder);
-  let (entries, children, roots) = module_tables(&tree, &modules, builder);
+  let ModuleTables {
+    entries,
+    children,
+    roots,
+  } = module_tables(&tree, &modules, builder);
   definitions.sort_by_key(|found: &Found<'d>| order(&modules, found));
 
   // The built-in packages' root modules' definitions, by package, namespace and name, the first
@@ -205,7 +209,7 @@ pub(crate) fn declarations<'d, 'a>(
   // What the root package's root module replaces: for each, the definition that replaces it. The
   // walk found which definitions those are, the first of each name in the root module.
   let mut replacing: Vec<bool> = vec![false; definitions.len()];
-  let mut primitives: BTreeMap<(u8, u32), usize> = BTreeMap::new();
+  let mut primitives: BTreeMap<Rank, usize> = BTreeMap::new();
   let mut named: BTreeMap<(usize, u8, &'d [u8]), usize> = BTreeMap::new();
   for (at, found) in definitions.iter().enumerate() {
     match found.replaces {
@@ -237,7 +241,7 @@ pub(crate) fn declarations<'d, 'a>(
   // The primitives, first in `core`'s root module, which is the first module of all.
   let core = modules[tree.root_of(CORE) as usize];
   let whole = Location::entire(sources.package_sources(CORE).start());
-  let mut materialised: BTreeMap<(u8, u32), DefId> = BTreeMap::new();
+  let mut materialised: BTreeMap<Rank, DefId> = BTreeMap::new();
   let mut primitive_defs: Vec<(Primitive, DefId)> = Vec::with_capacity(written.len());
   for (&rank, &primitive) in &written {
     let name = builder.intern(&spelled(primitive));
@@ -325,7 +329,12 @@ pub(crate) fn declarations<'d, 'a>(
   }
 
   // The second names, each in its built-in package's root module.
-  for (package, alias, target) in ALIASES {
+  for BuiltinAlias {
+    package,
+    name: alias,
+    target,
+  } in ALIASES
+  {
     let def = match target {
       Target::Primitive(primitive) => materialised.get(&primitive.rank()).copied(),
       Target::Named(BuiltinName {
@@ -442,17 +451,23 @@ pub(crate) fn declarations<'d, 'a>(
   }
 }
 
+/// The tables name resolution reads of the modules: [`module_tables`]'s answer.
+struct ModuleTables {
+  /// Every module, by id.
+  entries: Vec<ModuleEntry>,
+  /// Every module but a root module, sorted by its parent and its name.
+  children: Vec<Child>,
+  /// Each package's root module, by the package's index.
+  roots: Vec<ModuleId>,
+}
+
 /// Every module of `tree`, whose nodes `ids` numbers, by id, as name resolution reads it; every
 /// module but a root module, sorted by its parent and its name; and each package's root module,
 /// by the package's index.
 ///
 /// A module's name was interned when it was numbered, so interning it again finds its symbol and
 /// adds none.
-fn module_tables(
-  tree: &Tree<'_>,
-  ids: &[ModuleId],
-  builder: &mut ModelBuilder,
-) -> (Vec<ModuleEntry>, Vec<Child>, Vec<ModuleId>) {
+fn module_tables(tree: &Tree<'_>, ids: &[ModuleId], builder: &mut ModelBuilder) -> ModuleTables {
   let unset = ModuleEntry {
     package: 0,
     parent: None,
@@ -487,21 +502,36 @@ fn module_tables(
     }
   }
   children.sort_by_key(|child: &Child| (child.parent, child.name));
-  (entries, children, roots)
+  ModuleTables {
+    entries,
+    children,
+    roots,
+  }
 }
 
 /// A definition's place in the `DefId` order: its module, its source, then its position, which its
 /// name's is.
-fn order(modules: &[ModuleId], found: &Found<'_>) -> (ModuleId, SourceId, usize) {
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct DefOrder {
+  /// Its module.
+  module: ModuleId,
+  /// Its source.
+  source: SourceId,
+  /// Where its name is written, in the source.
+  position: usize,
+}
+
+/// `found`'s place in the `DefId` order.
+fn order(modules: &[ModuleId], found: &Found<'_>) -> DefOrder {
   let position = found
     .location
     .span()
     .map_or(0, |span: tokora::SimpleSpan| span.start());
-  (
-    modules[found.placed.module as usize],
-    found.placed.source,
+  DefOrder {
+    module: modules[found.placed.module as usize],
+    source: found.placed.source,
     position,
-  )
+  }
 }
 
 /// Gives `def` the description written as `description`, decoded into `text`.

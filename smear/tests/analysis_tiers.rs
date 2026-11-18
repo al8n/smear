@@ -341,7 +341,10 @@ fn rendered(analysis: &Analysis) -> String {
     let definition = model.def(id);
     text.push_str(&format!("{} {:?}\n", definition.name(), definition.tier()));
   }
-  let (_, occurrences, _, _) = test_support::counts(model);
+  let test_support::Counts {
+    type_exprs: occurrences,
+    ..
+  } = test_support::counts(model);
   for index in 0..occurrences {
     let ty = model.type_expr(TypeExprId::new(index)).ty();
     text.push_str(&format!("{index} {:?}\n", model.ty(ty).tier()));

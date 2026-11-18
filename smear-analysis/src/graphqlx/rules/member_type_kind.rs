@@ -55,7 +55,7 @@ use tokora::diagnostic::{Code, Location};
 
 use crate::graphqlx::{
   ApplicationId, Contribution, Cx, DefId, DefKind, Diagnostic, Member, MemberId, MemberKind, Model,
-  NamedTy, NamedTypeExpr, Site, TyId, TyKind, TypeExprId, TypeExprKind, Visitor,
+  NamedTy, NamedTypeExpr, Site, TyId, TyKind, TypeExprId, TypeExprKind, TypeParamRef, Visitor,
   code::schema,
   diagnostic::Excerpt,
   id::dense,
@@ -201,7 +201,7 @@ impl Visitor for MemberTypeKind {
         .primary_label(position.label());
       if let Some(default) = misfit
         .filled
-        .and_then(|(def, index): (DefId, u32)| default_of(model, def, index))
+        .and_then(|param: TypeParamRef| default_of(model, param.def(), param.index()))
       {
         report = report.label(default, "filled from this default");
       }
@@ -362,7 +362,7 @@ impl MemberTypeKind {
         }
         if let Some(default) = misfit
           .filled
-          .and_then(|(collection, index): (DefId, u32)| default_of(model, collection, index))
+          .and_then(|param: TypeParamRef| default_of(model, param.def(), param.index()))
         {
           report = report.label(default, "filled from this default");
         }

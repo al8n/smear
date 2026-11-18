@@ -1051,8 +1051,8 @@ fn fixture() -> Model {
   b.set_object(
     V_OBJECT,
     &[
-      (FILTER_TAGS, Some(at(APP_SCHEMA, 1086, 1087)), V_OBJECT_TAGS),
-      (FILTER_COLOR, None, V_OBJECT_COLOR),
+      ObjectEntry::new(FILTER_TAGS, Some(at(APP_SCHEMA, 1086, 1087)), V_OBJECT_TAGS),
+      ObjectEntry::new(FILTER_COLOR, None, V_OBJECT_COLOR),
     ],
   );
   assert_eq!(b.push_value(at(APP_SCHEMA, 1088, 1092), true), V_LITERAL);

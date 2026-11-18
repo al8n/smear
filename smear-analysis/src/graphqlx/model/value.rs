@@ -45,12 +45,22 @@ pub enum LiteralKind {
 /// written, and the field's value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ObjectEntry {
-  pub(super) field: MemberId,
-  pub(super) name: Option<Location>,
-  pub(super) value: ValueId,
+  pub(crate) field: MemberId,
+  pub(crate) name: Option<Location>,
+  pub(crate) value: ValueId,
 }
 
 impl ObjectEntry {
+  /// Creates the entry: the input field `field` set, where its name is written (`None` for a field
+  /// a default filled), and its value.
+  ///
+  /// Public because the model builder's `set_object`, which the test-support door exposes, takes
+  /// entries, and a test that builds a model by hand makes them.
+  #[inline]
+  pub const fn new(field: MemberId, name: Option<Location>, value: ValueId) -> Self {
+    Self { field, name, value }
+  }
+
   /// The input field it sets.
   #[inline]
   pub const fn field(&self) -> MemberId {

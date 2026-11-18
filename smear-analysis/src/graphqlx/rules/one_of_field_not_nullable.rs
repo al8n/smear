@@ -58,7 +58,7 @@ use crate::graphqlx::{
   code::schema,
   diagnostic::Excerpt,
   id::dense,
-  positions::{Derived, Fill, Mistake, Place, Positions, Taking, parameter, taking},
+  positions::{Derived, DerivedFill, Fill, Mistake, Place, Positions, Taking, parameter, taking},
 };
 
 use super::{Silence, one_of};
@@ -258,7 +258,13 @@ impl OneOfFieldNotNullable {
         slot: filled,
         ty: derived,
         verdict: slot,
-      }) => (slot, Some((filled, derived))),
+      }) => (
+        slot,
+        Some(DerivedFill {
+          slot: filled,
+          ty: derived,
+        }),
+      ),
     };
     let Taking {
       def: taker,

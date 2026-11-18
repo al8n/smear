@@ -33,9 +33,17 @@ use tokora::{diagnostic::Location, span::AsSpan};
 
 use super::{
   builtin::{available, written},
-  model::Primitive,
+  model::{Primitive, Rank},
   package::IntegerProvider,
 };
+
+/// What the pre-pass found: [`Widths::finish`]'s answer.
+pub(crate) struct WidthsFound {
+  /// Every primitive written, keyed by its place among `core`'s materialised definitions.
+  pub(crate) written: BTreeMap<Rank, Primitive>,
+  /// How many nodes of an unknown kind the pass met.
+  pub(crate) unknown: u32,
+}
 
 /// What the pre-pass has found so far, and the package and the source it is reading.
 pub(crate) struct Widths<'p> {
@@ -46,7 +54,7 @@ pub(crate) struct Widths<'p> {
   /// Every primitive written where it is available, keyed by its place among `core`'s
   /// materialised definitions: the key is the order the ids take, and two primitives share it
   /// only when they are one.
-  written: BTreeMap<(u8, u32), Primitive>,
+  written: BTreeMap<Rank, Primitive>,
   /// The primitives written first since the walk last took them, in the order written, each with
   /// where it is written.
   fresh: Vec<(Primitive, Location)>,
@@ -106,8 +114,11 @@ impl<'p> Widths<'p> {
 
   /// Every primitive written, keyed by its place among `core`'s materialised definitions, and how
   /// many nodes of an unknown kind the pass met.
-  pub(crate) fn finish(self) -> (BTreeMap<(u8, u32), Primitive>, u32) {
-    (self.written, self.unknown)
+  pub(crate) fn finish(self) -> WidthsFound {
+    WidthsFound {
+      written: self.written,
+      unknown: self.unknown,
+    }
   }
 
   /// Reads a type-system definition: its generic defaults, `implements`, `where` clause,

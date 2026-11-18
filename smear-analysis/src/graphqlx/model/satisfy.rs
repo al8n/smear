@@ -105,6 +105,15 @@ pub(crate) enum Wanted {
   Definition(DefId),
 }
 
+/// A pair of children, one of the node being descended and one of the target it is paired with.
+#[derive(Clone, Copy)]
+struct ChildPair {
+  /// The child of the node.
+  node: TyId,
+  /// The child of the target.
+  target: TyId,
+}
+
 /// What comparing one pair of nodes found.
 #[derive(Clone, Copy)]
 enum Compared {
@@ -376,9 +385,12 @@ impl Model {
     let mut paired: BTreeMap<TyId, TyId> = BTreeMap::new();
     // The pairs being descended, each with the index of its next pair of children.
     let mut frames: Vec<(TyId, TyId, u32)> = Vec::new();
-    let mut next: Option<(TyId, TyId)> = Some((declared, goal));
+    let mut next: Option<ChildPair> = Some(ChildPair {
+      node: declared,
+      target: goal,
+    });
     loop {
-      if let Some((node, target)) = next {
+      if let Some(ChildPair { node, target }) = next {
         if !steps.take(1) {
           return None;
         }
@@ -479,15 +491,21 @@ impl Model {
   /// The pair of children at `index` of `node` and `target`, which `compared` found to descend: a
   /// list's element and the target's, or the two named types' arguments at `index`. `None` past
   /// the last.
-  fn children(&self, node: TyId, target: TyId, index: u32) -> Option<(TyId, TyId)> {
+  fn children(&self, node: TyId, target: TyId, index: u32) -> Option<ChildPair> {
     let row = self.tys.get(node.get() as usize)?;
     let aim = self.tys.get(target.get() as usize)?;
     match row.shape {
-      KIND_LIST => (index == 0).then_some((row.element, aim.element)),
+      KIND_LIST => (index == 0).then_some(ChildPair {
+        node: row.element,
+        target: aim.element,
+      }),
       KIND_NAMED => {
         let args: &[TyId] = row.args.of(&self.ty_args);
         let targets: &[TyId] = aim.args.of(&self.ty_args);
-        Some((*args.get(index as usize)?, *targets.get(index as usize)?))
+        Some(ChildPair {
+          node: *args.get(index as usize)?,
+          target: *targets.get(index as usize)?,
+        })
       }
       _ => None,
     }

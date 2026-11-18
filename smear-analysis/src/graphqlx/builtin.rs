@@ -42,9 +42,18 @@ pub(crate) struct BuiltIn {
   pub(crate) name: &'static str,
   /// The tier the package's own definitions require.
   pub(crate) tier: Tier,
-  /// The package's embedded source files, as `(path, text)` pairs, in any order: the analysis
-  /// numbers them by path, as it numbers a supplied package's files.
-  pub(crate) files: &'static [(&'static str, &'static str)],
+  /// The package's embedded source files, in any order: the analysis numbers them by path, as it
+  /// numbers a supplied package's files.
+  pub(crate) files: &'static [EmbeddedFile],
+}
+
+/// One source file embedded in a built-in package.
+#[derive(Clone, Copy)]
+pub(crate) struct EmbeddedFile {
+  /// Its path.
+  pub(crate) path: &'static str,
+  /// Its text.
+  pub(crate) text: &'static str,
 }
 
 /// The built-in packages, in [`PackageId`](super::PackageId) order.
@@ -73,13 +82,22 @@ pub(crate) const CORE: usize = 0;
 pub(crate) const ALLOC: usize = 1;
 
 /// `core`'s embedded files.
-const CORE_FILES: &[(&str, &str)] = &[("lib.graphqlx", CORE_LIB)];
+const CORE_FILES: &[EmbeddedFile] = &[EmbeddedFile {
+  path: "lib.graphqlx",
+  text: CORE_LIB,
+}];
 
 /// `alloc`'s embedded files.
-const ALLOC_FILES: &[(&str, &str)] = &[("lib.graphqlx", ALLOC_LIB)];
+const ALLOC_FILES: &[EmbeddedFile] = &[EmbeddedFile {
+  path: "lib.graphqlx",
+  text: ALLOC_LIB,
+}];
 
 /// `std`'s embedded files.
-const STD_FILES: &[(&str, &str)] = &[("lib.graphqlx", STD_LIB)];
+const STD_FILES: &[EmbeddedFile] = &[EmbeddedFile {
+  path: "lib.graphqlx",
+  text: STD_LIB,
+}];
 
 /// `core`'s `lib.graphqlx`.
 const CORE_LIB: &str = r#"# GraphQLx's own definitions that need no allocator.
@@ -354,29 +372,53 @@ pub(crate) struct BuiltinName {
   pub(crate) name: &'static str,
 }
 
+/// One of GraphQL's built-in scalar names, with the built-in package whose root module gives it as
+/// a second name, and the one definition it names.
+#[derive(Clone, Copy)]
+pub(crate) struct BuiltinAlias {
+  /// The index of the built-in package whose root module gives the name.
+  pub(crate) package: usize,
+  /// The name.
+  pub(crate) name: &'static str,
+  /// The definition it is a second name of.
+  pub(crate) target: Target,
+}
+
 /// GraphQL's built-in scalar names, each with the built-in package whose root module gives it as
 /// a second name, and the one definition it names. A root package's own scalar of one of these
 /// names, in its root module, replaces that definition.
-pub(crate) const ALIASES: [(usize, &str, Target); 5] = [
-  (CORE, "Int", Target::Primitive(Primitive::signed(32))),
-  (CORE, "Float", Target::Primitive(Primitive::F64)),
-  (CORE, "Boolean", Target::Primitive(Primitive::Bool)),
-  (
-    ALLOC,
-    "String",
-    Target::Named(BuiltinName {
+pub(crate) const ALIASES: [BuiltinAlias; 5] = [
+  BuiltinAlias {
+    package: CORE,
+    name: "Int",
+    target: Target::Primitive(Primitive::signed(32)),
+  },
+  BuiltinAlias {
+    package: CORE,
+    name: "Float",
+    target: Target::Primitive(Primitive::F64),
+  },
+  BuiltinAlias {
+    package: CORE,
+    name: "Boolean",
+    target: Target::Primitive(Primitive::Bool),
+  },
+  BuiltinAlias {
+    package: ALLOC,
+    name: "String",
+    target: Target::Named(BuiltinName {
       package: ALLOC,
       name: "string",
     }),
-  ),
-  (
-    ALLOC,
-    "ID",
-    Target::Named(BuiltinName {
+  },
+  BuiltinAlias {
+    package: ALLOC,
+    name: "ID",
+    target: Target::Named(BuiltinName {
       package: ALLOC,
       name: "id",
     }),
-  ),
+  },
 ];
 
 /// GraphQL's specified directives, which `core` defines. A root package's own directive of one of
@@ -444,7 +486,7 @@ pub(crate) fn replaceable(namespace: u8, name: &[u8]) -> bool {
   } else {
     ALIASES
       .iter()
-      .any(|row: &(usize, &str, Target)| row.1.as_bytes() == name)
+      .any(|row: &BuiltinAlias| row.name.as_bytes() == name)
   }
 }
 
@@ -454,14 +496,22 @@ pub(crate) fn replaceable(namespace: u8, name: &[u8]) -> bool {
 pub(crate) fn replaced(kind: DefKind, name: &[u8]) -> Option<Replaced> {
   match kind {
     DefKind::Scalar => {
-      for (_, alias, target) in ALIASES {
+      for BuiltinAlias {
+        name: alias,
+        target,
+        ..
+      } in ALIASES
+      {
         if alias.as_bytes() == name {
           return Some(match target {
             Target::Primitive(primitive) => Replaced::Primitive(primitive),
-            Target::Named(BuiltinName { package, name }) => Replaced::Built(BuiltinDefinition {
+            Target::Named(BuiltinName {
+              package,
+              name: named,
+            }) => Replaced::Built(BuiltinDefinition {
               package,
               rank: TYPE,
-              name: name.as_bytes(),
+              name: named.as_bytes(),
             }),
           });
         }
@@ -516,7 +566,12 @@ pub(crate) fn written(spelling: &[u8]) -> Option<Primitive> {
   if let Some(primitive) = intrinsic(spelling) {
     return Some(primitive);
   }
-  for (_, alias, target) in ALIASES {
+  for BuiltinAlias {
+    name: alias,
+    target,
+    ..
+  } in ALIASES
+  {
     if let Target::Primitive(primitive) = target
       && alias.as_bytes() == spelling
     {

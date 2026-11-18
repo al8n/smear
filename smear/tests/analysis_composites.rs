@@ -1222,7 +1222,7 @@ fn nested_defaults_are_counted_before_they_are_copied() {
   }
   let model = analysis.model();
   assert!(arguments_of(model, "T").is_empty());
-  let (_, _, values, _) = test_support::counts(model);
+  let test_support::Counts { values, .. } = test_support::counts(model);
   assert!(values < 3000, "{values} values");
 }
 
@@ -1917,7 +1917,7 @@ fn reversing_files_and_dependencies_changes_no_composite_value_and_no_diagnostic
     let analysis = analyze(&root, &dependencies, &Limits::new());
     let model = analysis.model();
     let mut text = String::new();
-    let (_, _, count, _) = test_support::counts(model);
+    let test_support::Counts { values: count, .. } = test_support::counts(model);
     for index in 0..count {
       let value = model.value(ValueId::new(index));
       text.push_str(&format!(

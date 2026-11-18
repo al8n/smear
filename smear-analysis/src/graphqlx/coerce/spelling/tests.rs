@@ -4,12 +4,12 @@
 
 use std::{string::String, vec::Vec};
 
-use super::{copy, offset};
+use super::{Growth, copy, offset};
 
 /// The copy of `written`, and what it grew by.
-fn copied(written: &[u8]) -> (String, Vec<(u32, u32)>) {
+fn copied(written: &[u8]) -> (String, Vec<Growth>) {
   let mut out = String::new();
-  let mut growths: Vec<(u32, u32)> = Vec::new();
+  let mut growths: Vec<Growth> = Vec::new();
   copy(written, &mut out, &mut growths);
   (out, growths)
 }
@@ -76,7 +76,17 @@ fn each_sequence_that_is_not_utf8_moves_what_follows_it() {
   let written: &[u8] = b"[\"a\xffb\", \"\xe2\x82c\", \"\xc0\xafd\", \"\xf0\x9f\x98\"]";
   let (out, growths) = copied(written);
   assert_eq!(out, String::from_utf8_lossy(written));
-  assert_eq!(growths, [(4, 2), (11, 3), (17, 5), (18, 7), (26, 7)]);
+  let growth = |offset: u32, grown: u32| Growth { offset, grown };
+  assert_eq!(
+    growths,
+    [
+      growth(4, 2),
+      growth(11, 3),
+      growth(17, 5),
+      growth(18, 7),
+      growth(26, 7)
+    ]
+  );
   // The last string's quotes, at 22 and 26, are each 7 bytes later in the copy: the four sequences
   // before the first grew it by 2 + 1 + 2 + 2, and the one between them by nothing.
   assert_eq!(offset(&growths, 22), 29);

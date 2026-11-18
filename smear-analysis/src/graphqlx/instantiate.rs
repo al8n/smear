@@ -132,6 +132,7 @@
 //! and reported at its path. The `bounds` module says what is judged, and what is not.
 
 use std::{
+  borrow::Cow,
   boxed::Box,
   collections::{BTreeMap, BTreeSet},
   format,
@@ -146,9 +147,12 @@ use super::{
   builtin::{ALLOC, CORE, DIRECTIVE, TYPE},
   code::DiagnosticKind,
   declare::{Binding, Declarations},
-  diagnostic::{Diagnostic, Excerpt, Reporter},
-  id::{ApplicationId, DefId, PackageId, Sym, TyId, TypeExprId, dense},
-  model::{Collection, DefKind, Keys, ModelBuilder, Resolution, Written},
+  diagnostic::{Diagnostic, Excerpt, Message, Reporter},
+  id::{ApplicationId, DefId, PackageId, TyId, TypeExprId, dense},
+  model::{
+    Applied, Collection, DefKind, Keys, ModelBuilder, Resolution, TypeParamRef, Written,
+    WrittenParam,
+  },
   set::ROOT,
   source::SourceMap,
   types::{Limit, Types},
@@ -264,7 +268,12 @@ pub(crate) fn own_directive(
   own: PackageId,
   application: ApplicationId,
 ) -> Option<DefId> {
-  let (Resolution::Resolved(directive), _, at) = builder.applied(application)? else {
+  let Applied {
+    directive: Resolution::Resolved(directive),
+    at,
+    ..
+  } = builder.applied(application)?
+  else {
     return None;
   };
   (sources.written_by(at) == Some(own)).then_some(directive)
@@ -340,10 +349,6 @@ pub(crate) fn binding(
 const GROUP_HELP: &str =
   "give this type parameter no default, and none to the type parameters written before it";
 
-/// One type parameter, as the check of its definition's defaults reads it: its name, where its
-/// name is written, and its default.
-type Param = (Sym, Location, Option<TypeExprId>);
-
 /// An edge of a definition's graph of defaults: the default of `from` names `to` at `at`, both
 /// parameters counted from the least number of type arguments the definition takes.
 #[derive(Clone, Copy)]
@@ -358,7 +363,7 @@ struct Edge {
 #[derive(Default)]
 struct Scratch {
   /// The definition's type parameters, in order.
-  params: Vec<Param>,
+  params: Vec<WrittenParam>,
   /// The edges of its graph: by the parameter whose default holds each, then in pre-order of that
   /// default's tree.
   edges: Vec<Edge>,
@@ -392,9 +397,12 @@ fn defaults(builder: &ModelBuilder, reporter: &mut Reporter) -> Defaults {
     let least = definition(builder, reporter, DefId::new(index), &mut scratch);
     found.least.push(least);
     // Defaults are appended in definition order, then parameter order, so their roots ascend.
-    found
-      .roots
-      .extend(scratch.params.iter().filter_map(|param: &Param| param.2));
+    found.roots.extend(
+      scratch
+        .params
+        .iter()
+        .filter_map(|param: &WrittenParam| param.default),
+    );
   }
   found
 }
@@ -418,7 +426,7 @@ fn definition(
   let least = scratch
     .params
     .iter()
-    .rposition(|param: &Param| param.2.is_none())
+    .rposition(|param: &WrittenParam| param.default.is_none())
     .map_or(0, |at: usize| dense(at).saturating_add(1));
   trailing(builder, reporter, &scratch.params);
   if least < count {
@@ -429,10 +437,10 @@ fn definition(
 
 /// Reports the first of `params` with no default that follows one with a default: type arguments
 /// bind by position, so the default before it could never fill.
-fn trailing(builder: &ModelBuilder, reporter: &mut Reporter, params: &[Param]) {
+fn trailing(builder: &ModelBuilder, reporter: &mut Reporter, params: &[WrittenParam]) {
   let mut defaulted = false;
   let mut before: Option<TypeExprId> = None;
-  for &(name, at, default) in params {
+  for &WrittenParam { name, at, default } in params {
     match default {
       Some(root) => {
         defaulted = true;
@@ -476,7 +484,7 @@ fn groups(
   // The edges, default by default, each default's tree walked once, in pre-order.
   scratch.edges.clear();
   for (from, param) in (0u32..).zip(scratch.params.iter().skip(least as usize)) {
-    let Some(root) = param.2 else {
+    let Some(root) = param.default else {
       continue;
     };
     scratch.stack.clear();
@@ -486,7 +494,9 @@ fn groups(
         continue;
       };
       match occurrence.written {
-        Written::Param { def: owner, index } if owner == def && index >= least && index < count => {
+        Written::Param(TypeParamRef { def: owner, index })
+          if owner == def && index >= least && index < count =>
+        {
           scratch.edges.push(Edge {
             from,
             to: index - least,
@@ -547,7 +557,12 @@ fn groups(
     if name != dense(node) || !scratch.cyclic.get(node).copied().unwrap_or(false) {
       continue;
     }
-    let Some(&(sym, _, Some(root))) = scratch.params.get(node + least as usize) else {
+    let Some(&WrittenParam {
+      name: sym,
+      default: Some(root),
+      ..
+    }) = scratch.params.get(node + least as usize)
+    else {
       continue;
     };
     let Some(default) = builder.occurrence(root) else {
@@ -664,9 +679,20 @@ struct Fill {
   frame: u32,
   /// The slot.
   slot: u32,
-  /// Its key in the set of fills in progress: the occurrence's definition, how many arguments the
-  /// occurrence writes, and the slot.
-  key: (DefId, u32, u32),
+  /// Its key in the set of fills in progress.
+  key: FillKey,
+}
+
+/// A fill in progress, as the set of them keys it: the occurrence's definition, how many arguments
+/// the occurrence writes, and the slot.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct FillKey {
+  /// The occurrence's definition.
+  def: DefId,
+  /// How many arguments the occurrence writes.
+  written: u32,
+  /// The slot.
+  slot: u32,
 }
 
 /// What typing reads of one occurrence's row, or of an application's.
@@ -702,7 +728,7 @@ struct Typing<'p> {
   table: BTreeMap<Box<[u32]>, Result<TyId, Failure>>,
   /// The fills in progress, each as its definition, how many arguments the occurrence being filled
   /// writes, and the slot: exactly the keys of the fill frames on the stack.
-  progress: BTreeSet<(DefId, u32, u32)>,
+  progress: BTreeSet<FillKey>,
   /// The frames of the tree being typed.
   frames: Vec<Frame>,
   /// The results of the occurrences being typed, and the slots of those being filled.
@@ -794,7 +820,7 @@ impl Typing<'_> {
       Written::Unresolved => false,
       Written::List(_) => true,
       // A parameter of the definition whose slots it reads.
-      Written::Param { def, index } => {
+      Written::Param(TypeParamRef { def, index }) => {
         seen.args == 0
           && self.filled_def(owner) == Some(def)
           && index < self.builder.type_param_count(def)
@@ -818,7 +844,7 @@ impl Typing<'_> {
     };
     match self.seen_of(visit.of)?.written {
       Written::Named(def) => Some(def),
-      Written::Param { .. } | Written::List(_) | Written::Unresolved => None,
+      Written::Param(_) | Written::List(_) | Written::Unresolved => None,
     }
   }
 
@@ -841,7 +867,11 @@ impl Typing<'_> {
       Of::Occurrence(id) => return self.seen(id),
       Of::Application(application) => application,
     };
-    let (Resolution::Resolved(directive), args, location) = self.builder.applied(application)?
+    let Applied {
+      directive: Resolution::Resolved(directive),
+      written: args,
+      at: location,
+    } = self.builder.applied(application)?
     else {
       return None;
     };
@@ -863,7 +893,7 @@ impl Typing<'_> {
     let occurrence = self.builder.occurrence(id)?;
     match occurrence.written {
       Written::List(element) => (next == 0).then_some(element),
-      Written::Named(_) | Written::Param { .. } | Written::Unresolved => {
+      Written::Named(_) | Written::Param(_) | Written::Unresolved => {
         occurrence.args.get(next as usize).copied()
       }
     }
@@ -912,7 +942,7 @@ impl Typing<'_> {
       // node never gets here: it fails when it is entered.
       Written::Unresolved => self.unusable(visit),
       Written::List(_) => self.list(visit, seen),
-      Written::Param { def, index } => match visit.owner {
+      Written::Param(TypeParamRef { def, index }) => match visit.owner {
         None => self.param(visit, seen, def, index),
         Some(_) => self.read(visit, index),
       },
@@ -1179,13 +1209,21 @@ impl Typing<'_> {
     let Written::Named(def) = seen.written else {
       return Err(Reason::Unusable);
     };
-    let key = (def, seen.args, slot);
+    let key = FillKey {
+      def,
+      written: seen.args,
+      slot,
+    };
     // A key met twice on one chain would walk the same defaults to a third meeting, and on.
     if self.progress.contains(&key) {
       return Err(Reason::Cycle);
     }
     // Every parameter an occurrence leaves out has a default.
-    let Some((_, _, Some(default))) = self.builder.type_param(def, slot) else {
+    let Some(WrittenParam {
+      default: Some(default),
+      ..
+    }) = self.builder.type_param(def, slot)
+    else {
       return Err(Reason::Unusable);
     };
     self.progress.insert(key);
@@ -1215,7 +1253,7 @@ impl Typing<'_> {
     }
     // A collection's key or element filled from a default is non-null before anything reads it.
     if fill.slot == 0 {
-      self.key_non_null(fill.key.0, visit.start);
+      self.key_non_null(fill.key.def, visit.start);
     }
   }
 
@@ -1416,7 +1454,11 @@ impl Typing<'_> {
   fn complete_applications(&mut self) {
     for index in 0..self.builder.application_count() {
       let application = ApplicationId::new(index);
-      let Some((Resolution::Resolved(directive), written, at)) = self.builder.applied(application)
+      let Some(Applied {
+        directive: Resolution::Resolved(directive),
+        written,
+        at,
+      }) = self.builder.applied(application)
       else {
         continue;
       };
@@ -1446,17 +1488,20 @@ impl Typing<'_> {
   /// Checks every application's count of type arguments against its directive's type parameters.
   fn applications(&mut self) {
     for index in 0..self.builder.application_count() {
-      let Some((Resolution::Resolved(directive), written, at)) =
-        self.builder.applied(ApplicationId::new(index))
+      let Some(Applied {
+        directive: Resolution::Resolved(directive),
+        written,
+        at,
+      }) = self.builder.applied(ApplicationId::new(index))
       else {
         continue;
       };
       let count = self.builder.type_param_count(directive);
       let least = self.least(directive);
       if written > count || written < least {
-        let (message, help) = counted("@", self.builder.def_name(directive), count, least, written);
+        let message = counted("@", self.builder.def_name(directive), count, least, written);
         let defined = self.builder.def_location(directive);
-        self.report_arity(at, message, help, defined);
+        self.report_arity(at, message, defined);
       }
     }
   }
@@ -1464,7 +1509,7 @@ impl Typing<'_> {
   /// Reports a count of type arguments, written as `seen` says, that `def`, with `count` type
   /// parameters of which every one from `least` on has a default, does not take.
   fn report_count(&mut self, seen: Seen, def: DefId, count: u32, least: u32) {
-    let (message, help) = counted(
+    let message = counted(
       sigil(seen),
       self.builder.def_name(def),
       count,
@@ -1472,18 +1517,18 @@ impl Typing<'_> {
       seen.args,
     );
     let defined = self.builder.def_location(def);
-    self.report_arity(seen.location, message, help, defined);
+    self.report_arity(seen.location, message, defined);
   }
 
-  /// Reports `generic-arity` at `at`, saying `message` with `help`, with a label at `defined`, the
-  /// definition's name, when it has a position.
-  fn report_arity(&mut self, at: Location, message: String, help: &'static str, defined: Location) {
+  /// Reports `generic-arity` at `at`, saying `message` with its help, with a label at `defined`,
+  /// the definition's name, when it has a position.
+  fn report_arity(&mut self, at: Location, message: Message, defined: Location) {
     let kind = DiagnosticKind::GenericArity;
     let mut report = Diagnostic::builder(kind.code(), at)
       .severity(kind.severity())
-      .message(message)
+      .message(message.text)
       .primary_label(kind.title())
-      .help(help);
+      .help(message.help);
     // A primitive `core` materialises has no position of its own to point at.
     if !defined.is_entire() {
       report = report.label(defined, "defined here");
@@ -1519,7 +1564,7 @@ impl Typing<'_> {
     let sigil = sigil(seen);
     let name = Excerpt(self.builder.def_name(def));
     let spelled = Excerpt(match param {
-      Some((sym, _, _)) => self.builder.spelling(sym),
+      Some(WrittenParam { name: sym, .. }) => self.builder.spelling(sym),
       None => &[],
     });
     if cycle && self.in_default {
@@ -1544,7 +1589,7 @@ impl Typing<'_> {
        `{spelled}` cannot fill it here"
     );
     let default = param
-      .and_then(|(_, _, default): (Sym, Location, Option<TypeExprId>)| default)
+      .and_then(|param: WrittenParam| param.default)
       .and_then(|root: TypeExprId| self.builder.occurrence(root))
       .map(|occurrence| occurrence.location);
     let kind = DiagnosticKind::GenericArity;
@@ -1623,20 +1668,14 @@ fn sigil(seen: Seen) -> &'static str {
 /// where they are one. Each is true however the definition's defaults are written, where a range
 /// from `least` to `count` would not be: `scalar R<A, B = C, C = B>` takes at least one type
 /// argument, and a use that writes one cannot be filled either, its `B` and `C` needing each other.
-fn counted(
-  sigil: &str,
-  name: &[u8],
-  count: u32,
-  least: u32,
-  written: u32,
-) -> (String, &'static str) {
+fn counted(sigil: &str, name: &[u8], count: u32, least: u32, written: u32) -> Message {
   let name = Excerpt(name);
   let verb = if written == 1 { "is" } else { "are" };
   if count == 0 {
-    return (
-      format!("`{sigil}{name}` takes no type argument, and {written} {verb} written"),
-      "remove the type arguments",
-    );
+    return Message {
+      text: format!("`{sigil}{name}` takes no type argument, and {written} {verb} written"),
+      help: Cow::Borrowed("remove the type arguments"),
+    };
   }
   let (side, taken) = if least == count {
     ("", count)
@@ -1650,8 +1689,8 @@ fn counted(
   } else {
     "type arguments"
   };
-  (
-    format!("`{sigil}{name}` takes {side}{taken} {arguments}, and {written} {verb} written"),
-    COUNT_HELP,
-  )
+  Message {
+    text: format!("`{sigil}{name}` takes {side}{taken} {arguments}, and {written} {verb} written"),
+    help: Cow::Borrowed(COUNT_HELP),
+  }
 }

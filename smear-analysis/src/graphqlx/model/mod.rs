@@ -24,7 +24,10 @@ use smear_semantics::interner::ByteRange;
 
 pub use application::{Application, ApplicationArgument, Resolution};
 pub use build::ModelBuilder;
-pub(crate) use build::{Bytes, Occurrence, Segments, Shape, Stored, Text, Written};
+pub(crate) use build::{
+  Applied, Bytes, Occurrence, Segments, Shape, Stored, Text, Written, WrittenParam,
+};
+pub(crate) use def::Rank;
 pub use def::{
   Collection, Contribution, Contributions, Def, DefKind, DirectiveLocation, Extern, Externs,
   IntPrimitive, Origin, Primitive, TypeBound, TypeParam, TypeParams,
@@ -34,6 +37,7 @@ pub use module::{Module, ModuleKind};
 pub use name::{CanonicalName, Description, Namespace};
 pub(crate) use satisfy::{Keys, Steps};
 pub use schema::{Builtins, Root, RootOperation, Schema};
+pub(crate) use table::Run;
 pub use ty::{
   NamedTy, NamedTypeExpr, Path, PathRoot, Ty, TyKind, TypeExpr, TypeExprKind, TypeParamRef,
 };
@@ -234,16 +238,16 @@ impl Model {
     PackageId::new(dense(ROOT))
   }
 
-  /// How many members, type occurrences, values and applications it holds, in that order: the
-  /// tables its public views answer no whole range of.
+  /// How many members, type occurrences, values and applications it holds: the tables its public
+  /// views answer no whole range of.
   #[cfg(feature = "test-support")]
-  pub(crate) fn counts(&self) -> (u32, u32, u32, u32) {
-    (
-      dense(self.members.len()),
-      dense(self.type_exprs.len()),
-      dense(self.values.len()),
-      dense(self.applications.len()),
-    )
+  pub(crate) fn counts(&self) -> Counts {
+    Counts {
+      members: dense(self.members.len()),
+      type_exprs: dense(self.type_exprs.len()),
+      values: dense(self.values.len()),
+      applications: dense(self.applications.len()),
+    }
   }
 
   /// How many bytes its text arena holds: every spelling it keeps but names and paths.
@@ -251,6 +255,23 @@ impl Model {
   pub(crate) fn text_len(&self) -> usize {
     self.text.len()
   }
+}
+
+/// How many members, type occurrences, values and applications a model holds: the lengths of the
+/// four tables whose ids the public model answers no whole range of.
+///
+/// Public only in the test-support door, which `smear`'s integration tests read it through.
+#[cfg(feature = "test-support")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Counts {
+  /// How many members.
+  pub members: u32,
+  /// How many type occurrences.
+  pub type_exprs: u32,
+  /// How many values.
+  pub values: u32,
+  /// How many directive applications.
+  pub applications: u32,
 }
 
 /// One package of the model.

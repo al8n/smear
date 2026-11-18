@@ -740,9 +740,30 @@ fn written_in(model: &Model, row: &DefRow) -> bool {
 
 /// A location's place in the order of definitions: by source, a whole source before every span of
 /// it, then by span.
-fn key(at: Location) -> (u32, Option<(usize, usize)>) {
-  (
-    at.source(),
-    at.span().map(|span: SimpleSpan| (span.start(), span.end())),
-  )
+fn key(at: Location) -> OrderKey {
+  OrderKey {
+    source: at.source(),
+    span: at.span().map(|span: SimpleSpan| SpanKey {
+      start: span.start(),
+      end: span.end(),
+    }),
+  }
+}
+
+/// A location's place in the order of definitions: [`key`]'s answer.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct OrderKey {
+  /// Its source.
+  source: u32,
+  /// Its span, `None` for a whole source, which comes before every span of it.
+  span: Option<SpanKey>,
+}
+
+/// Where a span starts and ends.
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct SpanKey {
+  /// Where it starts.
+  start: usize,
+  /// Where it ends.
+  end: usize,
 }

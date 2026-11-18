@@ -64,7 +64,7 @@ use crate::graphqlx::{
   code::schema,
   diagnostic::Excerpt,
   id::dense,
-  positions::{Derived, Fill, Mistake, Place, Positions, Taking, parameter, taking},
+  positions::{Derived, DerivedFill, Fill, Mistake, Place, Positions, Taking, parameter, taking},
 };
 
 use super::{Silence, supplied};
@@ -329,7 +329,13 @@ impl DeprecatedRequired {
         slot: filled,
         ty: derived,
         verdict,
-      }) => (verdict, Some((filled, derived))),
+      }) => (
+        verdict,
+        Some(DerivedFill {
+          slot: filled,
+          ty: derived,
+        }),
+      ),
     };
     let Taking {
       def: taker,
