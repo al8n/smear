@@ -50,7 +50,9 @@ use self::{
 };
 use super::{
   builtin,
-  error::{SchemaError, SchemaErrorKind, SchemaErrors, directive_coordinate, owner_path},
+  error::{
+    DocumentSpan, SchemaError, SchemaErrorKind, SchemaErrors, directive_coordinate, owner_path,
+  },
   literal::{BuiltInScalar, LiteralShape, fits_i32, is_finite},
   repr::{
     DefaultKind, Deprecation, DirectiveDef, DirectiveLocation, DirectiveLocations, DirectiveMeta,
@@ -1777,7 +1779,7 @@ struct RawExtension {
   /// for draft §3.3.2's "The Schema must already be defined", which has nothing narrower to point
   /// at. `None` for a type or directive extension, which [`target`](RawExtension::target) or
   /// [`directive`](RawExtension::directive) locates.
-  schema: Option<(SimpleSpan, u32)>,
+  schema: Option<DocumentSpan>,
   /// An `extend scalar`'s `@specifiedBy(url:)`, decoded into the text arena.
   specified_by: Text,
   /// An `extend directive`'s `@deprecated`, its reason decoded into the text arena, or
@@ -2228,7 +2230,7 @@ pub struct SchemaBuilder {
   directive_of_sym: Vec<u32>,
   roots: [Option<Located>; 3],
   /// The `schema` definition's span, and the document it was read from.
-  schema_definition: Option<(SimpleSpan, u32)>,
+  schema_definition: Option<DocumentSpan>,
   /// `SCHEMA`-location directives, from the `schema` definition and every `extend schema`.
   ///
   /// One list rather than one per definition, because apollo and the draft both treat the schema
@@ -2899,15 +2901,18 @@ impl SchemaBuilder {
     S: AsRef<[u8]>,
   {
     let span = *def.span();
-    if let Some((previous, document)) = self.schema_definition {
+    if let Some(previous) = self.schema_definition {
       self.errors.push(
         SchemaError::new(SchemaErrorKind::DuplicateSchemaDefinition, "schema", span)
           .in_document(self.document)
-          .related_to(previous, document),
+          .related_to(previous.span, previous.document),
       );
       return;
     }
-    self.schema_definition = Some((span, self.document));
+    self.schema_definition = Some(DocumentSpan {
+      span,
+      document: self.document,
+    });
     self.schema_description = self.describe(description, Head::Schema);
     let directives = self.directive_uses(def.directives(), DirectiveLocation::Schema);
     self.schema_directives.extend(directives);
@@ -3510,7 +3515,10 @@ impl SchemaBuilder {
     let mut raw = RawExtension::default();
     match extension {
       TypeSystemExtension::Schema(schema) => {
-        raw.schema = Some((*schema.span(), self.document));
+        raw.schema = Some(DocumentSpan {
+          span: *schema.span(),
+          document: self.document,
+        });
         raw.directives = self.directive_uses(schema.directives(), DirectiveLocation::Schema);
         if let Some(roots) = schema.root_operation_types_definition() {
           for root in roots.root_operation_type_definitions() {
@@ -3640,7 +3648,7 @@ impl SchemaBuilder {
         continue;
       }
       let Some(target) = extension.target else {
-        if !schema_defined && let Some((span, document)) = extension.schema {
+        if !schema_defined && let Some(DocumentSpan { span, document }) = extension.schema {
           self.errors.push(
             SchemaError::new(
               SchemaErrorKind::SchemaExtensionWithoutSchema,
@@ -3900,7 +3908,7 @@ impl SchemaBuilder {
         if operation == RootOperation::Query {
           // At the `schema` definition, in the document it was read from; with none, at the
           // start of the first document, since the refusal is about the document as a whole.
-          let (span, document) = self.schema_definition.unwrap_or_default();
+          let DocumentSpan { span, document } = self.schema_definition.unwrap_or_default();
           self.errors.push(
             SchemaError::new(
               SchemaErrorKind::MissingQueryRootOperationType,

@@ -1136,6 +1136,18 @@ impl core::fmt::Display for SchemaErrorKind {
   }
 }
 
+/// A position in one of the builder's documents: a span, and the document it is in.
+///
+/// The builder reads several documents, so a span alone does not say which one it points into.
+/// [`SchemaError::related`] and [`SchemaError::related_document`] answer its two halves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct DocumentSpan {
+  /// The position.
+  pub(crate) span: SimpleSpan,
+  /// The index of the document the position is in, in the order the builder was given them.
+  pub(crate) document: u32,
+}
+
 /// One reason [`Schema::build`](super::Schema::build) refused a document.
 ///
 /// Every error names its subject — the artifact that was rejected, qualified by its owner where
@@ -1147,9 +1159,9 @@ pub struct SchemaError {
   subject: FrozenStr,
   owner: Option<FrozenStr>,
   span: SimpleSpan,
-  /// The second position, and the index of the document it is in, which need not be
-  /// [`SchemaError::document`]: the definition a duplicate repeats may be in another document.
-  related: Option<(SimpleSpan, u32)>,
+  /// The second position, in a document that need not be [`SchemaError::document`]: the
+  /// definition a duplicate repeats may be in another document.
+  related: Option<DocumentSpan>,
   document: u32,
 }
 
@@ -1175,7 +1187,7 @@ impl SchemaError {
   /// Points at a second, related position — the first of two duplicates, say — in the builder's
   /// document `document`.
   pub(crate) fn related_to(mut self, span: SimpleSpan, document: u32) -> Self {
-    self.related = Some((span, document));
+    self.related = Some(DocumentSpan { span, document });
     self
   }
 
@@ -1218,7 +1230,7 @@ impl SchemaError {
   #[inline]
   pub const fn related(&self) -> Option<SimpleSpan> {
     match self.related {
-      Some((span, _)) => Some(span),
+      Some(DocumentSpan { span, .. }) => Some(span),
       None => None,
     }
   }
@@ -1231,7 +1243,7 @@ impl SchemaError {
   #[inline]
   pub const fn related_document(&self) -> Option<u32> {
     match self.related {
-      Some((_, document)) => Some(document),
+      Some(DocumentSpan { document, .. }) => Some(document),
       None => None,
     }
   }
@@ -1256,7 +1268,9 @@ impl SchemaError {
   #[inline]
   const fn secondary(&self) -> Option<Label<'_>> {
     match (self.related, self.kind.related_label()) {
-      (Some((span, document)), Some(text)) => Some(Label::new(Location::new(document, span), text)),
+      (Some(DocumentSpan { span, document }), Some(text)) => {
+        Some(Label::new(Location::new(document, span), text))
+      }
       _ => None,
     }
   }
