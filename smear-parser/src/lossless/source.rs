@@ -58,6 +58,8 @@
 
 use std::{borrow::Cow, boxed::Box, rc::Rc, string::String, sync::Arc, vec::Vec};
 
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
+
 /// Why a source could not be read as a document at all.
 ///
 /// The error half of every `parse_*_from` door. There is no [`Parse`](super::runner::Parse) on
@@ -87,7 +89,9 @@ use std::{borrow::Cow, boxed::Box, rc::Rc, string::String, sync::Arc, vec::Vec};
 /// tree-only verification helpers would certify such a pair against `""`, and the recovering
 /// projection would report a *complete* recovery of a document nobody parsed. A refusal that
 /// cannot be a `Parse` removes all of it at once.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum Refused {
   /// The source is not UTF-8, so no green tree could be built from it.
@@ -97,30 +101,83 @@ pub enum Refused {
   /// requirements that boundary has; [`SourceTooLong`](Self::SourceTooLong) is the other, and
   /// [`LosslessView::as_text`] decides both **for the siblings**. A concrete `&str` door discharges
   /// this one by type and the other not at all.
-  NonUtf8Source {
-    /// Leading bytes that **are** valid UTF-8, from
-    /// [`Utf8Error::valid_up_to`](core::str::Utf8Error::valid_up_to). Also the offset of the
-    /// sequence that failed — the one position in the source a consumer can act on.
-    valid_up_to: usize,
-    /// How many bytes the source had.
-    ///
-    /// Carried because `valid_up_to` alone cannot say how much was refused: the same offset means
-    /// something different in a 14-byte source and a 14-megabyte one.
-    source_len: usize,
-  },
+  NonUtf8Source(NonUtf8Source),
   /// The source is longer than a green tree can address, so no tree could be built from it.
   ///
   /// tokora refuses the whole materialisation rather than truncating; see
   /// [`MAX_SOURCE_LEN`](Refused::MAX_SOURCE_LEN) for the bound and where it comes from.
   ///
   /// **Unreachable on a 32-bit target**, where no `usize` exceeds that bound.
-  SourceTooLong {
-    /// How many bytes the source had.
-    source_len: usize,
-    /// The largest a source may be — [`MAX_SOURCE_LEN`](Refused::MAX_SOURCE_LEN), repeated here
-    /// so a caller rendering the error does not have to reach for the constant.
-    max: usize,
-  },
+  SourceTooLong(SourceTooLong),
+}
+
+/// A source that is not UTF-8, and where it stopped being text: [`Refused::NonUtf8Source`]'s
+/// payload.
+///
+/// Public, with a `const` constructor, because a test or a caller that routes the refusal itself
+/// builds one without a source to refuse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NonUtf8Source {
+  pub(crate) valid_up_to: usize,
+  pub(crate) source_len: usize,
+}
+
+impl NonUtf8Source {
+  /// Creates the refusal of a `source_len`-byte source whose first `valid_up_to` bytes are text.
+  #[inline]
+  pub const fn new(valid_up_to: usize, source_len: usize) -> Self {
+    Self {
+      valid_up_to,
+      source_len,
+    }
+  }
+
+  /// Returns how many leading bytes **are** valid UTF-8, from
+  /// [`Utf8Error::valid_up_to`](core::str::Utf8Error::valid_up_to). It is also the offset of the
+  /// sequence that failed — the one position in the source a consumer can act on.
+  #[inline]
+  pub const fn valid_up_to(&self) -> usize {
+    self.valid_up_to
+  }
+
+  /// Returns how many bytes the source had.
+  ///
+  /// Carried because [`valid_up_to`](Self::valid_up_to) alone cannot say how much was refused: the
+  /// same offset means something different in a 14-byte source and a 14-megabyte one.
+  #[inline]
+  pub const fn source_len(&self) -> usize {
+    self.source_len
+  }
+}
+
+/// A source longer than a green tree can address: [`Refused::SourceTooLong`]'s payload.
+///
+/// Public, with a `const` constructor, for the same reason [`NonUtf8Source`] is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SourceTooLong {
+  pub(crate) source_len: usize,
+  pub(crate) max: usize,
+}
+
+impl SourceTooLong {
+  /// Creates the refusal of a `source_len`-byte source where a tree can address `max`.
+  #[inline]
+  pub const fn new(source_len: usize, max: usize) -> Self {
+    Self { source_len, max }
+  }
+
+  /// Returns how many bytes the source had.
+  #[inline]
+  pub const fn source_len(&self) -> usize {
+    self.source_len
+  }
+
+  /// Returns the largest a source may be — [`Refused::MAX_SOURCE_LEN`], repeated here so a caller
+  /// rendering the error does not have to reach for the constant.
+  #[inline]
+  pub const fn max(&self) -> usize {
+    self.max
+  }
 }
 
 impl Refused {
@@ -144,10 +201,10 @@ impl Refused {
   #[inline]
   pub const fn for_source_len(source_len: usize) -> Option<Self> {
     if source_len > Self::MAX_SOURCE_LEN {
-      Some(Self::SourceTooLong {
+      Some(Self::SourceTooLong(SourceTooLong::new(
         source_len,
-        max: Self::MAX_SOURCE_LEN,
-      })
+        Self::MAX_SOURCE_LEN,
+      )))
     } else {
       None
     }
@@ -157,15 +214,15 @@ impl Refused {
 impl core::fmt::Display for Refused {
   fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
     match self {
-      Self::NonUtf8Source {
+      Self::NonUtf8Source(NonUtf8Source {
         valid_up_to,
         source_len,
-      } => write!(
+      }) => write!(
         f,
         "the {source_len}-byte source is not valid UTF-8 (first invalid sequence at byte \
          {valid_up_to}), so it is not a document"
       ),
-      Self::SourceTooLong { source_len, max } => write!(
+      Self::SourceTooLong(SourceTooLong { source_len, max }) => write!(
         f,
         "the source is {source_len} bytes, longer than the {max} a green tree can address"
       ),
@@ -181,7 +238,9 @@ impl core::error::Error for Refused {}
 /// arms borrow out of the value [`LosslessSource::lossless_view`] was called on, and
 /// [`as_text`](Self::as_text) is where either becomes a `&str` a green tree can hold — or the
 /// [`Refused`] naming which of the two requirements it failed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum LosslessView<'a> {
   /// The source is already text.
   Text(&'a str),
@@ -249,10 +308,10 @@ impl<'a> LosslessView<'a> {
       Self::Text(text) => Ok(text),
       Self::Bytes(bytes) => match core::str::from_utf8(bytes) {
         Ok(text) => Ok(text),
-        Err(err) => Err(Refused::NonUtf8Source {
-          valid_up_to: err.valid_up_to(),
-          source_len: bytes.len(),
-        }),
+        Err(err) => Err(Refused::NonUtf8Source(NonUtf8Source::new(
+          err.valid_up_to(),
+          bytes.len(),
+        ))),
       },
     }
   }

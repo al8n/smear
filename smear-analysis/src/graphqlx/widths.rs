@@ -270,10 +270,10 @@ impl<'p> Widths<'p> {
     let mut stack: Vec<&UseTree<S>> = vec![item.tree()];
     while let Some(tree) = stack.pop() {
       match tree.kind() {
-        UseTreeKind::Simple { .. } => match tree.prefix() {
+        UseTreeKind::Simple(_) => match tree.prefix() {
           UsePrefix::Path(path) => self.path(path),
-          UsePrefix::Source { segments, .. } => {
-            if let Some(last) = segments.last() {
+          UsePrefix::Source(prefix) => {
+            if let Some(last) = prefix.segments().last() {
               self.spelling(last);
             }
           }

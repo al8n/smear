@@ -130,65 +130,70 @@
 //! present (a description, a spelling a rule refuses). **Fourteen project; forty-three refuse**,
 //! the two rows above for the hole among them.
 //!
+//! **A refusal in the last column is its variant and the kinds its payload names, in field order.**
+//! `UnexpectedChild(Document, InlineString)` reads "parent `Document`, found `InlineString`";
+//! `MissingChild(Document)` names the parent and leaves out the `wanted` text the payload also
+//! carries; `MalformedToken(Name)` is the token's kind.
+//!
 //! | file | site | probe | what the site leaves out | the projection |
 //! |---|---|---|---|---|
-//! | `document.rs` | report | `extend scalar S` | a constituent with an image | `MissingChild { ScalarTypeExtension }` |
-//! | `document.rs` | report | `extend type T` (and `extend interface I`, the same site) | a constituent with an image | `MissingChild { ObjectTypeExtension }` |
-//! | `document.rs` | report | `extend union U` | a constituent with an image | `MissingChild { UnionTypeExtension }` |
-//! | `document.rs` | report | `extend enum E` | a constituent with an image | `MissingChild { EnumTypeExtension }` |
-//! | `document.rs` | report | `extend input I` | a constituent with an image | `MissingChild { InputObjectTypeExtension }` |
-//! | `document.rs` | report | `extend schema` | a constituent with an image | `MissingChild { SchemaExtension }` |
-//! | `document.rs` | report | `extend directive @d` | a constituent with an image | `MissingChild { DirectiveExtension }` |
-//! | `document.rs` | report | `extend` | a constituent with an image — the `extend` is rubble | `UnexpectedChild { Document, Name }` |
-//! | `document.rs` | report | `"d" { f }` | nothing — a present node is refused | `UnexpectedChild { OperationDefinition, Description }` |
-//! | `document.rs` | report | `"d" extend scalar S @k` | nothing — a present node is refused | `UnexpectedChild { ScalarTypeExtension, Description }` |
-//! | `document.rs` | report | `"d" extend scalar S @k` (SDL root) | nothing — a present node is refused | `UnexpectedChild { ScalarTypeExtension, Description }` |
-//! | `document.rs` | report | the empty document | a constituent with an image | `MissingChild { Document }` |
-//! | `document.rs` | report | the empty document (SDL root) | a constituent with an image | `MissingChild { TypeSystemDocument }` |
-//! | `executable.rs` | report | `query Q() { f }` (executable root) | a constituent with an image | `MissingChild { VariablesDefinition }` |
-//! | `executable.rs` | unclosed | `query Q($a: Int` (executable root) | `)` of `VariablesDefinition` — **no image** | `UnexpectedChild { Root, OperationType }` — the executable root abandons its document node, so the list is rubble beside no container |
+//! | `document.rs` | report | `extend scalar S` | a constituent with an image | `MissingChild(ScalarTypeExtension)` |
+//! | `document.rs` | report | `extend type T` (and `extend interface I`, the same site) | a constituent with an image | `MissingChild(ObjectTypeExtension)` |
+//! | `document.rs` | report | `extend union U` | a constituent with an image | `MissingChild(UnionTypeExtension)` |
+//! | `document.rs` | report | `extend enum E` | a constituent with an image | `MissingChild(EnumTypeExtension)` |
+//! | `document.rs` | report | `extend input I` | a constituent with an image | `MissingChild(InputObjectTypeExtension)` |
+//! | `document.rs` | report | `extend schema` | a constituent with an image | `MissingChild(SchemaExtension)` |
+//! | `document.rs` | report | `extend directive @d` | a constituent with an image | `MissingChild(DirectiveExtension)` |
+//! | `document.rs` | report | `extend` | a constituent with an image — the `extend` is rubble | `UnexpectedChild(Document, Name)` |
+//! | `document.rs` | report | `"d" { f }` | nothing — a present node is refused | `UnexpectedChild(OperationDefinition, Description)` |
+//! | `document.rs` | report | `"d" extend scalar S @k` | nothing — a present node is refused | `UnexpectedChild(ScalarTypeExtension, Description)` |
+//! | `document.rs` | report | `"d" extend scalar S @k` (SDL root) | nothing — a present node is refused | `UnexpectedChild(ScalarTypeExtension, Description)` |
+//! | `document.rs` | report | the empty document | a constituent with an image | `MissingChild(Document)` |
+//! | `document.rs` | report | the empty document (SDL root) | a constituent with an image | `MissingChild(TypeSystemDocument)` |
+//! | `executable.rs` | report | `query Q() { f }` (executable root) | a constituent with an image | `MissingChild(VariablesDefinition)` |
+//! | `executable.rs` | unclosed | `query Q($a: Int` (executable root) | `)` of `VariablesDefinition` — **no image** | `UnexpectedChild(Root, OperationType)` — the executable root abandons its document node, so the list is rubble beside no container |
 //! | `executable.rs` | report | `type T { f query Q($a: Int }` | `)` of `VariablesDefinition` — **no image** | **a hole** — the `}` the list leaves is the root's, as an `Error` |
 //! | `executable.rs` | report | `fragment on on T { f }` (executable root) | nothing — a present token is refused | `SemanticRule` |
-//! | `executable.rs` | report | `"d" { f }` (executable root) | nothing — a present node is refused | `UnexpectedChild { OperationDefinition, Description }` |
-//! | `executable.rs` | report | the empty document (executable root) | a constituent with an image | `MissingChild { ExecutableDocument }` |
+//! | `executable.rs` | report | `"d" { f }` (executable root) | nothing — a present node is refused | `UnexpectedChild(OperationDefinition, Description)` |
+//! | `executable.rs` | report | the empty document (executable root) | a constituent with an image | `MissingChild(ExecutableDocument)` |
 //! | `selection.rs` | report | `fragment F T { f }` | `on` of `FragmentDefinition` — **no image** | **projects** |
-//! | `selection.rs` | report | `fragment F on { f }` | a constituent with an image | `UnexpectedChild { FragmentDefinition, SelectionSet }` |
-//! | `selection.rs` | report | `{ ... }` | a constituent with an image — the `...` is rubble | `UnexpectedChild { SelectionSet, Spread }` |
-//! | `selection.rs` | report | `{ }` | a constituent with an image | `MissingChild { SelectionSet }` |
+//! | `selection.rs` | report | `fragment F on { f }` | a constituent with an image | `UnexpectedChild(FragmentDefinition, SelectionSet)` |
+//! | `selection.rs` | report | `{ ... }` | a constituent with an image — the `...` is rubble | `UnexpectedChild(SelectionSet, Spread)` |
+//! | `selection.rs` | report | `{ }` | a constituent with an image | `MissingChild(SelectionSet)` |
 //! | `selection.rs` | unclosed | `{ f` | `}` of `SelectionSet` — **no image** | **projects** |
-//! | `definition.rs` | report | `type T { f(): Int }` | a constituent with an image | `MissingChild { ArgumentsDefinition }` |
-//! | `definition.rs` | unclosed | `type T { f(a: Int` | `)` of `ArgumentsDefinition` — **no image** | `UnexpectedChild { Document, Name }` |
+//! | `definition.rs` | report | `type T { f(): Int }` | a constituent with an image | `MissingChild(ArgumentsDefinition)` |
+//! | `definition.rs` | unclosed | `type T { f(a: Int` | `)` of `ArgumentsDefinition` — **no image** | `UnexpectedChild(Document, Name)` |
 //! | `definition.rs` | report | `type T { f(a: Int }` | `)` of `ArgumentsDefinition` — **no image** | **a hole** — the field is lost for want of its `:`, and the `}` the list leaves is the root's, as an `Error` |
-//! | `definition.rs` | report | `type T { }` | a constituent with an image | `MissingChild { FieldsDefinition }` |
+//! | `definition.rs` | report | `type T { }` | a constituent with an image | `MissingChild(FieldsDefinition)` |
 //! | `definition.rs` | unclosed | `type T { f: Int` | `}` of `FieldsDefinition` — **no image** | **projects** |
-//! | `definition.rs` | report | `input I { }` | a constituent with an image | `MissingChild { InputFieldsDefinition }` |
+//! | `definition.rs` | report | `input I { }` | a constituent with an image | `MissingChild(InputFieldsDefinition)` |
 //! | `definition.rs` | unclosed | `input I { f: Int` | `}` of `InputFieldsDefinition` — **no image** | **projects** |
-//! | `definition.rs` | report | `type T implements { f: Int }` | a constituent with an image | `MissingChild { ImplementsInterfaces }` |
-//! | `definition.rs` | report | `type T implements A & { f: Int }` | a constituent with an image | `MissingChild { ImplementsInterfaces }` |
-//! | `definition.rs` | report | `union U =` | a constituent with an image | `MissingChild { UnionMemberTypes }` |
-//! | `definition.rs` | report | `union U = A \|` | a constituent with an image | `MissingChild { UnionMemberTypes }` |
-//! | `definition.rs` | report | `directive @d on FOO` | nothing — a present token is refused | `MalformedToken { Name }` |
-//! | `definition.rs` | report | `directive @d on \|` | a constituent with an image | `MissingChild { DirectiveLocations }` |
-//! | `definition.rs` | report | `directive @d on FIELD \|` | a constituent with an image | `MissingChild { DirectiveLocations }` |
+//! | `definition.rs` | report | `type T implements { f: Int }` | a constituent with an image | `MissingChild(ImplementsInterfaces)` |
+//! | `definition.rs` | report | `type T implements A & { f: Int }` | a constituent with an image | `MissingChild(ImplementsInterfaces)` |
+//! | `definition.rs` | report | `union U =` | a constituent with an image | `MissingChild(UnionMemberTypes)` |
+//! | `definition.rs` | report | `union U = A \|` | a constituent with an image | `MissingChild(UnionMemberTypes)` |
+//! | `definition.rs` | report | `directive @d on FOO` | nothing — a present token is refused | `MalformedToken(Name)` |
+//! | `definition.rs` | report | `directive @d on \|` | a constituent with an image | `MissingChild(DirectiveLocations)` |
+//! | `definition.rs` | report | `directive @d on FIELD \|` | a constituent with an image | `MissingChild(DirectiveLocations)` |
 //! | `definition.rs` | report | `enum E { true }` | nothing — a present token is refused | `SemanticRule` |
-//! | `definition.rs` | report | `enum E { }` | a constituent with an image | `MissingChild { EnumValuesDefinition }` |
+//! | `definition.rs` | report | `enum E { }` | a constituent with an image | `MissingChild(EnumValuesDefinition)` |
 //! | `definition.rs` | unclosed | `enum E { A` | `}` of `EnumValuesDefinition` — **no image** | **projects** |
-//! | `definition.rs` | report | `schema { foo: Q }` | nothing — a present token is refused | `MalformedToken { Name }` |
-//! | `definition.rs` | report | `schema { }` | a constituent with an image | `MissingChild { RootOperationTypeDefinitions }` |
+//! | `definition.rs` | report | `schema { foo: Q }` | nothing — a present token is refused | `MalformedToken(Name)` |
+//! | `definition.rs` | report | `schema { }` | a constituent with an image | `MissingChild(RootOperationTypeDefinitions)` |
 //! | `definition.rs` | unclosed | `schema { query: Q` | `}` of `RootOperationTypeDefinitions` — **no image** | **projects** |
 //! | `definition.rs` | report | `directive @d FIELD` | `on` of `DirectiveDefinition` — **no image** | **projects** |
-//! | `definition.rs` | report | `directive @d on` | a constituent with an image | `MissingChild { DirectiveDefinition }` |
-//! | `definition.rs` | report | `schema @k` | a constituent with an image | `MissingChild { SchemaDefinition }` |
+//! | `definition.rs` | report | `directive @d on` | a constituent with an image | `MissingChild(DirectiveDefinition)` |
+//! | `definition.rs` | report | `schema @k` | a constituent with an image | `MissingChild(SchemaDefinition)` |
 //! | `directive.rs` | unclosed | `{ f(a: 1` | `)` of `Arguments` — **no image** | **projects** |
 //! | `directive.rs` | report | `{ f(a: 1 }` | `)` of `Arguments` — **no image** | **projects** |
 //! | `ty.rs` | unclosed | `type T { f: [Int` | `]` of `ListType` — **no image** | **projects** |
 //! | `ty.rs` | report | `type T { f: [Int }` | `]` of `ListType` — **no image** | **projects** |
-//! | `ty.rs` | report | `type T { f: }` | a constituent with an image | `MissingChild { FieldDefinition }` |
+//! | `ty.rs` | report | `type T { f: }` | a constituent with an image | `MissingChild(FieldDefinition)` |
 //! | `value.rs` | unclosed | `{ f(a: [1` | `]` of `ListValue` — **no image** | **projects** |
 //! | `value.rs` | report | `{ f(a: [1 }` | `]` of `ListValue` — **no image** | **projects** |
 //! | `value.rs` | unclosed | `{ f(a: {b: 1` | `}` of `ObjectValue` — **no image** | **projects** |
-//! | `value.rs` | report | `type T { f(a: Int = $v): Int }` | nothing — a present node is refused | `UnexpectedChild { DefaultValue, Variable }` |
-//! | `value.rs` | report | `{ f(a: ) }` | a constituent with an image | `MissingChild { Argument }` |
+//! | `value.rs` | report | `type T { f(a: Int = $v): Int }` | nothing — a present node is refused | `UnexpectedChild(DefaultValue, Variable)` |
+//! | `value.rs` | report | `{ f(a: ) }` | a constituent with an image | `MissingChild(Argument)` |
 //!
 //! ## The missing-token class: where an absent token still projects
 //!
@@ -570,8 +575,8 @@ impl Unverified {
   /// substrate whose liveness depends on which dialects are compiled.
   pub(crate) fn of(error: &ProjectError) -> Self {
     match error.kind() {
-      ProjectErrorKind::TooDeep { limit } => Self::TooDeep { limit: *limit },
-      ProjectErrorKind::WrongRoot { raw } => Self::WrongRoot { raw: *raw },
+      ProjectErrorKind::TooDeep(limit) => Self::TooDeep(*limit),
+      ProjectErrorKind::WrongRoot(raw) => Self::WrongRoot(*raw),
       _ => Self::SourceMismatch,
     }
   }
@@ -1121,7 +1126,7 @@ fn recovered_top_level_verified<'src, T>(
 /// shape.
 ///
 /// So the shape is asserted rather than searched: one container of `kind`, trivia, and nothing
-/// else, and a sibling or a duplicate is `UnexpectedChild { parent: Root, found }`. The recovering
+/// else, and a sibling or a duplicate is `UnexpectedChild(Root, found)`. The recovering
 /// doors do not share this assertion — see [`recovered_top_level`] for why. al8n/smear#218.
 fn sole_document<'g>(root: Node<'g>, kind: SyntaxKind, wanted: &'static str) -> Out<Node<'g>> {
   // `Trivia* Container Trivia*`, transcribed like every walk below.
@@ -1339,7 +1344,7 @@ impl<'g> Atoms<'g> for Cursor<'g> {
         self.extent.cover(token.text_range());
         if keyword_of(token).is_some_and(|keyword| reserved.contains(&keyword)) {
           return Err(ProjectError::new(
-            ProjectErrorKind::SemanticRule { rule },
+            ProjectErrorKind::SemanticRule(rule),
             to_range(token.text_range()),
           ));
         }
@@ -1409,7 +1414,7 @@ fn slice<'src>(source: &'src str, token: Token<'_>) -> Out<&'src str> {
 /// The refusal a leaf door answers: the tree labelled bytes the scanner will not read back.
 fn malformed(token: Token<'_>) -> ProjectError {
   ProjectError::new(
-    ProjectErrorKind::MalformedToken { kind: token.kind() },
+    ProjectErrorKind::MalformedToken(token.kind()),
     to_range(token.text_range()),
   )
 }

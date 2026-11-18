@@ -1792,9 +1792,10 @@ pub(crate) fn root<S: AsRef<[u8]>>(path: &Path<S>, source: SourceId) -> Root {
     PathRoot::Relative => Root::Relative,
     PathRoot::Package(_) => Root::Package,
     PathRoot::Dependency(_) => Root::Dependency,
-    PathRoot::Parent { span, count } => {
-      Root::Parent(count.get(), Location::new(source.get(), *span))
-    }
+    PathRoot::Parent(parent) => Root::Parent(
+      parent.count().get(),
+      Location::new(source.get(), *parent.span()),
+    ),
     // `PathRoot` is `#[non_exhaustive]`: a root of a kind this analyzer does not know names no
     // module it can find, and is reported as an item of an unknown kind is.
     _ => Root::Unknown(Location::new(source.get(), *path.span())),

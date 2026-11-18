@@ -214,6 +214,11 @@ const SOURCES_WITH_NO_KIND: &[(&str, &str)] = &[
      of the Path node it roots",
   ),
   (
+    "ParentRoot",
+    "`PathRoot::Parent`'s payload: the `.. ::` repeated, leading token children of the Path node \
+     it roots, as `PathRoot`'s own row says. `graphqlx/ast/mod.rs` binds it from `crate::path`",
+  ),
+  (
     "OperationType",
     "one `query`/`mutation`/`subscription` identifier token inside OperationDefinition",
   ),
@@ -231,6 +236,11 @@ const SOURCES_WITH_NO_KIND: &[(&str, &str)] = &[
      while every string *value* is a StringValue node, so the two can never be confused",
   ),
   // ---- a wrapper whose parts are already nodes ----
+  (
+    "SourcePrefix",
+    "`UsePrefix::Source`'s payload, the string and the segment names, which are already \
+     children of the UseTree they lead",
+  ),
   (
     "Constrained",
     "`WhereClause? Target`; the clause and the target are siblings, both already nodes",

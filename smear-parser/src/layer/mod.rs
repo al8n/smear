@@ -148,7 +148,7 @@ where
 /// complete here and refused there:
 ///
 /// - a caller-minted root holding two valid containers: every item of both is projected,
-///   `skipped` is zero, and the fail-fast door answers `UnexpectedChild { parent: Root, .. }` at
+///   `skipped` is zero, and the fail-fast door answers `UnexpectedChild(Root, ..)` at
 ///   the second container. This is kept, not closed: **each container is a legitimate document
 ///   image, and the recovering door's contract is per entry** — it reports what had an AST image
 ///   and what did not, and every item of the second container has one; and

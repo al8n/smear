@@ -1947,8 +1947,8 @@ impl Lowering<'_, '_, '_> {
       ast::PathRoot::Relative => Some(PathRoot::Relative),
       ast::PathRoot::Package(_) => Some(PathRoot::Package),
       ast::PathRoot::Dependency(_) => Some(PathRoot::Dependency),
-      ast::PathRoot::Parent { count, .. } => Some(PathRoot::Parent(
-        NonZeroU32::try_from(*count).unwrap_or(NonZeroU32::MAX),
+      ast::PathRoot::Parent(parent) => Some(PathRoot::Parent(
+        NonZeroU32::try_from(parent.count()).unwrap_or(NonZeroU32::MAX),
       )),
       // `PathRoot` is `#[non_exhaustive]`.
       _ => None,

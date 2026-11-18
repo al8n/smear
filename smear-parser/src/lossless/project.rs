@@ -88,7 +88,7 @@
 //! | the tree's text is the source | **no** — it slices the `Cst`'s own buffer, not the caller's | [`verify_source`], [`verify_source_at`] and [`verify_source_counted`], byte for byte, at every door | closed — `SourceMismatch` |
 //! | the tree is no deeper than [`MAX_GREEN_DEPTH`] | not relied on | the verifications refuse past [`MAX_GREEN_DEPTH`] before any projection | closed — `TooDeep` |
 //! | the source is UTF-8 and its length addressable | yes — `NonUtf8Source`, `OffsetOverflow` | — | enforced upstream |
-//! | the root holds one document container of the door's kind, plus trivia | **no** | the fail-fast doors assert it (`sole_document`, `UnexpectedChild { Root, .. }`); the recovering doors do not — every root child is an element, stepped through when it is a container of the door's kind and otherwise counted skipped, so a root with two valid containers projects both and is complete. That difference is the contract, not a gap: each container is a legitimate document image and the recovering contract is per entry — see [`Recovery`] | closed, differently per door family |
+//! | the root holds one document container of the door's kind, plus trivia | **no** | the fail-fast doors assert it (`sole_document`, `UnexpectedChild(Root, ..)`); the recovering doors do not — every root child is an element, stepped through when it is a container of the door's kind and otherwise counted skipped, so a root with two valid containers projects both and is complete. That difference is the contract, not a gap: each container is a legitimate document image and the recovering contract is per entry — see [`Recovery`] | closed, differently per door family |
 //! | the recovery tiles are the dialect's `Error` and `Gap` | **no** — the profile names its own | nothing reads a tile *as* a tile except the hole scan, which refuses the dialect's two; a tile of any other kind is an element like any other and meets the production that holds it | closed by not being assumed |
 //! | the element count a `Verified` pair is priced by | — | counted by [`verify_source_counted`] from the tree itself, never read from the `Parse` | closed by not being assumed |
 //! | `Parse::diagnostics` and `Parse::has_errors` describe the tree | **no** — they are the caller's emitter's | no projection door reads either; they are a consumer's, and a consumer of a minted `Parse` reads what its minter wrote | not relied on |
@@ -113,6 +113,8 @@
 //! header. al8n/smear#201.
 
 use core::{fmt, iter::FusedIterator, marker::PhantomData, ops::Range};
+
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
 
 use rowan_0_17::{
   GreenNodeData, GreenTokenData, Language, NodeOrToken, SyntaxToken, TextRange, TextSize,
@@ -221,12 +223,7 @@ impl Depth {
       Self::Diverged(at) => ProjectError::new(ProjectErrorKind::SourceMismatch, at),
       // No byte range is the answer here — the tree's shape is — so the span is empty rather than
       // pointing at whichever token the walk happened to be under.
-      Self::TooDeep => ProjectError::new(
-        ProjectErrorKind::TooDeep {
-          limit: MAX_GREEN_DEPTH,
-        },
-        0..0,
-      ),
+      Self::TooDeep => ProjectError::new(ProjectErrorKind::TooDeep(MAX_GREEN_DEPTH), 0..0),
     }
   }
 }
@@ -236,7 +233,9 @@ impl Depth {
 /// Positioned, single, and fail-fast. The projection is **not** a diagnostics channel: the
 /// parse's own diagnostics already exist on `Parse`, and a second, subtly different set would
 /// drift from them by construction. One typed refusal, at the first obstruction.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum ProjectErrorKind<K> {
   /// A constituent the AST shape requires is absent from the tree.
@@ -246,12 +245,7 @@ pub enum ProjectErrorKind<K> {
   /// it, an extension with no tail, or a caller-built node missing a required child. A recovery
   /// hole standing where the member should be is not this refusal — the hole scan answers
   /// [`UnexpectedChild`](Self::UnexpectedChild) for it first.
-  MissingChild {
-    /// The node kind that is missing a constituent.
-    parent: K,
-    /// What was wanted, in the grammar's vocabulary.
-    wanted: &'static str,
-  },
+  MissingChild(MissingChild<K>),
   /// An element the AST shape has no place for, named where it stands.
   ///
   /// Every element a production does not spell at its position: a recovery hole or gap tile; the
@@ -260,13 +254,9 @@ pub enum ProjectErrorKind<K> {
   /// child, a stray token, a foreign child or a doubled separator in a caller-built tree; a sibling
   /// of the document container under the root; and a `Variable` in a constant position, which the
   /// AST's own type system forbids (`ConstInputValue` has no `Variable` variant).
-  UnexpectedChild {
-    /// The node kind whose children were being read.
-    parent: K,
-    /// The kind that has no place there.
-    found: K,
-  },
-  /// A token's text cannot be read in the role its kind and position give it.
+  UnexpectedChild(UnexpectedChild<K>),
+  /// A token's text cannot be read in the role its kind and position give it: the payload is the
+  /// kind of the token that refused.
   ///
   /// Two ways, one answer. Every token whose text reaches the AST is re-read through the dialect's
   /// own lexer door — a name through the identifier door, a number through the integer or float
@@ -278,17 +268,17 @@ pub enum ProjectErrorKind<K> {
   /// classifies. The lossless productions report that and still build the node (`directive @d on
   /// FOO`, `schema { foo: Q }`), so this half **is** reachable from a parse. The variant says which
   /// token and where; it says nothing about who produced the bytes.
-  MalformedToken {
-    /// The token kind that refused.
-    kind: K,
-  },
+  MalformedToken(K),
   /// `source` is not the text this tree was parsed from.
   ///
   /// Every byte the tree holds is compared against `source` at the door, before any walk, so a
   /// mismatched pair is refused rather than silently projected into a wrong AST. The span names
   /// the first bytes that diverge.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   SourceMismatch,
-  /// A spelling a grammar rule forbids at a name position.
+  /// A spelling a grammar rule forbids at a name position: the payload is the rule, named for a
+  /// human.
   ///
   /// The positions are the ones each dialect's projection header derives from its syntactic
   /// parser's refusals — a fragment's name and a spread's target that is `on`, an enum value or an
@@ -296,11 +286,9 @@ pub enum ProjectErrorKind<K> {
   /// the violation only as a diagnostic and still build the node, the shape alone cannot tell the
   /// two apart and the projection re-checks it; where they never build it, a caller-built tree can,
   /// and the same check answers.
-  SemanticRule {
-    /// The rule, named for a human.
-    rule: &'static str,
-  },
-  /// The supplied tree is deeper than [`MAX_GREEN_DEPTH`].
+  SemanticRule(&'static str),
+  /// The supplied tree is deeper than [`MAX_GREEN_DEPTH`]: the payload is the limit that was
+  /// reached.
   ///
   /// A refusal of the tree's **shape**; its bytes may agree with the source exactly. Only the
   /// substrate walks construct it — the byte verifications, [`extent_of`] and the hole scan — and
@@ -308,11 +296,9 @@ pub enum ProjectErrorKind<K> {
   /// assertions beside [`MAX_GREEN_DEPTH`] and at the crate root keep their measured deepest tree
   /// under it. The tree that reaches it is one a caller built — with `rowan`'s public builder, or
   /// through `finish_root` — and whose shape its bytes do not determine.
-  TooDeep {
-    /// The limit that was reached.
-    limit: usize,
-  },
-  /// An element carries a raw kind outside the dialect's kind space.
+  TooDeep(usize),
+  /// An element carries a raw kind outside the dialect's kind space: the payload is the raw value,
+  /// as the green tree stores it.
   ///
   /// Not reachable from a dialect door's parse: every such door runs the emitted kinds through the
   /// dialect's validator first. It exists because a caller can mint a green tree with rowan's
@@ -323,20 +309,78 @@ pub enum ProjectErrorKind<K> {
   /// [`reject_foreign_kinds_and_holes`] reads the raw value through the dialect's
   /// [`KindSpace::from_raw`](super::KindSpace::from_raw) before anything else asks, and answers
   /// this with the element's range. al8n/smear#218.
-  InvalidRawKind {
-    /// The raw value, as the green tree stores it.
-    raw: u16,
-  },
-  /// A parse's root is not the dialect's document root.
+  InvalidRawKind(u16),
+  /// A parse's root is not the dialect's document root: the payload is the root's raw kind, as the
+  /// green tree stores it.
   ///
   /// [`InvalidRawKind`](Self::InvalidRawKind) is about an *element*; this is about the tree's
   /// identity, and it answers for an out-of-space root and an in-space wrong one alike, because a
   /// root that is not [`KindSpace::ROOT`](super::KindSpace::ROOT) is a tree no dialect door
   /// finished. See [`verify_root_kind`]. al8n/smear#218.
-  WrongRoot {
-    /// The root's raw kind, as the green tree stores it.
-    raw: u16,
-  },
+  WrongRoot(u16),
+}
+
+/// A constituent the AST shape requires is absent from the tree:
+/// [`ProjectErrorKind::MissingChild`]'s payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MissingChild<K> {
+  pub(crate) parent: K,
+  pub(crate) wanted: &'static str,
+}
+
+impl<K> MissingChild<K> {
+  /// Creates the refusal: `parent` has no `wanted`.
+  ///
+  /// Public because [`ProjectError::new`] is: a caller that projects its own tree reports through
+  /// the same type.
+  #[inline]
+  pub const fn new(parent: K, wanted: &'static str) -> Self {
+    Self { parent, wanted }
+  }
+
+  /// Returns the node kind that is missing a constituent.
+  #[inline]
+  pub const fn parent(&self) -> &K {
+    &self.parent
+  }
+
+  /// Returns what was wanted, in the grammar's vocabulary.
+  #[inline]
+  pub const fn wanted(&self) -> &'static str {
+    self.wanted
+  }
+}
+
+/// An element the AST shape has no place for, named where it stands:
+/// [`ProjectErrorKind::UnexpectedChild`]'s payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UnexpectedChild<K> {
+  pub(crate) parent: K,
+  pub(crate) found: K,
+}
+
+impl<K> UnexpectedChild<K> {
+  /// Creates the refusal: `found` has no place inside `parent`.
+  ///
+  /// Public because [`ProjectError::new`] is: a caller that projects its own tree reports through
+  /// the same type. The two kinds have one type, so the order is the whole contract: the parent
+  /// first, then the child that does not belong.
+  #[inline]
+  pub const fn new(parent: K, found: K) -> Self {
+    Self { parent, found }
+  }
+
+  /// Returns the node kind whose children were being read.
+  #[inline]
+  pub const fn parent(&self) -> &K {
+    &self.parent
+  }
+
+  /// Returns the kind that has no place there.
+  #[inline]
+  pub const fn found(&self) -> &K {
+    &self.found
+  }
 }
 
 /// A projection refusal, with the byte range of the element that caused it.
@@ -373,15 +417,15 @@ impl<K: fmt::Debug> fmt::Display for ProjectError<K> {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let Range { start, end } = self.span;
     match &self.kind {
-      ProjectErrorKind::MissingChild { parent, wanted } => write!(
+      ProjectErrorKind::MissingChild(MissingChild { parent, wanted }) => write!(
         f,
         "{start}..{end}: {parent:?} has no {wanted}, so no AST node can be built for it"
       ),
-      ProjectErrorKind::UnexpectedChild { parent, found } => write!(
+      ProjectErrorKind::UnexpectedChild(UnexpectedChild { parent, found }) => write!(
         f,
         "{start}..{end}: {found:?} has no place inside {parent:?}"
       ),
-      ProjectErrorKind::MalformedToken { kind } => write!(
+      ProjectErrorKind::MalformedToken(kind) => write!(
         f,
         "{start}..{end}: the {kind:?} token's text cannot be read in the role this position gives \
          it"
@@ -390,16 +434,16 @@ impl<K: fmt::Debug> fmt::Display for ProjectError<K> {
         f,
         "{start}..{end}: the source text is not what this tree was parsed from"
       ),
-      ProjectErrorKind::SemanticRule { rule } => write!(f, "{start}..{end}: {rule}"),
-      ProjectErrorKind::TooDeep { limit } => write!(
+      ProjectErrorKind::SemanticRule(rule) => write!(f, "{start}..{end}: {rule}"),
+      ProjectErrorKind::TooDeep(limit) => write!(
         f,
         "{start}..{end}: the tree nests deeper than the {limit} levels a projection will descend"
       ),
-      ProjectErrorKind::InvalidRawKind { raw } => write!(
+      ProjectErrorKind::InvalidRawKind(raw) => write!(
         f,
         "{start}..{end}: raw kind {raw} is outside this dialect's syntax-kind space"
       ),
-      ProjectErrorKind::WrongRoot { raw } => write!(
+      ProjectErrorKind::WrongRoot(raw) => write!(
         f,
         "{start}..{end}: the parse's root has raw kind {raw}, which is not this dialect's document \
          root"
@@ -427,23 +471,26 @@ pub use crate::layer::Recovery;
 /// A count cannot carry a state. `skipped` answers *how much of this parse had no AST image*, and
 /// "these are not the same document" is not a quantity of anything — at every size, including none.
 /// So the mismatch is the error half of a [`Result`] rather than a value of [`Recovery`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum Unverified {
   /// The parse and the source do not describe one document.
   ///
   /// The tree's text and `source` differ, in length or in a byte.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   SourceMismatch,
-  /// The supplied tree is deeper than [`MAX_GREEN_DEPTH`].
+  /// The supplied tree is deeper than [`MAX_GREEN_DEPTH`]: the payload is the limit that was
+  /// reached.
   ///
   /// A refusal of the tree, not of its bytes, which may agree with the source exactly. A parse of
   /// the same source through the dialect's own door is never this deep — see
   /// [`ProjectErrorKind::TooDeep`] — so the tree was built outside that door.
-  TooDeep {
-    /// The limit that was reached.
-    limit: usize,
-  },
-  /// The parse's root is not this dialect's document root.
+  TooDeep(usize),
+  /// The parse's root is not this dialect's document root: the payload is the root's raw kind, as
+  /// the green tree stores it.
   ///
   /// Nothing a dialect door parses can have one: every door finishes its tree at the dialect's
   /// [`KindSpace::ROOT`](super::KindSpace::ROOT). It exists because
@@ -451,21 +498,18 @@ pub enum Unverified {
   /// argument, and checks it only against the caller's own profile — so a caller can mint a
   /// dialect's `Parse` rooted at raw 60000, or at an in-space kind such as `Name`, and either one
   /// over an empty source verifies byte for byte. One variant for both. al8n/smear#218.
-  WrongRoot {
-    /// The root's raw kind, as the green tree stores it.
-    raw: u16,
-  },
+  WrongRoot(u16),
 }
 
 impl fmt::Display for Unverified {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self {
       Self::SourceMismatch => f.write_str("the parse and the source are not the same document"),
-      Self::TooDeep { limit } => write!(
+      Self::TooDeep(limit) => write!(
         f,
         "the parse nests deeper than the {limit} levels a projection will descend"
       ),
-      Self::WrongRoot { raw } => write!(
+      Self::WrongRoot(raw) => write!(
         f,
         "the parse's root has raw kind {raw}, which is not this dialect's document root, so the \
          parse was minted outside its door and nothing was projected"
@@ -492,7 +536,7 @@ pub fn verify_root_kind<K: super::KindSpace>(root: &GreenNodeData) -> Result<(),
     return Ok(());
   }
   Err(ProjectError::new(
-    ProjectErrorKind::WrongRoot { raw },
+    ProjectErrorKind::WrongRoot(raw),
     0..usize::from(root.text_len()),
   ))
 }
@@ -1042,7 +1086,7 @@ where
       };
       let Some(kind) = <L::Kind as super::KindSpace>::from_raw(raw) else {
         return Err(ProjectError::new(
-          ProjectErrorKind::InvalidRawKind { raw },
+          ProjectErrorKind::InvalidRawKind(raw),
           to_range(at),
         ));
       };
@@ -1053,9 +1097,7 @@ where
             Some(left) => descent.open(left, (), node.children()),
             None => {
               return Err(ProjectError::new(
-                ProjectErrorKind::TooDeep {
-                  limit: MAX_GREEN_DEPTH,
-                },
+                ProjectErrorKind::TooDeep(MAX_GREEN_DEPTH),
                 to_range(node.text_range()),
               ));
             }
@@ -1296,12 +1338,8 @@ where
     raw: rowan_0_17::SyntaxKind,
     at: TextRange,
   ) -> Result<K, ProjectError<K>> {
-    K::from_raw(raw.0).ok_or_else(|| {
-      ProjectError::new(
-        ProjectErrorKind::InvalidRawKind { raw: raw.0 },
-        to_range(at),
-      )
-    })
+    K::from_raw(raw.0)
+      .ok_or_else(|| ProjectError::new(ProjectErrorKind::InvalidRawKind(raw.0), to_range(at)))
   }
 
   let root = checked::<L::Kind>(node.green().kind(), node.text_range())?;
@@ -1310,18 +1348,13 @@ where
   while let Some((left, parent, node, kind)) = visiting {
     let Some(left) = left.checked_sub(1) else {
       return Err(ProjectError::new(
-        ProjectErrorKind::TooDeep {
-          limit: MAX_GREEN_DEPTH,
-        },
+        ProjectErrorKind::TooDeep(MAX_GREEN_DEPTH),
         to_range(node.text_range()),
       ));
     };
     if is_hole(kind) {
       return Err(ProjectError::new(
-        ProjectErrorKind::UnexpectedChild {
-          parent,
-          found: kind,
-        },
+        ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(parent, kind)),
         to_range(node.text_range()),
       ));
     }
@@ -1336,10 +1369,7 @@ where
           let kind = checked::<L::Kind>(token.green().kind(), token.text_range())?;
           if is_hole(kind) {
             return Err(ProjectError::new(
-              ProjectErrorKind::UnexpectedChild {
-                parent,
-                found: kind,
-              },
+              ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(parent, kind)),
               to_range(token.text_range()),
             ));
           }
@@ -1426,7 +1456,10 @@ pub(crate) mod walk {
 
   use rowan_0_17::{Language, NodeOrToken, TextRange};
 
-  use super::{Children, Element, Node, ProjectError, ProjectErrorKind, Token, to_range};
+  use super::{
+    Children, Element, MissingChild, Node, ProjectError, ProjectErrorKind, Token, UnexpectedChild,
+    to_range,
+  };
 
   /// What a dialect's language marker tells the cursor: which of its token kinds are trivia.
   ///
@@ -1548,10 +1581,7 @@ pub(crate) mod walk {
     wanted: &'static str,
   ) -> ProjectError<L::Kind> {
     ProjectError::new(
-      ProjectErrorKind::MissingChild {
-        parent: parent.kind(),
-        wanted,
-      },
+      ProjectErrorKind::MissingChild(MissingChild::new(parent.kind(), wanted)),
       to_range(parent.text_range()),
     )
   }
@@ -1563,10 +1593,7 @@ pub(crate) mod walk {
     at: TextRange,
   ) -> ProjectError<L::Kind> {
     ProjectError::new(
-      ProjectErrorKind::UnexpectedChild {
-        parent: parent.kind(),
-        found,
-      },
+      ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(parent.kind(), found)),
       to_range(at),
     )
   }

@@ -418,7 +418,7 @@ fn the_substrate_walks_refuse_a_raw_kind_outside_the_space() {
   };
 
   const FOREIGN: u16 = 60_000;
-  let refusal = ProjectErrorKind::<K>::InvalidRawKind { raw: FOREIGN };
+  let refusal = ProjectErrorKind::<K>::InvalidRawKind(FOREIGN);
   let legal = |kind: K| GraphQLLang::kind_to_raw(kind);
 
   // A foreign token beside a legal one, and a foreign node holding a legal token.
@@ -476,7 +476,7 @@ fn the_substrate_walks_refuse_a_raw_kind_outside_the_space() {
     builder.finish_node();
     assert_eq!(
       verify_root_kind::<K>(&builder.finish()).map_err(|error| error.kind().clone()),
-      Err(ProjectErrorKind::WrongRoot { raw: root.0 }),
+      Err(ProjectErrorKind::WrongRoot(root.0)),
       "{root:?}"
     );
   }

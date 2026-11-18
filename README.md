@@ -154,9 +154,9 @@ generic one cannot be inferred where a `&str` could be coerced: `String` is both
 `AsRef<[u8]>`, so a single generic door turns `parse_document(s.as_ref())` into an inference error
 at every call site that ever wrote it. And the **return type**, because a rowan green tree stores
 text as `&str` — so a `&str` source has already met the only requirement there is and cannot be
-refused, while bytes can. A source that is not UTF-8 yields `Err(Refused::NonUtf8Source {
-valid_up_to, source_len })` and no `Parse` at all: no empty tree to reprint, and nothing for a
-consumer that pairs a parse with a source to be handed.
+refused, while bytes can. A source that is not UTF-8 yields `Err(Refused::NonUtf8Source(refusal))`, whose
+`refusal.valid_up_to()` and `refusal.source_len()` carry both numbers, and no `Parse` at all: no
+empty tree to reprint, and nothing for a consumer that pairs a parse with a source to be handed.
 
 **This is not yet true of the whole crate.** The lossless **projection** takes `&str`, and so the
 lossless parser layer, which answers its document through the projection, reads `str` alone. The

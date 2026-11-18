@@ -40,8 +40,8 @@ use crate::{
   graphqlx::{
     GraphQLx,
     ast::{
-      InlineStringValue, Name, Nested, Path, PathRoot, UseDefinition, UsePrefix, UseTree,
-      UseTreeKind,
+      InlineStringValue, Name, Nested, Path, PathRoot, SourcePrefix, UseDefinition, UsePrefix,
+      UseTree, UseTreeKind,
     },
     error::{Expectation, GraphqlxError as DialectGraphqlxError},
   },
@@ -200,7 +200,7 @@ where
       Ok(UseTree::new(
         SimpleSpan::new(start, end),
         prefix,
-        UseTreeKind::Simple { alias },
+        UseTreeKind::Simple(alias),
       ))
     }
   }
@@ -296,7 +296,7 @@ where
     .map_or_else(|| source.span().end(), |segment| segment.span().end());
   finish_tree(
     start,
-    UsePrefix::Source { source, segments },
+    UsePrefix::Source(SourcePrefix::new(source, segments)),
     prefix_end,
     scope,
     inp,

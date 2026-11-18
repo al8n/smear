@@ -99,9 +99,7 @@ fn executable_selection_and_use_nodes_keep_their_span_type() {
   let tree = UseTree::new(
     CustomSpan(6),
     UsePrefix::Path(path(6, "User")),
-    UseTreeKind::Simple {
-      alias: Some(name(6, "Account")),
-    },
+    UseTreeKind::Simple(Some(name(6, "Account"))),
   );
   let item = UseDefinition::new(CustomSpan(8), tree.clone());
   assert_eq!(item.as_span(), &CustomSpan(8));
@@ -111,9 +109,7 @@ fn executable_selection_and_use_nodes_keep_their_span_type() {
     (
       CustomSpan(6),
       UsePrefix::Path(path(6, "User")),
-      UseTreeKind::Simple {
-        alias: Some(name(6, "Account")),
-      },
+      UseTreeKind::Simple(Some(name(6, "Account"))),
     )
   );
 

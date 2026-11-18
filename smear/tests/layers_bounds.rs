@@ -624,7 +624,7 @@ dialect!(
 #[cfg(all(feature = "rowan_0_17", feature = "std"))]
 #[test]
 fn a_length_past_what_a_tree_addresses_is_refused_before_any_scan() {
-  use smear::parser::lossless::Refused;
+  use smear::parser::lossless::{Refused, SourceTooLong};
 
   assert_eq!(Refused::for_source_len(0), None);
   assert_eq!(Refused::for_source_len(Refused::MAX_SOURCE_LEN), None);
@@ -634,17 +634,17 @@ fn a_length_past_what_a_tree_addresses_is_refused_before_any_scan() {
     let over = Refused::MAX_SOURCE_LEN + 1;
     assert_eq!(
       Refused::for_source_len(over),
-      Some(Refused::SourceTooLong {
-        source_len: over,
-        max: Refused::MAX_SOURCE_LEN,
-      })
+      Some(Refused::SourceTooLong(SourceTooLong::new(
+        over,
+        Refused::MAX_SOURCE_LEN
+      )))
     );
     assert_eq!(
       Refused::for_source_len(usize::MAX),
-      Some(Refused::SourceTooLong {
-        source_len: usize::MAX,
-        max: Refused::MAX_SOURCE_LEN,
-      })
+      Some(Refused::SourceTooLong(SourceTooLong::new(
+        usize::MAX,
+        Refused::MAX_SOURCE_LEN
+      )))
     );
   }
 }

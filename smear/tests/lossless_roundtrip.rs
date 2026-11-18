@@ -93,7 +93,7 @@ use smear::parser::{
       parse_executable_document_from, parse_type_system_document, parse_type_system_document_from,
     },
   },
-  lossless::Refused,
+  lossless::{NonUtf8Source, Refused},
 };
 
 /// The corpus entries whose bytes are kept by the sink's gap tiling rather than by the grammar.
@@ -555,7 +555,7 @@ fn the_round_trip_comparison_is_not_vacuous() {
 /// the doors a source that need not be either: bytes. Where those bytes are UTF-8 nothing changes
 /// — the whole corpus above is that case, and it reads the same through `parse_document_from` as
 /// through `parse_document`. Where they are **not**, there is no equality to state, because there
-/// is no tree: the fallible door answers `Err(Refused::NonUtf8Source { .. })` and produces no
+/// is no tree: the fallible door answers `Err(Refused::NonUtf8Source(_))` and produces no
 /// `Parse`.
 ///
 /// That is the repair rather than the situation. For one round the refusal *was* a `Parse` with an
@@ -572,10 +572,7 @@ fn a_refused_source_yields_no_parse_to_round_trip() {
   // text a formatter could reprint, at any of the three roots.
   assert_eq!(
     parse_document_from(BAD).err(),
-    Some(Refused::NonUtf8Source {
-      valid_up_to: 13,
-      source_len: 19
-    })
+    Some(Refused::NonUtf8Source(NonUtf8Source::new(13, 19)))
   );
   assert!(parse_type_system_document_from(BAD).is_err());
   assert!(parse_executable_document_from(BAD).is_err());

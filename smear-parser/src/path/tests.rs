@@ -8,7 +8,7 @@ use tokora::{
   utils::IntoComponents,
 };
 
-use super::{Path, PathRoot};
+use super::{ParentRoot, Path, PathRoot};
 
 #[test]
 fn path_projects_and_consumes_segments() {
@@ -44,11 +44,42 @@ fn every_root_displays_as_it_is_spelled() {
     (PathRoot::Relative, "a::b"),
     (PathRoot::Package(span), "~::a::b"),
     (PathRoot::Dependency(span), "^::a::b"),
-    (PathRoot::Parent { span, count: twice }, "..::..::a::b"),
+    (
+      PathRoot::Parent(ParentRoot::new(span, twice)),
+      "..::..::a::b",
+    ),
   ] {
     let path = Path::new(span, root, vec!["a", "b"]);
     assert_eq!(path.to_string(), spelled, "{root:?}");
     assert_eq!(path.root().span(), root.span());
     assert_eq!(root.is_relative(), root == PathRoot::Relative);
   }
+}
+
+#[test]
+fn a_parent_root_is_built_read_and_edited_through_its_accessors() {
+  let span = SimpleSpan::new(0, 6);
+  let twice = NonZeroUsize::new(2).expect("two is not zero");
+  let once = NonZeroUsize::new(1).expect("one is not zero");
+  let root = ParentRoot::new(span, twice);
+  assert_eq!(root.span(), &span);
+  assert_eq!(root.count(), twice);
+
+  let mut edited = root.with_count(once).with_span(SimpleSpan::new(1, 4));
+  assert_eq!(edited.count(), once);
+  assert_eq!(edited.span(), &SimpleSpan::new(1, 4));
+  edited.set_count(twice).set_span(span);
+  assert_eq!(edited, root);
+
+  let parent = PathRoot::Parent(root);
+  assert!(parent.is_parent());
+  assert!(!parent.is_relative());
+  assert_eq!(parent.span(), Some(&span));
+  assert_eq!(parent.unwrap_parent_ref().count(), twice);
+  assert!(PathRoot::<SimpleSpan>::Relative.is_relative());
+  assert!(
+    PathRoot::<SimpleSpan>::Relative
+      .try_unwrap_parent()
+      .is_err()
+  );
 }

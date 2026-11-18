@@ -321,9 +321,9 @@ pub fn parse_document_with_limits(src: &str, limits: LosslessLimits) -> Parse {
 ///
 /// match parse_document_from(bad) {
 ///   Ok(_) => panic!("a source that is not UTF-8 must not produce a parse"),
-///   Err(Refused::NonUtf8Source { valid_up_to, source_len }) => {
-///     assert_eq!(valid_up_to, 13);
-///     assert_eq!(source_len, 19);
+///   Err(Refused::NonUtf8Source(refusal)) => {
+///     assert_eq!(refusal.valid_up_to(), 13);
+///     assert_eq!(refusal.source_len(), 19);
 ///   }
 ///   Err(other) => panic!("unexpected refusal: {other}"),
 /// }

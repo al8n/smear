@@ -82,6 +82,9 @@ pub type Path<S, Span = SimpleSpan, Container = DefaultVec<Name<S, Span>>> =
 /// The root a GraphQLx [`Path`] starts at: none, `~::`, `^::`, or `..::` repeated.
 pub use crate::path::PathRoot;
 
+/// What [`PathRoot::Parent`] holds: the `..::` span and how many times it is written.
+pub use crate::path::ParentRoot;
+
 /// A GraphQLx boolean literal.
 pub type BooleanValue<S, Span = SimpleSpan> = crate::value::BooleanValue<S, Span, GraphQLx>;
 

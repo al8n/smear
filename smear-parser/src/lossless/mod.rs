@@ -81,7 +81,7 @@ pub mod source;
 
 pub mod trivia;
 
-pub use source::{LosslessSource, LosslessView, Refused};
+pub use source::{LosslessSource, LosslessView, NonUtf8Source, Refused, SourceTooLong};
 
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) use macros::{

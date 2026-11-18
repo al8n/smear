@@ -710,7 +710,7 @@ impl<'x> Run<'_, 'x> {
         continue;
       };
       match frame.tree.kind() {
-        UseTreeKind::Simple { alias } => {
+        UseTreeKind::Simple(alias) => {
           self.simple(cursor, start, segments, alias.as_ref(), whole, found);
         }
         UseTreeKind::Glob => match self.reach(cursor, start, segments, found) {
@@ -805,10 +805,8 @@ impl<'x> Run<'_, 'x> {
         };
         Some((start, segments))
       }
-      UsePrefix::Source {
-        source: string,
-        segments,
-      } => {
+      UsePrefix::Source(prefix) => {
+        let string = prefix.source();
         let raw: &'x [u8] = string.source().as_ref();
         let at = location(source, *string.span());
         let module = match self.directory(source, raw) {
@@ -824,7 +822,7 @@ impl<'x> Run<'_, 'x> {
             return None;
           }
         };
-        let segments: &'x [Name<S>] = segments.as_slice();
+        let segments: &'x [Name<S>] = prefix.segments();
         if segments.len() > self.scopes.max_segments as usize {
           let failure = Failure {
             at,
@@ -858,11 +856,11 @@ impl<'x> Run<'_, 'x> {
     match root {
       PathRoot::Package(_) => Some(Start::Module(self.scopes.roots[self.package], Within::Own)),
       PathRoot::Dependency(_) => Some(Start::Packages),
-      PathRoot::Parent { span, count } => match self.scopes.up(self.module, count.get()) {
+      PathRoot::Parent(parent) => match self.scopes.up(self.module, parent.count().get()) {
         Some(module) => Some(Start::Module(module, Within::Parent)),
         None => {
           let failure = Failure {
-            at: location(cursor.source, *span),
+            at: location(cursor.source, *parent.span()),
             name: b"..",
             why: Why::AboveRoot,
             single: false,
@@ -1303,7 +1301,7 @@ fn head_of<S: AsRef<[u8]>>(tree: &UseTree<S>, source: SourceId) -> Option<Head<'
   Some(Head {
     name: first.source().as_ref(),
     at: location(source, *first.as_span()),
-    whole: segments.len() == 1 && matches!(tree.kind(), UseTreeKind::Simple { .. }),
+    whole: segments.len() == 1 && matches!(tree.kind(), UseTreeKind::Simple(_)),
   })
 }
 
