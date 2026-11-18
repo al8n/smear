@@ -301,6 +301,8 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// than a consumer. One spelling per event is what that note asks for, and this is the second
   /// event.
   #[from(skip)]
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   TerminalEndOfInput,
   /// The parse tried to descend one level past the nesting budget.
   ///
@@ -312,6 +314,8 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// substrate's crate-private `root_turn` reads and no error value can discard (smear issue
   /// #178).
   #[from(skip)]
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   NestingLimitExceeded,
   /// The input's durable token budget refused an item, so the parse stopped reading.
   ///
@@ -319,6 +323,8 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// refusal has no diagnostic channel at all — so without this variant a document that ran out
   /// of `LosslessLimits::max_tokens` comes back indistinguishable from one that parsed.
   #[from(skip)]
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   TokenBudgetExhausted,
   /// A path that starts with `::`, where only a root or a name may: `::` joins two segments and
   /// roots none.
@@ -327,6 +333,8 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// point of it: the dependency root used to be spelled with a bare leading `::` and is `^::`, and
   /// [`SyntaxErrorKind::LeadingPathSeparator`]'s help says so. The span is the `::`'s.
   #[from(skip)]
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   LeadingPathSeparator,
   /// A dialect-specific message not represented by a dedicated variant.
   Other(std::borrow::Cow<'static, str>),

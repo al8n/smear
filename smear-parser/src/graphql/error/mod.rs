@@ -675,6 +675,8 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// The recoverable half of a pair — [`TerminalEndOfInput`](Self::TerminalEndOfInput) is the
   /// other — and the split is smear issue #177. Only the offset separates the two in tokora's
   /// value; only this enum can carry the separation into a [`MaybeTerminal`] arm.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   EndOfInput,
   /// An end of input that stands in for a **terminal scanner stop** — smear issue #177.
   ///
@@ -710,6 +712,8 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// `err.is_terminal()`. [`Error::terminal_end_of_input`] is the constructor they and the census
   /// share.
   #[from(skip)]
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   TerminalEndOfInput,
   /// The parse tried to descend one level past the nesting budget.
   ///
@@ -736,6 +740,8 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// asserted at the value in `error/tests/terminal.rs`, because it is what a **scanner** stop
   /// rides and no published witness sees that.
   #[from(skip)]
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   NestingLimitExceeded,
   /// The input's **durable** token budget refused an item, so the parse stopped reading — smear
   /// issue #193.
@@ -757,6 +763,8 @@ pub enum ErrorData<S, T, Char = char, Exp = Expectation, StateError = ()> {
   /// refusal, off the input's own
   /// [`refused_an_item`](tokora::input::TokenBudgetTally::refused_an_item) bit.
   #[from(skip)]
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   TokenBudgetExhausted,
   /// Some other error.
   Other(std::borrow::Cow<'static, str>),
