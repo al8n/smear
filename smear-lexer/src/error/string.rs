@@ -286,7 +286,7 @@ impl<Char> InvalidUnicodeSequence<Char> {
 /// both ranges, so these two variants are the whole classification rather than smear's vocabulary
 /// to grow. [`InvalidUnicodeScalarValue::kind`] hands it out to branch on, and a wildcard arm
 /// forced onto that branch could never run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 pub enum InvalidUnicodeScalarKind {
   /// In the UTF-16 surrogate range: 0xD800..=0xDFFF.
   Surrogate,
@@ -982,15 +982,23 @@ impl<Char> TryFrom<StringErrors<Char>> for StringError<Char> {
 /// (smear#246). A decoder that reads a spelling rather than trusting where it came from answers
 /// them instead of guessing. [`Sink`](Self::Sink) is not about the spelling at all: it is the
 /// caller's writer refusing a write.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[derive(
+  Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error, IsVariant, TryUnwrap, Unwrap,
+)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum StringValueError {
   /// The spelling is not wrapped in `"…"` or `"""…"""`.
   #[error("a string value is not wrapped in `\"` or `\"\"\"`")]
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Unquoted,
   /// The value is not UTF-8, which draft §2.9's `StringValue` — a sequence of Unicode scalar values
   /// — always is.
   #[error("a string value is not UTF-8")]
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   NotUtf8,
   /// The backslash at this byte offset of the spelling begins no escape draft §2.9.1 defines: an
   /// unknown character after it, too few or too many hex digits, or a code point that is a lone
@@ -1004,5 +1012,7 @@ pub enum StringValueError {
   /// reports only *that* it failed, and inventing a cause here would be a claim the writer never
   /// made.
   #[error("the writer refused a write")]
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Sink,
 }

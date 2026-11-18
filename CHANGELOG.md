@@ -30,9 +30,19 @@ All notable changes to Smear are documented in this file.
 - `smear-lexer`!: `BracedUnicodeEscapeError::TooManyDigits` carries a `TooManyDigits`, exported with
   the other error types, where it had the fields `span` and `count`: `span()`, `span_ref()`,
   `span_mut()` and `count()` read it. `BracedUnicodeEscapeError::too_many_digits` and
-  `UnicodeError::too_many_digits_in_braced_unicode_escape` still build the refusal. The enum
-  derives `is_*`, `unwrap_*` and `try_unwrap_*` for its variants, by value, by reference and by
-  mutable reference.
+  `UnicodeError::too_many_digits_in_braced_unicode_escape` still build the refusal.
+- `smear-lexer`!: the public enums of up to sixteen variants derive their `is_*` predicates, and
+  each one with data `unwrap_*` and `try_unwrap_*`, by value, by reference and by mutable
+  reference. `DecimalFloat`, `StringValueError`, `BracedUnicodeEscapeError`, `Sign`,
+  `LengthError`, `InvalidUnicodeScalarKind`, `LitStrDelimiterHint`, `LineTerminatorHint` and
+  `WhiteSpaceHint` are new to it, and the float, decimal, hex, octal and binary errors and the two
+  float hints gain the mutable reference. The enums of more than sixteen variants, the keywords
+  and the token kinds, derive nothing new, and the token enums that already had the face keep it.
+  A unit variant has no `unwrap_*` or `try_unwrap_*`, which could only return `()`:
+  `FloatError::unwrap_missing_integer_part_ref` is gone, and `is_missing_integer_part` answers
+  it; so are those of every unit variant of the token enums and of both `LexerErrorData`s, and
+  the `digit` ones of `DecimalHint`, `HexHint`, `OctalHint` and `BinaryHint`, which derive
+  `is_digit` alone.
 - `smear-lexer`: `decode_string_value` writes to any `core::fmt::Write`: a `String` as before, a
   `&mut dyn fmt::Write`, or the `fmt::Formatter` a `Display` implementation is handed. A writer
   that refuses a write is answered with the new `StringValueError::Sink`, holding a prefix of the

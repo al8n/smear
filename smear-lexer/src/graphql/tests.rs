@@ -809,10 +809,7 @@ where
   let errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 2);
 
-  errs[0]
-    .data()
-    .unwrap_float_ref()
-    .unwrap_missing_integer_part_ref();
+  assert!(errs[0].data().unwrap_float_ref().is_missing_integer_part());
   let err2 = errs[1]
     .data()
     .unwrap_float_ref()
@@ -823,10 +820,7 @@ where
   let mut lexer = Token::test_lexer("-.123abcd");
   let errs = lexer.next().unwrap().unwrap_err();
   assert_eq!(errs.len(), 2);
-  errs[0]
-    .data()
-    .unwrap_float_ref()
-    .unwrap_missing_integer_part_ref();
+  assert!(errs[0].data().unwrap_float_ref().is_missing_integer_part());
   let err2 = errs[1]
     .data()
     .unwrap_float_ref()

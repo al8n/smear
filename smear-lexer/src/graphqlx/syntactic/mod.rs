@@ -140,52 +140,100 @@ pub type SyntacticLexerErrors = error::LexerErrors<char, RecursionLimitExceeded>
 #[non_exhaustive]
 pub enum SyntacticToken<S> {
   /// Asterisk `*` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Asterisk,
   /// Ampersand `&` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Ampersand,
   /// At `@` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   At,
   /// Right angle bracket `>` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   RAngle,
   /// Right curly brace `}` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   RBrace,
   /// Right square bracket `]` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   RBracket,
   /// Right parenthesis `)` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   RParen,
   /// Dot `.` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Colon,
   /// Dollar `$` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Dollar,
   /// Equal `=` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Equal,
   /// Exclamation mark `!` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Bang,
   /// Left angle bracket `<` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   LAngle,
   /// Left curly brace `{` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   LBrace,
   /// Left square bracket `[` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   LBracket,
   /// Left parenthesis `(` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   LParen,
   /// Pipe `|` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Pipe,
   /// Fat arrow `=>` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   FatArrow,
   /// Spread operator `...` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Spread,
   /// Plus `+` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Plus,
   /// Minus `-` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Minus,
   /// Path separator `::` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   PathSeparator,
   /// Tilde `~` token, the sigil of a path's package root `~::`
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Tilde,
   /// Dot-dot `..` token, the sigil of a path's parent-module root `..::`
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   DotDot,
   /// Caret `^` token, the sigil of a path's dependency root `^::`
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Caret,
   /// Identifier token
   Identifier(S),
