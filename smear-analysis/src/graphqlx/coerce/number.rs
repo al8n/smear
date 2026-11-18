@@ -306,13 +306,13 @@ pub(super) fn decimal_float(text: &[u8]) -> Option<Float> {
   let mut buffer = [0; NORMALIZED_FLOAT_LEN];
   let spelled = match normalize_decimal_float(text, &mut buffer)? {
     DecimalFloat::Spelled(spelled) => spelled,
-    DecimalFloat::Zero { negative } => {
+    DecimalFloat::Zero(sign) => {
       return Some(Float {
-        value: Some(if negative { -0.0 } else { 0.0 }),
-        single: Some(if negative { -0.0 } else { 0.0 }),
+        value: Some(if sign.is_negative() { -0.0 } else { 0.0 }),
+        single: Some(if sign.is_negative() { -0.0 } else { 0.0 }),
       });
     }
-    DecimalFloat::Overflow { .. } => {
+    DecimalFloat::Overflow(_) => {
       return Some(Float {
         value: None,
         single: None,

@@ -1434,7 +1434,7 @@ fn fits_id(spelling: &str) -> bool {
 fn is_finite(spelling: &str) -> bool {
   let mut buffer = [0; NORMALIZED_FLOAT_LEN];
   match normalize_decimal_float(spelling.as_bytes(), &mut buffer) {
-    Some(DecimalFloat::Zero { .. }) => true,
+    Some(DecimalFloat::Zero(_)) => true,
     Some(DecimalFloat::Spelled(spelled)) => spelled.parse::<f64>().is_ok_and(f64::is_finite),
     // Past every double, no decimal float, or a reading of a later lexer's.
     _ => false,

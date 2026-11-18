@@ -45,7 +45,8 @@ All notable changes to Smear are documented in this file.
   that keeps its verdict. The request door now reads such an integer's digits, and charges them
   as it charges a `Float` literal's.
 - `smear-lexer`: `normalize_decimal_float` reads a decimal float literal's spelling, its `-`
-  included, as a binary float would hold it: `DecimalFloat::Zero`, `DecimalFloat::Overflow`, or
+  included, as a binary float would hold it: `DecimalFloat::Zero(Sign)`,
+  `DecimalFloat::Overflow(Sign)`, where `Sign` says whether the literal is written with a `-`, or
   `DecimalFloat::Spelled`, a spelling `str::parse::<f64>` and `::<f32>` read exactly, written into
   the caller's `[u8; NORMALIZED_FLOAT_LEN]`. It needs no allocator and sits behind no feature.
   Those parsers stop reading an exponent's digits once it reaches 65 536, so a literal whose long

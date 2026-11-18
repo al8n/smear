@@ -688,7 +688,7 @@ fn is_int_literal(bytes: &[u8]) -> bool {
 fn parse_f64(bytes: &[u8]) -> Option<f64> {
   let mut buffer = [0; NORMALIZED_FLOAT_LEN];
   match normalize_decimal_float(bytes, &mut buffer)? {
-    DecimalFloat::Zero { negative } => Some(if negative { -0.0 } else { 0.0 }),
+    DecimalFloat::Zero(sign) => Some(if sign.is_negative() { -0.0 } else { 0.0 }),
     DecimalFloat::Spelled(spelled) => {
       let value: f64 = spelled.parse().ok()?;
       value.is_finite().then_some(value)

@@ -165,7 +165,7 @@ pub(crate) fn fits_i32(spelling: &[u8]) -> bool {
 pub(crate) fn is_finite(spelling: &[u8]) -> bool {
   let mut buffer = [0; NORMALIZED_FLOAT_LEN];
   match normalize_decimal_float(spelling, &mut buffer) {
-    Some(DecimalFloat::Zero { .. }) => true,
+    Some(DecimalFloat::Zero(_)) => true,
     Some(DecimalFloat::Spelled(spelled)) => spelled.parse::<f64>().is_ok_and(f64::is_finite),
     // Past every double, no decimal float, or a reading of a later lexer's.
     _ => false,
