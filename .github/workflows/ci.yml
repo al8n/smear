@@ -674,7 +674,7 @@ jobs:
       - name: no package in the alloc-tier graph has `std` on
         run: |
           set -euo pipefail
-          F=alloc,graphql,graphqlx,parser,validator,proto,introspection,analysis,materialized-numbers,test-support,bstr_1,smol-bytes_0_2,bytes_1,hipstr_0_8
+          F=alloc,graphql,graphqlx,parser,validator,proto,introspection,analysis,serde,materialized-numbers,test-support,bstr_1,smol-bytes_0_2,bytes_1,hipstr_0_8
           graph() {
             cargo tree -p smear --no-default-features --features "$1" --target thumbv7em-none-eabihf \
               -e normal,no-proc-macro --prefix none --format '{p} [{f}]'
@@ -690,7 +690,7 @@ jobs:
       - name: the alloc tier builds on thumbv7em-none-eabihf
         run: >-
           cargo build -p smear --no-default-features
-          --features alloc,graphql,graphqlx,parser,validator,proto,introspection,analysis,materialized-numbers,test-support,bstr_1,smol-bytes_0_2,bytes_1,hipstr_0_8
+          --features alloc,graphql,graphqlx,parser,validator,proto,introspection,analysis,serde,materialized-numbers,test-support,bstr_1,smol-bytes_0_2,bytes_1,hipstr_0_8
           --target thumbv7em-none-eabihf
       - name: the core tier links no allocator
         run: bash ci/noalloc.sh
