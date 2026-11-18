@@ -1065,9 +1065,11 @@ impl Limits {
   /// alone would leave an unbounded number of entries under empty keys, since a zero-length key is
   /// a legal key. Together they also bound what finding a key costs. A lookup compares its key only
   /// against the entries its hash collides with, and where a client can make every hash collide —
-  /// a build without the standard library hashes at a fixed, public seed — the whole life of a map
-  /// still costs at most `max_extension_entries × max_extension_key_bytes` byte comparisons, which
-  /// is what the linear scan it used before it hashed cost.
+  /// a build without the standard library, on a target without address randomization, hashes at a
+  /// seed that can be worked out from the binary — building a map up to its ceilings still costs
+  /// at most `max_extension_entries × max_extension_key_bytes` byte comparisons, which is what the
+  /// linear scan it used before it hashed cost. [`Extensions`] says what the seed is and what a
+  /// removal costs there.
   ///
   /// **Not** [`max_interned_bytes`](Limits::max_interned_bytes), and the separation is deliberate:
   /// that arena is a response budget shared with field names and driver error messages, so

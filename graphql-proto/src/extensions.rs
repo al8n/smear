@@ -138,17 +138,11 @@ mod tests;
 #[cfg(feature = "std")]
 type KeyHasher = std::hash::RandomState;
 
-/// The `BuildHasher` an [`Extensions`] map hashes its keys with: foldhash at [`SEED`], because a
-/// build without the standard library has no randomness to key one from.
+/// The `BuildHasher` an [`Extensions`] map hashes its keys with: foldhash's, seeded per map. A
+/// build without the standard library has no randomness to draw a seed from, so foldhash derives
+/// one from addresses; [`Extensions`] says what that seed is and what it is not.
 #[cfg(not(feature = "std"))]
-type KeyHasher = foldhash::quality::FixedState;
-
-/// foldhash's seed in a build without the standard library.
-///
-/// Fixed and public on purpose: such a build has no source of randomness, and a seed in the source
-/// is no secret. The two extension ceilings bound what a collision can cost; see [`Extensions`].
-#[cfg(not(feature = "std"))]
-const SEED: u64 = 0x5EED_0000_0000_0001;
+type KeyHasher = foldhash::quality::RandomState;
 
 #[cfg(feature = "std")]
 #[inline]
@@ -158,8 +152,8 @@ fn key_hasher() -> KeyHasher {
 
 #[cfg(not(feature = "std"))]
 #[inline]
-const fn key_hasher() -> KeyHasher {
-  foldhash::quality::FixedState::with_seed(SEED)
+fn key_hasher() -> KeyHasher {
+  foldhash::quality::RandomState::default()
 }
 
 /// Which ceiling refused an [`Extensions::insert`].
@@ -262,23 +256,40 @@ impl<V: fmt::Debug> core::error::Error for Full<V> {}
 /// # Lookup is hashed, and the order is still the calls'
 ///
 /// [`insert`](Extensions::insert), [`get`](Extensions::get) and [`remove`](Extensions::remove) find
-/// a key by its hash: the standard library's `RandomState` under `std`, and foldhash at a fixed,
-/// public seed otherwise, because a build without the standard library has no randomness to key a
-/// hasher with. The hasher decides nothing a reader can see. Iteration is insertion order whatever
-/// the hasher and whatever the seed, so a serialiser's bytes are still a function of the calls
-/// alone.
-///
-/// The fixed seed has a cost, stated rather than hidden. Where it is in use, a driver that reflects
-/// request data into keys can be handed keys whose hashes collide, and a lookup then compares its
-/// key against every entry its hash collides with. The ceilings bound that at what the linear scan
-/// this map used before it hashed cost on every call: at most
-/// `max_extension_entries × max_extension_key_bytes` byte comparisons over the whole life of a map.
-/// So a forced collision costs what every lookup once did, and no more.
+/// a key by its hash, under a seed the map draws for itself when it is created: the standard
+/// library's `RandomState` under `std`, and foldhash's `RandomState` without it. The hasher decides
+/// nothing a reader can see. Iteration is insertion order whatever the hasher and whatever the
+/// seed, so a serialiser's bytes are still a function of the calls alone.
 ///
 /// A key longer than all the stored keys together is not looked up at all: none of them can equal
 /// it, so the answer is known without reading a byte of it. A lookup therefore hashes at most
 /// [`key_bytes`](Extensions::key_bytes) bytes, which the key-byte ceiling bounds, whatever key it
 /// is handed.
+///
+/// # The seed without the standard library, and what it is not
+///
+/// A build without the standard library has no source of randomness, so foldhash makes the seed
+/// from what the process has: the address of a stack slot, mixed with a value foldhash changes
+/// each time it makes a hasher, and a seed for the whole process made from the addresses of a
+/// stack slot, a function and a static, or a constant where the target has no compare-and-swap.
+/// The changing value keeps two maps from sharing a seed. Where address-space layout randomization
+/// moves the addresses from one run to the next, a client cannot know a map's seed ahead of time
+/// either. **It is not a cryptographic seed**, and foldhash claims only minimal resistance to
+/// someone who can study the process.
+///
+/// On a target without address randomization, which is most targets with no operating system, the
+/// addresses are the same on every run. There the seed can be worked out from the binary and the
+/// order the process made its hashers in, and a client who has done that can choose keys whose
+/// hashes collide. A deployment on such a target that hashes untrusted keys keeps
+/// [`max_extension_entries`](Limits::max_extension_entries) small.
+///
+/// The ceilings bound what a collision costs either way. A lookup compares its key only with the
+/// stored keys, so with every hash colliding it compares at most
+/// [`key_bytes`](Extensions::key_bytes) bytes, and building a map up to its ceilings compares at
+/// most `max_extension_entries × max_extension_key_bytes`: what the linear scan this map used
+/// before it hashed cost. A [`remove`](Extensions::remove) finds each entry after the one it
+/// removes again, to move it down a place, so with every hash colliding one removal probes on the
+/// order of `max_extension_entries²` slots, comparing positions rather than key bytes.
 pub struct Extensions<V> {
   entries: IndexMap<FrozenStr, V, KeyHasher>,
   key_bytes: u32,
@@ -305,8 +316,8 @@ impl<V> Extensions<V> {
   /// [`set_extensions`](crate::Executor::set_extensions) asks for `"extensions": {}`; not calling
   /// it at all asks for no entry.
   ///
-  /// Allocates nothing. Not `const`, because the standard library's hasher draws its keys when it
-  /// is created.
+  /// Allocates nothing. Not `const`, because the hasher draws the map's seed when it is created,
+  /// with the standard library or without it.
   #[inline]
   #[must_use]
   pub fn new(limits: &Limits) -> Self {

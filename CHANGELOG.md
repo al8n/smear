@@ -5,13 +5,14 @@ All notable changes to Smear are documented in this file.
 ## [Unreleased]
 
 - `graphql-proto`!: `Extensions` holds its entries in an `IndexMap` and finds a key by its hash,
-  with `std::hash::RandomState` under `std` and foldhash at a fixed, public seed without it,
-  where it scanned. Iteration is still insertion order, `remove` keeps the remaining entries in
-  order, and two maps are still equal only with the same entries in the same order. A key is
-  held inline up to 62 bytes where the target has pointer-width atomics. `Extensions::new` is no
-  longer `const`. `Extensions::iter` returns `ExtensionsIter`, which can be named and runs from
-  both ends as well as knowing its length, and `&Extensions` iterates as it, where
-  `IntoIterator`'s iterator type spelled the storage.
+  under a seed each map draws for itself, where it scanned: `std::hash::RandomState` under `std`,
+  and foldhash's `RandomState` without it, whose seed comes from addresses and so can be worked
+  out on a target without address randomization. Iteration is still insertion order, `remove`
+  keeps the remaining entries in order, and two maps are still equal only with the same entries
+  in the same order. A key is held inline up to 62 bytes where the target has pointer-width
+  atomics. `Extensions::new` is no longer `const`. `Extensions::iter` returns `ExtensionsIter`,
+  which can be named and runs from both ends as well as knowing its length, and `&Extensions`
+  iterates as it, where `IntoIterator`'s iterator type spelled the storage.
 - `graphql-proto`!: `ArgumentSource::Variable` carries a `NamedVariable`, exported at the crate
   root, where it had the fields `name` and `value`: `name()`, `value()` and `into_parts()` read
   them, and `new` with the `set_*` and `with_*` methods builds one. `StartError`'s
