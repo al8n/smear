@@ -95,7 +95,7 @@ use crate::{
   ArgumentSource, Values,
   collect::{Visits, byte_units},
   error::{ArgumentRef, FieldBudget, FieldCoordinate, Raw},
-  response::{Entity, Key, MetaKind, MetaLeaf, NONE, State, TypeMember, TypeRef},
+  response::{Entity, FlatRun, Key, MetaKind, MetaLeaf, NONE, State, TypeMember, TypeRef},
 };
 
 use super::{Coercion, Executor, Mark};
@@ -193,7 +193,7 @@ where
   /// A list element shares its field's metadata, so an element of `types` collects the
   /// sub-selections of every `types` selection merged into that response key.
   fn merge_selection_sets(&mut self, slot: u32) {
-    let (start, len) = self.meta[slot as usize].merged;
+    let FlatRun { start, len } = self.meta[slot as usize].merged;
     self.scratch_sets.clear();
     for field in &self.merged[start as usize..(start + len) as usize] {
       if let Some(set) = field.selection_set() {

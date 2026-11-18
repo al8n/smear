@@ -56,7 +56,7 @@ use smear_schema::{PackedType, Schema, Sym, TypeId};
 use super::{
   Extensions,
   collect::Unstored,
-  response::{NONE, Path, Slot},
+  response::{FlatRun, NONE, Path, Slot},
 };
 
 /// What went wrong, with everything the message needs.
@@ -361,13 +361,13 @@ pub(super) struct Row {
   pub(super) raw: Raw,
   /// The slot the error happened at, which is what the response path is derived from.
   pub(super) slot: u32,
-  /// Draft §7.1.2's `locations`, as a range into the executor's flat span table.
+  /// Draft §7.1.2's `locations`, as a run of the executor's flat span table.
   ///
-  /// A range and not a `Vec`, for the reason the module header gives about messages: a response
-  /// with four hundred field errors must not be four hundred allocations, and the spans it points
-  /// at were collected once per response key whatever happens afterwards. It is also what lets a
-  /// list of a thousand elements share one entry per merged field rather than one per element.
-  pub(super) locations: (u32, u32),
+  /// A run and not a `Vec`, for the reason the module header gives about messages: a response with
+  /// four hundred field errors must not be four hundred allocations, and the spans it points at
+  /// were collected once per response key whatever happens afterwards. It is also what lets a list
+  /// of a thousand elements share one entry per merged field rather than one per element.
+  pub(super) locations: FlatRun,
   /// Draft §7.1.6's `extensions`, as an index into the executor's side table of per-error maps, or
   /// [`NONE`] when the error carries none.
   ///
@@ -603,7 +603,7 @@ pub struct Error<'r, V> {
   pub(super) schema: &'r Schema,
   pub(super) slots: &'r [Slot<V>],
   pub(super) names: &'r str,
-  pub(super) name_spans: &'r [(u32, u32)],
+  pub(super) name_spans: &'r [FlatRun],
   pub(super) locations: &'r [SimpleSpan],
   /// The executor's side table of draft §7.1.6 maps, which `row.extensions` indexes.
   pub(super) error_extensions: &'r [Extensions<V>],
@@ -655,7 +655,7 @@ impl<'r, V> Error<'r, V> {
   /// Always at least one entry for any error a driver can observe.
   #[inline]
   pub fn locations(&self) -> &'r [SimpleSpan] {
-    let (start, len) = self.row.locations;
+    let FlatRun { start, len } = self.row.locations;
     &self.locations[start as usize..(start + len) as usize]
   }
 
@@ -691,7 +691,7 @@ impl<'r, V> Error<'r, V> {
   /// message. Both spellings the arena can hold from a document now refuse at admission instead;
   /// see [`Interner`](super::collect::Interner) and al8n/smear#139.
   fn name(&self, id: u32) -> &'r str {
-    let (start, len) = self.name_spans[id as usize];
+    let FlatRun { start, len } = self.name_spans[id as usize];
     &self.names[start as usize..(start + len) as usize]
   }
 }

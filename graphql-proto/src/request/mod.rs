@@ -53,7 +53,7 @@ use tokora::SimpleSpan;
 use smear_parser::graphql::ast::{Field, InputValue, SelectionSet};
 use smear_schema::{PackedType, Schema, Sym, TypeId};
 
-use super::response::{Path, Slot};
+use super::response::{FlatRun, Path, Slot};
 
 /// The error types for the request.
 pub mod error;
@@ -297,7 +297,7 @@ pub struct FieldRequest<'r, 'a, S, V> {
   pub(super) schema: &'r Schema,
   pub(super) slots: &'r [Slot<V>],
   pub(super) names: &'r str,
-  pub(super) name_spans: &'r [(u32, u32)],
+  pub(super) name_spans: &'r [FlatRun],
   pub(super) slot: u32,
   pub(super) field: &'a Field<S>,
   pub(super) merged: &'r [&'a Field<S>],

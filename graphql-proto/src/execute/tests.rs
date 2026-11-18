@@ -4837,8 +4837,12 @@ fn no_buffer_a_subscription_retains_grows_with_the_stream() {
     ("locations", held.locations, u64::from(METADATA)),
     // `Interner::insert`, refused past the arena ceiling. A name is at least one byte, so entries
     // cannot outrun bytes.
-    ("interner entries", held.interner.0, u64::from(INTERNED)),
-    ("interner bytes", held.interner.1, u64::from(INTERNED)),
+    (
+      "interner entries",
+      held.interner.entries,
+      u64::from(INTERNED),
+    ),
+    ("interner bytes", held.interner.bytes, u64::from(INTERNED)),
     // `fail`/`fail_at`, derived: at most one row per position.
     ("errors", held.errors, u64::from(SLOTS)),
     // `handle_field_error_with`, derived: at most one map per error row, so one per position.
@@ -4853,10 +4857,10 @@ fn no_buffer_a_subscription_retains_grows_with_the_stream() {
     ("scratch.keys", held.scratch.keys, u64::from(INTERNED)),
     // Draft §6.3's `visitedFragments`: a bitset word per 64 fragment ordinals, and the ordinals
     // set. **The document's size, not a ceiling** — every ordinal comes from the fragment index.
-    ("scratch.visited words", held.scratch.visited.0, 1),
+    ("scratch.visited words", held.scratch.visited.words, 1),
     (
       "scratch.visited seen",
-      held.scratch.visited.1,
+      held.scratch.visited.ordinals,
       FRAGMENTS as u64,
     ),
     // One frame per fragment spread or inline fragment, each charged a visit before it is taken.

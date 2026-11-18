@@ -7,7 +7,7 @@
 //! response object (draft §7.1.1 requires it to follow the query), and the list order is what
 //! `MergeSelectionSets` concatenates.
 //!
-//! Neither is stored as a map. Selections are appended to a flat vector as `(group, field)`, and a
+//! Neither is stored as a map. Selections are appended to a flat vector with their group, and a
 //! stable sort by group then makes every group a contiguous range, preserving document order inside
 //! each. One vector, one sort, and no allocation per response key.
 //!
@@ -47,6 +47,7 @@ use smear_schema::{Schema, TypeId, bucket, hash_bytes, is_name, is_name_tail};
 use super::{
   Values,
   error::{ConditionFault, Raw},
+  response::FlatRun,
 };
 
 use groups::{Appending, Groups};
@@ -944,7 +945,8 @@ pub(super) struct Interner {
   /// refuse rather than substitute. What is left is a reader that cannot fail, so there is no
   /// fallback left to choose wrongly.
   names: std::string::String,
-  spans: std::vec::Vec<(u32, u32)>,
+  /// Each entry's run of `names`, in id order.
+  spans: std::vec::Vec<FlatRun>,
   /// Each entry's whole [`hash_bytes`], parallel to [`spans`](Interner::spans).
   ///
   /// Eight bytes an entry, bought for three things the budget could not otherwise see. A chain step
@@ -964,6 +966,26 @@ pub(super) struct Interner {
   chain: std::vec::Vec<u32>,
   /// [`Limits::max_interned_bytes`](super::Limits::max_interned_bytes).
   cap: u32,
+}
+
+/// Where an [`Interner`] stands, which [`Interner::mark`] takes and [`Interner::restore`] goes back
+/// to.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct InternerMark {
+  /// The arena's length in bytes.
+  pub(super) names: usize,
+  /// How many entries the table held.
+  pub(super) spans: usize,
+}
+
+/// What an [`Interner`] is holding, which [`Interner::capacity`] reads.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct InternerSize {
+  /// Entries, which `spans`, `hashes`, `chain` and `heads` all follow.
+  pub(super) entries: usize,
+  /// Bytes of arena.
+  pub(super) bytes: usize,
 }
 
 /// Buckets the first growth allocates.
@@ -1070,7 +1092,7 @@ impl Interner {
         }
         // What that unit buys: two integers. A bucket collision — the constructible case, and the
         // only one an adversary has — is rejected here without touching a byte.
-        let (start, len) = self.spans[id as usize];
+        let FlatRun { start, len } = self.spans[id as usize];
         if self.hashes[id as usize] == hash && len as usize == bytes.len() {
           // Charged for what the `memcmp` reads. The stored hash and the length have both agreed,
           // so the ordinary outcome is equality and this pays `byte_units(len)` exactly as the
@@ -1121,15 +1143,18 @@ impl Interner {
     self.compares
   }
 
-  /// What this is holding, as `(entries, arena bytes)`.
+  /// What this is holding, in entries and in arena bytes.
   ///
   /// Entries covers `spans`, `hashes`, `chain` and `heads` at once: the first three are parallel to
   /// it by construction, and `heads` is a power of two that [`rehash`](Interner::rehash) keeps at or
   /// above it and never more than double. `clear` empties all five and shrinks none, so both
   /// numbers survive every operation this executor runs.
   #[cfg(test)]
-  pub(super) fn capacity(&self) -> (usize, usize) {
-    (self.spans.capacity(), self.names.capacity())
+  pub(super) fn capacity(&self) -> InternerSize {
+    InternerSize {
+      entries: self.spans.capacity(),
+      bytes: self.names.capacity(),
+    }
   }
 
   /// The place an insertion of `name` would take, or [`None`] when the arena cannot hold it.
@@ -1166,7 +1191,7 @@ impl Interner {
   fn insert(&mut self, name: &str, hash: u64, fit: Fit) -> u32 {
     let Fit { start, len, id } = fit;
     self.names.push_str(name);
-    self.spans.push((start, len));
+    self.spans.push(FlatRun { start, len });
     self.hashes.push(hash);
     self.chain.push(NONE);
     if self.spans.len() > self.heads.len() {
@@ -1213,15 +1238,15 @@ impl Interner {
 
   /// The arena, as the `str` its readers slice.
   ///
-  /// Every entry was appended whole through [`insert`](Interner::insert), so every `(start, len)`
-  /// in [`spans`](Interner::spans) is a pair of char boundaries and slicing by one cannot panic.
+  /// Every entry was appended whole through [`insert`](Interner::insert), so every run in
+  /// [`spans`](Interner::spans) starts and ends on a char boundary and slicing by one cannot panic.
   #[inline]
   pub(super) fn names(&self) -> &str {
     &self.names
   }
 
   #[inline]
-  pub(super) fn spans(&self) -> &[(u32, u32)] {
+  pub(super) fn spans(&self) -> &[FlatRun] {
     &self.spans
   }
 
@@ -1243,8 +1268,11 @@ impl Interner {
 
   /// Where the arena stands, so a failed collection or expansion can put it back.
   #[inline]
-  pub(super) fn mark(&self) -> (usize, usize) {
-    (self.names.len(), self.spans.len())
+  pub(super) fn mark(&self) -> InternerMark {
+    InternerMark {
+      names: self.names.len(),
+      spans: self.spans.len(),
+    }
   }
 
   /// Undoes every name interned since `mark`.
@@ -1257,7 +1285,7 @@ impl Interner {
   /// The index is unwound before the arena, and the bucket each entry is unlinked from is read out
   /// of [`hashes`](Interner::hashes) rather than recomputed from bytes the truncation is about to
   /// remove — so the unwind is one pointer write per entry and reads no arena at all.
-  pub(super) fn restore(&mut self, (names, spans): (usize, usize)) {
+  pub(super) fn restore(&mut self, InternerMark { names, spans }: InternerMark) {
     for id in (spans..self.spans.len()).rev() {
       let bucket = self.bucket(self.hashes[id]);
       debug_assert_eq!(
@@ -1279,8 +1307,8 @@ impl Interner {
 ///
 /// Cleared, never shrunk: capacity is what makes a steady-state response allocate nothing.
 pub(super) struct Scratch<'a, S> {
-  /// `(group, selection)` for every selection that survived, sorted by group at the end.
-  pub(super) fields: std::vec::Vec<(u32, &'a Field<S>)>,
+  /// Every selection that survived, with its group, sorted by group at the end.
+  pub(super) fields: std::vec::Vec<Grouped<'a, S>>,
   /// One entry per distinct response key, in the order the keys were first seen.
   ///
   /// Private, and reached through [`groups`](Scratch::groups) and [`walking`](Scratch::walking),
@@ -1299,7 +1327,26 @@ pub(super) struct Scratch<'a, S> {
   /// Draft §6.3's `visitedFragments`.
   visited: Visited,
   /// The descent, as heap rather than as native frames. See [`walk`].
-  stack: std::vec::Vec<(&'a SelectionSet<S>, usize)>,
+  stack: std::vec::Vec<Descent<'a, S>>,
+}
+
+/// One selection that survived collection, and the group its response key landed in.
+pub(super) struct Grouped<'a, S> {
+  /// The group, an index into [`Scratch`]'s group list.
+  pub(super) group: u32,
+  /// The selection.
+  pub(super) field: &'a Field<S>,
+}
+
+/// One frame of [`walk`]'s descent: a selection set, and where in it to resume.
+///
+/// The index is where the recursion this replaced would have resumed — the next sibling after a
+/// spread or an inline fragment the walk entered — which is what keeps the order pre-order.
+struct Descent<'a, S> {
+  /// The selection set being walked.
+  set: &'a SelectionSet<S>,
+  /// The index of the next selection in it to examine.
+  next: usize,
 }
 
 /// What each of [`Scratch`]'s five buffers is holding.
@@ -1310,17 +1357,27 @@ pub(super) struct Scratch<'a, S> {
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct ScratchCapacity {
-  /// Surviving `(group, selection)` pairs. Charged against `max_response_metadata` at the push.
+  /// Surviving selections with their groups. Charged against `max_response_metadata` at the push.
   pub(super) fields: usize,
   /// One per distinct response key, so at most one per `fields` entry.
   pub(super) groups: usize,
   /// Sparse over interner ids, so bounded by the arena rather than by the response.
   pub(super) keys: usize,
-  /// Draft §6.3's `visitedFragments`, as `(bitset words, ordinals set)`. Bounded by the document's
-  /// fragment count, and every spread that reaches it is charged a visit.
-  pub(super) visited: (usize, usize),
+  /// Draft §6.3's `visitedFragments`. Bounded by the document's fragment count, and every spread
+  /// that reaches it is charged a visit.
+  pub(super) visited: VisitedCapacity,
   /// The descent. One frame per fragment spread or inline fragment, each of them charged a visit.
   pub(super) stack: usize,
+}
+
+/// What [`Visited`]'s two buffers are holding.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct VisitedCapacity {
+  /// Bitset words, one per 64 fragment ordinals.
+  pub(super) words: usize,
+  /// The ordinals set, which is what the reset walks.
+  pub(super) ordinals: usize,
 }
 
 /// What [`walk`] is handed, with the group list restricted to the two things a walk does with it.
@@ -1329,11 +1386,11 @@ pub(super) struct ScratchCapacity {
 /// holds a [`Scratch`], so it has no way to reach the group vector other than the [`Appending`] in
 /// here — which cannot enumerate. See [`groups`].
 struct Walking<'s, 'a, S> {
-  fields: &'s mut std::vec::Vec<(u32, &'a Field<S>)>,
+  fields: &'s mut std::vec::Vec<Grouped<'a, S>>,
   groups: Appending<'s>,
   keys: &'s mut std::vec::Vec<u32>,
   visited: &'s mut Visited,
-  stack: &'s mut std::vec::Vec<(&'a SelectionSet<S>, usize)>,
+  stack: &'s mut std::vec::Vec<Descent<'a, S>>,
 }
 
 impl<'a, S> Scratch<'a, S> {
@@ -1363,7 +1420,10 @@ impl<'a, S> Scratch<'a, S> {
       fields: self.fields.capacity(),
       groups: self.groups.capacity(),
       keys: self.keys.capacity(),
-      visited: (self.visited.bits.capacity(), self.visited.seen.capacity()),
+      visited: VisitedCapacity {
+        words: self.visited.bits.capacity(),
+        ordinals: self.visited.seen.capacity(),
+      },
       stack: self.stack.capacity(),
     }
   }
@@ -1452,11 +1512,11 @@ where
   }
   scratch.stack.clear();
   // Stable, so document order inside a group survives; by group, so every group is contiguous.
-  scratch.fields.sort_by_key(|&(group, _)| group);
+  scratch.fields.sort_by_key(|grouped| grouped.group);
   let mut cursor = 0usize;
   for (index, group) in scratch.groups.iter_mut().enumerate() {
     let start = cursor;
-    while cursor < scratch.fields.len() && scratch.fields[cursor].0 as usize == index {
+    while cursor < scratch.fields.len() && scratch.fields[cursor].group as usize == index {
       cursor += 1;
     }
     group.start = start as u32;
@@ -1506,8 +1566,8 @@ where
 ///
 /// Draft §6.3 fixes response-key order to document order, and `MergeSelectionSets` concatenates in
 /// document order within a key — so this has to be pre-order depth-first, entering a fragment
-/// where its spread sits and resuming at the *next sibling* afterwards. That is why the stack
-/// holds `(set, index)` and not just `set`: the index is where the recursion would have resumed.
+/// where its spread sits and resuming at the *next sibling* afterwards. That is why a [`Descent`]
+/// frame holds an index beside the set: the index is where the recursion would have resumed.
 #[allow(clippy::too_many_arguments)]
 fn walk<'a, S, V>(
   schema: &Schema,
@@ -1532,15 +1592,15 @@ where
     stack,
   } = scratch;
   stack.clear();
-  stack.push((set, 0));
+  stack.push(Descent { set, next: 0 });
 
-  while let Some(&mut (set, ref mut cursor)) = stack.last_mut() {
+  while let Some(&mut Descent { set, ref mut next }) = stack.last_mut() {
     let selections = set.selections();
-    let Some(selection) = selections.get(*cursor) else {
+    let Some(selection) = selections.get(*next) else {
       stack.pop();
       continue;
     };
-    *cursor += 1;
+    *next += 1;
 
     // Charged here, before the arms, so that *every* selection examined costs the same whether or
     // not it survives. Charging what is appended instead — which is what the metadata ceiling
@@ -1627,7 +1687,7 @@ where
         // on its later duplicate while the commit path reports the first, and reading the stored
         // span is what makes the two the same value rather than two computations that agree.
         metadata.admits(fields.len(), groups.first(group))?;
-        fields.push((group, field));
+        fields.push(Grouped { group, field });
       }
       Selection::FragmentSpread(spread) => {
         if !included(spread.directives(), ctx, visits, *spread.span())? {
@@ -1655,7 +1715,10 @@ where
         if !applies(schema, condition, object_type) {
           continue;
         }
-        stack.push((fragment.selection_set(), 0));
+        stack.push(Descent {
+          set: fragment.selection_set(),
+          next: 0,
+        });
       }
       Selection::InlineFragment(inline) => {
         if !included(inline.directives(), ctx, visits, *inline.span())? {
@@ -1670,7 +1733,10 @@ where
             continue;
           }
         }
-        stack.push((inline.selection_set(), 0));
+        stack.push(Descent {
+          set: inline.selection_set(),
+          next: 0,
+        });
       }
     }
   }

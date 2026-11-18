@@ -87,8 +87,8 @@ use super::{
   Argument, ArgumentSource, Error, Extensions, FieldRequest, Leaf, Node, ReqId, ResponseStream,
   SourceEventError, SourceField, Values,
   collect::{
-    Admission, Allowance, Compared, Fragments, Interner, Scratch, Unstored, Visits, collect_fields,
-    metered_variable_key, scan_eq, variable_key,
+    Admission, Allowance, Compared, Fragments, Grouped, Interner, InternerMark, Scratch, Unstored,
+    Visits, collect_fields, metered_variable_key, scan_eq, variable_key,
   },
   error::{
     AbstractNotPossible, AbstractNotPossibleUnnamed, AbstractUnresolved, ArgumentRef,
@@ -96,7 +96,7 @@ use super::{
     RuntimeTypeBudget,
   },
   request::name_bytes,
-  response::{Entity, Key, NONE, PendingObject, Slot, State, node},
+  response::{Entity, FlatRun, Key, NONE, PendingObject, Slot, State, node},
 };
 
 mod introspect;
@@ -1268,7 +1268,7 @@ struct Mark {
   meta: usize,
   merged: usize,
   locations: usize,
-  interner: (usize, usize),
+  interner: InternerMark,
   /// Error rows, because a row names the slot it happened at.
   ///
   /// Not present until a restore could reach a path that had already failed. `expand`'s two restore
@@ -1369,7 +1369,7 @@ struct Retained {
   locations: usize,
   /// The interner's arena, table and chain, in entries and bytes. Bounded by
   /// [`Limits::max_interned_bytes`].
-  interner: (usize, usize),
+  interner: crate::collect::InternerSize,
   /// Error rows. Derived: at most one per position.
   errors: usize,
   /// Draft §7.1.6's per-error maps. Derived: at most one per error row, so at most one per
@@ -1814,19 +1814,19 @@ struct Meta<'a, S> {
   /// The field draft §6.4 takes the name and arguments from — `fields[0]` of the group. `None`
   /// only for the root, which has no field.
   field: Option<&'a Field<S>>,
-  /// The whole group, as a range into the executor's flat `merged` vector. Draft §6.4's
+  /// The whole group, as a run of the executor's flat `merged` vector. Draft §6.4's
   /// `MergeSelectionSets` reads it when the value comes back.
-  merged: (u32, u32),
-  /// The same group's spans, as a range into the executor's flat `locations` vector — draft
-  /// §7.1.2's `locations` for any error raised at this position.
+  merged: FlatRun,
+  /// The same group's spans, as a run of the executor's flat `locations` vector — draft §7.1.2's
+  /// `locations` for any error raised at this position.
   ///
-  /// A second range rather than a reuse of `merged`, because [`Row`] must be readable from
+  /// A second run rather than a reuse of `merged`, because [`Row`] must be readable from
   /// [`Error`](super::Error), which is deliberately not generic over the source type `S` and so
   /// cannot hold a `Field<S>`. The two vectors carry the same group in the same order but are
   /// **not** indexed alike: `fail_at` appends a lone span for the errors draft §6.4.1 points at an
   /// argument rather than at the field, so `locations` also holds entries `merged` has no member
   /// for.
-  locations: (u32, u32),
+  locations: FlatRun,
   /// The object type the field was selected on, for a `Type.field` message.
   parent_type: TypeId,
   /// The field's name as a schema symbol.
@@ -2695,8 +2695,8 @@ where
     ));
     self.meta.push(Meta {
       field: None,
-      merged: (0, 0),
-      locations: (0, 0),
+      merged: FlatRun { start: 0, len: 0 },
+      locations: FlatRun { start: 0, len: 0 },
       parent_type: root_type,
       field_sym: self.schema.type_def(root_type).name(),
     });
@@ -2777,7 +2777,7 @@ where
     self.child_departed(parent, true);
 
     let meta = &self.meta[slot as usize];
-    let (start, len) = meta.merged;
+    let FlatRun { start, len } = meta.merged;
     let field = meta
       .field
       .expect("only the root has no field, and it is never ready");
@@ -3348,7 +3348,7 @@ where
       return None;
     };
     let meta = &self.meta[source as usize];
-    let (start, len) = meta.merged;
+    let FlatRun { start, len } = meta.merged;
     let field = meta
       .field
       .expect("draft §6.2.3.1's source field is a collected field and has a node");
@@ -3913,7 +3913,7 @@ where
 
     // `MergeSelectionSets`: every field that shared this response key contributes its
     // sub-selections, and §6.3 collects over the concatenation.
-    let (start, len) = self.meta[slot as usize].merged;
+    let FlatRun { start, len } = self.meta[slot as usize].merged;
     self.scratch_sets.clear();
     for field in &self.merged[start as usize..(start + len) as usize] {
       if let Some(set) = field.selection_set() {
@@ -4059,7 +4059,7 @@ where
     let mut exhausted: Option<(Exhausted, SimpleSpan)> = None;
     for group in scratch.groups() {
       let selections = &scratch.fields[group.start as usize..(group.start + group.len) as usize];
-      let first = selections[0].1;
+      let first = selections[0].field;
       // The probe hashes the field's *document* spelling, and this runs once per object position.
       // The response key collection interned is the **alias** when there is one, so `{ a: <a
       // megabyte of name> }` charges a byte or two at collection and hashes a megabyte here, per
@@ -4114,7 +4114,7 @@ where
         exhausted = Some((Exhausted::Selections, group.first));
         break;
       }
-      for &(_, field) in selections {
+      for &Grouped { field, .. } in selections {
         self.merged.push(field);
         self.locations.push(*field.span());
       }
@@ -4167,8 +4167,14 @@ where
       };
       self.meta[child as usize] = Meta {
         field: Some(first),
-        merged: (start, group.len),
-        locations: (located, group.len),
+        merged: FlatRun {
+          start,
+          len: group.len,
+        },
+        locations: FlatRun {
+          start: located,
+          len: group.len,
+        },
         parent_type: object_type,
         field_sym: sym,
       };
@@ -4217,8 +4223,8 @@ where
       };
       // `fail_at` rather than `fail`, and the span is the refused selection's own.
       //
-      // `fail` reads the slot's stored locations range, and the *root's* range is empty by
-      // construction — `start` builds it as `(0, 0)` because the root has no field to have a span.
+      // `fail` reads the slot's stored locations run, and the *root's* run is empty by
+      // construction — `start` builds it empty because the root has no field to have a span.
       // So a budget tripped at the top level reached the driver with `locations()` empty, against
       // this crate's own contract that every observable error has at least one. Pointing at the
       // selection that was refused fixes the root and sharpens every other budget error with it:
@@ -4673,7 +4679,7 @@ where
     // The root is the one position whose stored range is empty, and it can fail at most once per
     // operation, so the fallback below overshoots the ceiling by at most a single entry.
     let stored = self.meta[slot as usize].locations;
-    if !self.metadata_room(1) && stored.1 > 0 {
+    if !self.metadata_room(1) && stored.len > 0 {
       self.record(slot, raw, stored, NONE);
       return;
     }
@@ -4682,7 +4688,7 @@ where
       return;
     };
     self.locations.push(location);
-    self.record(slot, raw, (start, 1), NONE);
+    self.record(slot, raw, FlatRun { start, len: 1 }, NONE);
   }
 
   /// Whether `more` metadata entries fit under [`Limits::max_response_metadata`].
@@ -4696,7 +4702,7 @@ where
     used + more <= u64::from(self.limits.max_response_metadata.get())
   }
 
-  fn record(&mut self, slot: u32, raw: Raw, locations: (u32, u32), extensions: u32) {
+  fn record(&mut self, slot: u32, raw: Raw, locations: FlatRun, extensions: u32) {
     self.errors.push(Row {
       raw,
       slot,
@@ -5708,7 +5714,7 @@ pub struct Response<'r, V> {
   slots: &'r [Slot<V>],
   depth: u32,
   names: &'r str,
-  name_spans: &'r [(u32, u32)],
+  name_spans: &'r [FlatRun],
   locations: &'r [SimpleSpan],
   errors: &'r [Row],
   /// Draft §7.1.6's per-error maps, which the rows in `errors` index.

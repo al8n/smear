@@ -72,6 +72,18 @@ mod tests;
 /// The sentinel for "no such slot".
 pub(super) const NONE: u32 = u32::MAX;
 
+/// A run of `len` entries of one of the executor's flat tables, starting at `start`: a name's bytes
+/// in the interner's arena, or one response key's group in the `merged` and `locations` vectors.
+///
+/// A start and a length, never an end, so the run is `table[start..start + len]`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct FlatRun {
+  /// Where the run begins in its table.
+  pub(super) start: u32,
+  /// How many entries it holds.
+  pub(super) len: u32,
+}
+
 /// One position in the response.
 #[derive(Debug)]
 pub(super) struct Slot<V> {
@@ -436,6 +448,14 @@ pub const INLINE_SEGMENTS: usize = 32;
 /// an ASCII elision beside that separator is four dots a reader has to count.
 const ELIDED: &str = "…";
 
+/// What [`Path::window`] fills: the innermost segments, and whether the chain went on past them.
+struct Window<'w, 'r> {
+  /// The innermost segments, innermost first — at most [`INLINE_SEGMENTS`] of them.
+  segments: &'w [Segment<'r>],
+  /// Whether the chain ran on past the window, so the outermost segments were dropped.
+  elided: bool,
+}
+
 /// A draft §7.1.2 response path, outermost segment first.
 ///
 /// Derived from the response tree rather than stored: an error records the slot it happened at and
@@ -525,7 +545,7 @@ const ELIDED: &str = "…";
 pub struct Path<'r, V> {
   slots: &'r [Slot<V>],
   names: &'r str,
-  name_spans: &'r [(u32, u32)],
+  name_spans: &'r [FlatRun],
   slot: u32,
 }
 
@@ -547,7 +567,7 @@ impl<'r, V> Path<'r, V> {
   pub(super) const fn new(
     slots: &'r [Slot<V>],
     names: &'r str,
-    name_spans: &'r [(u32, u32)],
+    name_spans: &'r [FlatRun],
     slot: u32,
   ) -> Self {
     Self {
@@ -663,9 +683,9 @@ impl<'r, V> Path<'r, V> {
 
   /// Fills `into` with the innermost segments and says whether the chain ran on past them.
   ///
-  /// The returned slice is innermost first — the direction the links point — so a formatter
-  /// reverses it, and a `true` beside it means the segments *above* the slice were dropped. Both
-  /// formatters below share this so that the two renderings are one walk read two ways.
+  /// The window's segments are innermost first — the direction the links point — so a formatter
+  /// reverses them, and [`elided`](Window::elided) means the segments *above* them were dropped.
+  /// Both formatters below share this so that the two renderings are one walk read two ways.
   ///
   /// At most [`INLINE_SEGMENTS`] + 1 links however deep the path is: the window's worth, and one
   /// more to ask whether there was another. Nothing here allocates and nothing here can fail, which
@@ -675,7 +695,7 @@ impl<'r, V> Path<'r, V> {
   /// Bounded by the window and not by [`len`](Path::len), deliberately: a *strategy* may be chosen
   /// from a number the executor recorded, and what is **written** may not be. Nothing rendered below
   /// comes from anywhere but the chain itself, the elision included.
-  fn window<'w>(&self, into: &'w mut [Segment<'r>; INLINE_SEGMENTS]) -> (&'w [Segment<'r>], bool) {
+  fn window<'w>(&self, into: &'w mut [Segment<'r>; INLINE_SEGMENTS]) -> Window<'w, 'r> {
     let mut ancestors = self.ancestors();
     let mut filled = 0;
     while filled < INLINE_SEGMENTS {
@@ -685,8 +705,11 @@ impl<'r, V> Path<'r, V> {
       into[filled] = segment;
       filled += 1;
     }
-    // `Ancestors` is fused, so this is `None` when the loop above ran out rather than filled up.
-    (&into[..filled], ancestors.next().is_some())
+    Window {
+      segments: &into[..filled],
+      // `Ancestors` is fused, so this is `None` when the loop above ran out rather than filled up.
+      elided: ancestors.next().is_some(),
+    }
   }
 
   /// Walks the chain into `buf` and turns it around.
@@ -731,14 +754,14 @@ impl<V> fmt::Debug for Path<'_, V> {
   /// and not an implementation note.
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let mut storage = [Segment::Index(0); INLINE_SEGMENTS];
-    let (window, elided) = self.window(&mut storage);
+    let Window { segments, elided } = self.window(&mut storage);
     let mut list = f.debug_list();
     if elided {
       // `format_args!` rather than a `&str`, so the marker is not rendered as the quoted string a
       // segment never is.
       list.entry(&format_args!("{ELIDED}"));
     }
-    for segment in window.iter().rev() {
+    for segment in segments.iter().rev() {
       list.entry(segment);
     }
     list.finish()
@@ -753,11 +776,11 @@ impl<V> fmt::Display for Path<'_, V> {
   /// and not an implementation note.
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let mut storage = [Segment::Index(0); INLINE_SEGMENTS];
-    let (window, elided) = self.window(&mut storage);
+    let Window { segments, elided } = self.window(&mut storage);
     if elided {
       f.write_str(ELIDED)?;
     }
-    for (position, segment) in window.iter().rev().enumerate() {
+    for (position, segment) in segments.iter().rev().enumerate() {
       // The marker occupies the first position when there is one, so it is what the leading
       // separator is measured against.
       if elided || position > 0 {
@@ -1116,7 +1139,7 @@ pub struct Children<'r, V> {
   schema: &'r Schema,
   slots: &'r [Slot<V>],
   names: &'r str,
-  name_spans: &'r [(u32, u32)],
+  name_spans: &'r [FlatRun],
   next: u32,
 }
 
@@ -1174,8 +1197,8 @@ impl<V> fmt::Debug for Children<'_, V> {
 /// response keys it could not read became the same readable one. The arena is a `str` now, and
 /// refuses at admission instead; see [`Interner`](super::collect::Interner).
 #[inline]
-fn interned<'r>(names: &'r str, name_spans: &[(u32, u32)], id: u32) -> &'r str {
-  let (start, len) = name_spans[id as usize];
+fn interned<'r>(names: &'r str, name_spans: &[FlatRun], id: u32) -> &'r str {
+  let FlatRun { start, len } = name_spans[id as usize];
   &names[start as usize..(start + len) as usize]
 }
 
@@ -1188,7 +1211,7 @@ pub(super) fn node<'r, V>(
   schema: &'r Schema,
   slots: &'r [Slot<V>],
   names: &'r str,
-  name_spans: &'r [(u32, u32)],
+  name_spans: &'r [FlatRun],
   index: u32,
 ) -> Node<'r, V> {
   let slot = &slots[index as usize];
