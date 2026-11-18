@@ -3,6 +3,7 @@
 
 use core::fmt;
 
+use derive_more::IsVariant;
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::id::{DefId, ModuleId, Sym};
@@ -15,7 +16,7 @@ use super::{
 
 /// The two kinds of name a module gives: a type definition's and a directive definition's are
 /// apart, so one module may hold a type and a directive with one name.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum Namespace {
   /// The name of every definition but a directive's.

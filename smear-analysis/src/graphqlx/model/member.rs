@@ -1,5 +1,6 @@
 //! Members: the fields, arguments, input fields and enum values of definitions.
 
+use derive_more::IsVariant;
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::id::{ApplicationId, DefId, IdRange, MemberId, Sym, TypeExprId, ValueId};
@@ -7,7 +8,7 @@ use crate::graphqlx::id::{ApplicationId, DefId, IdRange, MemberId, Sym, TypeExpr
 use super::{Model, name::Description, table::MemberRow};
 
 /// What kind of member a member is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum MemberKind {
   /// A field of an object or an interface.

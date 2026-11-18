@@ -16,7 +16,7 @@ use super::{
 };
 
 /// The syntactic kind of a literal kept as written.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum LiteralKind {
   /// `true` or `false`.

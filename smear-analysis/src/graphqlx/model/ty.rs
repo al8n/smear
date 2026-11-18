@@ -17,14 +17,22 @@ use super::{
 };
 
 /// Where a written path starts.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum PathRoot {
   /// No root: the path starts in the scope it is written in, as `Int` and `geo::Point` do.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Relative,
   /// `~::`: the root module of the package it is written in.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Package,
   /// `^::`: a package the one it is written in may reach, named by the path's first segment.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Dependency,
   /// `..::`, as many times as it holds: that many modules up from the one it is written in.
   Parent(NonZeroU32),

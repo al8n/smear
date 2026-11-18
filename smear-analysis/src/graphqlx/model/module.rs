@@ -1,5 +1,6 @@
 //! Modules: each package's root module, its directory modules, and its inline `mod`s.
 
+use derive_more::IsVariant;
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::id::{DefId, IdRange, ModuleId, PackageId, Sym, dense};
@@ -7,7 +8,7 @@ use crate::graphqlx::id::{DefId, IdRange, ModuleId, PackageId, Sym, dense};
 use super::{Model, name::Description, table::ModuleRow};
 
 /// How a module came to be.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum ModuleKind {
   /// A package's root module: `~::` inside the package, and `^::name` from a package that reaches

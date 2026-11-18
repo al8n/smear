@@ -18,7 +18,7 @@ use super::{
 };
 
 /// What kind of definition a definition is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum DefKind {
   /// A scalar: a primitive, a custom scalar, or a scalar a host type stands for.
@@ -52,7 +52,7 @@ impl DefKind {
 }
 
 /// Where a definition comes from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum Origin {
   /// A supplied package's own definition.
@@ -188,7 +188,7 @@ impl IntPrimitive {
 }
 
 /// The collection a definition stands for: what `@set` or `@map` makes of it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum Collection {
   /// A set, through `@set`.

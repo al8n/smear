@@ -20,6 +20,7 @@ mod value;
 
 use std::{string::String, vec::Vec};
 
+use derive_more::IsVariant;
 use smear_semantics::interner::ByteRange;
 
 pub use application::{Application, ApplicationArgument, Resolution};
@@ -149,7 +150,7 @@ pub struct Model {
 }
 
 /// Which kind of package a package is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum PackageKind {
   /// `core`, `alloc` or `std`: smear's own, embedded in smear and supplied by no caller.

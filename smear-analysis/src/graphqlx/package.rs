@@ -3,6 +3,8 @@
 use core::ops::RangeInclusive;
 use std::{boxed::Box, vec::Vec};
 
+use derive_more::IsVariant;
+
 /// One file of a [`Package`]: where it sits in the package, and its text.
 ///
 /// Built with [`SourceFile::new`] and read through its getters; the fields are private so that a
@@ -41,7 +43,7 @@ impl<S> SourceFile<S> {
 }
 
 /// How a package's files become its modules.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum Layout {
   /// Directory modules: a file's path is its module's path, so `media/vision.graphqlx` is the
@@ -55,7 +57,7 @@ pub enum Layout {
 /// What a package may use, from the language's three built-in packages.
 ///
 /// Ordered by what each admits: `Core < Alloc < Std`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum Tier {
   /// `core` alone: no allocation and no operating system.
