@@ -31,8 +31,17 @@ use crate::{
 };
 
 enum TypeCore<S> {
-  Path(super::ast::Path<S>, Option<TypeGenerics<S>>),
+  Path(PathCore<S>),
   List(Type<S>),
+}
+
+/// A path and the generic arguments after it, before the span and `!` that finish the type:
+/// [`TypeCore::Path`]'s payload.
+struct PathCore<S> {
+  /// The namespaced path.
+  path: super::ast::Path<S>,
+  /// The optional generic arguments.
+  generics: Option<TypeGenerics<S>>,
 }
 
 /// A type's heads: a path's name or root sigil, or a list's `[`. A `::` starts no path, so it is
@@ -145,7 +154,7 @@ where
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let generics = try_type_generics(inp)?;
-  Ok(TypeCore::Path(path, generics))
+  Ok(TypeCore::Path(PathCore { path, generics }))
 }
 
 fn list_type_core<'inp, Src, Ctx>(
@@ -213,7 +222,7 @@ where
   let required = matches!(try_bang(inp)?, ParseAttempt::Accept(_));
   let span = inp.span_since_trimmed(&node_start);
   Ok(match core {
-    TypeCore::Path(path, generics) => {
+    TypeCore::Path(PathCore { path, generics }) => {
       // A path's arguments are the second way a GraphQLx type nests, so the list that closes the
       // cycle is the one `Nested` releases. Every other carrier that holds an argument list holds
       // a flat one, which is why the conversion is here rather than in `try_type_generics`.

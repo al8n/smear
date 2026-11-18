@@ -219,14 +219,18 @@ impl<S: crate::value::Leaf> Numbers<S> for SliceNumbers {
 #[cfg(feature = "materialized-numbers")]
 pub(crate) enum OutOfRange<S> {
   /// An `IntValue` outside the named width.
-  Int {
-    /// The literal's source spelling.
-    value: S,
-    /// The width the conversion was attempted at.
-    width: IntWidth,
-  },
+  Int(OutOfRangeInt<S>),
   /// A `FloatValue` that is not a finite [`f64`].
   Float(S),
+}
+
+/// An `IntValue` outside the named width: [`OutOfRange::Int`]'s payload.
+#[cfg(feature = "materialized-numbers")]
+pub(crate) struct OutOfRangeInt<S> {
+  /// The literal's source spelling.
+  pub(crate) value: S,
+  /// The width the conversion was attempted at.
+  pub(crate) width: IntWidth,
 }
 
 /// The one report body every materialised width uses.
@@ -241,7 +245,7 @@ pub(crate) fn report_out_of_range<S>(
   span: SimpleSpan,
 ) -> DialectGraphqlError<S> {
   match error {
-    OutOfRange::Int { value, width } => {
+    OutOfRange::Int(OutOfRangeInt { value, width }) => {
       DialectGraphqlError::int_overflow(IntOverflow::new(value, width), span)
     }
     OutOfRange::Float(slice) => DialectGraphqlError::float_overflow(slice, span),
@@ -467,10 +471,10 @@ where
       Some(value) => Ok(value),
       // The width is `I`'s own, so this arm cannot name a width the conversion above was not
       // attempted at: there is one type in the expression and it decides both halves.
-      None => Err(OutOfRange::Int {
+      None => Err(OutOfRange::Int(OutOfRangeInt {
         value: slice,
         width: I::WIDTH,
-      }),
+      })),
     }
   }
 

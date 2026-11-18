@@ -103,7 +103,7 @@ use super::{
   use_tree::use_definition,
 };
 
-use crate::lossless::depth::{self, RootTurn};
+use crate::lossless::depth::{self, JudgedTurn, RootTurn};
 
 use crate::lossless::lossless_production;
 
@@ -249,13 +249,13 @@ lossless_production! {
         }
         Some(_) if starts_item => {
           // The verdict is all this loop reads. The trip term beside it is the root's to record.
-          let (turn, _tripped): (RootTurn<(), super::Error<'inp, Src, Ctx>>, bool) =
+          let JudgedTurn { turn, .. }: JudgedTurn<(), super::Error<'inp, Src, Ctx>> =
             depth::judge_turn(inp, type_system_item::<Src, Ctx>);
           match turn {
-            RootTurn::Parsed { .. } => {}
-            RootTurn::EndsTheDocument { error } => return Err(error),
+            RootTurn::Parsed(_) => {}
+            RootTurn::EndsTheDocument(error) => return Err(error),
             // Reported where it failed. Rule 1's guard again, before anything is skipped.
-            RootTurn::Recoverable { .. } => {
+            RootTurn::Recoverable(_) => {
               if inp.state().brace_depth() >= floor {
                 recover::resync_to_mod_item::<Src, Ctx>(inp, floor)?;
               }
@@ -441,9 +441,9 @@ lossless_production! {
         // This peek is also what crosses the trailing trivia — see the module docs.
         while peek_kind::<Src, Ctx>(inp)?.is_some() {
           match depth::root_turn(inp, stop, document_entry_item::<Src, Ctx>) {
-            RootTurn::Parsed { .. } => {}
-            RootTurn::EndsTheDocument { error } => return Err(error),
-            RootTurn::Recoverable { .. } => recover::resync_to_definition::<Src, Ctx>(inp)?,
+            RootTurn::Parsed(_) => {}
+            RootTurn::EndsTheDocument(error) => return Err(error),
+            RootTurn::Recoverable(_) => recover::resync_to_definition::<Src, Ctx>(inp)?,
           }
         }
         Ok(())
@@ -472,9 +472,9 @@ lossless_production! {
         while peek_kind::<Src, Ctx>(inp)?.is_some() {
           // The refusal arm [`document`]'s note explains, through the same call and the same slot.
           match depth::root_turn(inp, stop, type_system_item::<Src, Ctx>) {
-            RootTurn::Parsed { .. } => {}
-            RootTurn::EndsTheDocument { error } => return Err(error),
-            RootTurn::Recoverable { .. } => recover::resync_to_definition::<Src, Ctx>(inp)?,
+            RootTurn::Parsed(_) => {}
+            RootTurn::EndsTheDocument(error) => return Err(error),
+            RootTurn::Recoverable(_) => recover::resync_to_definition::<Src, Ctx>(inp)?,
           }
         }
         Ok(())

@@ -969,7 +969,7 @@ impl<T: Copy, I: ExactSizeIterator> Descent<T, I> {
   /// Without that a chain of one-child nodes would leave a spent iterator behind per level and the
   /// storage would follow the depth after all — which is the trade the first round of #199
   /// rejected an iterator stack for, and the reason this one does not make it.
-  fn take(&mut self) -> Option<(usize, T, I::Item)> {
+  fn take(&mut self) -> Option<TakenChild<T, I::Item>> {
     while let Some(source) = self.innermost() {
       let Some(item) = source.children.next() else {
         self.close();
@@ -979,10 +979,24 @@ impl<T: Copy, I: ExactSizeIterator> Descent<T, I> {
       if source.children.len() == 0 {
         self.close();
       }
-      return Some((left, tag, item));
+      return Some(TakenChild {
+        budget: left,
+        tag,
+        item,
+      });
     }
     None
   }
+}
+
+/// A child [`Descent::take`] handed over, with the budget and tag of the source it came from.
+struct TakenChild<T, Item> {
+  /// How many more levels the source's walk may descend.
+  budget: usize,
+  /// What the walk tagged the source with when it opened it.
+  tag: T,
+  /// The child itself.
+  item: Item,
 }
 
 /// The token extent of `node` — its first non-trivia token's start to its last one's end.
@@ -1114,7 +1128,9 @@ where
           None => piece,
         });
       }
-      item = descent.take().map(|(left, (), element)| (left, element));
+      item = descent
+        .take()
+        .map(|TakenChild { budget, item, .. }| (budget, item));
     }
   }
   Ok(extent)
@@ -1181,7 +1197,12 @@ pub fn verify_source_counted<K>(
     };
     let mut descent: Descent<(), rowan_0_17::Children<'_>> = Descent::new();
     descent.open(left, (), green.children());
-    while let Some((left, (), child)) = descent.take() {
+    while let Some(TakenChild {
+      budget: left,
+      item: child,
+      ..
+    }) = descent.take()
+    {
       *elements = elements.saturating_add(1);
       match child {
         NodeOrToken::Node(node) => {
@@ -1282,7 +1303,12 @@ pub fn verify_source_at<K>(
     };
     let mut descent: Descent<(), rowan_0_17::Children<'_>> = Descent::new();
     descent.open(left, (), green.children());
-    while let Some((left, (), child)) = descent.take() {
+    while let Some(TakenChild {
+      budget: left,
+      item: child,
+      ..
+    }) = descent.take()
+    {
       match child {
         NodeOrToken::Node(node) => {
           let Some(left) = left.checked_sub(1) else {
@@ -1361,11 +1387,19 @@ where
     descent.open(left, kind, node.children());
     visiting = loop {
       match descent.take() {
-        Some((left, parent, NodeOrToken::Node(child))) => {
+        Some(TakenChild {
+          budget: left,
+          tag: parent,
+          item: NodeOrToken::Node(child),
+        }) => {
           let kind = checked::<L::Kind>(child.green().kind(), child.text_range())?;
           break Some((left, parent, child, kind));
         }
-        Some((_, parent, NodeOrToken::Token(token))) => {
+        Some(TakenChild {
+          tag: parent,
+          item: NodeOrToken::Token(token),
+          ..
+        }) => {
           let kind = checked::<L::Kind>(token.green().kind(), token.text_range())?;
           if is_hole(kind) {
             return Err(ProjectError::new(
@@ -1456,9 +1490,11 @@ pub(crate) mod walk {
 
   use rowan_0_17::{Language, NodeOrToken, TextRange};
 
+  use tokora::SimpleSpan;
+
   use super::{
-    Children, Element, MissingChild, Node, ProjectError, ProjectErrorKind, Token, UnexpectedChild,
-    to_range,
+    Children, Element, MissingChild, Node, ProjectError, ProjectErrorKind, Recovery, Token,
+    UnexpectedChild, to_range,
   };
 
   /// What a dialect's language marker tells the cursor: which of its token kinds are trivia.
@@ -1612,6 +1648,33 @@ pub(crate) mod walk {
     found: Token<'_, L>,
   ) -> ProjectError<L::Kind> {
     unexpected(parent, found.kind(), found.text_range())
+  }
+
+  /// What [`Cursor::separated`] read: its items, and whether the list opened with a separator.
+  pub(crate) struct Separated<T> {
+    /// The items, in the order they were written.
+    pub(crate) items: Vec<T>,
+    /// Whether a leading separator was written.
+    ///
+    /// No walk asks: the grammar's own answer is two-valued, and every caller either allowed or
+    /// forbade a leading separator by its [`Leading`] argument already.
+    #[allow(
+      dead_code,
+      reason = "the walk reports what it read; no caller needs the second half yet"
+    )]
+    pub(crate) leading: bool,
+  }
+
+  /// What a recovering door's walk over the root answers: the entries that survived, the span of
+  /// the tokens under them, and the tally.
+  pub(crate) struct TopLevel<T> {
+    /// The extent of the tokens under the entries that survived, or the zero-width span at the
+    /// container's start when none did.
+    pub(crate) span: SimpleSpan,
+    /// The entries that had an AST image, in document order.
+    pub(crate) items: Vec<T>,
+    /// How much of the root had an image and how much did not.
+    pub(crate) recovery: Recovery,
   }
 
   /// Whether a separated list may open with its separator — `on | FIELD | QUERY` may, `A & B` may
@@ -1866,7 +1929,7 @@ pub(crate) mod walk {
       separator: L::Kind,
       leading: Leading,
       wanted: &'static str,
-    ) -> Result<(Vec<T>, bool), ProjectError<L::Kind>> {
+    ) -> Result<Separated<T>, ProjectError<L::Kind>> {
       let led = leading == Leading::Allowed && self.opt_token(separator).is_some();
       let mut taken = Vec::new();
       match item(self)? {
@@ -1879,7 +1942,10 @@ pub(crate) mod walk {
           None => return Err(self.absent(None, wanted)),
         }
       }
-      Ok((taken, led))
+      Ok(Separated {
+        items: taken,
+        leading: led,
+      })
     }
 
     /// [`separated`](Self::separated) over **nodes** of one of `kinds`.
@@ -1897,7 +1963,7 @@ pub(crate) mod walk {
           leading,
           wanted,
         )
-        .map(|(taken, _)| taken)
+        .map(|separated| separated.items)
     }
 
     /// Fold a projected child's extent in, and keep its value.

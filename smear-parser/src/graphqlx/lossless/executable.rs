@@ -376,9 +376,9 @@ lossless_production! {
             stop,
             super::document::use_or_executable_definition::<Src, Ctx>,
           ) {
-            RootTurn::Parsed { .. } => {}
-            RootTurn::EndsTheDocument { error } => return Err(error),
-            RootTurn::Recoverable { .. } => recover::resync_to_definition::<Src, Ctx>(inp)?,
+            RootTurn::Parsed(_) => {}
+            RootTurn::EndsTheDocument(error) => return Err(error),
+            RootTurn::Recoverable(_) => recover::resync_to_definition::<Src, Ctx>(inp)?,
           }
         }
         Ok(())

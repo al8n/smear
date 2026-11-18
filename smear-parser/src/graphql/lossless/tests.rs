@@ -496,9 +496,9 @@ fn each_term_of_a_roots_stop_is_alone_on_a_population() {
             // The verdict and what the root returns are the same decision, and the root returns
             // its failure the way every shipped root does.
             let (verdict, out) = match turn {
-              RootTurn::Parsed { .. } => (Verdict::Parsed, Ok(())),
-              RootTurn::EndsTheDocument { error, .. } => (Verdict::Ends(error), Err(error)),
-              RootTurn::Recoverable { error, .. } => (Verdict::Recoverable(error), Err(error)),
+              RootTurn::Parsed(_) => (Verdict::Parsed, Ok(())),
+              RootTurn::EndsTheDocument(error) => (Verdict::Ends(error), Err(error)),
+              RootTurn::Recoverable(error) => (Verdict::Recoverable(error), Err(error)),
             };
             observed.set(Some(verdict));
             out
@@ -711,19 +711,19 @@ fn a_caught_trip_does_not_silence_a_later_failures_drain() {
           match root_turn(inp, stop, |inp: &mut InputRef<'inp, '_, _, _, _>| {
             descend(inp).map(|_| ())
           }) {
-            RootTurn::Parsed { .. } => {}
+            RootTurn::Parsed(_) => {}
             // CAUGHT AND CARRIED ON. Nothing in either shipped dialect does this; the public
             // generic layer lets a consumer, and `RootTurn::EndsTheDocument` is a value rather
             // than a stop the type system forces.
-            RootTurn::EndsTheDocument { .. } | RootTurn::Recoverable { .. } => {}
+            RootTurn::EndsTheDocument(_) | RootTurn::Recoverable(_) => {}
           }
         }
         Entry::Refusal => {
           match root_turn(inp, stop, |inp: &mut InputRef<'inp, '_, _, _, _>| {
             descend(inp).map(|_| ())
           }) {
-            RootTurn::Parsed { .. } => {}
-            RootTurn::EndsTheDocument { error, .. } | RootTurn::Recoverable { error, .. } => {
+            RootTurn::Parsed(_) => {}
+            RootTurn::EndsTheDocument(error) | RootTurn::Recoverable(error) => {
               return Err(error);
             }
           }
@@ -734,8 +734,8 @@ fn a_caught_trip_does_not_silence_a_later_failures_drain() {
           match root_turn(inp, stop, |_inp: &mut InputRef<'inp, '_, _, _, _>| {
             Err::<(), E>(E::Ordinary)
           }) {
-            RootTurn::Parsed { .. } => {}
-            RootTurn::EndsTheDocument { error, .. } | RootTurn::Recoverable { error, .. } => {
+            RootTurn::Parsed(_) => {}
+            RootTurn::EndsTheDocument(error) | RootTurn::Recoverable(error) => {
               return Err(error);
             }
           }
@@ -944,8 +944,8 @@ fn a_nested_drains_stop_is_not_reclassified_by_the_drain_above_it() {
     match root_turn(inp, stop, |inp: &mut InputRef<'inp, '_, _, _, _>| {
       descend(inp).map(|_| ())
     }) {
-      RootTurn::Parsed { .. } => Ok(()),
-      RootTurn::EndsTheDocument { error, .. } | RootTurn::Recoverable { error, .. } => Err(error),
+      RootTurn::Parsed(_) => Ok(()),
+      RootTurn::EndsTheDocument(error) | RootTurn::Recoverable(error) => Err(error),
     }
   }
 

@@ -498,7 +498,8 @@ use crate::{
     Recovery, Unverified, reject_foreign_kinds_and_holes, to_range, to_span, verify_root_kind,
     verify_source, verify_source_at, verify_source_counted,
     walk::{
-      Extent, Leading, Optional, Trivia, described_extents, missing, unexpected, unexpected_node,
+      Extent, Leading, Optional, Separated, TopLevel, Trivia, described_extents, missing,
+      unexpected, unexpected_node,
     },
   },
 };
@@ -705,8 +706,11 @@ pub fn project_executable_document_recovered<'src>(
   parse: &Parse,
   source: &'src str,
 ) -> Result<(ExecutableDocument<&'src str>, Recovery), Unverified> {
-  let (span, definitions, recovery) =
-    recovered_top_level(parse, K::ExecutableDocument, recoverable_entry, source)?;
+  let TopLevel {
+    span,
+    items: definitions,
+    recovery,
+  } = recovered_top_level(parse, K::ExecutableDocument, recoverable_entry, source)?;
   Ok((ExecutableDocument::new(span, definitions), recovery))
 }
 
@@ -718,7 +722,11 @@ pub fn project_executable_document_recovered<'src>(
 pub fn project_executable_document_verified<'src>(
   pair: Verified<'_, 'src>,
 ) -> (ExecutableDocument<&'src str>, Recovery) {
-  let (span, definitions, recovery) = recovered_top_level_verified(
+  let TopLevel {
+    span,
+    items: definitions,
+    recovery,
+  } = recovered_top_level_verified(
     pair.parse(),
     K::ExecutableDocument,
     recoverable_entry,
@@ -734,8 +742,11 @@ pub(crate) fn project_own_executable_document<'src>(
   parse: &Parse,
   source: &'src str,
 ) -> (ExecutableDocument<&'src str>, Recovery) {
-  let (span, definitions, recovery) =
-    recovered_top_level_verified(parse, K::ExecutableDocument, recoverable_entry, source);
+  let TopLevel {
+    span,
+    items: definitions,
+    recovery,
+  } = recovered_top_level_verified(parse, K::ExecutableDocument, recoverable_entry, source);
   (ExecutableDocument::new(span, definitions), recovery)
 }
 
@@ -829,7 +840,11 @@ pub fn project_type_system_document_recovered<'src>(
   parse: &Parse,
   source: &'src str,
 ) -> Result<(TypeSystemDocument<&'src str>, Recovery), Unverified> {
-  let (span, definitions, recovery) = recovered_top_level(
+  let TopLevel {
+    span,
+    items: definitions,
+    recovery,
+  } = recovered_top_level(
     parse,
     K::TypeSystemDocument,
     recoverable_type_system_entry,
@@ -844,7 +859,11 @@ pub fn project_type_system_document_recovered<'src>(
 pub fn project_type_system_document_verified<'src>(
   pair: Verified<'_, 'src>,
 ) -> (TypeSystemDocument<&'src str>, Recovery) {
-  let (span, definitions, recovery) = recovered_top_level_verified(
+  let TopLevel {
+    span,
+    items: definitions,
+    recovery,
+  } = recovered_top_level_verified(
     pair.parse(),
     K::TypeSystemDocument,
     recoverable_type_system_entry,
@@ -860,7 +879,11 @@ pub(crate) fn project_own_type_system_document<'src>(
   parse: &Parse,
   source: &'src str,
 ) -> (TypeSystemDocument<&'src str>, Recovery) {
-  let (span, definitions, recovery) = recovered_top_level_verified(
+  let TopLevel {
+    span,
+    items: definitions,
+    recovery,
+  } = recovered_top_level_verified(
     parse,
     K::TypeSystemDocument,
     recoverable_type_system_entry,
@@ -1039,7 +1062,7 @@ fn recovered_top_level<'src, T>(
   root_kind: SyntaxKind,
   entry_of: fn(Node<'_>, &'src str) -> Out<(T, TextRange)>,
   source: &'src str,
-) -> Result<(SimpleSpan, Vec<T>, Recovery), Unverified> {
+) -> Result<TopLevel<T>, Unverified> {
   // Established once, over the whole root, before a single element is projected, and **returned**
   // rather than folded into the tally. The entries below compare no bytes, so this is the only
   // byte comparison this walk makes.
@@ -1062,7 +1085,7 @@ fn recovered_top_level_verified<'src, T>(
   root_kind: SyntaxKind,
   entry_of: fn(Node<'_>, &'src str) -> Out<(T, TextRange)>,
   source: &'src str,
-) -> (SimpleSpan, Vec<T>, Recovery) {
+) -> TopLevel<T> {
   let root = parse_root(parse);
   let container = child_node(root, root_kind).unwrap_or(root);
 
@@ -1115,7 +1138,11 @@ fn recovered_top_level_verified<'src, T>(
     }
   };
   let recovery = Recovery::new(definitions.len() as u32, skipped);
-  (span, definitions, recovery)
+  TopLevel {
+    span,
+    items: definitions,
+    recovery,
+  }
 }
 
 /// The one document container a fail-fast door reads, with the rest of the root's shape refused.
@@ -1562,7 +1589,11 @@ fn document_entry<'src>(
   if let Some((extension, extent)) = type_system_extension(node, source)? {
     return Ok((DefinitionOrExtension::Extension(extension), extent));
   }
-  let (description, definition, outer) = definition(node, source)?;
+  let HoistedDefinition {
+    description,
+    definition,
+    range: outer,
+  } = definition(node, source)?;
   Ok((
     DefinitionOrExtension::Definition(Described::new(to_span(outer), description, definition)),
     outer,
@@ -1606,7 +1637,11 @@ fn type_system_entry<'src>(
       extent,
     ));
   }
-  let (description, definition, outer) = type_system_definition(node, source)?;
+  let HoistedDefinition {
+    description,
+    definition,
+    range: outer,
+  } = type_system_definition(node, source)?;
   Ok((
     TypeSystemDefinitionOrExtension::Definition(Described::new(
       to_span(outer),
@@ -1645,7 +1680,11 @@ fn executable_entry<'src>(
   node: Node<'_>,
   source: &'src str,
 ) -> Out<(DescribedExecutableDefinition<&'src str>, TextRange)> {
-  let (description, definition, outer) = executable_definition(node, source)?;
+  let HoistedDefinition {
+    description,
+    definition,
+    range: outer,
+  } = executable_definition(node, source)?;
   Ok((
     Described::new(to_span(outer), description, definition),
     outer,
@@ -1653,28 +1692,44 @@ fn executable_entry<'src>(
 }
 
 /// A described definition's three answers, folded from the node's single walk.
-///
-/// The hoisted description, the definition itself — whose own span is the inner extent, already
-/// built into it — and the node's full token extent, which is both the `Described` wrapper's span
-/// and what the enclosing document covers.
-type Definition<'src, T> = (Option<StringValue<&'src str>>, T, TextRange);
+struct HoistedDefinition<'src, T> {
+  /// The hoisted description, if the definition had one.
+  description: Option<StringValue<&'src str>>,
+  /// The definition itself, whose own span is the inner extent, already built into it.
+  definition: T,
+  /// The node's full token extent, which is both the `Described` wrapper's span and what the
+  /// enclosing document covers.
+  range: TextRange,
+}
 
 fn executable_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, ExecutableDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, ExecutableDefinition<&'src str>>> {
   Ok(match node.kind() {
     K::OperationDefinition => {
-      let (description, operation, outer) = operation_definition(node, source)?;
-      (
+      let HoistedDefinition {
         description,
-        ExecutableDefinition::Operation(operation),
-        outer,
-      )
+        definition: operation,
+        range: outer,
+      } = operation_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: ExecutableDefinition::Operation(operation),
+        range: outer,
+      }
     }
     K::FragmentDefinition => {
-      let (description, fragment, outer) = fragment_definition(node, source)?;
-      (description, ExecutableDefinition::Fragment(fragment), outer)
+      let HoistedDefinition {
+        description,
+        definition: fragment,
+        range: outer,
+      } = fragment_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: ExecutableDefinition::Fragment(fragment),
+        range: outer,
+      }
     }
     found => return Err(unexpected(node, found, node.text_range())),
   })
@@ -1683,7 +1738,7 @@ fn executable_definition<'src>(
 fn definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, crate::graphql::ast::Definition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, crate::graphql::ast::Definition<&'src str>>> {
   use crate::graphql::ast::Definition as D;
 
   // The two executable kinds, then the eight type-system ones through the shared arm. One list of
@@ -1692,24 +1747,40 @@ fn definition<'src>(
   // ASTs out of the same node.
   Ok(match node.kind() {
     K::OperationDefinition => {
-      let (description, operation, outer) = operation_definition(node, source)?;
-      (
+      let HoistedDefinition {
         description,
-        D::Executable(ExecutableDefinition::Operation(operation)),
-        outer,
-      )
+        definition: operation,
+        range: outer,
+      } = operation_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: D::Executable(ExecutableDefinition::Operation(operation)),
+        range: outer,
+      }
     }
     K::FragmentDefinition => {
-      let (description, fragment, outer) = fragment_definition(node, source)?;
-      (
+      let HoistedDefinition {
         description,
-        D::Executable(ExecutableDefinition::Fragment(fragment)),
-        outer,
-      )
+        definition: fragment,
+        range: outer,
+      } = fragment_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: D::Executable(ExecutableDefinition::Fragment(fragment)),
+        range: outer,
+      }
     }
     _ => {
-      let (description, definition, outer) = type_system_definition(node, source)?;
-      (description, D::TypeSystem(definition), outer)
+      let HoistedDefinition {
+        description,
+        definition,
+        range: outer,
+      } = type_system_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: D::TypeSystem(definition),
+        range: outer,
+      }
     }
   })
 }
@@ -1718,67 +1789,103 @@ fn definition<'src>(
 fn type_system_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, TypeSystemDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, TypeSystemDefinition<&'src str>>> {
   Ok(match node.kind() {
     K::ScalarTypeDefinition => {
-      let (description, definition, outer) = scalar_type_definition(node, source)?;
-      (
+      let HoistedDefinition {
         description,
-        TypeSystemDefinition::Type(TypeDefinition::Scalar(definition)),
-        outer,
-      )
+        definition,
+        range: outer,
+      } = scalar_type_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: TypeSystemDefinition::Type(TypeDefinition::Scalar(definition)),
+        range: outer,
+      }
     }
     K::ObjectTypeDefinition => {
-      let (description, definition, outer) = object_type_definition(node, source)?;
-      (
+      let HoistedDefinition {
         description,
-        TypeSystemDefinition::Type(TypeDefinition::Object(definition)),
-        outer,
-      )
+        definition,
+        range: outer,
+      } = object_type_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: TypeSystemDefinition::Type(TypeDefinition::Object(definition)),
+        range: outer,
+      }
     }
     K::InterfaceTypeDefinition => {
-      let (description, definition, outer) = interface_type_definition(node, source)?;
-      (
+      let HoistedDefinition {
         description,
-        TypeSystemDefinition::Type(TypeDefinition::Interface(definition)),
-        outer,
-      )
+        definition,
+        range: outer,
+      } = interface_type_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: TypeSystemDefinition::Type(TypeDefinition::Interface(definition)),
+        range: outer,
+      }
     }
     K::UnionTypeDefinition => {
-      let (description, definition, outer) = union_type_definition(node, source)?;
-      (
+      let HoistedDefinition {
         description,
-        TypeSystemDefinition::Type(TypeDefinition::Union(definition)),
-        outer,
-      )
+        definition,
+        range: outer,
+      } = union_type_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: TypeSystemDefinition::Type(TypeDefinition::Union(definition)),
+        range: outer,
+      }
     }
     K::EnumTypeDefinition => {
-      let (description, definition, outer) = enum_type_definition(node, source)?;
-      (
+      let HoistedDefinition {
         description,
-        TypeSystemDefinition::Type(TypeDefinition::Enum(definition)),
-        outer,
-      )
+        definition,
+        range: outer,
+      } = enum_type_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: TypeSystemDefinition::Type(TypeDefinition::Enum(definition)),
+        range: outer,
+      }
     }
     K::InputObjectTypeDefinition => {
-      let (description, definition, outer) = input_object_type_definition(node, source)?;
-      (
+      let HoistedDefinition {
         description,
-        TypeSystemDefinition::Type(TypeDefinition::InputObject(definition)),
-        outer,
-      )
+        definition,
+        range: outer,
+      } = input_object_type_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: TypeSystemDefinition::Type(TypeDefinition::InputObject(definition)),
+        range: outer,
+      }
     }
     K::DirectiveDefinition => {
-      let (description, definition, outer) = directive_definition(node, source)?;
-      (
+      let HoistedDefinition {
         description,
-        TypeSystemDefinition::Directive(definition),
-        outer,
-      )
+        definition,
+        range: outer,
+      } = directive_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: TypeSystemDefinition::Directive(definition),
+        range: outer,
+      }
     }
     K::SchemaDefinition => {
-      let (description, definition, outer) = schema_definition(node, source)?;
-      (description, TypeSystemDefinition::Schema(definition), outer)
+      let HoistedDefinition {
+        description,
+        definition,
+        range: outer,
+      } = schema_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: TypeSystemDefinition::Schema(definition),
+        range: outer,
+      }
     }
     found => return Err(unexpected(node, found, node.text_range())),
   })
@@ -1894,7 +2001,7 @@ fn hoisted_description<'src>(
 fn operation_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, OperationDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, OperationDefinition<&'src str>>> {
   // `Description? OperationType Name? VariablesDefinition? Directives? SelectionSet`
   //  | `Description? SelectionSet`
   let mut cursor = Cursor::new(node);
@@ -1918,7 +2025,11 @@ fn operation_definition<'src>(
     cursor.end()?;
     let selections = cursor.keep(selection_set(set, source)?);
     let (outer, _) = described_extents(node, cursor.extent, None)?;
-    return Ok((None, OperationDefinition::Shorthand(selections), outer));
+    return Ok(HoistedDefinition {
+      description: None,
+      definition: OperationDefinition::Shorthand(selections),
+      range: outer,
+    });
   };
   let name = cursor.opt_name(source)?;
   let variables_node = cursor.opt_node(K::VariablesDefinition);
@@ -1933,9 +2044,9 @@ fn operation_definition<'src>(
   let selections = cursor.keep(selection_set(set, source)?);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
-  Ok((
+  Ok(HoistedDefinition {
     description,
-    OperationDefinition::Named(NamedOperationDefinition::new(
+    definition: OperationDefinition::Named(NamedOperationDefinition::new(
       to_span(inner),
       operation_type,
       name,
@@ -1943,8 +2054,8 @@ fn operation_definition<'src>(
       directives,
       selections,
     )),
-    outer,
-  ))
+    range: outer,
+  })
 }
 
 /// An `OperationType` node: one `Name` read for its spelling, which must be one of the three
@@ -2036,7 +2147,7 @@ fn variable_definition<'src>(
 fn fragment_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, crate::graphql::ast::FragmentDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, crate::graphql::ast::FragmentDefinition<&'src str>>> {
   // `Description? fragment FragmentName on? NamedType Directives? SelectionSet`, and
   // `FragmentName : Name but not on`. The lossless production reports the violation on the
   // diagnostic channel and still builds the node, so the shape alone cannot tell a legal fragment
@@ -2065,17 +2176,17 @@ fn fragment_definition<'src>(
   let selections = cursor.keep(selection_set(set, source)?);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
-  Ok((
+  Ok(HoistedDefinition {
     description,
-    crate::graphql::ast::FragmentDefinition::new(
+    definition: crate::graphql::ast::FragmentDefinition::new(
       to_span(inner),
       FragmentName::from_name(name),
       type_condition,
       directives,
       selections,
     ),
-    outer,
-  ))
+    range: outer,
+  })
 }
 
 /// A type condition, `on NamedType` — **not a node in this kind space**: the keyword is a token of
@@ -2115,35 +2226,43 @@ fn type_condition<'src>(
 /// before the descent and travels here. A `FragmentSpread` never appears: it holds no selection set
 /// and is finished where it is read.
 enum OpenSelection<'g, 'src> {
-  Field {
-    /// The `Field` node, and the owner of the finished selection's span.
-    node: Node<'g>,
-    /// The field's fold, everything but its selection set.
-    extent: Extent,
-    alias: Option<Alias<&'src str>>,
-    name: Name<&'src str>,
-    arguments: Option<Arguments<&'src str>>,
-    directives: Option<Directives<&'src str>>,
-    /// The `SelectionSet` node this field is waiting on.
-    pending: Node<'g>,
-  },
-  InlineFragment {
-    /// The `InlineFragment` node, and the owner of the finished selection's span.
-    node: Node<'g>,
-    /// The fragment's fold, everything but its selection set.
-    extent: Extent,
-    type_condition: Option<TypeCondition<&'src str>>,
-    directives: Option<Directives<&'src str>>,
-    /// The `SelectionSet` node this fragment is waiting on.
-    pending: Node<'g>,
-  },
+  Field(OpenFieldSelection<'g, 'src>),
+  InlineFragment(OpenInlineFragment<'g, 'src>),
+}
+
+/// A `Field` whose selection set is being built below: [`OpenSelection::Field`]'s payload.
+struct OpenFieldSelection<'g, 'src> {
+  /// The `Field` node, and the owner of the finished selection's span.
+  node: Node<'g>,
+  /// The field's fold, everything but its selection set.
+  extent: Extent,
+  alias: Option<Alias<&'src str>>,
+  name: Name<&'src str>,
+  arguments: Option<Arguments<&'src str>>,
+  directives: Option<Directives<&'src str>>,
+  /// The `SelectionSet` node this field is waiting on.
+  pending: Node<'g>,
+}
+
+/// An `InlineFragment` whose selection set is being built below: [`OpenSelection::InlineFragment`]'s
+/// payload.
+struct OpenInlineFragment<'g, 'src> {
+  /// The `InlineFragment` node, and the owner of the finished selection's span.
+  node: Node<'g>,
+  /// The fragment's fold, everything but its selection set.
+  extent: Extent,
+  type_condition: Option<TypeCondition<&'src str>>,
+  directives: Option<Directives<&'src str>>,
+  /// The `SelectionSet` node this fragment is waiting on.
+  pending: Node<'g>,
 }
 
 impl<'g> OpenSelection<'g, '_> {
   /// The `SelectionSet` node this selection is waiting on.
   const fn set(&self) -> Node<'g> {
     match self {
-      Self::Field { pending, .. } | Self::InlineFragment { pending, .. } => *pending,
+      Self::Field(open) => open.pending,
+      Self::InlineFragment(open) => open.pending,
     }
   }
 }
@@ -2172,7 +2291,7 @@ enum ResumedSet<'g, 'src> {
   /// The next nested selection set that has to be built; the frame is back on the worklist.
   Descend(Node<'g>),
   /// This frame is finished, and what it finished to.
-  Done(SelectionSet<&'src str>, TextRange),
+  Done((SelectionSet<&'src str>, TextRange)),
 }
 
 /// Read selections until one is waiting on a set of its own.
@@ -2281,7 +2400,7 @@ fn resume_selection<'g, 'src>(
       }
       None => {
         let (set, range) = close_selection_set(cursor, selections)?;
-        ResumedSet::Done(set, range)
+        ResumedSet::Done((set, range))
       }
     },
   )
@@ -2301,7 +2420,7 @@ fn selection_set<'src>(
     let (set, piece) = built;
     built = match resume_selection(&mut frames, frame, set, piece, source)? {
       ResumedSet::Descend(nested) => open_selection_chain(&mut frames, nested, source)?,
-      ResumedSet::Done(set, range) => (set, range),
+      ResumedSet::Done((set, range)) => (set, range),
     };
   }
 }
@@ -2330,7 +2449,7 @@ fn open_field<'g, 'src>(
   let arguments = cursor.keep_optional(optional_arguments(arguments_node, source)?);
   let directives = cursor.keep_optional(optional_directives(directives_node, source)?);
   match selection_set_node {
-    Some(set) => Ok(Ok(OpenSelection::Field {
+    Some(set) => Ok(Ok(OpenSelection::Field(OpenFieldSelection {
       node,
       extent: cursor.extent,
       alias,
@@ -2338,7 +2457,7 @@ fn open_field<'g, 'src>(
       arguments,
       directives,
       pending: set,
-    })),
+    }))),
     None => {
       let extent = cursor.range("a token")?;
       Ok(Err((
@@ -2411,13 +2530,13 @@ fn open_inline_fragment<'g, 'src>(
       .transpose()?,
   );
   let directives = cursor.keep_optional(optional_directives(directives_node, source)?);
-  Ok(OpenSelection::InlineFragment {
+  Ok(OpenSelection::InlineFragment(OpenInlineFragment {
     node,
     extent: cursor.extent,
     type_condition,
     directives,
     pending: set,
-  })
+  }))
 }
 
 /// Build the selection that was waiting on `set`, and answer its own extent.
@@ -2427,7 +2546,7 @@ fn close_selection<'src>(
   piece: TextRange,
 ) -> Out<(Selection<&'src str>, TextRange)> {
   Ok(match open {
-    OpenSelection::Field {
+    OpenSelection::Field(OpenFieldSelection {
       node,
       mut extent,
       alias,
@@ -2435,7 +2554,7 @@ fn close_selection<'src>(
       arguments,
       directives,
       ..
-    } => {
+    }) => {
       extent.cover(piece);
       let range = extent.range(node, "a token")?;
       (
@@ -2450,13 +2569,13 @@ fn close_selection<'src>(
         range,
       )
     }
-    OpenSelection::InlineFragment {
+    OpenSelection::InlineFragment(OpenInlineFragment {
       node,
       mut extent,
       type_condition,
       directives,
       ..
-    } => {
+    }) => {
       extent.cover(piece);
       let range = extent.range(node, "a token")?;
       (
@@ -2836,14 +2955,25 @@ fn leaf<'g>(node: Node<'g>, kind: SyntaxKind, wanted: &'static str) -> Out<(Toke
 /// A leaf holding one `Name` read for its **spelling** — `true`, `false`, `null` — and the
 /// spelling's classification through the lexer's own table. The caller refuses what it does not
 /// classify.
-fn spelled_leaf<'g>(
-  node: Node<'g>,
-  wanted: &'static str,
-) -> Out<(Option<ContextualKeyword>, Token<'g>, TextRange)> {
+fn spelled_leaf<'g>(node: Node<'g>, wanted: &'static str) -> Out<SpelledToken<'g>> {
   let mut cursor = Cursor::new(node);
   let token = cursor.spelling(wanted)?;
   let extent = cursor.finish("a token")?;
-  Ok((keyword_of(token), token, extent))
+  Ok(SpelledToken {
+    keyword: keyword_of(token),
+    token,
+    range: extent,
+  })
+}
+
+/// A leaf's one `Name` token, the keyword its spelling classifies as, and the node's extent.
+struct SpelledToken<'g> {
+  /// The spelling's classification through the lexer's own table, if it has one.
+  keyword: Option<ContextualKeyword>,
+  /// The token.
+  token: Token<'g>,
+  /// The node's extent.
+  range: TextRange,
 }
 
 fn string_literal<'src>(
@@ -2860,7 +2990,11 @@ fn string_literal<'src>(
 
 fn boolean_literal<'src>(node: Node<'_>) -> Out<(BooleanValue<&'src str>, TextRange)> {
   // One `Name`, read for its spelling.
-  let (keyword, token, extent) = spelled_leaf(node, "a `true` or `false` keyword")?;
+  let SpelledToken {
+    keyword,
+    token,
+    range: extent,
+  } = spelled_leaf(node, "a `true` or `false` keyword")?;
   let span = to_span(token.text_range());
   match keyword {
     Some(ContextualKeyword::True) => Ok((BooleanValue::new(span, true), extent)),
@@ -3067,10 +3201,15 @@ enum Built<'g, 'src, G: ValueGrammar<'src>> {
   /// A `ListValue`'s elements, in document order.
   List(Vec<G::Value>),
   /// An `ObjectValue`'s finished fields, and the field whose value is being built below.
-  Object {
-    fields: Vec<G::Field>,
-    open: OpenField<'g, 'src>,
-  },
+  Object(BuiltObject<'g, 'src, G>),
+}
+
+/// An `ObjectValue`'s accumulator: [`Built::Object`]'s payload.
+struct BuiltObject<'g, 'src, G: ValueGrammar<'src>> {
+  /// The fields finished so far, in document order.
+  fields: Vec<G::Field>,
+  /// The field whose value is being built below.
+  open: OpenField<'g, 'src>,
 }
 
 /// What a [`ValueFrame`] did with the value the level below finished.
@@ -3080,9 +3219,19 @@ enum Built<'g, 'src, G: ValueGrammar<'src>> {
 enum ResumedValue<'g, 'src, G: ValueGrammar<'src>> {
   /// The node whose dispatch reaches the next value, and that value's node; the frame is back on
   /// the worklist.
-  Descend(Node<'g>, Node<'g>),
+  Descend(NextValue<'g>),
   /// This frame is finished, and what it finished to.
-  Done(G::Value, TextRange),
+  Done((G::Value, TextRange)),
+}
+
+/// The next value a frame descends into: [`ResumedValue::Descend`]'s payload.
+///
+/// Two nodes of one type, so the order is named rather than positional.
+struct NextValue<'g> {
+  /// The node whose dispatch reaches the value.
+  dispatch: Node<'g>,
+  /// The value's own node.
+  value: Node<'g>,
 }
 
 /// The next field of an object value.
@@ -3172,7 +3321,11 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
         return Ok((G::boolean(boolean), extent));
       }
       K::NullValue => {
-        let (keyword, token, extent) = spelled_leaf(node, "a `null` keyword")?;
+        let SpelledToken {
+          keyword,
+          token,
+          range: extent,
+        } = spelled_leaf(node, "a `null` keyword")?;
         // The spelling, not just the kind: `NullValue` carries its own text into the AST, so a
         // node of this kind over any other identifier would project to a `null` the parser has no
         // way to produce. Its sibling `BooleanValue` has always checked; this one did not.
@@ -3205,10 +3358,10 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
               (
                 open.node,
                 open.pending,
-                Built::Object {
+                Built::Object(BuiltObject {
                   fields: Vec::new(),
                   open,
-                },
+                }),
               )
             })
           }
@@ -3267,15 +3420,18 @@ fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
             cursor,
             built: Built::List(values),
           });
-          ResumedValue::Descend(node, next)
+          ResumedValue::Descend(NextValue {
+            dispatch: node,
+            value: next,
+          })
         }
         None => {
           let range = close_container(&mut cursor)?;
-          ResumedValue::Done(G::list(to_span(range), values), range)
+          ResumedValue::Done((G::list(to_span(range), values), range))
         }
       }
     }
-    Built::Object { mut fields, open } => {
+    Built::Object(BuiltObject { mut fields, open }) => {
       let (field, range) = close_field::<G>(open, value, piece)?;
       cursor.extent.cover(range);
       fields.push(field);
@@ -3284,13 +3440,16 @@ fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
           let (parent, pending) = (next.node, next.pending);
           frames.push(ValueFrame {
             cursor,
-            built: Built::Object { fields, open: next },
+            built: Built::Object(BuiltObject { fields, open: next }),
           });
-          ResumedValue::Descend(parent, pending)
+          ResumedValue::Descend(NextValue {
+            dispatch: parent,
+            value: pending,
+          })
         }
         None => {
           let range = close_container(&mut cursor)?;
-          ResumedValue::Done(G::object(to_span(range), fields), range)
+          ResumedValue::Done((G::object(to_span(range), fields), range))
         }
       }
     }
@@ -3311,10 +3470,11 @@ fn value_tree<'src, G: ValueGrammar<'src>>(
     };
     let (value, piece) = built;
     built = match resume_value::<G>(&mut frames, frame, value, piece, source)? {
-      ResumedValue::Descend(parent, node) => {
-        open_value_chain::<G>(&mut frames, parent, node, source)?
-      }
-      ResumedValue::Done(value, range) => (value, range),
+      ResumedValue::Descend(NextValue {
+        dispatch: parent,
+        value: node,
+      }) => open_value_chain::<G>(&mut frames, parent, node, source)?,
+      ResumedValue::Done((value, range)) => (value, range),
     };
   }
 }
@@ -3641,7 +3801,7 @@ fn enum_value_definition<'src>(
 fn scalar_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, ScalarTypeDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, ScalarTypeDefinition<&'src str>>> {
   // `Description? scalar Name Directives[Const]?`
   let mut cursor = Cursor::new(node);
   let description_node = cursor.opt_node(K::Description);
@@ -3654,17 +3814,17 @@ fn scalar_type_definition<'src>(
   let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
-  Ok((
+  Ok(HoistedDefinition {
     description,
-    ScalarTypeDefinition::new(to_span(inner), name, directives),
-    outer,
-  ))
+    definition: ScalarTypeDefinition::new(to_span(inner), name, directives),
+    range: outer,
+  })
 }
 
 fn object_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, ObjectTypeDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, ObjectTypeDefinition<&'src str>>> {
   // `Description? type Name ImplementsInterfaces? Directives[Const]? FieldsDefinition?`
   let mut cursor = Cursor::new(node);
   let description_node = cursor.opt_node(K::Description);
@@ -3681,23 +3841,23 @@ fn object_type_definition<'src>(
   let fields_definition = cursor.keep_opt(optional_fields_definition(fields_node, source)?);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
-  Ok((
+  Ok(HoistedDefinition {
     description,
-    ObjectTypeDefinition::new(
+    definition: ObjectTypeDefinition::new(
       to_span(inner),
       name,
       implements,
       directives,
       fields_definition,
     ),
-    outer,
-  ))
+    range: outer,
+  })
 }
 
 fn interface_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, InterfaceTypeDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, InterfaceTypeDefinition<&'src str>>> {
   // `Description? interface Name ImplementsInterfaces? Directives[Const]? FieldsDefinition?`
   let mut cursor = Cursor::new(node);
   let description_node = cursor.opt_node(K::Description);
@@ -3714,23 +3874,23 @@ fn interface_type_definition<'src>(
   let fields_definition = cursor.keep_opt(optional_fields_definition(fields_node, source)?);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
-  Ok((
+  Ok(HoistedDefinition {
     description,
-    InterfaceTypeDefinition::new(
+    definition: InterfaceTypeDefinition::new(
       to_span(inner),
       name,
       implements,
       directives,
       fields_definition,
     ),
-    outer,
-  ))
+    range: outer,
+  })
 }
 
 fn union_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, UnionTypeDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, UnionTypeDefinition<&'src str>>> {
   // `Description? union Name Directives[Const]? UnionMemberTypes?`
   let mut cursor = Cursor::new(node);
   let description_node = cursor.opt_node(K::Description);
@@ -3745,17 +3905,17 @@ fn union_type_definition<'src>(
   let members = cursor.keep_opt(optional_union_members(members_node, source)?);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
-  Ok((
+  Ok(HoistedDefinition {
     description,
-    UnionTypeDefinition::new(to_span(inner), name, directives, members),
-    outer,
-  ))
+    definition: UnionTypeDefinition::new(to_span(inner), name, directives, members),
+    range: outer,
+  })
 }
 
 fn enum_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, EnumTypeDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, EnumTypeDefinition<&'src str>>> {
   // `Description? enum Name Directives[Const]? EnumValuesDefinition?`
   let mut cursor = Cursor::new(node);
   let description_node = cursor.opt_node(K::Description);
@@ -3770,17 +3930,17 @@ fn enum_type_definition<'src>(
   let values = cursor.keep_opt(optional_enum_values(values_node, source)?);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
-  Ok((
+  Ok(HoistedDefinition {
     description,
-    EnumTypeDefinition::new(to_span(inner), name, directives, values),
-    outer,
-  ))
+    definition: EnumTypeDefinition::new(to_span(inner), name, directives, values),
+    range: outer,
+  })
 }
 
 fn input_object_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, InputObjectTypeDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, InputObjectTypeDefinition<&'src str>>> {
   // `Description? input Name Directives[Const]? InputFieldsDefinition?`
   let mut cursor = Cursor::new(node);
   let description_node = cursor.opt_node(K::Description);
@@ -3795,17 +3955,17 @@ fn input_object_type_definition<'src>(
   let fields = cursor.keep_opt(optional_input_fields_definition(fields_node, source)?);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
-  Ok((
+  Ok(HoistedDefinition {
     description,
-    InputObjectTypeDefinition::new(to_span(inner), name, directives, fields),
-    outer,
-  ))
+    definition: InputObjectTypeDefinition::new(to_span(inner), name, directives, fields),
+    range: outer,
+  })
 }
 
 fn directive_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, crate::graphql::ast::DirectiveDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, crate::graphql::ast::DirectiveDefinition<&'src str>>> {
   // `Description? directive @ Name ArgumentsDefinition? Directives[Const]? repeatable? on
   // DirectiveLocations` — three keyword positions, each read by its spelling in its own place. The
   // walk this replaces took "the `Name` at index 2 is `repeatable` or `on`" and never read the
@@ -3832,9 +3992,9 @@ fn directive_definition<'src>(
   let locations = cursor.keep(directive_locations(locations_node)?);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
-  Ok((
+  Ok(HoistedDefinition {
     description,
-    DirectiveDefinition::new(
+    definition: DirectiveDefinition::new(
       to_span(inner),
       name,
       arguments_definition,
@@ -3842,8 +4002,8 @@ fn directive_definition<'src>(
       repeatable,
       locations,
     ),
-    outer,
-  ))
+    range: outer,
+  })
 }
 
 /// A directive definition's `FIELD | QUERY` location list.
@@ -3854,7 +4014,7 @@ fn directive_definition<'src>(
 fn directive_locations(node: Node<'_>) -> Out<(DirectiveLocations<Location>, TextRange)> {
   // `|? Name (| Name)*` — each location a `Name` read for its spelling.
   let mut cursor = Cursor::new(node);
-  let (tokens, _) = cursor.separated(
+  let Separated { items: tokens, .. } = cursor.separated(
     |cursor| Ok(cursor.opt_spelling()),
     K::Pipe,
     Leading::Allowed,
@@ -3874,7 +4034,7 @@ fn directive_locations(node: Node<'_>) -> Out<(DirectiveLocations<Location>, Tex
 fn schema_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, SchemaDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, SchemaDefinition<&'src str>>> {
   // `Description? schema Directives[Const]? RootOperationTypeDefinitions`
   let mut cursor = Cursor::new(node);
   let description_node = cursor.opt_node(K::Description);
@@ -3891,11 +4051,11 @@ fn schema_definition<'src>(
   let roots = cursor.keep(root_operation_types(roots_node, source)?);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
-  Ok((
+  Ok(HoistedDefinition {
     description,
-    SchemaDefinition::new(to_span(inner), directives, roots),
-    outer,
-  ))
+    definition: SchemaDefinition::new(to_span(inner), directives, roots),
+    range: outer,
+  })
 }
 
 fn root_operation_types<'src>(

@@ -461,9 +461,9 @@ lossless_production! {
         // This peek is also what crosses the trailing trivia — see the module docs.
         while peek_kind::<Src, Ctx>(inp)?.is_some() {
           match depth::root_turn(inp, stop, definition::<Src, Ctx>) {
-            RootTurn::Parsed { .. } => {}
-            RootTurn::EndsTheDocument { error } => return Err(error),
-            RootTurn::Recoverable { .. } => recover::resync_to_definition::<Src, Ctx>(inp)?,
+            RootTurn::Parsed(_) => {}
+            RootTurn::EndsTheDocument(error) => return Err(error),
+            RootTurn::Recoverable(_) => recover::resync_to_definition::<Src, Ctx>(inp)?,
           }
         }
         Ok(())
@@ -493,9 +493,9 @@ lossless_production! {
           // The refusal arm [`document`]'s note explains, through the same call — and the same
           // slot, for the reason its `stop` note gives.
           match depth::root_turn(inp, stop, type_system_definition_or_extension::<Src, Ctx>) {
-            RootTurn::Parsed { .. } => {}
-            RootTurn::EndsTheDocument { error } => return Err(error),
-            RootTurn::Recoverable { .. } => recover::resync_to_definition::<Src, Ctx>(inp)?,
+            RootTurn::Parsed(_) => {}
+            RootTurn::EndsTheDocument(error) => return Err(error),
+            RootTurn::Recoverable(_) => recover::resync_to_definition::<Src, Ctx>(inp)?,
           }
         }
         Ok(())

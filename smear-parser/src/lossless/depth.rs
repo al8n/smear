@@ -548,10 +548,11 @@ where
 /// longer provides, which is the shape this module has spent four rounds removing. What guards the
 /// forgery now is that nothing outside this crate can name the type at all.
 ///
-/// **The variants stay braced.** Round 3's reason was the attribute — on a *tuple* variant
+/// **The variants are newtypes.** They were braced for round 3's attribute — on a *tuple* variant
 /// `#[non_exhaustive]` privates the constructor and an out-of-crate tuple pattern resolves through
-/// it — and the shape survives it because six match sites read these arms and a named field costs
-/// one word at each.
+/// it — and then for the six match sites, where a named field cost one word each. Each arm carries
+/// exactly one value, the entry's product or its failure, so there is nothing for a field name to
+/// say that the arm's own name does not; the sites read `RootTurn::EndsTheDocument(error)`.
 ///
 /// `#[must_use]`, and that is the last hand-copied step this could still lose: a root that calls
 /// [`root_turn`] and drops the verdict compiles, parses, and resynchronises past every refusal —
@@ -561,27 +562,20 @@ where
               refusal, which is smear issue #169"]
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) enum RootTurn<T, E> {
-  /// The entry parsed. The loop takes another turn.
-  Parsed {
-    /// What the entry produced — `()` for every production in this workspace.
-    parsed: T,
-  },
+  /// The entry parsed, and the payload is what it produced — `()` for every production in this
+  /// workspace. The loop takes another turn.
+  Parsed(T),
   /// The entry failed, and the failure **ends the document**: return it, resynchronise past
-  /// nothing, and read no more input.
+  /// nothing, and read no more input. The payload is the failure, already reported at the point of
+  /// failure.
   ///
   /// Two independent things can put a failure here — the error value's own
   /// [`MaybeTerminal::is_terminal`] arm, and the input's resource-trip witness — and
   /// [`root_turn`] documents why neither covers the other.
-  EndsTheDocument {
-    /// The failure, already reported at the point of failure.
-    error: E,
-  },
-  /// The entry failed with an ordinary syntax error, already reported at the point of failure.
-  /// The root drops it and resynchronises.
-  Recoverable {
-    /// The syntax error, already reported at the point of failure.
-    error: E,
-  },
+  EndsTheDocument(E),
+  /// The entry failed with an ordinary syntax error, the payload, already reported at the point of
+  /// failure. The root drops it and resynchronises.
+  Recoverable(E),
 }
 
 /// Carries what [`root_turn`] decided out of the loop that asked it and up to the drain above the
@@ -702,9 +696,9 @@ impl RootStop {
   #[inline]
   fn ending<T, E>(self, out: Result<T, E>) -> RootTurn<T, E> {
     match out {
-      Ok(parsed) => RootTurn::Parsed { parsed },
-      Err(error) if self.ends_the_document => RootTurn::EndsTheDocument { error },
-      Err(error) => RootTurn::Recoverable { error },
+      Ok(parsed) => RootTurn::Parsed(parsed),
+      Err(error) if self.ends_the_document => RootTurn::EndsTheDocument(error),
+      Err(error) => RootTurn::Recoverable(error),
     }
   }
 }
@@ -715,9 +709,9 @@ impl RootStop {
 ///
 /// ```text
 /// match depth::root_turn(inp, stop, one_entry::<Src, Ctx>) {
-///   RootTurn::Parsed { .. } => {}
-///   RootTurn::EndsTheDocument { error } => return Err(error),
-///   RootTurn::Recoverable { .. } => recover::resync_to_definition::<Src, Ctx>(inp)?,
+///   RootTurn::Parsed(_) => {}
+///   RootTurn::EndsTheDocument(error) => return Err(error),
+///   RootTurn::Recoverable(_) => recover::resync_to_definition::<Src, Ctx>(inp)?,
 /// }
 /// ```
 ///
@@ -819,11 +813,29 @@ where
   Entry:
     FnOnce(&mut InputRef<'inp, 'closure, L, Ctx, Lang>) -> Result<T, ErrorOf<'inp, L, Ctx, Lang>>,
 {
-  let (turn, tripped) = judge_turn(inp, entry);
+  let JudgedTurn { turn, tripped } = judge_turn(inp, entry);
   // ASSIGNED HERE, NOT AT THE ARM — and the trip beside it, LATCHED. See `RootStop::record` for
   // why one of the two may not be a latch and the other may not be an assignment.
-  stop.record(matches!(turn, RootTurn::EndsTheDocument { .. }), tripped);
+  stop.record(matches!(turn, RootTurn::EndsTheDocument(_)), tripped);
   turn
+}
+
+/// What [`judge_turn`] answers: the verdict on one entry, and whether the attempt tripped a
+/// resource budget.
+///
+/// `#[must_use]`, with [`RootTurn`]'s message, because a struct does not inherit the attribute from
+/// its field: the tuple this replaces carried it through its [`RootTurn`] element, and a caller that
+/// dropped the pair would otherwise compile — the whole of smear issue #169, at a call site that
+/// looks like it consulted something.
+#[must_use = "the verdict is the whole point of the call: dropping it resynchronises past a \
+              refusal, which is smear issue #169"]
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+pub(crate) struct JudgedTurn<T, E> {
+  /// What the entry's outcome means for the document.
+  pub(crate) turn: RootTurn<T, E>,
+  /// Whether the attempt tripped a resource budget, which a root records and a block that recovers
+  /// its own items leaves to its root.
+  pub(crate) tripped: bool,
 }
 
 /// Runs one entry and says what its outcome means for the document, beside whether the attempt
@@ -856,7 +868,7 @@ where
 pub(crate) fn judge_turn<'inp, 'closure, L, Ctx, Lang, T, Entry>(
   inp: &mut InputRef<'inp, 'closure, L, Ctx, Lang>,
   entry: Entry,
-) -> (RootTurn<T, ErrorOf<'inp, L, Ctx, Lang>>, bool)
+) -> JudgedTurn<T, ErrorOf<'inp, L, Ctx, Lang>>
 where
   Lang: ?Sized,
   L: Lexer<'inp, Span = SimpleSpan, Offset = usize>,
@@ -880,11 +892,11 @@ where
   // is alone on.
   let ends_the_document = out.as_ref().is_err_and(|e| e.is_terminal() || tripped);
   let turn = match out {
-    Ok(parsed) => RootTurn::Parsed { parsed },
-    Err(error) if ends_the_document => RootTurn::EndsTheDocument { error },
-    Err(error) => RootTurn::Recoverable { error },
+    Ok(parsed) => RootTurn::Parsed(parsed),
+    Err(error) if ends_the_document => RootTurn::EndsTheDocument(error),
+    Err(error) => RootTurn::Recoverable(error),
   };
-  (turn, tripped)
+  JudgedTurn { turn, tripped }
 }
 
 /// Runs a document root, then drains whatever it left uncommitted — unless the root said its
@@ -1267,17 +1279,17 @@ where
   let out = match stop.ending(out) {
     // The root said it stopped. Nothing reads the tail, which is what makes the refusal one
     // diagnostic — `drain_unless_terminal`'s own note carries the count.
-    RootTurn::EndsTheDocument { error } => return Err(error),
+    RootTurn::EndsTheDocument(error) => return Err(error),
     // The trait is still asked, on both remaining arms, by `drain_unless_terminal`: a terminal
     // value reaching a drain by a path no `root_turn` classified — a scanner stop, which moves no
     // descent counter — is the population it is alone on.
-    RootTurn::Parsed { parsed } => drain_unless_terminal(inp, Ok(parsed)),
+    RootTurn::Parsed(parsed) => drain_unless_terminal(inp, Ok(parsed)),
     // A failure carrying a trip this root never judged. It is a stop whatever the error value
     // says, for the reason `root_turn` reads the witness beside the trait at all — smear PR #189,
     // round 4. `Parsed` is deliberately not here: a root that returns `Ok` has said it parsed,
     // and ending a document on that word would be the false-stop direction.
-    RootTurn::Recoverable { error } if unjudged_trip => return Err(error),
-    RootTurn::Recoverable { error } => drain_unless_terminal(inp, Err(error)),
+    RootTurn::Recoverable(error) if unjudged_trip => return Err(error),
+    RootTurn::Recoverable(error) => drain_unless_terminal(inp, Err(error)),
   };
   // AFTER THE DRAIN, WHICH IS THE ONE FURTHER READER THIS FRAME RUNS. `skip_while` lexes the tail
   // against the same durable tally and tokora answers `Ok` on the terminal `Scan::Tripped`, so a

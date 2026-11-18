@@ -119,15 +119,26 @@ enum ExecutableHead {
 
 #[derive(Debug, Copy, Clone)]
 enum ClassifiedExecutableHead {
-  Accepted(ExecutableHead, SimpleSpan, SyntacticTokenKind),
+  Accepted(AcceptedHead),
   Rejected(Option<(SimpleSpan, SyntacticTokenKind)>),
+}
+
+/// A head the classifier accepted: [`ClassifiedExecutableHead::Accepted`]'s payload.
+#[derive(Debug, Copy, Clone)]
+struct AcceptedHead {
+  /// Which head it is.
+  head: ExecutableHead,
+  /// The head token's span.
+  span: SimpleSpan,
+  /// The head token's kind.
+  kind: SyntacticTokenKind,
 }
 
 impl ClassifiedExecutableHead {
   #[inline]
   const fn found(self) -> Option<(SimpleSpan, SyntacticTokenKind)> {
     match self {
-      Self::Accepted(_, span, kind) => Some((span, kind)),
+      Self::Accepted(AcceptedHead { span, kind, .. }) => Some((span, kind)),
       Self::Rejected(found) => found,
     }
   }
@@ -163,7 +174,7 @@ where
       _ => None,
     };
     match head {
-      Some(head) => ClassifiedExecutableHead::Accepted(head, span, kind),
+      Some(head) => ClassifiedExecutableHead::Accepted(AcceptedHead { head, span, kind }),
       None => ClassifiedExecutableHead::Rejected(Some((span, kind))),
     }
   })?;
@@ -553,16 +564,13 @@ executable_parser!(
     let classified = classify_executable_head(inp)?;
     let found = classified.found();
     let branch: Branch<2> = match classified {
-      ClassifiedExecutableHead::Accepted(ExecutableHead::Operation(OperationHead::Query), ..) => {
+      ClassifiedExecutableHead::Accepted(AcceptedHead { head: ExecutableHead::Operation(OperationHead::Query), .. }) => {
         Branch::B0
       }
-      ClassifiedExecutableHead::Accepted(ExecutableHead::Operation(OperationHead::Mutation), ..) => {
+      ClassifiedExecutableHead::Accepted(AcceptedHead { head: ExecutableHead::Operation(OperationHead::Mutation), .. }) => {
         Branch::B1
       }
-      ClassifiedExecutableHead::Accepted(
-        ExecutableHead::Operation(OperationHead::Subscription),
-        ..,
-      ) => Branch::B2,
+      ClassifiedExecutableHead::Accepted(AcceptedHead { head: ExecutableHead::Operation(OperationHead::Subscription), .. }) => Branch::B2,
       _ => {
         return expected_classified_executable_head(inp, Expectation::OperationType, found);
       }
@@ -607,8 +615,8 @@ executable_parser!(
     let found = classified.found();
     let mut named_head = None;
     let branch: Branch<1> = match classified {
-      ClassifiedExecutableHead::Accepted(ExecutableHead::Shorthand, ..) => Branch::B0,
-      ClassifiedExecutableHead::Accepted(ExecutableHead::Operation(head), ..) => {
+      ClassifiedExecutableHead::Accepted(AcceptedHead { head: ExecutableHead::Shorthand, .. }) => Branch::B0,
+      ClassifiedExecutableHead::Accepted(AcceptedHead { head: ExecutableHead::Operation(head), .. }) => {
         named_head = Some(head);
         Branch::B1
       }
@@ -711,7 +719,7 @@ executable_parser!(
       // `OperationDefinition : SelectionSet` does not. The `{` is reported where it
       // stands and left unconsumed, so a caller resumes at the selection set rather
       // than inside it.
-      ClassifiedExecutableHead::Accepted(ExecutableHead::Shorthand, ..)
+      ClassifiedExecutableHead::Accepted(AcceptedHead { head: ExecutableHead::Shorthand, .. })
         if description.is_some() =>
       {
         return expected_classified_executable_head(
@@ -720,12 +728,12 @@ executable_parser!(
           found,
         );
       }
-      ClassifiedExecutableHead::Accepted(ExecutableHead::Shorthand, ..) => Branch::B0,
-      ClassifiedExecutableHead::Accepted(ExecutableHead::Operation(head), span, ..) => {
+      ClassifiedExecutableHead::Accepted(AcceptedHead { head: ExecutableHead::Shorthand, .. }) => Branch::B0,
+      ClassifiedExecutableHead::Accepted(AcceptedHead { head: ExecutableHead::Operation(head), span, .. }) => {
         named_head = Some((head, span.start()));
         Branch::B1
       }
-      ClassifiedExecutableHead::Accepted(ExecutableHead::Fragment, ..) => Branch::B2,
+      ClassifiedExecutableHead::Accepted(AcceptedHead { head: ExecutableHead::Fragment, .. }) => Branch::B2,
       ClassifiedExecutableHead::Rejected(_) => {
         return expected_classified_executable_head(
           inp,

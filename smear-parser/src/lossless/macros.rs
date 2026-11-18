@@ -408,8 +408,8 @@ macro_rules! lossless_drivers {
                 match root_turn(inp, stop, |inp: &mut TestInput<'inp, '_>| {
                   super::$production::<str, _>(inp $(, $mark)? $($(, $extra)+)?)
                 }) {
-                  RootTurn::Parsed { parsed } => Ok(parsed),
-                  RootTurn::EndsTheDocument { error } | RootTurn::Recoverable { error } => {
+                  RootTurn::Parsed(parsed) => Ok(parsed),
+                  RootTurn::EndsTheDocument(error) | RootTurn::Recoverable(error) => {
                     Err(error)
                   }
                 }

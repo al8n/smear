@@ -5,8 +5,8 @@ use smear_lexer::graphql::{
 use tokora::Lexer;
 
 use super::{
-  Materialized, MaterializedInt, Numbers, OutOfRange, is_int_literal, overflows, parse_f64,
-  parse_i32, parse_i64, sealed,
+  Materialized, MaterializedInt, Numbers, OutOfRange, OutOfRangeInt, is_int_literal, overflows,
+  parse_f64, parse_i32, parse_i64, sealed,
 };
 use crate::graphql::error::{IntOverflow, IntWidth};
 
@@ -286,10 +286,10 @@ fn failure_returns_the_slice_and_which_leaf_it_came_from() {
   let int = <Materialized<i64> as Numbers<&str>>::int("99999999999999999999999999");
   assert!(matches!(
     int,
-    Err(OutOfRange::Int {
+    Err(OutOfRange::Int(OutOfRangeInt {
       value: "99999999999999999999999999",
       width: IntWidth::I64,
-    })
+    }))
   ));
 
   let float = <Materialized<i64> as Numbers<&str>>::float("1e400");
@@ -381,10 +381,10 @@ fn each_instantiation_names_its_own_width() {
   let past_i32 = <Materialized<i32> as Numbers<&str>>::int("2147483648");
   assert!(matches!(
     past_i32,
-    Err(OutOfRange::Int {
+    Err(OutOfRange::Int(OutOfRangeInt {
       value: "2147483648",
       width: IntWidth::I32,
-    })
+    }))
   ));
   assert_eq!(
     <Materialized<i64> as Numbers<&str>>::int("2147483648").ok(),
@@ -396,17 +396,17 @@ fn each_instantiation_names_its_own_width() {
   let past_i64_at_64 = <Materialized<i64> as Numbers<&str>>::int("9223372036854775808");
   assert!(matches!(
     past_i64_at_32,
-    Err(OutOfRange::Int {
+    Err(OutOfRange::Int(OutOfRangeInt {
       width: IntWidth::I32,
       ..
-    })
+    }))
   ));
   assert!(matches!(
     past_i64_at_64,
-    Err(OutOfRange::Int {
+    Err(OutOfRange::Int(OutOfRangeInt {
       width: IntWidth::I64,
       ..
-    })
+    }))
   ));
 }
 
