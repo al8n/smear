@@ -126,9 +126,12 @@ fn an_ordinary_schema_reaches_neither_ceiling() {
   builder.document(&parse(SDL));
   builder.document(&parse("scalar Custom"));
 
-  for (at, &(start, end)) in builder.interner.spans().iter().enumerate() {
+  for (at, range) in builder.interner.spans().iter().enumerate() {
     let sym = Sym::new(at as u32);
-    assert!(start <= end, "span {at} is inverted: {start}..{end}");
+    assert!(
+      range.start() <= range.end(),
+      "span {at} is inverted: {range:?}"
+    );
     assert_eq!(
       builder.interner.lookup(builder.interner.bytes(sym)),
       Some(sym),

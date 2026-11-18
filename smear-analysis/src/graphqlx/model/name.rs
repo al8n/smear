@@ -48,8 +48,11 @@ impl Model {
       sym.get(),
       self.spans.len()
     );
-    let (start, end) = self.spans[sym.get() as usize];
-    self.names.get(start as usize..end as usize).unwrap_or("")
+    let range = self.spans[sym.get() as usize];
+    self
+      .names
+      .get(range.start() as usize..range.end() as usize)
+      .unwrap_or("")
   }
 
   /// The canonical name of `def`: `^::package::module::path::Name` for a type, and

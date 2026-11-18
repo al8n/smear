@@ -19,7 +19,7 @@ pub trait Symbol: Copy {
 /// | bound | from | value |
 /// |---|---|---|
 /// | lower: the arena a **parsed** document needs | one copy per distinct spelling, and a parsed document's leaves hold disjoint token spans | **that document's own source** |
-/// | upper: the last offset a span can name | [`Interner::spans`] is a `(u32, u32)` pair of byte offsets into [`Interner::strings`] | **`u32::MAX`** |
+/// | upper: the last offset a span can name | each of [`Interner::spans`] is a [`ByteRange`] of two `u32` byte offsets into [`Interner::strings`] | **`u32::MAX`** |
 ///
 /// The lower row is why a ceiling at the top of the interval refuses nothing this workspace
 /// parses. A `TypeSystemDocument` that `type_system_document` produced over one source has one
@@ -50,14 +50,61 @@ pub const MAX_ARENA_BYTES: u32 = u32::MAX;
 /// property of today's call sites rather than of this type.
 pub const MAX_ARENA_SYMBOLS: u32 = u32::MAX;
 
+/// A half-open `[start, end)` range of bytes in the interner's arena.
+///
+/// An [`Interner`] records one per symbol, which [`Interner::spans`] lends and
+/// [`InternerParts::spans`] hands over. The offsets are `u32` because that is the width
+/// [`MAX_ARENA_BYTES`] is derived from: the arena refuses a spelling rather than record a range
+/// its offsets cannot name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ByteRange {
+  pub(crate) start: u32,
+  pub(crate) end: u32,
+}
+
+impl ByteRange {
+  /// Creates the range from its two offsets.
+  ///
+  /// Public because a range is only its two offsets: no arena takes one back from a caller, so a
+  /// range built here can only be compared with the ones an arena hands out, or read like them.
+  #[inline]
+  pub const fn new(start: u32, end: u32) -> Self {
+    Self { start, end }
+  }
+
+  /// Returns the offset of the range's first byte.
+  #[inline]
+  pub const fn start(&self) -> u32 {
+    self.start
+  }
+
+  /// Returns the offset one past the range's last byte.
+  #[inline]
+  pub const fn end(&self) -> u32 {
+    self.end
+  }
+
+  /// Returns how many bytes the range covers: none when `end` is not past `start`.
+  #[inline]
+  pub const fn len(&self) -> u32 {
+    self.end.saturating_sub(self.start)
+  }
+
+  /// Returns whether the range covers no bytes.
+  #[inline]
+  pub const fn is_empty(&self) -> bool {
+    self.end <= self.start
+  }
+}
+
 /// An arena of distinct byte spellings, each stored once and addressed by a dense [`Symbol`].
 ///
 /// # The offsets are checked, and here is what they did when they were not
 ///
-/// A span is a pair of `u32` **byte offsets** into `strings`, and the three that record one were
-/// `… .len() as u32`. Two of them index `strings`, so they wrap at four gigabytes of interned
-/// bytes; the third counts symbols and needs four billion of them, which is the bar a review of
-/// this type read all three against. Measured on this type at `fcac941`,
+/// A span is a [`ByteRange`], two `u32` **byte offsets** into `strings`, and the three that record
+/// one were `… .len() as u32`. Two of them index `strings`, so they wrap at four gigabytes of
+/// interned bytes; the third counts symbols and needs four billion of them, which is the bar a
+/// review of this type read all three against. Measured on this type at `fcac941`,
 /// `aarch64-apple-darwin`, release, by padding `strings` and interning `"beta"` after `"alpha"`:
 ///
 /// | `strings.len()` | span recorded | `bytes()` |
@@ -82,7 +129,7 @@ pub const MAX_ARENA_SYMBOLS: u32 = u32::MAX;
 /// two.
 pub struct Interner<S> {
   strings: Vec<u8>,
-  spans: Vec<(u32, u32)>,
+  spans: Vec<ByteRange>,
   map: BTreeMap<Box<[u8]>, u32>,
   /// The symbol a refused intern answers with, minted at the first refusal.
   ///
@@ -122,6 +169,18 @@ impl<S> core::fmt::Debug for Interner<S> {
       .field("refused", &self.refused.is_some())
       .finish()
   }
+}
+
+/// An [`Interner`] taken apart by [`Interner::into_parts`]: its arena, a range per symbol, and its
+/// retired map.
+pub struct InternerParts {
+  /// Every interned spelling's bytes, concatenated: the arena.
+  pub bytes: Vec<u8>,
+  /// One range per symbol minted, the refusal placeholder's empty one included, indexed by
+  /// [`Symbol::index`]; each addresses [`bytes`](InternerParts::bytes).
+  pub spans: Vec<ByteRange>,
+  /// The map from spelling to symbol, which nothing reads again.
+  pub retired: Retired,
 }
 
 /// The map of an [`Interner`] that [`Interner::into_parts`] took apart.
@@ -165,7 +224,7 @@ impl<S: Symbol> Interner<S> {
       return self.refuse();
     }
     self.strings.extend_from_slice(bytes);
-    self.spans.push((start, end));
+    self.spans.push(ByteRange::new(start, end));
     self.map.insert(bytes.to_owned().into_boxed_slice(), sym);
     S::from_index(sym)
   }
@@ -185,7 +244,7 @@ impl<S: Symbol> Interner<S> {
       // One slot short of the width, so that pushing the placeholder cannot be the thing that
       // overflows `len`.
       Ok(sym) if sym < u32::MAX => {
-        self.spans.push((0, 0));
+        self.spans.push(ByteRange::new(0, 0));
         sym
       }
       // The symbol space is full as well. Symbol zero exists, because filling it took `2^32`
@@ -210,7 +269,7 @@ impl<S: Symbol> Interner<S> {
   /// bounds by construction. A `get` here would answer a future break with the empty spelling
   /// instead of saying so.
   pub fn bytes(&self, sym: S) -> &[u8] {
-    let (start, end) = self.spans[sym.index() as usize];
+    let ByteRange { start, end } = self.spans[sym.index() as usize];
     &self.strings[start as usize..end as usize]
   }
 
@@ -238,13 +297,17 @@ impl<S: Symbol> Interner<S> {
     self.refused
   }
 
-  /// The arena's bytes, its spans, and the retired map, in that order.
-  pub fn into_parts(self) -> (Vec<u8>, Vec<(u32, u32)>, Retired) {
-    (self.strings, self.spans, Retired { _map: self.map })
+  /// Takes the arena apart: its bytes, a range per symbol, and the retired map.
+  pub fn into_parts(self) -> InternerParts {
+    InternerParts {
+      bytes: self.strings,
+      spans: self.spans,
+      retired: Retired { _map: self.map },
+    }
   }
 
   /// The spans, one per symbol: the builder's tests read the arena's shape through this.
-  pub fn spans(&self) -> &[(u32, u32)] {
+  pub fn spans(&self) -> &[ByteRange] {
     &self.spans
   }
 

@@ -7491,16 +7491,26 @@ impl SchemaBuilder {
       type_of_sym[raw.name.sym.get() as usize] = index as u32;
     }
 
-    let (strings, spans, retired) = interner.into_parts();
+    let semantics::interner::InternerParts {
+      bytes: strings,
+      spans,
+      retired,
+    } = interner.into_parts();
     _retired = Some(retired);
     let strings = strings.into_boxed_slice();
-    let spans = spans.into_boxed_slice();
+    // Mapped in place: a `ByteRange` and a `Range32` are both two `u32`s, so collecting from the
+    // interner's `Vec` reuses its buffer, and the build allocates no more than a plain hand-over.
+    let spans = spans
+      .into_iter()
+      .map(|range| Range32::new(range.start(), range.end()))
+      .collect::<Vec<_>>()
+      .into_boxed_slice();
     let index = {
       let spans_ref = &spans;
       let strings_ref = &strings;
       NameIndex::build(symbol_count, |sym| {
-        let (start, end) = spans_ref[sym as usize];
-        &strings_ref[start as usize..end as usize]
+        let range = spans_ref[sym as usize];
+        &strings_ref[range.start() as usize..range.end() as usize]
       })
     };
     let Some(index) = index else {

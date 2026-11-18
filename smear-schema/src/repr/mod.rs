@@ -65,8 +65,8 @@ const NOT_A_TYPE: u32 = u32::MAX;
 pub struct Schema {
   /// Every interned name's bytes, concatenated.
   pub(crate) strings: Box<[u8]>,
-  /// `Sym` to its `(start, end)` range in [`Schema::strings`].
-  pub(crate) spans: Box<[(u32, u32)]>,
+  /// `Sym` to the range of its bytes in [`Schema::strings`].
+  pub(crate) spans: Box<[Range32]>,
   /// Name bytes to `Sym`.
   pub(crate) index: NameIndex,
   /// Type definitions; a [`TypeId`] indexes this table.
@@ -143,8 +143,8 @@ impl Schema {
   /// meaningful against the schema that produced them.
   #[inline]
   pub fn name_bytes(&self, sym: Sym) -> &[u8] {
-    let (start, end) = self.spans[sym.get() as usize];
-    &self.strings[start as usize..end as usize]
+    let range = self.spans[sym.get() as usize];
+    &self.strings[range.start() as usize..range.end() as usize]
   }
 
   /// Returns an interned name.
@@ -168,8 +168,8 @@ impl Schema {
     let strings = &self.strings;
     let spans = &self.spans;
     self.index.get(bytes, |s| {
-      let (start, end) = spans[s as usize];
-      &strings[start as usize..end as usize]
+      let range = spans[s as usize];
+      &strings[range.start() as usize..range.end() as usize]
     })
   }
 

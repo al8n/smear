@@ -20,6 +20,8 @@ mod value;
 
 use std::{string::String, vec::Vec};
 
+use smear_semantics::interner::ByteRange;
+
 pub use application::{Application, ApplicationArgument, Resolution};
 pub use build::ModelBuilder;
 pub(crate) use build::{Bytes, Occurrence, Segments, Shape, Stored, Text, Written};
@@ -129,8 +131,8 @@ pub struct Model {
 
   /// Every interned name, concatenated: the name arena.
   names: String,
-  /// Each name's `(start, end)` in the name arena, indexed by [`Sym`].
-  spans: Vec<(u32, u32)>,
+  /// Each name's range in the name arena, indexed by [`Sym`].
+  spans: Vec<ByteRange>,
   /// Every module path and every written path's segments.
   paths: Vec<Sym>,
   /// Every other spelling the model keeps: package names, descriptions, strings, literals and

@@ -74,7 +74,7 @@ pub(crate) struct Bytes(Run);
 
 use std::{boxed::Box, collections::BTreeMap, string::String, vec, vec::Vec};
 
-use smear_semantics::interner::{Interner, Symbol};
+use smear_semantics::interner::{Interner, InternerParts, Symbol};
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
@@ -1226,7 +1226,7 @@ impl ModelBuilder {
     let ModelBuilder {
       mut model, names, ..
     } = self;
-    let (bytes, spans, _) = names.into_parts();
+    let InternerParts { bytes, spans, .. } = names.into_parts();
     // Every spelling was interned from a `&str`, so the arena is UTF-8 and every span falls on a
     // character boundary.
     model.names = String::from_utf8(bytes).unwrap_or_default();
