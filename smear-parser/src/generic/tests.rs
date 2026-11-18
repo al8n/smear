@@ -4,11 +4,12 @@ use tokora::{
 };
 
 use super::{
-  Constrained, DefinitionName, DefinitionTypeGenerics, DefinitionTypeParam, EnumTypeExtension,
-  EnumTypeExtensionData, ExecutableDefinitionHeader, ExecutableDefinitionName,
-  ExecutableDefinitionTypeGenerics, ExtensionMembers, ExtensionName, ExtensionTypeGenerics,
-  ExtensionTypeParam, ExtensionValues, InputObjectTypeDefinition, InputObjectTypeExtensionData,
-  ScalarTypeDefinition, ScalarTypeExtension, ScalarTypeExtensionData, TypePath,
+  Constrained, ConstrainedComponents, DefinitionName, DefinitionTypeGenerics,
+  DefinitionTypeGenericsComponents, DefinitionTypeParam, EnumTypeExtension, EnumTypeExtensionData,
+  ExecutableDefinitionHeader, ExecutableDefinitionName, ExecutableDefinitionTypeGenerics,
+  ExtensionMembers, ExtensionName, ExtensionTypeGenerics, ExtensionTypeParam, ExtensionValues,
+  InputObjectTypeDefinition, InputObjectTypeExtensionData, ScalarTypeDefinition,
+  ScalarTypeDefinitionComponents, ScalarTypeExtension, ScalarTypeExtensionData, TypePath,
   UnionTypeExtensionData, WhereClause, WherePredicate,
 };
 use crate::type_system::{ExtensionDirectives, ExtensionFields};
@@ -28,7 +29,13 @@ fn generic_declarations_preserve_custom_spans_and_components() {
   assert_eq!(generics.params(), std::slice::from_ref(&parameter));
   assert_eq!(generics.params(), std::slice::from_ref(&parameter));
   assert_eq!(generics.as_span(), &CustomSpan(2));
-  assert_eq!(generics.into_components(), (CustomSpan(2), [parameter]));
+  assert_eq!(
+    generics.into_components(),
+    DefinitionTypeGenericsComponents {
+      span: CustomSpan(2),
+      params: [parameter]
+    }
+  );
 
   let extension_parameter = ExtensionTypeParam::new(CustomSpan(3), "T");
   let extension_generics = ExtensionTypeGenerics::new(CustomSpan(4), [extension_parameter.clone()]);
@@ -76,11 +83,11 @@ fn type_paths_where_clauses_and_constraints_are_composable() {
   assert_eq!(constrained.target(), &"{ value }");
   assert_eq!(
     constrained.into_components(),
-    (
-      CustomSpan(6),
-      Some(WhereClause::new(CustomSpan(5), [predicate])),
-      "{ value }"
-    )
+    ConstrainedComponents {
+      span: CustomSpan(6),
+      where_clause: Some(WhereClause::new(CustomSpan(5), [predicate])),
+      target: "{ value }"
+    }
   );
 }
 
@@ -98,13 +105,13 @@ fn the_four_kinds_carry_their_interfaces_beside_their_directives() {
   assert_eq!(scalar.where_clause(), Some(&"where T: Key"));
   assert_eq!(
     scalar.into_components(),
-    (
-      CustomSpan(1),
-      "Url",
-      Some("Node"),
-      None,
-      Some("where T: Key")
-    )
+    ScalarTypeDefinitionComponents {
+      span: CustomSpan(1),
+      name: "Url",
+      implements: Some("Node"),
+      directives: None,
+      where_clause: Some("where T: Key")
+    }
   );
 
   let input = InputObjectTypeDefinition::new(

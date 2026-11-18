@@ -4,10 +4,12 @@ use tokora::{
 };
 
 use super::{
-  ArgumentsDefinition, DirectiveDefinition, DirectiveExtension, DirectiveLocations,
-  ExecutableDirectiveLocation, ExtensionDirectives, ExtensionFields, ExtensionOperations,
-  FieldDefinition, InputValueDefinition, Location, ObjectTypeDefinition, ObjectTypeExtensionData,
-  SchemaExtensionData, TypeSystemDirectiveLocation, TypeSystemExtension,
+  ArgumentsDefinition, DirectiveDefinition, DirectiveDefinitionComponents, DirectiveExtension,
+  DirectiveExtensionComponents, DirectiveLocations, ExecutableDirectiveLocation,
+  ExecutableDirectiveLocationComponents, ExtensionDirectives, ExtensionFields, ExtensionOperations,
+  FieldDefinition, InputValueDefinition, InputValueDefinitionComponents, Location,
+  ObjectTypeDefinition, ObjectTypeExtensionData, SchemaExtensionData, TypeSystemDirectiveLocation,
+  TypeSystemDirectiveLocationComponents, TypeSystemExtension,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,7 +39,13 @@ fn carriers_support_custom_spans_and_components() {
   assert_eq!(input.directives(), Some(&"@range"));
   assert_eq!(
     input.into_components(),
-    (CustomSpan(1), "limit", "Int", Some("10"), Some("@range"))
+    InputValueDefinitionComponents {
+      span: CustomSpan(1),
+      name: "limit",
+      ty: "Int",
+      default_value: Some("10"),
+      directives: Some("@range")
+    }
   );
 
   let field = FieldDefinition::<_, _, _, _, CustomSpan>::new(
@@ -76,14 +84,14 @@ fn carriers_support_custom_spans_and_components() {
   assert_eq!(directive.locations(), &"FIELD_DEFINITION");
   assert_eq!(
     directive.into_components(),
-    (
-      CustomSpan(4),
-      "deprecated",
-      None,
-      Some("@experimental"),
-      true,
-      "FIELD_DEFINITION"
-    )
+    DirectiveDefinitionComponents {
+      span: CustomSpan(4),
+      name: "deprecated",
+      arguments_definition: None,
+      directives: Some("@experimental"),
+      repeatable: true,
+      locations: "FIELD_DEFINITION"
+    }
   );
 
   let extension =
@@ -93,7 +101,11 @@ fn carriers_support_custom_spans_and_components() {
   assert_eq!(extension.directives(), &"@experimental");
   assert_eq!(
     extension.into_components(),
-    (CustomSpan(5), "deprecated", "@experimental")
+    DirectiveExtensionComponents {
+      span: CustomSpan(5),
+      name: "deprecated",
+      directives: "@experimental"
+    }
   );
 
   type Extension = DirectiveExtension<&'static str, &'static str, CustomSpan>;
@@ -125,7 +137,13 @@ fn collections_project_array_backed_containers_to_slices() {
 fn directive_locations_preserve_their_kind_and_span() {
   let executable = ExecutableDirectiveLocation::field(CustomSpan(1));
   assert_eq!(executable.as_str(), "FIELD");
-  assert_eq!(executable.into_components(), (CustomSpan(1), "FIELD"));
+  assert_eq!(
+    executable.into_components(),
+    ExecutableDirectiveLocationComponents {
+      span: CustomSpan(1),
+      spelling: "FIELD"
+    }
+  );
 
   let location: Location<CustomSpan> =
     TypeSystemDirectiveLocation::input_field_definition(CustomSpan(2)).into();
@@ -155,7 +173,10 @@ fn directive_location_enums_keep_variant_and_textual_ergonomics() {
   assert_eq!(AsRef::<str>::as_ref(&directive), "DIRECTIVE_DEFINITION");
   assert_eq!(
     directive.into_components(),
-    (CustomSpan(3), "DIRECTIVE_DEFINITION")
+    TypeSystemDirectiveLocationComponents {
+      span: CustomSpan(3),
+      spelling: "DIRECTIVE_DEFINITION"
+    }
   );
 
   let location: Location<CustomSpan> = query.into();

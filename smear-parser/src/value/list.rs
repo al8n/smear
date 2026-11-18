@@ -65,11 +65,23 @@ impl<Value, Span, Container> IntoSpan<Span> for List<Value, Span, Container> {
   }
 }
 
+/// [`List`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListComponents<Span, Container> {
+  /// The span covering the complete list.
+  pub span: Span,
+  /// The parsed list elements.
+  pub values: Container,
+}
+
 impl<Value, Span, Container> IntoComponents for List<Value, Span, Container> {
-  type Components = (Span, Container);
+  type Components = ListComponents<Span, Container>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.values)
+    ListComponents {
+      span: self.span,
+      values: self.values,
+    }
   }
 }

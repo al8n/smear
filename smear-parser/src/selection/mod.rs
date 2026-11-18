@@ -76,12 +76,24 @@ impl<Name, Span> IntoSpan<Span> for Alias<Name, Span> {
   }
 }
 
+/// [`Alias`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AliasComponents<Name, Span> {
+  /// The span covering the alias and its colon.
+  pub span: Span,
+  /// The alias name.
+  pub name: Name,
+}
+
 impl<Name, Span> IntoComponents for Alias<Name, Span> {
-  type Components = (Span, Name);
+  type Components = AliasComponents<Name, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name)
+    AliasComponents {
+      span: self.span,
+      name: self.name,
+    }
   }
 }
 
@@ -129,12 +141,24 @@ impl<Name, Span> IntoSpan<Span> for TypeCondition<Name, Span> {
   }
 }
 
+/// [`TypeCondition`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TypeConditionComponents<Name, Span> {
+  /// The span covering `on` and the type name.
+  pub span: Span,
+  /// The condition's type name.
+  pub name: Name,
+}
+
 impl<Name, Span> IntoComponents for TypeCondition<Name, Span> {
-  type Components = (Span, Name);
+  type Components = TypeConditionComponents<Name, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name)
+    TypeConditionComponents {
+      span: self.span,
+      name: self.name,
+    }
   }
 }
 
@@ -197,14 +221,29 @@ impl<FragmentName, Directives, Span> IntoSpan<Span>
   }
 }
 
+/// [`FragmentSpread`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FragmentSpreadComponents<FragmentName, Directives, Span> {
+  /// The span covering the entire spread.
+  pub span: Span,
+  /// The spread fragment name.
+  pub name: FragmentName,
+  /// The nonempty directive collection, if present.
+  pub directives: Option<Directives>,
+}
+
 impl<FragmentName, Directives, Span> IntoComponents
   for FragmentSpread<FragmentName, Directives, Span>
 {
-  type Components = (Span, FragmentName, Option<Directives>);
+  type Components = FragmentSpreadComponents<FragmentName, Directives, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.directives)
+    FragmentSpreadComponents {
+      span: self.span,
+      name: self.name,
+      directives: self.directives,
+    }
   }
 }
 
@@ -282,24 +321,32 @@ impl<TypeCondition, Directives, SelectionSet, Span> IntoSpan<Span>
   }
 }
 
+/// [`InlineFragment`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InlineFragmentComponents<TypeCondition, Directives, SelectionSet, Span> {
+  /// The span covering the entire inline fragment.
+  pub span: Span,
+  /// The optional type condition.
+  pub type_condition: Option<TypeCondition>,
+  /// The nonempty directive collection, if present.
+  pub directives: Option<Directives>,
+  /// The required nested selection set.
+  pub selection_set: SelectionSet,
+}
+
 impl<TypeCondition, Directives, SelectionSet, Span> IntoComponents
   for InlineFragment<TypeCondition, Directives, SelectionSet, Span>
 {
-  type Components = (
-    Span,
-    Option<TypeCondition>,
-    Option<Directives>,
-    SelectionSet,
-  );
+  type Components = InlineFragmentComponents<TypeCondition, Directives, SelectionSet, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (
-      self.span,
-      self.type_condition,
-      self.directives,
-      self.selection_set,
-    )
+    InlineFragmentComponents {
+      span: self.span,
+      type_condition: self.type_condition,
+      directives: self.directives,
+      selection_set: self.selection_set,
+    }
   }
 }
 
@@ -361,12 +408,24 @@ impl<Selection, Span, Container> IntoSpan<Span> for SelectionSet<Selection, Span
   }
 }
 
+/// [`SelectionSet`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SelectionSetComponents<Span, Container> {
+  /// The span including the surrounding braces.
+  pub span: Span,
+  /// The contained selections.
+  pub selections: Container,
+}
+
 impl<Selection, Span, Container> IntoComponents for SelectionSet<Selection, Span, Container> {
-  type Components = (Span, Container);
+  type Components = SelectionSetComponents<Span, Container>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.selections)
+    SelectionSetComponents {
+      span: self.span,
+      selections: self.selections,
+    }
   }
 }
 
@@ -462,28 +521,38 @@ impl<Alias, Name, Arguments, Directives, SelectionSet, Span> IntoSpan<Span>
   }
 }
 
+/// [`Field`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FieldComponents<Alias, Name, Arguments, Directives, SelectionSet, Span> {
+  /// The span covering the entire field.
+  pub span: Span,
+  /// The optional field alias.
+  pub alias: Option<Alias>,
+  /// The required field name.
+  pub name: Name,
+  /// The nonempty arguments collection, if present.
+  pub arguments: Option<Arguments>,
+  /// The nonempty directives collection, if present.
+  pub directives: Option<Directives>,
+  /// The optional nested selection set.
+  pub selection_set: Option<SelectionSet>,
+}
+
 impl<Alias, Name, Arguments, Directives, SelectionSet, Span> IntoComponents
   for Field<Alias, Name, Arguments, Directives, SelectionSet, Span>
 {
-  type Components = (
-    Span,
-    Option<Alias>,
-    Name,
-    Option<Arguments>,
-    Option<Directives>,
-    Option<SelectionSet>,
-  );
+  type Components = FieldComponents<Alias, Name, Arguments, Directives, SelectionSet, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (
-      self.span,
-      self.alias,
-      self.name,
-      self.arguments,
-      self.directives,
-      self.selection_set,
-    )
+    FieldComponents {
+      span: self.span,
+      alias: self.alias,
+      name: self.name,
+      arguments: self.arguments,
+      directives: self.directives,
+      selection_set: self.selection_set,
+    }
   }
 }
 

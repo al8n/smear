@@ -27,12 +27,24 @@ impl<Name, Span> IntoSpan<Span> for VariableValue<Name, Span> {
   }
 }
 
+/// [`VariableValue`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct VariableValueComponents<Name, Span> {
+  /// The span covering the variable.
+  pub span: Span,
+  /// The variable name.
+  pub name: Name,
+}
+
 impl<Name, Span> IntoComponents for VariableValue<Name, Span> {
-  type Components = (Span, Name);
+  type Components = VariableValueComponents<Name, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name)
+    VariableValueComponents {
+      span: self.span,
+      name: self.name,
+    }
   }
 }
 

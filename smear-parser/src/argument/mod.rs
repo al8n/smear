@@ -40,12 +40,27 @@ impl<Name, Value, Span> IntoSpan<Span> for Argument<Name, Value, Span> {
   }
 }
 
+/// [`Argument`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArgumentComponents<Name, Value, Span> {
+  /// The span from the argument name through its value.
+  pub span: Span,
+  /// The argument name.
+  pub name: Name,
+  /// The argument value.
+  pub value: Value,
+}
+
 impl<Name, Value, Span> IntoComponents for Argument<Name, Value, Span> {
-  type Components = (Span, Name, Value);
+  type Components = ArgumentComponents<Name, Value, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.value)
+    ArgumentComponents {
+      span: self.span,
+      name: self.name,
+      value: self.value,
+    }
   }
 }
 
@@ -109,12 +124,24 @@ impl<Arg, Container, Span> IntoSpan<Span> for ArgumentList<Arg, Container, Span>
   }
 }
 
+/// [`ArgumentList`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArgumentListComponents<Container, Span> {
+  /// The collection span.
+  pub span: Span,
+  /// The parsed arguments.
+  pub arguments: Container,
+}
+
 impl<Arg, Container, Span> IntoComponents for ArgumentList<Arg, Container, Span> {
-  type Components = (Span, Container);
+  type Components = ArgumentListComponents<Container, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.arguments)
+    ArgumentListComponents {
+      span: self.span,
+      arguments: self.arguments,
+    }
   }
 }
 

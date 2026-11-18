@@ -66,12 +66,27 @@ impl<Name, Type, Span> IntoSpan<Span> for DefinitionTypeParam<Name, Type, Span> 
   }
 }
 
+/// [`DefinitionTypeParam`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DefinitionTypeParamComponents<Name, Type, Span> {
+  /// The complete parameter span.
+  pub span: Span,
+  /// The declared parameter name.
+  pub name: Name,
+  /// The optional default type.
+  pub default: Option<Type>,
+}
+
 impl<Name, Type, Span> IntoComponents for DefinitionTypeParam<Name, Type, Span> {
-  type Components = (Span, Name, Option<Type>);
+  type Components = DefinitionTypeParamComponents<Name, Type, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.default)
+    DefinitionTypeParamComponents {
+      span: self.span,
+      name: self.name,
+      default: self.default,
+    }
   }
 }
 
@@ -134,14 +149,26 @@ impl<Parameter, Span, Container> IntoSpan<Span>
   }
 }
 
+/// [`DefinitionTypeGenerics`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DefinitionTypeGenericsComponents<Span, Container> {
+  /// The span covering the enclosing angle brackets.
+  pub span: Span,
+  /// The declared parameters.
+  pub params: Container,
+}
+
 impl<Parameter, Span, Container> IntoComponents
   for DefinitionTypeGenerics<Parameter, Span, Container>
 {
-  type Components = (Span, Container);
+  type Components = DefinitionTypeGenericsComponents<Span, Container>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.params)
+    DefinitionTypeGenericsComponents {
+      span: self.span,
+      params: self.params,
+    }
   }
 }
 
@@ -186,12 +213,24 @@ impl<Name, Span> IntoSpan<Span> for ExtensionTypeParam<Name, Span> {
   }
 }
 
+/// [`ExtensionTypeParam`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExtensionTypeParamComponents<Name, Span> {
+  /// The complete argument span.
+  pub span: Span,
+  /// The argument name.
+  pub name: Name,
+}
+
 impl<Name, Span> IntoComponents for ExtensionTypeParam<Name, Span> {
-  type Components = (Span, Name);
+  type Components = ExtensionTypeParamComponents<Name, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name)
+    ExtensionTypeParamComponents {
+      span: self.span,
+      name: self.name,
+    }
   }
 }
 
@@ -254,14 +293,26 @@ impl<Parameter, Span, Container> IntoSpan<Span>
   }
 }
 
+/// [`ExtensionTypeGenerics`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExtensionTypeGenericsComponents<Span, Container> {
+  /// The span covering the enclosing angle brackets.
+  pub span: Span,
+  /// The extension generic arguments.
+  pub params: Container,
+}
+
 impl<Parameter, Span, Container> IntoComponents
   for ExtensionTypeGenerics<Parameter, Span, Container>
 {
-  type Components = (Span, Container);
+  type Components = ExtensionTypeGenericsComponents<Span, Container>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.params)
+    ExtensionTypeGenericsComponents {
+      span: self.span,
+      params: self.params,
+    }
   }
 }
 
@@ -324,14 +375,26 @@ impl<Name, Span, Container> IntoSpan<Span>
   }
 }
 
+/// [`ExecutableDefinitionTypeGenerics`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExecutableDefinitionTypeGenericsComponents<Span, Container> {
+  /// The span covering the enclosing angle brackets.
+  pub span: Span,
+  /// The executable generic names.
+  pub params: Container,
+}
+
 impl<Name, Span, Container> IntoComponents
   for ExecutableDefinitionTypeGenerics<Name, Span, Container>
 {
-  type Components = (Span, Container);
+  type Components = ExecutableDefinitionTypeGenericsComponents<Span, Container>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.params)
+    ExecutableDefinitionTypeGenericsComponents {
+      span: self.span,
+      params: self.params,
+    }
   }
 }
 
@@ -387,12 +450,27 @@ impl<Name, Generics, Span> IntoSpan<Span> for DefinitionName<Name, Generics, Spa
   }
 }
 
+/// [`DefinitionName`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DefinitionNameComponents<Name, Generics, Span> {
+  /// The complete name span.
+  pub span: Span,
+  /// The definition name.
+  pub name: Name,
+  /// The optional declared generic parameters.
+  pub generics: Option<Generics>,
+}
+
 impl<Name, Generics, Span> IntoComponents for DefinitionName<Name, Generics, Span> {
-  type Components = (Span, Name, Option<Generics>);
+  type Components = DefinitionNameComponents<Name, Generics, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.generics)
+    DefinitionNameComponents {
+      span: self.span,
+      name: self.name,
+      generics: self.generics,
+    }
   }
 }
 
@@ -448,12 +526,27 @@ impl<Path, Generics, Span> IntoSpan<Span> for ExtensionName<Path, Generics, Span
   }
 }
 
+/// [`ExtensionName`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExtensionNameComponents<Path, Generics, Span> {
+  /// The complete name span.
+  pub span: Span,
+  /// The extension path.
+  pub path: Path,
+  /// The optional generic arguments.
+  pub generics: Option<Generics>,
+}
+
 impl<Path, Generics, Span> IntoComponents for ExtensionName<Path, Generics, Span> {
-  type Components = (Span, Path, Option<Generics>);
+  type Components = ExtensionNameComponents<Path, Generics, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.path, self.generics)
+    ExtensionNameComponents {
+      span: self.span,
+      path: self.path,
+      generics: self.generics,
+    }
   }
 }
 
@@ -509,12 +602,27 @@ impl<Name, Generics, Span> IntoSpan<Span> for ExecutableDefinitionName<Name, Gen
   }
 }
 
+/// [`ExecutableDefinitionName`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExecutableDefinitionNameComponents<Name, Generics, Span> {
+  /// The complete name span.
+  pub span: Span,
+  /// The executable definition name.
+  pub name: Name,
+  /// The optional generic names.
+  pub generics: Option<Generics>,
+}
+
 impl<Name, Generics, Span> IntoComponents for ExecutableDefinitionName<Name, Generics, Span> {
-  type Components = (Span, Name, Option<Generics>);
+  type Components = ExecutableDefinitionNameComponents<Name, Generics, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.generics)
+    ExecutableDefinitionNameComponents {
+      span: self.span,
+      name: self.name,
+      generics: self.generics,
+    }
   }
 }
 
@@ -580,14 +688,29 @@ impl<ImplementationGenerics, Name, Span> IntoSpan<Span>
   }
 }
 
+/// [`ExecutableDefinitionHeader`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ExecutableDefinitionHeaderComponents<ImplementationGenerics, Name, Span> {
+  /// The complete header span.
+  pub span: Span,
+  /// The optional leading generic declaration.
+  pub implementation_generics: Option<ImplementationGenerics>,
+  /// The executable definition name.
+  pub name: Name,
+}
+
 impl<ImplementationGenerics, Name, Span> IntoComponents
   for ExecutableDefinitionHeader<ImplementationGenerics, Name, Span>
 {
-  type Components = (Span, Option<ImplementationGenerics>, Name);
+  type Components = ExecutableDefinitionHeaderComponents<ImplementationGenerics, Name, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.implementation_generics, self.name)
+    ExecutableDefinitionHeaderComponents {
+      span: self.span,
+      implementation_generics: self.implementation_generics,
+      name: self.name,
+    }
   }
 }
 
@@ -643,12 +766,27 @@ impl<Path, Generics, Span> IntoSpan<Span> for TypePath<Path, Generics, Span> {
   }
 }
 
+/// [`TypePath`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TypePathComponents<Path, Generics, Span> {
+  /// The complete type-path span.
+  pub span: Span,
+  /// The namespaced path.
+  pub path: Path,
+  /// The optional generic arguments.
+  pub generics: Option<Generics>,
+}
+
 impl<Path, Generics, Span> IntoComponents for TypePath<Path, Generics, Span> {
-  type Components = (Span, Path, Option<Generics>);
+  type Components = TypePathComponents<Path, Generics, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.path, self.generics)
+    TypePathComponents {
+      span: self.span,
+      path: self.path,
+      generics: self.generics,
+    }
   }
 }
 
@@ -713,12 +851,27 @@ impl<TypePath, Span, Container> IntoSpan<Span> for WherePredicate<TypePath, Span
   }
 }
 
+/// [`WherePredicate`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct WherePredicateComponents<TypePath, Span, Container> {
+  /// The complete predicate span.
+  pub span: Span,
+  /// The path being constrained.
+  pub bounded_type: TypePath,
+  /// The bound paths.
+  pub bounds: Container,
+}
+
 impl<TypePath, Span, Container> IntoComponents for WherePredicate<TypePath, Span, Container> {
-  type Components = (Span, TypePath, Container);
+  type Components = WherePredicateComponents<TypePath, Span, Container>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.bounded_type, self.bounds)
+    WherePredicateComponents {
+      span: self.span,
+      bounded_type: self.bounded_type,
+      bounds: self.bounds,
+    }
   }
 }
 
@@ -777,12 +930,24 @@ impl<Predicate, Span, Container> IntoSpan<Span> for WhereClause<Predicate, Span,
   }
 }
 
+/// [`WhereClause`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct WhereClauseComponents<Span, Container> {
+  /// The complete clause span.
+  pub span: Span,
+  /// The predicates.
+  pub predicates: Container,
+}
+
 impl<Predicate, Span, Container> IntoComponents for WhereClause<Predicate, Span, Container> {
-  type Components = (Span, Container);
+  type Components = WhereClauseComponents<Span, Container>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.predicates)
+    WhereClauseComponents {
+      span: self.span,
+      predicates: self.predicates,
+    }
   }
 }
 
@@ -838,12 +1003,27 @@ impl<Target, WhereClause, Span> IntoSpan<Span> for Constrained<Target, WhereClau
   }
 }
 
+/// [`Constrained`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ConstrainedComponents<Target, WhereClause, Span> {
+  /// The complete constrained-node span.
+  pub span: Span,
+  /// The optional `where` clause.
+  pub where_clause: Option<WhereClause>,
+  /// The constrained target.
+  pub target: Target,
+}
+
 impl<Target, WhereClause, Span> IntoComponents for Constrained<Target, WhereClause, Span> {
-  type Components = (Span, Option<WhereClause>, Target);
+  type Components = ConstrainedComponents<Target, WhereClause, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.where_clause, self.target)
+    ConstrainedComponents {
+      span: self.span,
+      where_clause: self.where_clause,
+      target: self.target,
+    }
   }
 }
 

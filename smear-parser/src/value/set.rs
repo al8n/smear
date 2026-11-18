@@ -64,11 +64,23 @@ impl<Value, Span, Container> IntoSpan<Span> for Set<Value, Span, Container> {
   }
 }
 
+/// [`Set`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetComponents<Span, Container> {
+  /// The span covering the complete set.
+  pub span: Span,
+  /// The parsed set values.
+  pub values: Container,
+}
+
 impl<Value, Span, Container> IntoComponents for Set<Value, Span, Container> {
-  type Components = (Span, Container);
+  type Components = SetComponents<Span, Container>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.values)
+    SetComponents {
+      span: self.span,
+      values: self.values,
+    }
   }
 }

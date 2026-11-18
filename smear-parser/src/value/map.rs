@@ -88,12 +88,27 @@ where
   }
 }
 
+/// [`MapEntry`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MapEntryComponents<Key, Value, Span> {
+  /// The span covering this entry.
+  pub span: Span,
+  /// The entry key.
+  pub key: Key,
+  /// The entry value.
+  pub value: Value,
+}
+
 impl<Key, Value, Span> IntoComponents for MapEntry<Key, Value, Span> {
-  type Components = (Span, Key, Value);
+  type Components = MapEntryComponents<Key, Value, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.key, self.value)
+    MapEntryComponents {
+      span: self.span,
+      key: self.key,
+      value: self.value,
+    }
   }
 }
 
@@ -155,11 +170,23 @@ impl<Key, Value, Span, Container> IntoSpan<Span> for Map<Key, Value, Span, Conta
   }
 }
 
+/// [`Map`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MapComponents<Span, Container> {
+  /// The span covering the complete map.
+  pub span: Span,
+  /// The parsed map entries.
+  pub entries: Container,
+}
+
 impl<Key, Value, Span, Container> IntoComponents for Map<Key, Value, Span, Container> {
-  type Components = (Span, Container);
+  type Components = MapComponents<Span, Container>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.entries)
+    MapComponents {
+      span: self.span,
+      entries: self.entries,
+    }
   }
 }

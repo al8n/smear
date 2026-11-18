@@ -198,12 +198,27 @@ impl<Name, Span, Container> IntoSpan<Span> for Path<Name, Span, Container> {
   }
 }
 
+/// [`Path`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PathComponents<Span, Container> {
+  /// The span covering the complete path, root included.
+  pub span: Span,
+  /// The root the path starts at.
+  pub root: PathRoot<Span>,
+  /// The path segments.
+  pub segments: Container,
+}
+
 impl<Name, Span, Container> IntoComponents for Path<Name, Span, Container> {
-  type Components = (Span, PathRoot<Span>, Container);
+  type Components = PathComponents<Span, Container>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.root, self.segments)
+    PathComponents {
+      span: self.span,
+      root: self.root,
+      segments: self.segments,
+    }
   }
 }
 

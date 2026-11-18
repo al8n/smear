@@ -99,7 +99,7 @@ macro_rules! ty {
               // depth.
               Self::List(nest) => {
                 if let Some(list) = nest.into_inner() {
-                  worklist.push(list.into_components().1);
+                  worklist.push(list.into_components().ty);
                 }
               }
             }
@@ -108,8 +108,8 @@ macro_rules! ty {
 
         impl<Name> Sealed for ListType<$name<Name>> {}
 
-        /// The pointee side of the same walk: a list carrier is `(span, element, required)` and
-        /// only the element holds a type.
+        /// The pointee side of the same walk: a list carrier is a span, an element and `required`,
+        /// and only the element, its `ty`, holds a type.
         impl<Name> Nestable for ListType<$name<Name>> {
           /// The type tree: rank 1. It holds no value node and no selection.
           const RANK: u8 = 1;
@@ -118,7 +118,7 @@ macro_rules! ty {
 
           #[inline]
           fn into_children(self, worklist: &mut Worklist<$name<Name>>) {
-            worklist.push(self.into_components().1);
+            worklist.push(self.into_components().ty);
           }
         }
 

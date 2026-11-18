@@ -41,6 +41,56 @@ pub use use_tree::*;
 /// The default collection container used by GraphQLx AST collections.
 pub type DefaultVec<T> = Vec<T>;
 
+// What `IntoComponents::into_components` returns for the nodes above: one struct per node, with
+// every field named and public, in the order the node writes them. A pattern needs no type
+// arguments, so a consumer destructures a node with
+// `let ArgumentComponents { span, name, value } = argument.into_components();`. A plain comment
+// rather than a doc comment, because rustdoc would merge a doc comment into the page of every
+// struct below.
+pub use crate::{
+  argument::{ArgumentComponents, ArgumentListComponents},
+  directive::{DirectiveComponents, DirectivesComponents},
+  executable::{
+    DescribedComponents, DocumentComponents, FragmentDefinitionComponents,
+    NamedOperationDefinitionComponents, VariableDefinitionComponents,
+    VariablesDefinitionComponents,
+  },
+  generic::{
+    ConstrainedComponents, DefinitionNameComponents, DefinitionTypeGenericsComponents,
+    DefinitionTypeParamComponents, EnumTypeDefinitionComponents, EnumTypeExtensionComponents,
+    ExecutableDefinitionHeaderComponents, ExecutableDefinitionNameComponents,
+    ExecutableDefinitionTypeGenericsComponents, ExtensionNameComponents,
+    ExtensionTypeGenericsComponents, ExtensionTypeParamComponents,
+    InputObjectTypeDefinitionComponents, InputObjectTypeExtensionComponents,
+    ScalarTypeDefinitionComponents, ScalarTypeExtensionComponents, TypePathComponents,
+    UnionTypeDefinitionComponents, UnionTypeExtensionComponents, WhereClauseComponents,
+    WherePredicateComponents,
+  },
+  path::PathComponents,
+  selection::{
+    AliasComponents, FieldComponents, FragmentSpreadComponents, InlineFragmentComponents,
+    SelectionSetComponents, TypeConditionComponents,
+  },
+  ty::{DefinitionTypePathComponents, ListTypeComponents, TypeGenericsComponents},
+  type_system::{
+    ArgumentsDefinitionComponents, DirectiveDefinitionComponents, DirectiveExtensionComponents,
+    DirectiveLocationsComponents, EnumValueDefinitionComponents, EnumValuesDefinitionComponents,
+    ExecutableDirectiveLocationComponents, FieldDefinitionComponents, FieldsDefinitionComponents,
+    ImplementInterfacesComponents, InputFieldsDefinitionComponents, InputValueDefinitionComponents,
+    InterfaceTypeDefinitionComponents, InterfaceTypeExtensionComponents, LocationComponents,
+    ObjectTypeDefinitionComponents, ObjectTypeExtensionComponents,
+    RootOperationTypeDefinitionComponents, RootOperationTypesDefinitionComponents,
+    SchemaDefinitionComponents, SchemaExtensionComponents, TypeSystemDirectiveLocationComponents,
+    UnionMemberTypesComponents,
+  },
+  value::{
+    BlockStringValueComponents, BooleanValueComponents, DefaultInputValueComponents,
+    EnumValueComponents, FloatValueComponents, InlineStringValueComponents, IntValueComponents,
+    ListComponents, MapComponents, MapEntryComponents, NullValueComponents, ObjectComponents,
+    ObjectFieldComponents, SetComponents, StringValueComponents, VariableValueComponents,
+  },
+};
+
 /// The two shapes the carriers hold their nesting children in, and the traits that decide what may
 /// stand in each.
 ///
@@ -493,7 +543,7 @@ impl<S, Span> Nestable for Type<S, Span> {
       // A path holds no type EXCEPT through its generic arguments, which is the arm a reading of
       // the pointer variant alone would miss.
       Self::Path(path) => {
-        let (_, _, generics, _) = path.into_components();
+        let DefinitionTypePathComponents { generics, .. } = path.into_components();
         if let Some(generics) = generics {
           worklist.adopt(generics.into_params().into_vec());
         }
@@ -503,7 +553,7 @@ impl<S, Span> Nestable for Type<S, Span> {
       // worklist's register, so releasing one allocates nothing at any depth.
       Self::List(nest) => {
         if let Some(list) = nest.into_inner() {
-          worklist.push(list.into_components().1);
+          worklist.push(list.into_components().ty);
         }
       }
     }
@@ -521,7 +571,7 @@ impl<S, Span> Nestable for crate::ty::ListType<Type<S, Span>, Span> {
 
   #[inline]
   fn into_children(self, worklist: &mut Worklist<Type<S, Span>>) {
-    worklist.push(self.into_components().1);
+    worklist.push(self.into_components().ty);
   }
 }
 

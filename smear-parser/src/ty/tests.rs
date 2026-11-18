@@ -3,7 +3,7 @@ use tokora::{
   utils::IntoComponents,
 };
 
-use super::ListType;
+use super::{ListType, ListTypeComponents};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CustomSpan(u8);
@@ -21,13 +21,20 @@ fn carriers_support_custom_spans() {
     ListType::<_, CustomSpan>::new(CustomSpan(2), "Element", false).into_span(),
     CustomSpan(2)
   );
-  assert_eq!(list.into_components(), (CustomSpan(2), "Element", false));
+  assert_eq!(
+    list.into_components(),
+    ListTypeComponents {
+      span: CustomSpan(2),
+      ty: "Element",
+      required: false
+    }
+  );
 }
 
 #[cfg(feature = "graphql")]
 #[test]
 fn named_type_carrier_supports_custom_spans() {
-  use super::NamedType;
+  use super::{NamedType, NamedTypeComponents};
 
   let named = NamedType::<_, CustomSpan>::new(CustomSpan(1), "Name", true);
   assert_eq!(named.as_span(), &CustomSpan(1));
@@ -35,7 +42,14 @@ fn named_type_carrier_supports_custom_spans() {
     NamedType::<_, CustomSpan>::new(CustomSpan(1), "Name", true).into_span(),
     CustomSpan(1)
   );
-  assert_eq!(named.into_components(), (CustomSpan(1), "Name", true));
+  assert_eq!(
+    named.into_components(),
+    NamedTypeComponents {
+      span: CustomSpan(1),
+      name: "Name",
+      required: true
+    }
+  );
 }
 
 #[cfg(feature = "graphqlx")]
@@ -49,14 +63,17 @@ fn graphqlx_carriers_support_custom_spans() {
 
   use crate::path::{Path, PathRoot};
 
-  use super::{DefinitionTypePath, TypeGenerics};
+  use super::{DefinitionTypePath, TypeGenerics, TypeGenericsComponents};
 
   let generics = TypeGenerics::<_, CustomSpan>::new(CustomSpan(5), vec!["Argument"]);
   assert_eq!(generics.as_span(), &CustomSpan(5));
   assert_eq!(generics.params(), &["Argument"]);
   assert_eq!(
     generics.into_components(),
-    (CustomSpan(5), vec!["Argument"])
+    TypeGenericsComponents {
+      span: CustomSpan(5),
+      params: vec!["Argument"]
+    }
   );
 
   let definition = DefinitionTypePath::<_, _, CustomSpan>::new(

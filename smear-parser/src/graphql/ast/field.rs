@@ -11,7 +11,7 @@ use tokora::{
   utils::IntoComponents,
 };
 
-use super::{Arguments, Directives, FragmentName, Name};
+use super::{Arguments, Directives, FieldComponents, FragmentName, InlineFragmentComponents, Name};
 use crate::value::{Absent, NestNode, Nestable, Nested, Sealed, Worklist};
 
 /// A field alias in a GraphQL selection (`Name :`).
@@ -103,7 +103,7 @@ impl<S> Nestable for Selection<S> {
       Self::Field(field) => {
         // span, alias, name, arguments, directives — dropped in place. The first three are
         // leaves; the last two are rank-1 value nodes that release themselves iteratively.
-        let (_, _, _, _, _, selection_set) = field.into_components();
+        let FieldComponents { selection_set, .. } = field.into_components();
         if let Some(selection_set) = selection_set {
           worklist.adopt(selection_set.into_selections().into_vec());
         }
@@ -113,7 +113,7 @@ impl<S> Nestable for Selection<S> {
       Self::InlineFragment(fragment) => {
         // span, type_condition, directives — dropped in place. The directives are rank-1 value
         // nodes; the type condition is a rank-1 type node in GraphQLx and a bare name in GraphQL.
-        let (_, _, _, selection_set) = fragment.into_components();
+        let InlineFragmentComponents { selection_set, .. } = fragment.into_components();
         worklist.adopt(selection_set.into_selections().into_vec());
       }
     }

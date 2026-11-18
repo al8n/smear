@@ -43,12 +43,24 @@ impl<S, Span, Lang: ?Sized> IntoSpan<Span> for StringValue<S, Span, Lang> {
   }
 }
 
+/// [`StringValue`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct StringValueComponents<S, Span> {
+  /// The span covering the string literal.
+  pub span: Span,
+  /// The string literal, as its lexer token read it.
+  pub lit: LitStr<S>,
+}
+
 impl<S, Span, Lang: ?Sized> IntoComponents for StringValue<S, Span, Lang> {
-  type Components = (Span, LitStr<S>);
+  type Components = StringValueComponents<S, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.lit)
+    StringValueComponents {
+      span: self.span,
+      lit: self.lit,
+    }
   }
 }
 
@@ -135,12 +147,24 @@ impl<S, Span, Lang: ?Sized> IntoSpan<Span> for InlineStringValue<S, Span, Lang> 
   }
 }
 
+/// [`InlineStringValue`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct InlineStringValueComponents<S, Span> {
+  /// The span covering the inline string literal.
+  pub span: Span,
+  /// The inline string literal, as its lexer token read it.
+  pub lit: LitInlineStr<S>,
+}
+
 impl<S, Span, Lang: ?Sized> IntoComponents for InlineStringValue<S, Span, Lang> {
-  type Components = (Span, LitInlineStr<S>);
+  type Components = InlineStringValueComponents<S, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.lit)
+    InlineStringValueComponents {
+      span: self.span,
+      lit: self.lit,
+    }
   }
 }
 
@@ -239,12 +263,24 @@ impl<S, Span, Lang: ?Sized> IntoSpan<Span> for BlockStringValue<S, Span, Lang> {
   }
 }
 
+/// [`BlockStringValue`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BlockStringValueComponents<S, Span> {
+  /// The span covering the block string literal.
+  pub span: Span,
+  /// The block string literal, as its lexer token read it.
+  pub lit: LitBlockStr<S>,
+}
+
 impl<S, Span, Lang: ?Sized> IntoComponents for BlockStringValue<S, Span, Lang> {
-  type Components = (Span, LitBlockStr<S>);
+  type Components = BlockStringValueComponents<S, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.lit)
+    BlockStringValueComponents {
+      span: self.span,
+      lit: self.lit,
+    }
   }
 }
 

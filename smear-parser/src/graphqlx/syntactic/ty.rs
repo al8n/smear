@@ -25,7 +25,7 @@ use crate::{
   combinator::{ParseCtx, try_bang},
   graphqlx::{
     GraphQLx,
-    ast::{DefinitionTypePath, Nest, Type, TypeGenerics},
+    ast::{DefinitionTypePath, Nest, Type, TypeGenerics, TypeGenericsComponents},
     error::{Expectation, GraphqlxError as DialectGraphqlxError},
   },
 };
@@ -218,7 +218,7 @@ where
       // cycle is the one `Nested` releases. Every other carrier that holds an argument list holds
       // a flat one, which is why the conversion is here rather than in `try_type_generics`.
       let generics = generics.map(|generics| {
-        let (span, params) = generics.into_components();
+        let TypeGenericsComponents { span, params } = generics.into_components();
         TypeGenerics::new(span, params.into())
       });
       Type::Path(DefinitionTypePath::new(span, path, generics, required))

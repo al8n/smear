@@ -194,12 +194,27 @@ impl<S, Span> IntoSpan<Span> for UseTree<S, Span> {
   }
 }
 
+/// [`UseTree`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UseTreeComponents<S, Span> {
+  /// The complete tree span, from its prefix's first token to its own last token.
+  pub span: Span,
+  /// What the tree's names resolve against.
+  pub prefix: UsePrefix<S, Span>,
+  /// What the tree brings into scope.
+  pub kind: UseTreeKind<S, Span>,
+}
+
 impl<S, Span> IntoComponents for UseTree<S, Span> {
-  type Components = (Span, UsePrefix<S, Span>, UseTreeKind<S, Span>);
+  type Components = UseTreeComponents<S, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.prefix, self.kind)
+    UseTreeComponents {
+      span: self.span,
+      prefix: self.prefix,
+      kind: self.kind,
+    }
   }
 }
 
@@ -274,11 +289,23 @@ impl<S, Span> IntoSpan<Span> for UseDefinition<S, Span> {
   }
 }
 
+/// [`UseDefinition`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UseDefinitionComponents<S, Span> {
+  /// The complete item span, from `use` to the tree's last token.
+  pub span: Span,
+  /// The item's tree.
+  pub tree: UseTree<S, Span>,
+}
+
 impl<S, Span> IntoComponents for UseDefinition<S, Span> {
-  type Components = (Span, UseTree<S, Span>);
+  type Components = UseDefinitionComponents<S, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.tree)
+    UseDefinitionComponents {
+      span: self.span,
+      tree: self.tree,
+    }
   }
 }

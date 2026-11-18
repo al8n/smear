@@ -47,13 +47,29 @@ impl<Name, Span> IntoSpan<Span> for NamedType<Name, Span> {
   }
 }
 
+/// [`NamedType`] taken apart: every field, in the order it is written.
+#[cfg(feature = "graphql")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NamedTypeComponents<Name, Span> {
+  /// The span covering the complete type reference.
+  pub span: Span,
+  /// The referenced type name.
+  pub name: Name,
+  /// Whether this type reference is non-null.
+  pub required: bool,
+}
+
 #[cfg(feature = "graphql")]
 impl<Name, Span> IntoComponents for NamedType<Name, Span> {
-  type Components = (Span, Name, bool);
+  type Components = NamedTypeComponents<Name, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.required)
+    NamedTypeComponents {
+      span: self.span,
+      name: self.name,
+      required: self.required,
+    }
   }
 }
 
@@ -114,12 +130,27 @@ impl<Type, Span> IntoSpan<Span> for ListType<Type, Span> {
   }
 }
 
+/// [`ListType`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ListTypeComponents<Type, Span> {
+  /// The span covering the complete type reference.
+  pub span: Span,
+  /// The element type.
+  pub ty: Type,
+  /// Whether this type reference is non-null.
+  pub required: bool,
+}
+
 impl<Type, Span> IntoComponents for ListType<Type, Span> {
-  type Components = (Span, Type, bool);
+  type Components = ListTypeComponents<Type, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.ty, self.required)
+    ListTypeComponents {
+      span: self.span,
+      ty: self.ty,
+      required: self.required,
+    }
   }
 }
 
@@ -214,13 +245,26 @@ impl<Type, Span, Container> IntoSpan<Span> for TypeGenerics<Type, Span, Containe
   }
 }
 
+/// [`TypeGenerics`] taken apart: every field, in the order it is written.
+#[cfg(feature = "graphqlx")]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TypeGenericsComponents<Span, Container> {
+  /// The span covering `<...>`.
+  pub span: Span,
+  /// The type parameters.
+  pub params: Container,
+}
+
 #[cfg(feature = "graphqlx")]
 impl<Type, Span, Container> IntoComponents for TypeGenerics<Type, Span, Container> {
-  type Components = (Span, Container);
+  type Components = TypeGenericsComponents<Span, Container>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.params)
+    TypeGenericsComponents {
+      span: self.span,
+      params: self.params,
+    }
   }
 }
 
@@ -309,20 +353,34 @@ impl<Name, Type, Span, PathContainer, TypeContainer> IntoSpan<Span>
   }
 }
 
+/// [`DefinitionTypePath`] taken apart: every field, in the order it is written.
+#[cfg(feature = "graphqlx")]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DefinitionTypePathComponents<Name, Type, Span, PathContainer, TypeContainer> {
+  /// The span covering the complete type reference.
+  pub span: Span,
+  /// The namespaced path.
+  pub path: Path<Name, Span, PathContainer>,
+  /// The optional generic arguments.
+  pub generics: Option<TypeGenerics<Type, Span, TypeContainer>>,
+  /// Whether this type reference is non-null.
+  pub required: bool,
+}
+
 #[cfg(feature = "graphqlx")]
 impl<Name, Type, Span, PathContainer, TypeContainer> IntoComponents
   for DefinitionTypePath<Name, Type, Span, PathContainer, TypeContainer>
 {
-  type Components = (
-    Span,
-    Path<Name, Span, PathContainer>,
-    Option<TypeGenerics<Type, Span, TypeContainer>>,
-    bool,
-  );
+  type Components = DefinitionTypePathComponents<Name, Type, Span, PathContainer, TypeContainer>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.path, self.generics, self.required)
+    DefinitionTypePathComponents {
+      span: self.span,
+      path: self.path,
+      generics: self.generics,
+      required: self.required,
+    }
   }
 }
 

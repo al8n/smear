@@ -22,7 +22,8 @@ pub struct ScalarTypeDefinition<Name, Directives, Span = SimpleSpan> {
 impl_node_traits!(
   ScalarTypeDefinition<Name, Directives, Span>,
   (Span, Name, Option<Directives>),
-  (span, name, directives)
+  (span, name, directives),
+  [Name, Directives, Span]
 );
 
 impl<Name, Directives, Span> ScalarTypeDefinition<Name, Directives, Span> {
@@ -67,7 +68,8 @@ pub struct EnumTypeDefinition<Name, Directives, EnumValues, Span = SimpleSpan> {
 impl_node_traits!(
   EnumTypeDefinition<Name, Directives, EnumValues, Span>,
   (Span, Name, Option<Directives>, Option<EnumValues>),
-  (span, name, directives, enum_values_definition)
+  (span, name, directives, enum_values_definition),
+  [Name, Directives, EnumValues, Span]
 );
 
 impl<Name, Directives, EnumValues, Span> EnumTypeDefinition<Name, Directives, EnumValues, Span> {
@@ -124,7 +126,8 @@ pub struct UnionTypeDefinition<Name, Directives, MemberTypes, Span = SimpleSpan>
 impl_node_traits!(
   UnionTypeDefinition<Name, Directives, MemberTypes, Span>,
   (Span, Name, Option<Directives>, Option<MemberTypes>),
-  (span, name, directives, member_types)
+  (span, name, directives, member_types),
+  [Name, Directives, MemberTypes, Span]
 );
 
 impl<Name, Directives, MemberTypes, Span> UnionTypeDefinition<Name, Directives, MemberTypes, Span> {
@@ -181,7 +184,8 @@ pub struct InputObjectTypeDefinition<Name, Directives, Fields, Span = SimpleSpan
 impl_node_traits!(
   InputObjectTypeDefinition<Name, Directives, Fields, Span>,
   (Span, Name, Option<Directives>, Option<Fields>),
-  (span, name, directives, fields_definition)
+  (span, name, directives, fields_definition),
+  [Name, Directives, Fields, Span]
 );
 
 impl<Name, Directives, Fields, Span> InputObjectTypeDefinition<Name, Directives, Fields, Span> {
@@ -333,7 +337,8 @@ pub struct UnionTypeExtension<Name, Directives, MemberTypes, Span = SimpleSpan> 
 impl_node_traits!(
   UnionTypeExtension<Name, Directives, MemberTypes, Span>,
   (Span, Name, UnionTypeExtensionData<Directives, MemberTypes>),
-  (span, name, data)
+  (span, name, data),
+  [Name, Directives, MemberTypes, Span]
 );
 
 impl<Name, Directives, MemberTypes, Span> UnionTypeExtension<Name, Directives, MemberTypes, Span> {
@@ -485,7 +490,8 @@ pub struct EnumTypeExtension<Name, Directives, Values, Span = SimpleSpan> {
 impl_node_traits!(
   EnumTypeExtension<Name, Directives, Values, Span>,
   (Span, Name, EnumTypeExtensionData<Directives, Values>),
-  (span, name, data)
+  (span, name, data),
+  [Name, Directives, Values, Span]
 );
 
 impl<Name, Directives, Values, Span> EnumTypeExtension<Name, Directives, Values, Span> {
@@ -637,7 +643,8 @@ pub struct InputObjectTypeExtension<Name, Directives, Fields, Span = SimpleSpan>
 impl_node_traits!(
   InputObjectTypeExtension<Name, Directives, Fields, Span>,
   (Span, Name, InputObjectTypeExtensionData<Directives, Fields>),
-  (span, name, data)
+  (span, name, data),
+  [Name, Directives, Fields, Span]
 );
 
 impl<Name, Directives, Fields, Span> InputObjectTypeExtension<Name, Directives, Fields, Span> {
@@ -695,7 +702,8 @@ pub struct ScalarTypeExtension<Name, Directives, Span = SimpleSpan> {
 impl_node_traits!(
   ScalarTypeExtension<Name, Directives, Span>,
   (Span, Name, Directives),
-  (span, name, directives)
+  (span, name, directives),
+  [Name, Directives, Span]
 );
 
 impl<Name, Directives, Span> ScalarTypeExtension<Name, Directives, Span> {

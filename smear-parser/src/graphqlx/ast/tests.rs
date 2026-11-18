@@ -9,7 +9,7 @@ use super::{
   Argument, BooleanValue, DefinitionName, DefinitionTypeGenerics, DefinitionTypeParam,
   ExecutableDefinitionName, ExecutableDefinitionTypeGenerics, ExtensionName, ExtensionTypeGenerics,
   ExtensionTypeParam, Field, InputValue, Name, OperationType, Path, PathRoot, Selection, TypePath,
-  UseDefinition, UsePrefix, UseTree, UseTreeKind, WhereClause, WherePredicate,
+  UseDefinition, UsePrefix, UseTree, UseTreeComponents, UseTreeKind, WhereClause, WherePredicate,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -106,11 +106,11 @@ fn executable_selection_and_use_nodes_keep_their_span_type() {
   assert_eq!(item.tree().as_span(), &CustomSpan(6));
   assert_eq!(
     tree.into_components(),
-    (
-      CustomSpan(6),
-      UsePrefix::Path(path(6, "User")),
-      UseTreeKind::Simple(Some(name(6, "Account"))),
-    )
+    UseTreeComponents {
+      span: CustomSpan(6),
+      prefix: UsePrefix::Path(path(6, "User")),
+      kind: UseTreeKind::Simple(Some(name(6, "Account"))),
+    }
   );
 
   let operation = OperationType::Query(CustomSpan(7));

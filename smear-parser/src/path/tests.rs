@@ -8,7 +8,7 @@ use tokora::{
   utils::IntoComponents,
 };
 
-use super::{ParentRoot, Path, PathRoot};
+use super::{ParentRoot, Path, PathComponents, PathRoot};
 
 #[test]
 fn path_projects_and_consumes_segments() {
@@ -21,7 +21,11 @@ fn path_projects_and_consumes_segments() {
   assert_eq!(path.clone().into_span(), SimpleSpan::new(0, 11));
   assert_eq!(
     path.clone().into_components(),
-    (SimpleSpan::new(0, 11), root, vec!["one", "two"])
+    PathComponents {
+      span: SimpleSpan::new(0, 11),
+      root,
+      segments: vec!["one", "two"]
+    }
   );
   assert_eq!(path.into_segments(), vec!["one", "two"]);
 }

@@ -21,7 +21,7 @@ use std::{
   vec::Vec,
 };
 
-use smear_parser::graphqlx::{Layer, Report, Syntactic, ast::TypeSystemDocument};
+use smear_parser::graphqlx::{Layer, ParsedComponents, Report, Syntactic, ast::TypeSystemDocument};
 use tokora::{
   SimpleSpan,
   diagnostic::{Diagnose, DiagnoseExt, Location},
@@ -139,7 +139,12 @@ where
   let mut sink = Syntax::new(reporter, source);
   match parser.type_system_document(text, &mut sink) {
     Ok(parsed) => {
-      let (document, _, errors, tree) = parsed.into_components();
+      let ParsedComponents {
+        document,
+        errors,
+        tree,
+        ..
+      } = parsed.into_components();
       sink.found(errors);
       (Some(document), Some(tree))
     }

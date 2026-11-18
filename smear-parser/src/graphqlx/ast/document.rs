@@ -238,17 +238,30 @@ impl<S, Span, Ty> IntoSpan<Span> for ModDefinition<S, Span, Ty> {
   }
 }
 
+/// [`ModDefinition`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModDefinitionComponents<S, Span, Ty> {
+  /// The complete module span, from its description or its `mod` to its `}`.
+  pub span: Span,
+  /// The module's description, if one was written.
+  pub description: Option<StringValue<S, Span>>,
+  /// The module's name.
+  pub name: Name<S, Span>,
+  /// The module's items, in source order.
+  pub items: Nested<TypeSystemItem<S, Span, Ty>>,
+}
+
 impl<S, Span, Ty> IntoComponents for ModDefinition<S, Span, Ty> {
-  type Components = (
-    Span,
-    Option<StringValue<S, Span>>,
-    Name<S, Span>,
-    Nested<TypeSystemItem<S, Span, Ty>>,
-  );
+  type Components = ModDefinitionComponents<S, Span, Ty>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.description, self.name, self.items)
+    ModDefinitionComponents {
+      span: self.span,
+      description: self.description,
+      name: self.name,
+      items: self.items,
+    }
   }
 }
 

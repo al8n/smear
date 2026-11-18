@@ -314,6 +314,18 @@ const SOURCES_WITH_NO_KIND: &[(&str, &str)] = &[
   ),
   // ---- not a grammar production at all ----
   ("DefaultVec", "the AST's default container type parameter"),
+  (
+    "UseTreeComponents",
+    "`UseTree`'s decomposition, the struct its `into_components` returns; not a production",
+  ),
+  (
+    "UseDefinitionComponents",
+    "`UseDefinition`'s decomposition, the struct its `into_components` returns; not a production",
+  ),
+  (
+    "ModDefinitionComponents",
+    "`ModDefinition`'s decomposition, the struct its `into_components` returns; not a production",
+  ),
 ];
 
 // ---------------------------------------------------------------------------------------------

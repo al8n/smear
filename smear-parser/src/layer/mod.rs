@@ -283,13 +283,32 @@ impl<D, T> Parsed<D, T> {
   }
 }
 
+/// [`Parsed`] taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedComponents<D, T> {
+  /// The items that have an AST image, as the syntactic AST.
+  pub document: D,
+  /// How much of the text the document covers.
+  pub recovery: Recovery,
+  /// How many errors the parse reported.
+  pub errors: usize,
+  /// What the layer kept beside the document: `&()` for the syntactic layer, which keeps nothing,
+  /// and the tree for the lossless layer.
+  pub tree: T,
+}
+
 impl<D, T> IntoComponents for Parsed<D, T> {
   /// The document, the recovery, the error count and the tree.
-  type Components = (D, Recovery, usize, T);
+  type Components = ParsedComponents<D, T>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.document, self.recovery, self.errors, self.tree)
+    ParsedComponents {
+      document: self.document,
+      recovery: self.recovery,
+      errors: self.errors,
+      tree: self.tree,
+    }
   }
 }
 
