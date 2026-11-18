@@ -26,7 +26,7 @@ use std::{boxed::Box, format, string::String};
 use super::{
   super::error::SchemaErrors,
   decode::Owner,
-  json::{Mark, line_column},
+  json::{LineColumn, Mark, line_column},
 };
 use crate::diagnostic::{Code, Diagnose, Label, Location, PathSegment, Severity};
 
@@ -318,7 +318,7 @@ impl ResponseError {
     self.resume = None;
     let Pending { owner, at } = core::mem::take(&mut self.pending);
     if let Some(at) = at {
-      let (line, column) = line_column(response, at);
+      let LineColumn { line, column } = line_column(response, at);
       self.subject = format!("{} at line {line} column {column}", self.subject).into_boxed_str();
     }
     if !matches!(owner, Owner::Unowned) {

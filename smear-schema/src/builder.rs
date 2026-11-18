@@ -193,25 +193,27 @@ impl core::fmt::Debug for TextArena {
 }
 
 impl TextArena {
-  /// Makes room for `len` more bytes and answers where they start and how long they are, or
-  /// refuses at [`MAX_TEXT_BYTES`].
+  /// Makes room for `len` more bytes and answers the [`Text`] that will name them — where they
+  /// start and how long they are — or refuses at [`MAX_TEXT_BYTES`].
   ///
   /// Asked before anything is written, so a refusal leaves the arena as it was, and the room is
   /// reserved from the length about to be written — one growth at most per string, and none when
   /// [`SchemaBuilder::inject`] has already reserved the built-ins' share.
-  fn admit(&mut self, len: usize) -> Option<(u32, u32)> {
+  fn admit(&mut self, len: usize) -> Option<Text> {
     self.admit_within(len, MAX_TEXT_BYTES)
   }
 
   /// [`TextArena::admit`] with the ceiling supplied, for the reason [`Interner::intern_within`]
   /// takes its two: a test can stand at a ceiling it can afford, and this is the whole mechanism.
-  fn admit_within(&mut self, len: usize, max_bytes: u32) -> Option<(u32, u32)> {
+  fn admit_within(&mut self, len: usize, max_bytes: u32) -> Option<Text> {
     let start = self.text.len();
     let bounds = match (
       u32::try_from(start),
       start.checked_add(len).map(u32::try_from),
     ) {
-      (Ok(start), Some(Ok(end))) if !self.refused && end <= max_bytes => Some((start, end - start)),
+      (Ok(start), Some(Ok(end))) if !self.refused && end <= max_bytes => {
+        Some(Text::new(start, end - start))
+      }
       _ => None,
     };
     match bounds {
@@ -249,12 +251,12 @@ impl TextArena {
       return Ok(Text::new(start as u32, (self.text.len() - start) as u32));
     }
     let len = string_value_len(spelling)?;
-    let Some((start, len)) = self.admit(len) else {
+    let Some(text) = self.admit(len) else {
       return Ok(Text::NONE);
     };
     // Cannot refuse: the sizing walk above read the same spelling and accepted it.
     string_value_pieces(spelling, |piece| self.text.push_str(piece))?;
-    Ok(Text::new(start, len))
+    Ok(text)
   }
 
   /// Appends a constant value's canonical text, measured before it is written.
@@ -266,12 +268,12 @@ impl TextArena {
   {
     let mut measure = Measure::default();
     print::canonical(value, &mut measure)?;
-    let Some((start, len)) = self.admit(measure.0) else {
+    let Some(text) = self.admit(measure.0) else {
       return Ok(Text::NONE);
     };
     // Cannot refuse: the measure above printed the same literal.
     print::canonical(value, &mut self.text)?;
-    Ok(Text::new(start, len))
+    Ok(text)
   }
 }
 
@@ -716,8 +718,20 @@ enum Names {
   /// At or below [`NARROW_LIST`] asks: the scan, whose per-lookup cost that ceiling is what bounds,
   /// exactly as it bounds the declared argument lists'.
   Scan,
-  /// Past it: `(name, position)` sorted once, so a lookup is a binary search.
-  Sorted(Vec<(Sym, u32)>),
+  /// Past it: the names and their positions, sorted once, so a lookup is a binary search.
+  Sorted(Vec<NamePosition>),
+}
+
+/// A name and the position of the list entry that wrote it.
+///
+/// Ordered by name, and by position among equal names — the field order is the key order, so the
+/// derived `Ord` is the sort [`Names`] and [`DeclaredNames`] rely on for `first`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct NamePosition {
+  /// The name the entry wrote.
+  name: Sym,
+  /// The entry's position in its list.
+  position: u32,
 }
 
 impl Names {
@@ -727,7 +741,12 @@ impl Names {
     if asks <= NARROW_LIST {
       return Self::Scan;
     }
-    let mut order: Vec<(Sym, u32)> = (0..len).map(|at| (name(at), at as u32)).collect();
+    let mut order: Vec<NamePosition> = (0..len)
+      .map(|at| NamePosition {
+        name: name(at),
+        position: at as u32,
+      })
+      .collect();
     order.sort_unstable();
     Self::Sorted(order)
   }
@@ -738,9 +757,9 @@ impl Names {
     match self {
       Self::Scan => (0..len).find(|&at| name(at) == wanted),
       Self::Sorted(order) => {
-        let at = order.partition_point(|&(written, _)| written < wanted);
+        let at = order.partition_point(|entry| entry.name < wanted);
         match order.get(at) {
-          Some(&(written, position)) if written == wanted => Some(position as usize),
+          Some(entry) if entry.name == wanted => Some(entry.position as usize),
           _ => None,
         }
       }
@@ -826,8 +845,8 @@ struct DeclaredNames {
 struct Declaration {
   /// Asks this declaration has answered by scanning, across the whole build.
   asks: u32,
-  /// `(name, position)` sorted once, so a lookup is a binary search.
-  order: Option<Vec<(Sym, u32)>>,
+  /// The names and their positions, sorted once, so a lookup is a binary search.
+  order: Option<Vec<NamePosition>>,
 }
 
 impl DeclaredNames {
@@ -872,18 +891,21 @@ impl DeclaredNames {
         slot.asks += 1;
         return declared.iter().position(|entry| name(entry) == wanted);
       }
-      let mut sorted: Vec<(Sym, u32)> = declared
+      let mut sorted: Vec<NamePosition> = declared
         .iter()
         .enumerate()
-        .map(|(at, entry)| (name(entry), at as u32))
+        .map(|(at, entry)| NamePosition {
+          name: name(entry),
+          position: at as u32,
+        })
         .collect();
       sorted.sort_unstable();
       slot.order = Some(sorted);
     }
     let order = slot.order.as_ref().expect("the index was just filled");
-    let at = order.partition_point(|&(declared, _)| declared < wanted);
+    let at = order.partition_point(|entry| entry.name < wanted);
     match order.get(at) {
-      Some(&(declared, position)) if declared == wanted => Some(position as usize),
+      Some(entry) if entry.name == wanted => Some(entry.position as usize),
       _ => None,
     }
   }
@@ -896,6 +918,31 @@ struct RawTypeRef {
   span: SimpleSpan,
   packed: PackedType,
   too_deep: bool,
+}
+
+/// A type reference [`SchemaBuilder::resolve_type_refs`] will report, held until the push loops at
+/// the end: the base as written, where the reference sits, and the span to blame.
+///
+/// Both of its report lists, the references that name nothing and the ones past the nesting
+/// ceiling, hold these.
+#[derive(Debug, Clone, Copy)]
+struct Unresolved {
+  /// The base name as written, with the document it was read from.
+  at: Located,
+  /// The field, argument or input field the reference is written on.
+  path: Coordinate,
+  /// The span the diagnostic points at.
+  span: SimpleSpan,
+}
+
+/// The input object a field ties its owner to under `InputObjectHasUnbreakableCycle`:
+/// [`SchemaBuilder::input_link`]'s answer.
+#[derive(Debug, Clone, Copy)]
+struct InputLink {
+  /// The index of the input object type the field names.
+  target: usize,
+  /// Whether the field is nullable.
+  nullable: bool,
 }
 
 /// A directive written on a type-system element, kept whole.
@@ -2243,6 +2290,14 @@ fn push_related(
   errors.push(error);
 }
 
+/// The three disjoint borrows [`SchemaBuilder::split_indexed`] hands out: the read side, the
+/// errors, and the literal-checking index.
+struct SplitIndexed<'a> {
+  model: Model<'a>,
+  errors: &'a mut Vec<SchemaError>,
+  names: &'a mut DeclaredNames,
+}
+
 // ---------------------------------------------------------------------------------------------
 // the builder
 // ---------------------------------------------------------------------------------------------
@@ -2448,7 +2503,7 @@ impl SchemaBuilder {
 
   /// The read side and the write side, borrowed apart. See [`Model`].
   fn split(&mut self) -> (Model<'_>, &mut Vec<SchemaError>) {
-    let (model, errors, _) = self.split_indexed();
+    let SplitIndexed { model, errors, .. } = self.split_indexed();
     (model, errors)
   }
 
@@ -2457,9 +2512,9 @@ impl SchemaBuilder {
   /// A third field borrow rather than a local, because the index is a function of the declarations
   /// alone: the checks that read literals are reached from four `&mut self` passes, and an index
   /// per pass would sort one declaration once for each of them. See [`DeclaredNames`].
-  fn split_indexed(&mut self) -> (Model<'_>, &mut Vec<SchemaError>, &mut DeclaredNames) {
-    (
-      Model {
+  fn split_indexed(&mut self) -> SplitIndexed<'_> {
+    SplitIndexed {
+      model: Model {
         types: &self.types,
         directives: &self.directives,
         type_of_sym: &self.type_of_sym,
@@ -2469,9 +2524,9 @@ impl SchemaBuilder {
         literals: &self.literals,
         built_in_document: self.built_in_document,
       },
-      &mut self.errors,
-      &mut self.declared_names,
-    )
+      errors: &mut self.errors,
+      names: &mut self.declared_names,
+    }
   }
 
   // -- interning ------------------------------------------------------------------------------
@@ -4025,8 +4080,8 @@ impl SchemaBuilder {
   /// built-in ones included — and all but the handful that fail need no path at all. Rendering is
   /// deferred to the push loops at the end, where `&mut self` is free anyway.
   fn resolve_type_refs(&mut self) {
-    let mut unresolved: Vec<(Located, Coordinate, SimpleSpan)> = Vec::new();
-    let mut too_deep: Vec<(Located, Coordinate, SimpleSpan)> = Vec::new();
+    let mut unresolved: Vec<Unresolved> = Vec::new();
+    let mut too_deep: Vec<Unresolved> = Vec::new();
 
     for index in 0..self.types.len() {
       let owner = Coordinate::named(self.types[index].name.sym);
@@ -4086,12 +4141,12 @@ impl SchemaBuilder {
       }
     }
 
-    for (at, path, _) in unresolved {
+    for Unresolved { at, path, .. } in unresolved {
       let subject = self.text(at.sym).to_owned();
       let path = self.owner(path);
       self.push_owned(SchemaErrorKind::UndefinedType, &subject, path, at);
     }
-    for (at, path, span) in too_deep {
+    for Unresolved { at, path, span } in too_deep {
       let subject = self.text(at.sym).to_owned();
       let path = self.owner(path);
       let mut at = at;
@@ -4104,11 +4159,15 @@ impl SchemaBuilder {
     type_of_sym: &[u32],
     reference: &mut RawTypeRef,
     path: Coordinate,
-    unresolved: &mut Vec<(Located, Coordinate, SimpleSpan)>,
-    too_deep: &mut Vec<(Located, Coordinate, SimpleSpan)>,
+    unresolved: &mut Vec<Unresolved>,
+    too_deep: &mut Vec<Unresolved>,
   ) {
     if reference.too_deep {
-      too_deep.push((reference.base, path, reference.span));
+      too_deep.push(Unresolved {
+        at: reference.base,
+        path,
+        span: reference.span,
+      });
     }
     let slot = reference.base.sym.get() as usize;
     match type_of_sym.get(slot) {
@@ -4119,7 +4178,11 @@ impl SchemaBuilder {
           reference.packed.wrappers(),
         );
       }
-      _ => unresolved.push((reference.base, path, reference.span)),
+      _ => unresolved.push(Unresolved {
+        at: reference.base,
+        path,
+        span: reference.span,
+      }),
     }
   }
 
@@ -4458,7 +4521,11 @@ impl SchemaBuilder {
       }
 
       let built_in = self.types[index].built_in;
-      let (model, errors, names) = self.split_indexed();
+      let SplitIndexed {
+        model,
+        errors,
+        names,
+      } = self.split_indexed();
       Self::validate_arguments(
         model,
         errors,
@@ -4764,7 +4831,11 @@ impl SchemaBuilder {
         .default_value
         .is_some()
       {
-        let (model, errors, names) = self.split_indexed();
+        let SplitIndexed {
+          model,
+          errors,
+          names,
+        } = self.split_indexed();
         let default = model.types[index].input_fields[position]
           .default_value
           .as_ref()
@@ -4821,7 +4892,11 @@ impl SchemaBuilder {
         self.push(SchemaErrorKind::TooManyDirectiveArguments, &name, at);
       }
 
-      let (model, errors, names) = self.split_indexed();
+      let SplitIndexed {
+        model,
+        errors,
+        names,
+      } = self.split_indexed();
       Self::validate_arguments(
         model,
         errors,
@@ -4851,7 +4926,11 @@ impl SchemaBuilder {
   /// be resolved before a value can be checked against it, and after
   /// [`SchemaBuilder::apply_extensions`] because a definition and its extensions are one location.
   fn validate_directive_usages(&mut self) {
-    let (model, errors, names) = self.split_indexed();
+    let SplitIndexed {
+      model,
+      errors,
+      names,
+    } = self.split_indexed();
     Self::check_directive_uses(
       model,
       errors,
@@ -6075,7 +6154,11 @@ impl SchemaBuilder {
         stack.push((current, cursor + 1, nullable));
         let field = &self.types[current].input_fields[cursor];
         let at = field.name;
-        let Some((target, link_is_nullable)) = self.input_link(current, field.ty.packed) else {
+        let Some(InputLink {
+          target,
+          nullable: link_is_nullable,
+        }) = self.input_link(current, field.ty.packed)
+        else {
           continue;
         };
         if finite[target] {
@@ -6141,7 +6224,7 @@ impl SchemaBuilder {
       let mut leaves = false;
       for field in &self.types[owner].input_fields {
         match self.input_link(owner, field.ty.packed) {
-          Some((target, _)) => {
+          Some(InputLink { target, .. }) => {
             start[target + 1] += 1;
             waiting[owner] += 1;
           }
@@ -6168,7 +6251,7 @@ impl SchemaBuilder {
         continue;
       }
       for field in &self.types[owner].input_fields {
-        if let Some((target, _)) = self.input_link(owner, field.ty.packed) {
+        if let Some(InputLink { target, .. }) = self.input_link(owner, field.ty.packed) {
           owners[next[target] as usize] = owner as u32;
           next[target] += 1;
         }
@@ -6201,7 +6284,7 @@ impl SchemaBuilder {
   /// enum; a nullable field of an ordinary input object, which may be left out; and a type that
   /// did not resolve or is not an input type, which another rule has already refused. A nullable
   /// field of a OneOf is still a link, because the one field a OneOf is given may not be `null`.
-  fn input_link(&self, owner: usize, packed: PackedType) -> Option<(usize, bool)> {
+  fn input_link(&self, owner: usize, packed: PackedType) -> Option<InputLink> {
     let nullable = !packed.is_non_null();
     if nullable && !self.types[owner].one_of {
       return None;
@@ -6214,7 +6297,10 @@ impl SchemaBuilder {
       return None;
     }
     let base = base.get() as usize;
-    (self.types[base].kind == TypeKind::InputObject).then_some((base, nullable))
+    (self.types[base].kind == TypeKind::InputObject).then_some(InputLink {
+      target: base,
+      nullable,
+    })
   }
 
   /// Draft §3.10.1(4): `InputObjectDefaultValueHasCycle(inputObject)` must be false.
@@ -6604,7 +6690,11 @@ impl SchemaBuilder {
       position
     }
 
-    let (model, errors, names) = self.split_indexed();
+    let SplitIndexed {
+      model,
+      errors,
+      names,
+    } = self.split_indexed();
     let count = model.types.len();
     // A dense id per input field, so path membership is a bit rather than a search.
     let mut field_base: Vec<usize> = vec![0; count + 1];

@@ -75,7 +75,7 @@ use std::{boxed::Box, string::String, vec::Vec};
 use super::{
   super::{error::owner_path, repr::DirectiveLocation},
   error::{ResponseError, ResponseErrorKind},
-  json::{Scanned, Scanner, Text},
+  json::{Scanned, ScannedString, Scanner, Text},
   model::{
     IntrospectedDirective, IntrospectedEnumValue, IntrospectedField, IntrospectedInputValue,
     IntrospectedKind, IntrospectedSchema, IntrospectedType, Name, NamedTypeRef, TypeRef,
@@ -287,7 +287,7 @@ fn peek_name(response: &str, at: usize) -> Option<&str> {
       name = Scanner::at(response, value)
         .string("an owner")
         .ok()
-        .map(|(literal, _)| literal);
+        .map(|string| string.raw);
     }
   }
   name
@@ -313,7 +313,7 @@ fn refuse(kind: ResponseErrorKind, subject: &str, owner: Owner) -> ResponseError
 // object is a map, so the second `"name"` replaced the first long before the shape was consulted.
 
 /// One recognised member, as its **last** occurrence left it: where the value began, and what
-/// reading it produced.
+/// reading it produced. A member's slot is an `Option` of this, `None` until the member is met.
 ///
 /// # Why a member's failure waits for the closing brace
 ///
@@ -327,19 +327,29 @@ fn refuse(kind: ResponseErrorKind, subject: &str, owner: Owner) -> ResponseError
 /// any other value. Reading is still fail-fast at the *document* — [`Refusals::check`] reports
 /// before the object is built, nothing accumulates across objects — it is fail-fast at the member
 /// that survived rather than at the first one written.
-type Slot<T> = Option<(usize, Scanned<T>)>;
+struct Slot<T> {
+  /// The offset where the value began.
+  at: usize,
+  /// What reading the value produced: the value, or the refusal it held.
+  value: Scanned<T>,
+}
 
 /// Reads one occurrence of a recognised member into its slot, replacing whatever an earlier
 /// occurrence left there.
 fn member<'a, T>(
   scanner: &mut Scanner<'a>,
-  slot: &mut Slot<T>,
+  slot: &mut Option<Slot<T>>,
   read: impl FnOnce(&mut Scanner<'a>) -> Scanned<T>,
 ) -> Scanned {
   scanner.skip_ws();
   let at = scanner.mark();
   match read(scanner) {
-    Ok(value) => *slot = Some((at.position(), Ok(value))),
+    Ok(value) => {
+      *slot = Some(Slot {
+        at: at.position(),
+        value: Ok(value),
+      })
+    }
     Err(refusal) => {
       // Whatever the refusal did to the cursor, it has to end up at the end of this member's value:
       // the object's remaining members still have to be read, because one of them may be this
@@ -364,7 +374,10 @@ fn member<'a, T>(
           scanner.skip_value()?;
         }
       }
-      *slot = Some((at.position(), Err(refusal)));
+      *slot = Some(Slot {
+        at: at.position(),
+        value: Err(refusal),
+      });
     }
   }
   Ok(())
@@ -373,22 +386,36 @@ fn member<'a, T>(
 /// The refusal an object's surviving members produce, once the object has closed.
 #[derive(Debug, Default)]
 struct Refusals {
-  first: Option<(usize, ResponseError)>,
+  first: Option<FirstRefusal>,
+}
+
+/// The surviving refusal at the smallest offset: [`Refusals`]'s held failure.
+#[derive(Debug)]
+struct FirstRefusal {
+  /// The offset where the refused member's value began.
+  at: usize,
+  /// The refusal.
+  error: ResponseError,
 }
 
 impl Refusals {
   /// Takes a slot's value, keeping its refusal if it has one.
-  fn take<T>(&mut self, slot: Slot<T>) -> Option<T> {
+  fn take<T>(&mut self, slot: Option<Slot<T>>) -> Option<T> {
     match slot {
       None => None,
-      Some((_, Ok(value))) => Some(value),
-      Some((at, Err(refusal))) => {
+      Some(Slot {
+        value: Ok(value), ..
+      }) => Some(value),
+      Some(Slot {
+        at,
+        value: Err(refusal),
+      }) => {
         // Document order, which is offset order: members are read left to right, so the smallest
         // offset among the surviving failures is the defect the response wrote first — the same
         // one a reader that stopped at the first failure would have named, whenever no duplicate
         // took that failure away.
-        if !matches!(&self.first, Some((first, _)) if *first <= at) {
-          self.first = Some((at, refusal));
+        if !matches!(&self.first, Some(first) if first.at <= at) {
+          self.first = Some(FirstRefusal { at, error: refusal });
         }
         None
       }
@@ -404,7 +431,7 @@ impl Refusals {
   /// inside it and the mark has to name the value *its own* caller is stepping over.
   fn check(self, scanner: &Scanner<'_>) -> Scanned {
     match self.first {
-      Some((_, refusal)) => Err(refusal.resume_at(scanner.mark())),
+      Some(FirstRefusal { error, .. }) => Err(error.resume_at(scanner.mark())),
       None => Ok(()),
     }
   }
@@ -476,7 +503,7 @@ fn is_deprecated(scanner: &mut Scanner<'_>, what: &str) -> Scanned<bool> {
 /// [`InvalidName`](ResponseErrorKind::InvalidName) with the literal as the subject. See
 /// [the five kinds of string](super::json) for the other four, all of which decode.
 fn graphql_name<'a>(scanner: &mut Scanner<'a>, what: &str, owner: Owner) -> Scanned<Name<'a>> {
-  let (literal, _) = scanner.string(what)?;
+  let ScannedString { raw: literal, .. } = scanner.string(what)?;
   Name::new(literal).ok_or_else(|| refuse(ResponseErrorKind::InvalidName, literal, owner))
 }
 
