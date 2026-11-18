@@ -20,6 +20,7 @@ use crate::type_system::{ExtensionDirectives, ExtensionFields};
 macro_rules! impl_node_traits {
   (
     $node:ident<$($generic:ident),+>,
+    $components:ident,
     ($($component:ty),+),
     ($($field:ident),+),
     [$($used:ident),+]
@@ -38,23 +39,21 @@ macro_rules! impl_node_traits {
       }
     }
 
-    paste::paste! {
-      #[doc = concat!("`", stringify!($node), "` taken apart: every field, in the order it is written.")]
-      #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-      pub struct [<$node Components>]<$($used),+> {
-        $(
-          #[doc = concat!("The node's `", stringify!($field), "`.")]
-          pub $field: $component,
-        )+
-      }
+    #[doc = concat!("`", stringify!($node), "` taken apart: every field, in the order it is written.")]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct $components<$($used),+> {
+      $(
+        #[doc = concat!("The node's `", stringify!($field), "`.")]
+        pub $field: $component,
+      )+
+    }
 
-      impl<$($generic),+> IntoComponents for $node<$($generic),+> {
-        type Components = [<$node Components>]<$($used),+>;
+    impl<$($generic),+> IntoComponents for $node<$($generic),+> {
+      type Components = $components<$($used),+>;
 
-        #[inline]
-        fn into_components(self) -> Self::Components {
-          [<$node Components>] { $($field: self.$field,)+ }
-        }
+      #[inline]
+      fn into_components(self) -> Self::Components {
+        $components { $($field: self.$field,)+ }
       }
     }
   };
@@ -73,6 +72,7 @@ pub struct ScalarTypeDefinition<Name, Implements, Directives, WhereClause, Span 
 
 impl_node_traits!(
   ScalarTypeDefinition<Name, Implements, Directives, WhereClause, Span>,
+  ScalarTypeDefinitionComponents,
   (
     Span,
     Name,
@@ -148,6 +148,7 @@ pub struct EnumTypeDefinition<Name, Implements, Directives, EnumValues, Span = S
 
 impl_node_traits!(
   EnumTypeDefinition<Name, Implements, Directives, EnumValues, Span>,
+  EnumTypeDefinitionComponents,
   (
     Span,
     Name,
@@ -223,6 +224,7 @@ pub struct UnionTypeDefinition<Name, Implements, Directives, MemberTypes, Span =
 
 impl_node_traits!(
   UnionTypeDefinition<Name, Implements, Directives, MemberTypes, Span>,
+  UnionTypeDefinitionComponents,
   (
     Span,
     Name,
@@ -298,6 +300,7 @@ pub struct InputObjectTypeDefinition<Name, Implements, Directives, Fields, Span 
 
 impl_node_traits!(
   InputObjectTypeDefinition<Name, Implements, Directives, Fields, Span>,
+  InputObjectTypeDefinitionComponents,
   (
     Span,
     Name,
@@ -405,6 +408,7 @@ pub struct ScalarTypeExtension<Name, Implements, Directives, Span = SimpleSpan> 
 
 impl_node_traits!(
   ScalarTypeExtension<Name, Implements, Directives, Span>,
+  ScalarTypeExtensionComponents,
   (Span, Name, ScalarTypeExtensionData<Implements, Directives>),
   (span, name, data),
   [Name, Implements, Directives, Span]
@@ -601,6 +605,7 @@ pub struct EnumTypeExtension<Name, Implements, Directives, Values, Span = Simple
 
 impl_node_traits!(
   EnumTypeExtension<Name, Implements, Directives, Values, Span>,
+  EnumTypeExtensionComponents,
   (Span, Name, EnumTypeExtensionData<Implements, Directives, Values>),
   (span, name, data),
   [Name, Implements, Directives, Values, Span]
@@ -807,6 +812,7 @@ pub struct UnionTypeExtension<Name, Implements, Directives, MemberTypes, Span = 
 
 impl_node_traits!(
   UnionTypeExtension<Name, Implements, Directives, MemberTypes, Span>,
+  UnionTypeExtensionComponents,
   (Span, Name, UnionTypeExtensionData<Implements, Directives, MemberTypes>),
   (span, name, data),
   [Name, Implements, Directives, MemberTypes, Span]
@@ -919,6 +925,7 @@ pub struct InputObjectTypeExtension<Name, Implements, Directives, Fields, Span =
 
 impl_node_traits!(
   InputObjectTypeExtension<Name, Implements, Directives, Fields, Span>,
+  InputObjectTypeExtensionComponents,
   (Span, Name, InputObjectTypeExtensionData<Implements, Directives, Fields>),
   (span, name, data),
   [Name, Implements, Directives, Fields, Span]

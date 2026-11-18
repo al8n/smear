@@ -25,6 +25,7 @@ mod tests;
 macro_rules! impl_node_traits {
   (
     $node:ident<$($generic:ident),+>,
+    $components:ident,
     ($($component:ty),+),
     ($($field:ident),+),
     [$($used:ident),+]
@@ -43,23 +44,21 @@ macro_rules! impl_node_traits {
       }
     }
 
-    paste::paste! {
-      #[doc = concat!("`", stringify!($node), "` taken apart: every field, in the order it is written.")]
-      #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-      pub struct [<$node Components>]<$($used),+> {
-        $(
-          #[doc = concat!("The node's `", stringify!($field), "`.")]
-          pub $field: $component,
-        )+
-      }
+    #[doc = concat!("`", stringify!($node), "` taken apart: every field, in the order it is written.")]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct $components<$($used),+> {
+      $(
+        #[doc = concat!("The node's `", stringify!($field), "`.")]
+        pub $field: $component,
+      )+
+    }
 
-      impl<$($generic),+> IntoComponents for $node<$($generic),+> {
-        type Components = [<$node Components>]<$($used),+>;
+    impl<$($generic),+> IntoComponents for $node<$($generic),+> {
+      type Components = $components<$($used),+>;
 
-        #[inline]
-        fn into_components(self) -> Self::Components {
-          [<$node Components>] { $($field: self.$field,)+ }
-        }
+      #[inline]
+      fn into_components(self) -> Self::Components {
+        $components { $($field: self.$field,)+ }
       }
     }
   };
@@ -82,6 +81,7 @@ pub struct ArgumentsDefinition<InputValue, Container = Vec<InputValue>, Span = S
 
 impl_node_traits!(
   ArgumentsDefinition<InputValue, Container, Span>,
+  ArgumentsDefinitionComponents,
   (Span, Container),
   (span, input_value_definitions),
   [Container, Span]
@@ -132,6 +132,7 @@ pub struct InputValueDefinition<Name, Type, DefaultValue, Directives, Span = Sim
 
 impl_node_traits!(
   InputValueDefinition<Name, Type, DefaultValue, Directives, Span>,
+  InputValueDefinitionComponents,
   (Span, Name, Type, Option<DefaultValue>, Option<Directives>),
   (span, name, ty, default_value, directives),
   [Name, Type, DefaultValue, Directives, Span]
@@ -199,6 +200,7 @@ pub struct InputFieldsDefinition<InputValue, Container = Vec<InputValue>, Span =
 
 impl_node_traits!(
   InputFieldsDefinition<InputValue, Container, Span>,
+  InputFieldsDefinitionComponents,
   (Span, Container),
   (span, input_value_definitions),
   [Container, Span]
@@ -249,6 +251,7 @@ pub struct FieldDefinition<Name, Arguments, Type, Directives, Span = SimpleSpan>
 
 impl_node_traits!(
   FieldDefinition<Name, Arguments, Type, Directives, Span>,
+  FieldDefinitionComponents,
   (Span, Name, Option<Arguments>, Type, Option<Directives>),
   (span, name, arguments_definition, ty, directives),
   [Name, Arguments, Type, Directives, Span]
@@ -316,6 +319,7 @@ pub struct FieldsDefinition<Field, Container = Vec<Field>, Span = SimpleSpan> {
 
 impl_node_traits!(
   FieldsDefinition<Field, Container, Span>,
+  FieldsDefinitionComponents,
   (Span, Container),
   (span, field_definitions),
   [Container, Span]
@@ -364,6 +368,7 @@ pub struct ImplementInterfaces<Name, Container = Vec<Name>, Span = SimpleSpan> {
 
 impl_node_traits!(
   ImplementInterfaces<Name, Container, Span>,
+  ImplementInterfacesComponents,
   (Span, Container),
   (span, interfaces),
   [Container, Span]
@@ -414,6 +419,7 @@ pub struct InterfaceTypeDefinition<Name, Implements, Directives, Fields, Span = 
 
 impl_node_traits!(
   InterfaceTypeDefinition<Name, Implements, Directives, Fields, Span>,
+  InterfaceTypeDefinitionComponents,
   (Span, Name, Option<Implements>, Option<Directives>, Option<Fields>),
   (span, name, implements, directives, fields_definition),
   [Name, Implements, Directives, Fields, Span]
@@ -481,6 +487,7 @@ pub struct RootOperationTypeDefinition<Name, OperationType, Span = SimpleSpan> {
 
 impl_node_traits!(
   RootOperationTypeDefinition<Name, OperationType, Span>,
+  RootOperationTypeDefinitionComponents,
   (Span, OperationType, Name),
   (span, operation_type, name),
   [Name, OperationType, Span]
@@ -530,6 +537,7 @@ pub struct RootOperationTypesDefinition<
 
 impl_node_traits!(
   RootOperationTypesDefinition<RootOperation, Container, Span>,
+  RootOperationTypesDefinitionComponents,
   (Span, Container),
   (span, root_operation_type_definitions),
   [Container, Span]
@@ -578,6 +586,7 @@ pub struct EnumValueDefinition<EnumValue, Directives, Span = SimpleSpan> {
 
 impl_node_traits!(
   EnumValueDefinition<EnumValue, Directives, Span>,
+  EnumValueDefinitionComponents,
   (Span, EnumValue, Option<Directives>),
   (span, value, directives),
   [EnumValue, Directives, Span]
@@ -623,6 +632,7 @@ pub struct EnumValuesDefinition<EnumValue, Container = Vec<EnumValue>, Span = Si
 
 impl_node_traits!(
   EnumValuesDefinition<EnumValue, Container, Span>,
+  EnumValuesDefinitionComponents,
   (Span, Container),
   (span, enum_value_definitions),
   [Container, Span]
@@ -673,6 +683,7 @@ pub struct ObjectTypeDefinition<Name, Implements, Directives, Fields, Span = Sim
 
 impl_node_traits!(
   ObjectTypeDefinition<Name, Implements, Directives, Fields, Span>,
+  ObjectTypeDefinitionComponents,
   (Span, Name, Option<Implements>, Option<Directives>, Option<Fields>),
   (span, name, implements, directives, fields_definition),
   [Name, Implements, Directives, Fields, Span]
@@ -740,6 +751,7 @@ pub struct UnionMemberTypes<Name, Container = Vec<Name>, Span = SimpleSpan> {
 
 impl_node_traits!(
   UnionMemberTypes<Name, Container, Span>,
+  UnionMemberTypesComponents,
   (Span, Container),
   (span, members),
   [Container, Span]
@@ -1284,6 +1296,7 @@ pub struct DirectiveLocations<
 
 impl_node_traits!(
   DirectiveLocations<DirectiveLocation, Container, Span>,
+  DirectiveLocationsComponents,
   (Span, Container),
   (span, locations),
   [Container, Span]
@@ -1339,6 +1352,7 @@ pub struct DirectiveDefinition<Name, Arguments, Directives, Locations, Span = Si
 
 impl_node_traits!(
   DirectiveDefinition<Name, Arguments, Directives, Locations, Span>,
+  DirectiveDefinitionComponents,
   (Span, Name, Option<Arguments>, Option<Directives>, bool, Locations),
   (span, name, arguments_definition, directives, repeatable, locations),
   [Name, Arguments, Directives, Locations, Span]
@@ -1414,6 +1428,7 @@ pub struct SchemaDefinition<Directives, RootOperations, Span = SimpleSpan> {
 
 impl_node_traits!(
   SchemaDefinition<Directives, RootOperations, Span>,
+  SchemaDefinitionComponents,
   (Span, Option<Directives>, RootOperations),
   (span, directives, root_operation_types_definition),
   [Directives, RootOperations, Span]
@@ -1668,6 +1683,7 @@ pub struct ObjectTypeExtension<Name, Implements, Directives, Fields, Span = Simp
 
 impl_node_traits!(
   ObjectTypeExtension<Name, Implements, Directives, Fields, Span>,
+  ObjectTypeExtensionComponents,
   (Span, Name, ObjectTypeExtensionData<Implements, Directives, Fields>),
   (span, name, data),
   [Name, Implements, Directives, Fields, Span]
@@ -1781,6 +1797,7 @@ pub struct InterfaceTypeExtension<Name, Implements, Directives, Fields, Span = S
 
 impl_node_traits!(
   InterfaceTypeExtension<Name, Implements, Directives, Fields, Span>,
+  InterfaceTypeExtensionComponents,
   (Span, Name, InterfaceTypeExtensionData<Implements, Directives, Fields>),
   (span, name, data),
   [Name, Implements, Directives, Fields, Span]
@@ -1952,6 +1969,7 @@ pub struct SchemaExtension<Directives, RootOperations, Span = SimpleSpan> {
 
 impl_node_traits!(
   SchemaExtension<Directives, RootOperations, Span>,
+  SchemaExtensionComponents,
   (Span, SchemaExtensionData<Directives, RootOperations>),
   (span, data),
   [Directives, RootOperations, Span]
@@ -2136,6 +2154,7 @@ pub struct DirectiveExtension<Name, Directives, Span = SimpleSpan> {
 
 impl_node_traits!(
   DirectiveExtension<Name, Directives, Span>,
+  DirectiveExtensionComponents,
   (Span, Name, Directives),
   (span, name, directives),
   [Name, Directives, Span]

@@ -21,6 +21,7 @@ pub struct ScalarTypeDefinition<Name, Directives, Span = SimpleSpan> {
 
 impl_node_traits!(
   ScalarTypeDefinition<Name, Directives, Span>,
+  ScalarTypeDefinitionComponents,
   (Span, Name, Option<Directives>),
   (span, name, directives),
   [Name, Directives, Span]
@@ -67,6 +68,7 @@ pub struct EnumTypeDefinition<Name, Directives, EnumValues, Span = SimpleSpan> {
 
 impl_node_traits!(
   EnumTypeDefinition<Name, Directives, EnumValues, Span>,
+  EnumTypeDefinitionComponents,
   (Span, Name, Option<Directives>, Option<EnumValues>),
   (span, name, directives, enum_values_definition),
   [Name, Directives, EnumValues, Span]
@@ -125,6 +127,7 @@ pub struct UnionTypeDefinition<Name, Directives, MemberTypes, Span = SimpleSpan>
 
 impl_node_traits!(
   UnionTypeDefinition<Name, Directives, MemberTypes, Span>,
+  UnionTypeDefinitionComponents,
   (Span, Name, Option<Directives>, Option<MemberTypes>),
   (span, name, directives, member_types),
   [Name, Directives, MemberTypes, Span]
@@ -183,6 +186,7 @@ pub struct InputObjectTypeDefinition<Name, Directives, Fields, Span = SimpleSpan
 
 impl_node_traits!(
   InputObjectTypeDefinition<Name, Directives, Fields, Span>,
+  InputObjectTypeDefinitionComponents,
   (Span, Name, Option<Directives>, Option<Fields>),
   (span, name, directives, fields_definition),
   [Name, Directives, Fields, Span]
@@ -336,6 +340,7 @@ pub struct UnionTypeExtension<Name, Directives, MemberTypes, Span = SimpleSpan> 
 
 impl_node_traits!(
   UnionTypeExtension<Name, Directives, MemberTypes, Span>,
+  UnionTypeExtensionComponents,
   (Span, Name, UnionTypeExtensionData<Directives, MemberTypes>),
   (span, name, data),
   [Name, Directives, MemberTypes, Span]
@@ -489,6 +494,7 @@ pub struct EnumTypeExtension<Name, Directives, Values, Span = SimpleSpan> {
 
 impl_node_traits!(
   EnumTypeExtension<Name, Directives, Values, Span>,
+  EnumTypeExtensionComponents,
   (Span, Name, EnumTypeExtensionData<Directives, Values>),
   (span, name, data),
   [Name, Directives, Values, Span]
@@ -642,6 +648,7 @@ pub struct InputObjectTypeExtension<Name, Directives, Fields, Span = SimpleSpan>
 
 impl_node_traits!(
   InputObjectTypeExtension<Name, Directives, Fields, Span>,
+  InputObjectTypeExtensionComponents,
   (Span, Name, InputObjectTypeExtensionData<Directives, Fields>),
   (span, name, data),
   [Name, Directives, Fields, Span]
@@ -701,6 +708,7 @@ pub struct ScalarTypeExtension<Name, Directives, Span = SimpleSpan> {
 
 impl_node_traits!(
   ScalarTypeExtension<Name, Directives, Span>,
+  ScalarTypeExtensionComponents,
   (Span, Name, Directives),
   (span, name, directives),
   [Name, Directives, Span]
