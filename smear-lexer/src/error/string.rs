@@ -347,8 +347,57 @@ impl InvalidUnicodeScalarValue {
   }
 }
 
-/// An error encountered during lexing for `\u{...}` (braced) unicode sequences.
+/// More than six hex digits between the braces of a `\u{...}` escape: the payload of
+/// [`BracedUnicodeEscapeError::TooManyDigits`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct TooManyDigits {
+  span: Span,
+  count: usize,
+}
+
+impl TooManyDigits {
+  /// Create the refusal of an escape over `span` that holds `count` digits.
+  #[inline(always)]
+  pub(crate) const fn new(span: Span, count: usize) -> Self {
+    Self { span, count }
+  }
+
+  /// Get the span of the entire braced unicode escape.
+  #[inline(always)]
+  pub const fn span(&self) -> Span {
+    self.span
+  }
+
+  /// Get the span of the entire braced unicode escape as a reference.
+  #[inline(always)]
+  pub const fn span_ref(&self) -> &Span {
+    &self.span
+  }
+
+  /// Get the mutable span of the entire braced unicode escape.
+  #[inline(always)]
+  pub const fn span_mut(&mut self) -> &mut Span {
+    &mut self.span
+  }
+
+  /// Get the count of digits found.
+  #[inline(always)]
+  pub const fn count(&self) -> usize {
+    self.count
+  }
+
+  /// Bumps the span of the entire braced unicode escape by `n`.
+  #[inline]
+  pub(crate) fn bump(&mut self, n: usize) -> &mut Self {
+    self.span.bump(&n);
+    self
+  }
+}
+
+/// An error encountered during lexing for `\u{...}` (braced) unicode sequences.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, IsVariant, TryUnwrap, Unwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum BracedUnicodeEscapeError {
   /// The opening brace was not closed: `\u{1234`.
@@ -358,12 +407,7 @@ pub enum BracedUnicodeEscapeError {
   Empty(Span),
 
   /// More than 6 hex digits inside the braces.
-  TooManyDigits {
-    /// The span of the entire braced unicode escape.
-    span: Span,
-    /// The count of digits found.
-    count: usize,
-  },
+  TooManyDigits(TooManyDigits),
 
   /// An invalid sequence of unicode in the braces.
   InvalidSequence(Span),
@@ -379,10 +423,9 @@ impl BracedUnicodeEscapeError {
   #[inline]
   pub const fn kind(&self) -> SyntaxErrorKind {
     match self {
-      Self::Unclosed(_)
-      | Self::Empty(_)
-      | Self::TooManyDigits { .. }
-      | Self::InvalidSequence(_) => SyntaxErrorKind::InvalidUnicodeEscape,
+      Self::Unclosed(_) | Self::Empty(_) | Self::TooManyDigits(_) | Self::InvalidSequence(_) => {
+        SyntaxErrorKind::InvalidUnicodeEscape
+      }
       Self::InvalidScalar(_) => SyntaxErrorKind::InvalidUnicodeScalar,
     }
   }
@@ -396,7 +439,7 @@ impl BracedUnicodeEscapeError {
   /// Creates a too many digits in braced unicode escape error.
   #[inline]
   pub const fn too_many_digits(span: Span, count: usize) -> Self {
-    Self::TooManyDigits { span, count }
+    Self::TooManyDigits(TooManyDigits::new(span, count))
   }
 
   /// Creates an unclosed brace in braced unicode escape error.
@@ -435,8 +478,8 @@ impl BracedUnicodeEscapeError {
       Self::Empty(span) => {
         span.bump(&n);
       }
-      Self::TooManyDigits { span, .. } => {
-        span.bump(&n);
+      Self::TooManyDigits(err) => {
+        err.bump(n);
       }
       Self::InvalidSequence(span) => {
         span.bump(&n);
@@ -568,7 +611,7 @@ impl<Char> UnicodeError<Char> {
   /// Creates a too many digits in braced unicode escape error.
   #[inline]
   pub const fn too_many_digits_in_braced_unicode_escape(span: Span, count: usize) -> Self {
-    Self::Braced(BracedUnicodeEscapeError::TooManyDigits { span, count })
+    Self::Braced(BracedUnicodeEscapeError::too_many_digits(span, count))
   }
 
   /// Creates an unclosed brace in braced unicode escape error.

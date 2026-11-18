@@ -27,6 +27,12 @@ All notable changes to Smear are documented in this file.
   `indexmap` with either tier and on foldhash with `alloc`, and `smear-schema` on smol-bytes 0.2
   with either tier where the target has pointer-width atomics. A build with no tier compiles none
   of them.
+- `smear-lexer`!: `BracedUnicodeEscapeError::TooManyDigits` carries a `TooManyDigits`, exported with
+  the other error types, where it had the fields `span` and `count`: `span()`, `span_ref()`,
+  `span_mut()` and `count()` read it. `BracedUnicodeEscapeError::too_many_digits` and
+  `UnicodeError::too_many_digits_in_braced_unicode_escape` still build the refusal. The enum
+  derives `is_*`, `unwrap_*` and `try_unwrap_*` for its variants, by value, by reference and by
+  mutable reference.
 - `smear-lexer`: `decode_string_value` writes to any `core::fmt::Write`: a `String` as before, a
   `&mut dyn fmt::Write`, or the `fmt::Formatter` a `Display` implementation is handed. A writer
   that refuses a write is answered with the new `StringValueError::Sink`, holding a prefix of the
