@@ -8,12 +8,14 @@
 //! each nonempty form the grammar allows, as the object extension's does: interfaces alone, or
 //! directives or the kind's own body with optional interfaces before them.
 
-use derive_more::IsVariant;
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use tokora::{
   SimpleSpan,
   span::{AsSpan, IntoSpan},
   utils::IntoComponents,
 };
+
+use crate::type_system::{ExtensionDirectives, ExtensionFields};
 
 macro_rules! impl_node_traits {
   ($node:ident<$($generic:ident),+>, ($($component:ty),+), ($($field:ident),+)) => {
@@ -343,17 +345,14 @@ impl<Name, Implements, Directives, Fields, Span>
 ///
 /// Each variant is one of the two nonempty forms: interfaces alone, or directives with optional
 /// interfaces before them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum ScalarTypeExtensionData<Implements, Directives> {
   /// Adds one or more implemented interfaces only.
   Implements(Implements),
   /// Adds directives, with optional implemented interfaces.
-  Directives {
-    /// The optional implemented interfaces.
-    implements: Option<Implements>,
-    /// The directives being added.
-    directives: Directives,
-  },
+  Directives(ExtensionDirectives<Implements, Directives>),
 }
 
 impl<Implements, Directives> ScalarTypeExtensionData<Implements, Directives> {
@@ -362,7 +361,7 @@ impl<Implements, Directives> ScalarTypeExtensionData<Implements, Directives> {
   pub const fn implements(&self) -> Option<&Implements> {
     match self {
       Self::Implements(implements) => Some(implements),
-      Self::Directives { implements, .. } => implements.as_ref(),
+      Self::Directives(extension) => extension.implements(),
     }
   }
 
@@ -370,7 +369,7 @@ impl<Implements, Directives> ScalarTypeExtensionData<Implements, Directives> {
   #[inline]
   pub const fn directives(&self) -> Option<&Directives> {
     match self {
-      Self::Directives { directives, .. } => Some(directives),
+      Self::Directives(extension) => Some(extension.directives()),
       Self::Implements(_) => None,
     }
   }
@@ -432,30 +431,112 @@ impl<Name, Implements, Directives, Span> ScalarTypeExtension<Name, Implements, D
   }
 }
 
+/// Enum values added by an extension, with the optional interfaces and directives written before
+/// them.
+///
+/// The `Values` payload of the enum type extension data enum. Built with [`new`](Self::new); edited
+/// in place with the `set_*` setters or by value with the `with_*` ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExtensionValues<Implements, Directives, Values> {
+  pub(crate) implements: Option<Implements>,
+  pub(crate) directives: Option<Directives>,
+  pub(crate) enum_values_definition: Values,
+}
+
+impl<Implements, Directives, Values> ExtensionValues<Implements, Directives, Values> {
+  /// Creates the payload from the optional implemented interfaces, the optional directives and the
+  /// enum-values definition being added.
+  #[inline]
+  pub const fn new(
+    implements: Option<Implements>,
+    directives: Option<Directives>,
+    enum_values_definition: Values,
+  ) -> Self {
+    Self {
+      implements,
+      directives,
+      enum_values_definition,
+    }
+  }
+
+  /// Returns the optional implemented interfaces.
+  #[inline]
+  pub const fn implements(&self) -> Option<&Implements> {
+    self.implements.as_ref()
+  }
+
+  /// Returns the optional directives being added.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.directives.as_ref()
+  }
+
+  /// Returns the nonempty enum-values definition being added.
+  #[inline]
+  pub const fn enum_values_definition(&self) -> &Values {
+    &self.enum_values_definition
+  }
+
+  /// Replaces the optional implemented interfaces.
+  #[inline]
+  pub fn set_implements(&mut self, implements: Option<Implements>) -> &mut Self {
+    self.implements = implements;
+    self
+  }
+
+  /// Replaces the optional directives.
+  #[inline]
+  pub fn set_directives(&mut self, directives: Option<Directives>) -> &mut Self {
+    self.directives = directives;
+    self
+  }
+
+  /// Replaces the enum-values definition.
+  #[inline]
+  pub fn set_enum_values_definition(&mut self, enum_values_definition: Values) -> &mut Self {
+    self.enum_values_definition = enum_values_definition;
+    self
+  }
+
+  /// Returns the payload with the optional implemented interfaces replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_implements(mut self, implements: Option<Implements>) -> Self {
+    self.implements = implements;
+    self
+  }
+
+  /// Returns the payload with the optional directives replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_directives(mut self, directives: Option<Directives>) -> Self {
+    self.directives = directives;
+    self
+  }
+
+  /// Returns the payload with the enum-values definition replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_enum_values_definition(mut self, enum_values_definition: Values) -> Self {
+    self.enum_values_definition = enum_values_definition;
+    self
+  }
+}
+
 /// The payload contributed by an enum type extension.
 ///
 /// Each variant is one of the nonempty forms: interfaces alone, directives with optional interfaces
 /// before them, or enum values with optional interfaces and directives before them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum EnumTypeExtensionData<Implements, Directives, Values> {
   /// Adds one or more implemented interfaces only.
   Implements(Implements),
   /// Adds directives, with optional implemented interfaces.
-  Directives {
-    /// The optional implemented interfaces.
-    implements: Option<Implements>,
-    /// The directives being added.
-    directives: Directives,
-  },
+  Directives(ExtensionDirectives<Implements, Directives>),
   /// Adds enum values, with optional interfaces and directives.
-  Values {
-    /// The optional implemented interfaces.
-    implements: Option<Implements>,
-    /// The optional directives being added.
-    directives: Option<Directives>,
-    /// The nonempty enum-values definition being added.
-    enum_values_definition: Values,
-  },
+  Values(ExtensionValues<Implements, Directives, Values>),
 }
 
 impl<Implements, Directives, Values> EnumTypeExtensionData<Implements, Directives, Values> {
@@ -464,7 +545,8 @@ impl<Implements, Directives, Values> EnumTypeExtensionData<Implements, Directive
   pub const fn implements(&self) -> Option<&Implements> {
     match self {
       Self::Implements(implements) => Some(implements),
-      Self::Directives { implements, .. } | Self::Values { implements, .. } => implements.as_ref(),
+      Self::Directives(extension) => extension.implements(),
+      Self::Values(extension) => extension.implements(),
     }
   }
 
@@ -472,8 +554,8 @@ impl<Implements, Directives, Values> EnumTypeExtensionData<Implements, Directive
   #[inline]
   pub const fn directives(&self) -> Option<&Directives> {
     match self {
-      Self::Directives { directives, .. } => Some(directives),
-      Self::Values { directives, .. } => directives.as_ref(),
+      Self::Directives(extension) => Some(extension.directives()),
+      Self::Values(extension) => extension.directives(),
       Self::Implements(_) => None,
     }
   }
@@ -482,11 +564,8 @@ impl<Implements, Directives, Values> EnumTypeExtensionData<Implements, Directive
   #[inline]
   pub const fn enum_values_definition(&self) -> Option<&Values> {
     match self {
-      Self::Values {
-        enum_values_definition,
-        ..
-      } => Some(enum_values_definition),
-      Self::Implements(_) | Self::Directives { .. } => None,
+      Self::Values(extension) => Some(extension.enum_values_definition()),
+      Self::Implements(_) | Self::Directives(_) => None,
     }
   }
 }
@@ -555,30 +634,112 @@ impl<Name, Implements, Directives, Values, Span>
   }
 }
 
+/// Union member types added by an extension, with the optional interfaces and directives written
+/// before them.
+///
+/// The `Members` payload of the union type extension data enum. Built with [`new`](Self::new);
+/// edited in place with the `set_*` setters or by value with the `with_*` ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExtensionMembers<Implements, Directives, MemberTypes> {
+  pub(crate) implements: Option<Implements>,
+  pub(crate) directives: Option<Directives>,
+  pub(crate) member_types: MemberTypes,
+}
+
+impl<Implements, Directives, MemberTypes> ExtensionMembers<Implements, Directives, MemberTypes> {
+  /// Creates the payload from the optional implemented interfaces, the optional directives and the
+  /// member-types clause being added.
+  #[inline]
+  pub const fn new(
+    implements: Option<Implements>,
+    directives: Option<Directives>,
+    member_types: MemberTypes,
+  ) -> Self {
+    Self {
+      implements,
+      directives,
+      member_types,
+    }
+  }
+
+  /// Returns the optional implemented interfaces.
+  #[inline]
+  pub const fn implements(&self) -> Option<&Implements> {
+    self.implements.as_ref()
+  }
+
+  /// Returns the optional directives being added.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.directives.as_ref()
+  }
+
+  /// Returns the nonempty member-types clause being added.
+  #[inline]
+  pub const fn member_types(&self) -> &MemberTypes {
+    &self.member_types
+  }
+
+  /// Replaces the optional implemented interfaces.
+  #[inline]
+  pub fn set_implements(&mut self, implements: Option<Implements>) -> &mut Self {
+    self.implements = implements;
+    self
+  }
+
+  /// Replaces the optional directives.
+  #[inline]
+  pub fn set_directives(&mut self, directives: Option<Directives>) -> &mut Self {
+    self.directives = directives;
+    self
+  }
+
+  /// Replaces the member-types clause.
+  #[inline]
+  pub fn set_member_types(&mut self, member_types: MemberTypes) -> &mut Self {
+    self.member_types = member_types;
+    self
+  }
+
+  /// Returns the payload with the optional implemented interfaces replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_implements(mut self, implements: Option<Implements>) -> Self {
+    self.implements = implements;
+    self
+  }
+
+  /// Returns the payload with the optional directives replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_directives(mut self, directives: Option<Directives>) -> Self {
+    self.directives = directives;
+    self
+  }
+
+  /// Returns the payload with the member-types clause replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_member_types(mut self, member_types: MemberTypes) -> Self {
+    self.member_types = member_types;
+    self
+  }
+}
+
 /// The payload contributed by a union type extension.
 ///
 /// Each variant is one of the nonempty forms: interfaces alone, directives with optional interfaces
 /// before them, or members with optional interfaces and directives before them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum UnionTypeExtensionData<Implements, Directives, MemberTypes> {
   /// Adds one or more implemented interfaces only.
   Implements(Implements),
   /// Adds directives, with optional implemented interfaces.
-  Directives {
-    /// The optional implemented interfaces.
-    implements: Option<Implements>,
-    /// The directives being added.
-    directives: Directives,
-  },
+  Directives(ExtensionDirectives<Implements, Directives>),
   /// Adds union member types, with optional interfaces and directives.
-  Members {
-    /// The optional implemented interfaces.
-    implements: Option<Implements>,
-    /// The optional directives being added.
-    directives: Option<Directives>,
-    /// The nonempty member-types clause being added.
-    member_types: MemberTypes,
-  },
+  Members(ExtensionMembers<Implements, Directives, MemberTypes>),
 }
 
 impl<Implements, Directives, MemberTypes>
@@ -589,7 +750,8 @@ impl<Implements, Directives, MemberTypes>
   pub const fn implements(&self) -> Option<&Implements> {
     match self {
       Self::Implements(implements) => Some(implements),
-      Self::Directives { implements, .. } | Self::Members { implements, .. } => implements.as_ref(),
+      Self::Directives(extension) => extension.implements(),
+      Self::Members(extension) => extension.implements(),
     }
   }
 
@@ -597,8 +759,8 @@ impl<Implements, Directives, MemberTypes>
   #[inline]
   pub const fn directives(&self) -> Option<&Directives> {
     match self {
-      Self::Directives { directives, .. } => Some(directives),
-      Self::Members { directives, .. } => directives.as_ref(),
+      Self::Directives(extension) => Some(extension.directives()),
+      Self::Members(extension) => extension.directives(),
       Self::Implements(_) => None,
     }
   }
@@ -607,8 +769,8 @@ impl<Implements, Directives, MemberTypes>
   #[inline]
   pub const fn member_types(&self) -> Option<&MemberTypes> {
     match self {
-      Self::Members { member_types, .. } => Some(member_types),
-      Self::Implements(_) | Self::Directives { .. } => None,
+      Self::Members(extension) => Some(extension.member_types()),
+      Self::Implements(_) | Self::Directives(_) => None,
     }
   }
 }
@@ -681,26 +843,16 @@ impl<Name, Implements, Directives, MemberTypes, Span>
 ///
 /// Each variant is one of the nonempty forms: interfaces alone, directives with optional interfaces
 /// before them, or input fields with optional interfaces and directives before them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum InputObjectTypeExtensionData<Implements, Directives, Fields> {
   /// Adds one or more implemented interfaces only.
   Implements(Implements),
   /// Adds directives, with optional implemented interfaces.
-  Directives {
-    /// The optional implemented interfaces.
-    implements: Option<Implements>,
-    /// The directives being added.
-    directives: Directives,
-  },
+  Directives(ExtensionDirectives<Implements, Directives>),
   /// Adds input fields, with optional interfaces and directives.
-  Fields {
-    /// The optional implemented interfaces.
-    implements: Option<Implements>,
-    /// The optional directives being added.
-    directives: Option<Directives>,
-    /// The nonempty input-fields definition being added.
-    fields_definition: Fields,
-  },
+  Fields(ExtensionFields<Implements, Directives, Fields>),
 }
 
 impl<Implements, Directives, Fields> InputObjectTypeExtensionData<Implements, Directives, Fields> {
@@ -709,7 +861,8 @@ impl<Implements, Directives, Fields> InputObjectTypeExtensionData<Implements, Di
   pub const fn implements(&self) -> Option<&Implements> {
     match self {
       Self::Implements(implements) => Some(implements),
-      Self::Directives { implements, .. } | Self::Fields { implements, .. } => implements.as_ref(),
+      Self::Directives(extension) => extension.implements(),
+      Self::Fields(extension) => extension.implements(),
     }
   }
 
@@ -717,8 +870,8 @@ impl<Implements, Directives, Fields> InputObjectTypeExtensionData<Implements, Di
   #[inline]
   pub const fn directives(&self) -> Option<&Directives> {
     match self {
-      Self::Directives { directives, .. } => Some(directives),
-      Self::Fields { directives, .. } => directives.as_ref(),
+      Self::Directives(extension) => Some(extension.directives()),
+      Self::Fields(extension) => extension.directives(),
       Self::Implements(_) => None,
     }
   }
@@ -727,10 +880,8 @@ impl<Implements, Directives, Fields> InputObjectTypeExtensionData<Implements, Di
   #[inline]
   pub const fn fields_definition(&self) -> Option<&Fields> {
     match self {
-      Self::Fields {
-        fields_definition, ..
-      } => Some(fields_definition),
-      Self::Implements(_) | Self::Directives { .. } => None,
+      Self::Fields(extension) => Some(extension.fields_definition()),
+      Self::Implements(_) | Self::Directives(_) => None,
     }
   }
 }

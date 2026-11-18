@@ -4,7 +4,7 @@
 //! GraphQLx's four kinds take an `implements` clause and bind carriers of their own from
 //! `crate::generic`, so these compile only with `graphql`.
 
-use derive_more::IsVariant;
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use tokora::{
   SimpleSpan,
   span::{AsSpan, IntoSpan},
@@ -226,18 +226,78 @@ impl<Name, Directives, Fields, Span> InputObjectTypeDefinition<Name, Directives,
   }
 }
 
+/// Union member types added by an extension, with the optional directives written before them.
+///
+/// The `Members` payload of the union type extension data enum. Built with [`new`](Self::new);
+/// edited in place with the `set_*` setters or by value with the `with_*` ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExtensionMembers<Directives, MemberTypes> {
+  pub(crate) directives: Option<Directives>,
+  pub(crate) member_types: MemberTypes,
+}
+
+impl<Directives, MemberTypes> ExtensionMembers<Directives, MemberTypes> {
+  /// Creates the payload from the optional directives and the member-types clause being added.
+  #[inline]
+  pub const fn new(directives: Option<Directives>, member_types: MemberTypes) -> Self {
+    Self {
+      directives,
+      member_types,
+    }
+  }
+
+  /// Returns the optional directives being added.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.directives.as_ref()
+  }
+
+  /// Returns the nonempty member-types clause being added.
+  #[inline]
+  pub const fn member_types(&self) -> &MemberTypes {
+    &self.member_types
+  }
+
+  /// Replaces the optional directives.
+  #[inline]
+  pub fn set_directives(&mut self, directives: Option<Directives>) -> &mut Self {
+    self.directives = directives;
+    self
+  }
+
+  /// Replaces the member-types clause.
+  #[inline]
+  pub fn set_member_types(&mut self, member_types: MemberTypes) -> &mut Self {
+    self.member_types = member_types;
+    self
+  }
+
+  /// Returns the payload with the optional directives replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_directives(mut self, directives: Option<Directives>) -> Self {
+    self.directives = directives;
+    self
+  }
+
+  /// Returns the payload with the member-types clause replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_member_types(mut self, member_types: MemberTypes) -> Self {
+    self.member_types = member_types;
+    self
+  }
+}
+
 /// The payload contributed by a union type extension.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum UnionTypeExtensionData<Directives, MemberTypes> {
   /// Adds directives only.
   Directives(Directives),
   /// Adds union member types, with optional directives.
-  Members {
-    /// The optional directives being added.
-    directives: Option<Directives>,
-    /// The nonempty member-types clause being added.
-    member_types: MemberTypes,
-  },
+  Members(ExtensionMembers<Directives, MemberTypes>),
 }
 
 impl<Directives, MemberTypes> UnionTypeExtensionData<Directives, MemberTypes> {
@@ -246,7 +306,7 @@ impl<Directives, MemberTypes> UnionTypeExtensionData<Directives, MemberTypes> {
   pub const fn directives(&self) -> Option<&Directives> {
     match self {
       Self::Directives(directives) => Some(directives),
-      Self::Members { directives, .. } => directives.as_ref(),
+      Self::Members(extension) => extension.directives(),
     }
   }
 
@@ -254,7 +314,7 @@ impl<Directives, MemberTypes> UnionTypeExtensionData<Directives, MemberTypes> {
   #[inline]
   pub const fn member_types(&self) -> Option<&MemberTypes> {
     match self {
-      Self::Members { member_types, .. } => Some(member_types),
+      Self::Members(extension) => Some(extension.member_types()),
       Self::Directives(_) => None,
     }
   }
@@ -318,18 +378,78 @@ impl<Name, Directives, MemberTypes, Span> UnionTypeExtension<Name, Directives, M
   }
 }
 
+/// Enum values added by an extension, with the optional directives written before them.
+///
+/// The `Values` payload of the enum type extension data enum. Built with [`new`](Self::new); edited
+/// in place with the `set_*` setters or by value with the `with_*` ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExtensionValues<Directives, Values> {
+  pub(crate) directives: Option<Directives>,
+  pub(crate) enum_values_definition: Values,
+}
+
+impl<Directives, Values> ExtensionValues<Directives, Values> {
+  /// Creates the payload from the optional directives and the enum-values definition being added.
+  #[inline]
+  pub const fn new(directives: Option<Directives>, enum_values_definition: Values) -> Self {
+    Self {
+      directives,
+      enum_values_definition,
+    }
+  }
+
+  /// Returns the optional directives being added.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.directives.as_ref()
+  }
+
+  /// Returns the nonempty enum-values definition being added.
+  #[inline]
+  pub const fn enum_values_definition(&self) -> &Values {
+    &self.enum_values_definition
+  }
+
+  /// Replaces the optional directives.
+  #[inline]
+  pub fn set_directives(&mut self, directives: Option<Directives>) -> &mut Self {
+    self.directives = directives;
+    self
+  }
+
+  /// Replaces the enum-values definition.
+  #[inline]
+  pub fn set_enum_values_definition(&mut self, enum_values_definition: Values) -> &mut Self {
+    self.enum_values_definition = enum_values_definition;
+    self
+  }
+
+  /// Returns the payload with the optional directives replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_directives(mut self, directives: Option<Directives>) -> Self {
+    self.directives = directives;
+    self
+  }
+
+  /// Returns the payload with the enum-values definition replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_enum_values_definition(mut self, enum_values_definition: Values) -> Self {
+    self.enum_values_definition = enum_values_definition;
+    self
+  }
+}
+
 /// The payload contributed by an enum type extension.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum EnumTypeExtensionData<Directives, Values> {
   /// Adds directives only.
   Directives(Directives),
   /// Adds enum values, with optional directives.
-  Values {
-    /// The optional directives being added.
-    directives: Option<Directives>,
-    /// The nonempty enum-values definition being added.
-    enum_values_definition: Values,
-  },
+  Values(ExtensionValues<Directives, Values>),
 }
 
 impl<Directives, Values> EnumTypeExtensionData<Directives, Values> {
@@ -338,7 +458,7 @@ impl<Directives, Values> EnumTypeExtensionData<Directives, Values> {
   pub const fn directives(&self) -> Option<&Directives> {
     match self {
       Self::Directives(directives) => Some(directives),
-      Self::Values { directives, .. } => directives.as_ref(),
+      Self::Values(extension) => extension.directives(),
     }
   }
 
@@ -346,10 +466,7 @@ impl<Directives, Values> EnumTypeExtensionData<Directives, Values> {
   #[inline]
   pub const fn enum_values_definition(&self) -> Option<&Values> {
     match self {
-      Self::Values {
-        enum_values_definition,
-        ..
-      } => Some(enum_values_definition),
+      Self::Values(extension) => Some(extension.enum_values_definition()),
       Self::Directives(_) => None,
     }
   }
@@ -413,18 +530,78 @@ impl<Name, Directives, Values, Span> EnumTypeExtension<Name, Directives, Values,
   }
 }
 
+/// Input fields added by an extension, with the optional directives written before them.
+///
+/// The `Fields` payload of the input object type extension data enum. Built with
+/// [`new`](Self::new); edited in place with the `set_*` setters or by value with the `with_*` ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExtensionInputFields<Directives, Fields> {
+  pub(crate) directives: Option<Directives>,
+  pub(crate) fields_definition: Fields,
+}
+
+impl<Directives, Fields> ExtensionInputFields<Directives, Fields> {
+  /// Creates the payload from the optional directives and the input-fields definition being added.
+  #[inline]
+  pub const fn new(directives: Option<Directives>, fields_definition: Fields) -> Self {
+    Self {
+      directives,
+      fields_definition,
+    }
+  }
+
+  /// Returns the optional directives being added.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.directives.as_ref()
+  }
+
+  /// Returns the nonempty input-fields definition being added.
+  #[inline]
+  pub const fn fields_definition(&self) -> &Fields {
+    &self.fields_definition
+  }
+
+  /// Replaces the optional directives.
+  #[inline]
+  pub fn set_directives(&mut self, directives: Option<Directives>) -> &mut Self {
+    self.directives = directives;
+    self
+  }
+
+  /// Replaces the input-fields definition.
+  #[inline]
+  pub fn set_fields_definition(&mut self, fields_definition: Fields) -> &mut Self {
+    self.fields_definition = fields_definition;
+    self
+  }
+
+  /// Returns the payload with the optional directives replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_directives(mut self, directives: Option<Directives>) -> Self {
+    self.directives = directives;
+    self
+  }
+
+  /// Returns the payload with the input-fields definition replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_fields_definition(mut self, fields_definition: Fields) -> Self {
+    self.fields_definition = fields_definition;
+    self
+  }
+}
+
 /// The payload contributed by an input object type extension.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum InputObjectTypeExtensionData<Directives, Fields> {
   /// Adds directives only.
   Directives(Directives),
   /// Adds input fields, with optional directives.
-  Fields {
-    /// The optional directives being added.
-    directives: Option<Directives>,
-    /// The nonempty input-fields definition being added.
-    fields_definition: Fields,
-  },
+  Fields(ExtensionInputFields<Directives, Fields>),
 }
 
 impl<Directives, Fields> InputObjectTypeExtensionData<Directives, Fields> {
@@ -433,7 +610,7 @@ impl<Directives, Fields> InputObjectTypeExtensionData<Directives, Fields> {
   pub const fn directives(&self) -> Option<&Directives> {
     match self {
       Self::Directives(directives) => Some(directives),
-      Self::Fields { directives, .. } => directives.as_ref(),
+      Self::Fields(extension) => extension.directives(),
     }
   }
 
@@ -441,9 +618,7 @@ impl<Directives, Fields> InputObjectTypeExtensionData<Directives, Fields> {
   #[inline]
   pub const fn fields_definition(&self) -> Option<&Fields> {
     match self {
-      Self::Fields {
-        fields_definition, ..
-      } => Some(fields_definition),
+      Self::Fields(extension) => Some(extension.fields_definition()),
       Self::Directives(_) => None,
     }
   }

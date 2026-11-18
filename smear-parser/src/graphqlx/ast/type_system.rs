@@ -22,12 +22,13 @@ use super::{
 
 pub use crate::{
   generic::{
-    EnumTypeExtensionData, InputObjectTypeExtensionData, ScalarTypeExtensionData,
-    UnionTypeExtensionData,
+    EnumTypeExtensionData, ExtensionMembers, ExtensionValues, InputObjectTypeExtensionData,
+    ScalarTypeExtensionData, UnionTypeExtensionData,
   },
   type_system::{
-    ExecutableDirectiveLocation, InterfaceTypeExtensionData, Location, ObjectTypeExtensionData,
-    SchemaExtensionData, TypeSystemDirectiveLocation,
+    ExecutableDirectiveLocation, ExtensionDirectives, ExtensionFields, ExtensionOperations,
+    InterfaceTypeExtensionData, Location, ObjectTypeExtensionData, SchemaExtensionData,
+    TypeSystemDirectiveLocation,
   },
 };
 

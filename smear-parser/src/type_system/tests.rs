@@ -5,8 +5,9 @@ use tokora::{
 
 use super::{
   ArgumentsDefinition, DirectiveDefinition, DirectiveExtension, DirectiveLocations,
-  ExecutableDirectiveLocation, FieldDefinition, InputValueDefinition, Location,
-  ObjectTypeDefinition, TypeSystemDirectiveLocation, TypeSystemExtension,
+  ExecutableDirectiveLocation, ExtensionDirectives, ExtensionFields, ExtensionOperations,
+  FieldDefinition, InputValueDefinition, Location, ObjectTypeDefinition, ObjectTypeExtensionData,
+  SchemaExtensionData, TypeSystemDirectiveLocation, TypeSystemExtension,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,4 +163,66 @@ fn directive_location_enums_keep_variant_and_textual_ergonomics() {
   assert_eq!(location.unwrap_executable_ref().as_str(), "QUERY");
   assert!(location.try_unwrap_type_system_ref().is_err());
   assert_eq!(AsRef::<str>::as_ref(&location), "QUERY");
+}
+
+#[test]
+fn shared_extension_payloads_are_read_through_their_enums_and_unwrapped() {
+  let object = ObjectTypeExtensionData::<&str, &str, &str>::Fields(ExtensionFields::new(
+    Some("Node"),
+    None,
+    "{ id }",
+  ));
+  assert!(object.is_fields());
+  assert_eq!(object.implements(), Some(&"Node"));
+  assert_eq!(object.directives(), None);
+  assert_eq!(object.fields_definition(), Some(&"{ id }"));
+  assert_eq!(object.unwrap_fields_ref().fields_definition(), &"{ id }");
+
+  let directives =
+    ObjectTypeExtensionData::<&str, &str, &str>::Directives(ExtensionDirectives::new(None, "@d"));
+  assert_eq!(directives.directives(), Some(&"@d"));
+  assert_eq!(directives.fields_definition(), None);
+  assert!(directives.try_unwrap_fields_ref().is_err());
+
+  let schema = SchemaExtensionData::<&str, &str>::Operations(ExtensionOperations::new(
+    Some("@d"),
+    "{ query: Query }",
+  ));
+  assert!(schema.is_operations());
+  assert_eq!(schema.directives(), Some(&"@d"));
+  assert_eq!(
+    schema.root_operation_types_definition(),
+    Some(&"{ query: Query }")
+  );
+  assert!(schema.try_unwrap_directives_ref().is_err());
+  let only = SchemaExtensionData::<&str, &str>::Directives("@d");
+  assert_eq!(only.unwrap_directives(), "@d");
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn graphql_extension_payloads_carry_no_interfaces() {
+  use super::{
+    EnumTypeExtensionData, ExtensionInputFields, ExtensionMembers, ExtensionValues,
+    InputObjectTypeExtensionData, UnionTypeExtensionData,
+  };
+
+  let members =
+    UnionTypeExtensionData::<&str, &str>::Members(ExtensionMembers::new(Some("@d"), "= A | B"));
+  assert!(members.is_members());
+  assert_eq!(members.directives(), Some(&"@d"));
+  assert_eq!(members.member_types(), Some(&"= A | B"));
+
+  let values = EnumTypeExtensionData::<&str, &str>::Values(ExtensionValues::new(None, "{ RED }"));
+  assert_eq!(
+    values.unwrap_values_ref().enum_values_definition(),
+    &"{ RED }"
+  );
+
+  let fields = InputObjectTypeExtensionData::<&str, &str>::Fields(ExtensionInputFields::new(
+    None,
+    "{ limit: Int }",
+  ));
+  assert_eq!(fields.fields_definition(), Some(&"{ limit: Int }"));
+  assert!(fields.try_unwrap_directives_ref().is_err());
 }

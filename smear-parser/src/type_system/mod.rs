@@ -1402,29 +1402,176 @@ impl<Directives, RootOperations, Span> SchemaDefinition<Directives, RootOperatio
   }
 }
 
+/// Directives added by an extension, with the optional interfaces written before them.
+///
+/// The `Directives` payload of the object and interface type extension data enums, and of
+/// GraphQLx's scalar, enum, union and input object ones. Built with [`new`](Self::new); edited in
+/// place with the `set_*` setters or by value with the `with_*` ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExtensionDirectives<Implements, Directives> {
+  pub(crate) implements: Option<Implements>,
+  pub(crate) directives: Directives,
+}
+
+impl<Implements, Directives> ExtensionDirectives<Implements, Directives> {
+  /// Creates the payload from the optional implemented interfaces and the directives being added.
+  #[inline]
+  pub const fn new(implements: Option<Implements>, directives: Directives) -> Self {
+    Self {
+      implements,
+      directives,
+    }
+  }
+
+  /// Returns the optional implemented interfaces.
+  #[inline]
+  pub const fn implements(&self) -> Option<&Implements> {
+    self.implements.as_ref()
+  }
+
+  /// Returns the directives being added.
+  #[inline]
+  pub const fn directives(&self) -> &Directives {
+    &self.directives
+  }
+
+  /// Replaces the optional implemented interfaces.
+  #[inline]
+  pub fn set_implements(&mut self, implements: Option<Implements>) -> &mut Self {
+    self.implements = implements;
+    self
+  }
+
+  /// Replaces the directives.
+  #[inline]
+  pub fn set_directives(&mut self, directives: Directives) -> &mut Self {
+    self.directives = directives;
+    self
+  }
+
+  /// Returns the payload with the optional implemented interfaces replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_implements(mut self, implements: Option<Implements>) -> Self {
+    self.implements = implements;
+    self
+  }
+
+  /// Returns the payload with the directives replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_directives(mut self, directives: Directives) -> Self {
+    self.directives = directives;
+    self
+  }
+}
+
+/// A fields definition added by an extension, with the optional interfaces and directives written
+/// before it.
+///
+/// The `Fields` payload of the object and interface type extension data enums, and of GraphQLx's
+/// input object one. Built with [`new`](Self::new); edited in place with the `set_*` setters or by
+/// value with the `with_*` ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExtensionFields<Implements, Directives, Fields> {
+  pub(crate) implements: Option<Implements>,
+  pub(crate) directives: Option<Directives>,
+  pub(crate) fields_definition: Fields,
+}
+
+impl<Implements, Directives, Fields> ExtensionFields<Implements, Directives, Fields> {
+  /// Creates the payload from the optional implemented interfaces, the optional directives and the
+  /// fields definition being added.
+  #[inline]
+  pub const fn new(
+    implements: Option<Implements>,
+    directives: Option<Directives>,
+    fields_definition: Fields,
+  ) -> Self {
+    Self {
+      implements,
+      directives,
+      fields_definition,
+    }
+  }
+
+  /// Returns the optional implemented interfaces.
+  #[inline]
+  pub const fn implements(&self) -> Option<&Implements> {
+    self.implements.as_ref()
+  }
+
+  /// Returns the optional directives being added.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.directives.as_ref()
+  }
+
+  /// Returns the nonempty fields definition being added.
+  #[inline]
+  pub const fn fields_definition(&self) -> &Fields {
+    &self.fields_definition
+  }
+
+  /// Replaces the optional implemented interfaces.
+  #[inline]
+  pub fn set_implements(&mut self, implements: Option<Implements>) -> &mut Self {
+    self.implements = implements;
+    self
+  }
+
+  /// Replaces the optional directives.
+  #[inline]
+  pub fn set_directives(&mut self, directives: Option<Directives>) -> &mut Self {
+    self.directives = directives;
+    self
+  }
+
+  /// Replaces the fields definition.
+  #[inline]
+  pub fn set_fields_definition(&mut self, fields_definition: Fields) -> &mut Self {
+    self.fields_definition = fields_definition;
+    self
+  }
+
+  /// Returns the payload with the optional implemented interfaces replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_implements(mut self, implements: Option<Implements>) -> Self {
+    self.implements = implements;
+    self
+  }
+
+  /// Returns the payload with the optional directives replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_directives(mut self, directives: Option<Directives>) -> Self {
+    self.directives = directives;
+    self
+  }
+
+  /// Returns the payload with the fields definition replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_fields_definition(mut self, fields_definition: Fields) -> Self {
+    self.fields_definition = fields_definition;
+    self
+  }
+}
+
 /// The payload contributed by an object or interface type extension.
 ///
 /// Each variant represents one of GraphQL's legal nonempty extension forms.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum ObjectTypeExtensionData<Implements, Directives, Fields> {
   /// Adds one or more implemented interfaces only.
   Implements(Implements),
   /// Adds directives, with optional implemented interfaces.
-  Directives {
-    /// The optional implemented interfaces.
-    implements: Option<Implements>,
-    /// The directives being added.
-    directives: Directives,
-  },
+  Directives(ExtensionDirectives<Implements, Directives>),
   /// Adds fields, with optional interfaces and directives.
-  Fields {
-    /// The optional implemented interfaces.
-    implements: Option<Implements>,
-    /// The optional directives being added.
-    directives: Option<Directives>,
-    /// The nonempty fields definition being added.
-    fields_definition: Fields,
-  },
+  Fields(ExtensionFields<Implements, Directives, Fields>),
 }
 
 impl<Implements, Directives, Fields> ObjectTypeExtensionData<Implements, Directives, Fields> {
@@ -1433,7 +1580,8 @@ impl<Implements, Directives, Fields> ObjectTypeExtensionData<Implements, Directi
   pub const fn implements(&self) -> Option<&Implements> {
     match self {
       Self::Implements(implements) => Some(implements),
-      Self::Directives { implements, .. } | Self::Fields { implements, .. } => implements.as_ref(),
+      Self::Directives(extension) => extension.implements(),
+      Self::Fields(extension) => extension.implements(),
     }
   }
 
@@ -1441,8 +1589,8 @@ impl<Implements, Directives, Fields> ObjectTypeExtensionData<Implements, Directi
   #[inline]
   pub const fn directives(&self) -> Option<&Directives> {
     match self {
-      Self::Directives { directives, .. } => Some(directives),
-      Self::Fields { directives, .. } => directives.as_ref(),
+      Self::Directives(extension) => Some(extension.directives()),
+      Self::Fields(extension) => extension.directives(),
       Self::Implements(_) => None,
     }
   }
@@ -1451,10 +1599,8 @@ impl<Implements, Directives, Fields> ObjectTypeExtensionData<Implements, Directi
   #[inline]
   pub const fn fields_definition(&self) -> Option<&Fields> {
     match self {
-      Self::Fields {
-        fields_definition, ..
-      } => Some(fields_definition),
-      Self::Implements(_) | Self::Directives { .. } => None,
+      Self::Fields(extension) => Some(extension.fields_definition()),
+      Self::Implements(_) | Self::Directives(_) => None,
     }
   }
 }
@@ -1528,26 +1674,16 @@ impl<Name, Implements, Directives, Fields, Span>
 /// The payload contributed by an interface type extension.
 ///
 /// Each variant represents one of GraphQL's legal nonempty extension forms.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum InterfaceTypeExtensionData<Implements, Directives, Fields> {
   /// Adds one or more implemented interfaces only.
   Implements(Implements),
   /// Adds directives, with optional implemented interfaces.
-  Directives {
-    /// The optional implemented interfaces.
-    implements: Option<Implements>,
-    /// The directives being added.
-    directives: Directives,
-  },
+  Directives(ExtensionDirectives<Implements, Directives>),
   /// Adds fields, with optional interfaces and directives.
-  Fields {
-    /// The optional implemented interfaces.
-    implements: Option<Implements>,
-    /// The optional directives being added.
-    directives: Option<Directives>,
-    /// The nonempty fields definition being added.
-    fields_definition: Fields,
-  },
+  Fields(ExtensionFields<Implements, Directives, Fields>),
 }
 
 impl<Implements, Directives, Fields> InterfaceTypeExtensionData<Implements, Directives, Fields> {
@@ -1556,7 +1692,8 @@ impl<Implements, Directives, Fields> InterfaceTypeExtensionData<Implements, Dire
   pub const fn implements(&self) -> Option<&Implements> {
     match self {
       Self::Implements(implements) => Some(implements),
-      Self::Directives { implements, .. } | Self::Fields { implements, .. } => implements.as_ref(),
+      Self::Directives(extension) => extension.implements(),
+      Self::Fields(extension) => extension.implements(),
     }
   }
 
@@ -1564,8 +1701,8 @@ impl<Implements, Directives, Fields> InterfaceTypeExtensionData<Implements, Dire
   #[inline]
   pub const fn directives(&self) -> Option<&Directives> {
     match self {
-      Self::Directives { directives, .. } => Some(directives),
-      Self::Fields { directives, .. } => directives.as_ref(),
+      Self::Directives(extension) => Some(extension.directives()),
+      Self::Fields(extension) => extension.directives(),
       Self::Implements(_) => None,
     }
   }
@@ -1574,10 +1711,8 @@ impl<Implements, Directives, Fields> InterfaceTypeExtensionData<Implements, Dire
   #[inline]
   pub const fn fields_definition(&self) -> Option<&Fields> {
     match self {
-      Self::Fields {
-        fields_definition, ..
-      } => Some(fields_definition),
-      Self::Implements(_) | Self::Directives { .. } => None,
+      Self::Fields(extension) => Some(extension.fields_definition()),
+      Self::Implements(_) | Self::Directives(_) => None,
     }
   }
 }
@@ -1648,18 +1783,89 @@ impl<Name, Implements, Directives, Fields, Span>
   }
 }
 
+/// Root operation types added by a schema extension, with the optional directives written before
+/// them.
+///
+/// The `Operations` payload of the schema extension data enum. Built with [`new`](Self::new);
+/// edited in place with the `set_*` setters or by value with the `with_*` ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExtensionOperations<Directives, RootOperations> {
+  pub(crate) directives: Option<Directives>,
+  pub(crate) root_operation_types_definition: RootOperations,
+}
+
+impl<Directives, RootOperations> ExtensionOperations<Directives, RootOperations> {
+  /// Creates the payload from the optional directives and the root-operation-types definition being
+  /// added.
+  #[inline]
+  pub const fn new(
+    directives: Option<Directives>,
+    root_operation_types_definition: RootOperations,
+  ) -> Self {
+    Self {
+      directives,
+      root_operation_types_definition,
+    }
+  }
+
+  /// Returns the optional directives being added.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.directives.as_ref()
+  }
+
+  /// Returns the nonempty root-operation-types definition being added.
+  #[inline]
+  pub const fn root_operation_types_definition(&self) -> &RootOperations {
+    &self.root_operation_types_definition
+  }
+
+  /// Replaces the optional directives.
+  #[inline]
+  pub fn set_directives(&mut self, directives: Option<Directives>) -> &mut Self {
+    self.directives = directives;
+    self
+  }
+
+  /// Replaces the root-operation-types definition.
+  #[inline]
+  pub fn set_root_operation_types_definition(
+    &mut self,
+    root_operation_types_definition: RootOperations,
+  ) -> &mut Self {
+    self.root_operation_types_definition = root_operation_types_definition;
+    self
+  }
+
+  /// Returns the payload with the optional directives replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_directives(mut self, directives: Option<Directives>) -> Self {
+    self.directives = directives;
+    self
+  }
+
+  /// Returns the payload with the root-operation-types definition replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_root_operation_types_definition(
+    mut self,
+    root_operation_types_definition: RootOperations,
+  ) -> Self {
+    self.root_operation_types_definition = root_operation_types_definition;
+    self
+  }
+}
+
 /// The payload contributed by a schema extension.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum SchemaExtensionData<Directives, RootOperations> {
   /// Adds directives only.
   Directives(Directives),
   /// Adds root operation types, with optional directives.
-  Operations {
-    /// The optional directives being added.
-    directives: Option<Directives>,
-    /// The nonempty root-operation-types definition being added.
-    root_operation_types_definition: RootOperations,
-  },
+  Operations(ExtensionOperations<Directives, RootOperations>),
 }
 
 impl<Directives, RootOperations> SchemaExtensionData<Directives, RootOperations> {
@@ -1668,7 +1874,7 @@ impl<Directives, RootOperations> SchemaExtensionData<Directives, RootOperations>
   pub const fn directives(&self) -> Option<&Directives> {
     match self {
       Self::Directives(directives) => Some(directives),
-      Self::Operations { directives, .. } => directives.as_ref(),
+      Self::Operations(extension) => extension.directives(),
     }
   }
 
@@ -1676,10 +1882,7 @@ impl<Directives, RootOperations> SchemaExtensionData<Directives, RootOperations>
   #[inline]
   pub const fn root_operation_types_definition(&self) -> Option<&RootOperations> {
     match self {
-      Self::Operations {
-        root_operation_types_definition,
-        ..
-      } => Some(root_operation_types_definition),
+      Self::Operations(extension) => Some(extension.root_operation_types_definition()),
       Self::Directives(_) => None,
     }
   }

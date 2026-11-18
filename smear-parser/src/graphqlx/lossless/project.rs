@@ -642,7 +642,8 @@ use crate::{
       Document, DocumentItem, EnumTypeDefinition, EnumTypeExtension, EnumTypeExtensionData,
       EnumValue, EnumValuesDefinition, ExecutableDefinition, ExecutableDefinitionHeader,
       ExecutableDefinitionName, ExecutableDefinitionTypeGenerics, ExecutableDocument,
-      ExtensionName, ExtensionTypeGenerics, ExtensionTypeParam, Field, FieldsDefinition,
+      ExtensionDirectives, ExtensionFields, ExtensionMembers, ExtensionName, ExtensionOperations,
+      ExtensionTypeGenerics, ExtensionTypeParam, ExtensionValues, Field, FieldsDefinition,
       FloatValue, FragmentSpread, ImplementInterfaces, InlineFragment, InlineStringValue,
       InputFieldsDefinition, InputObjectTypeDefinition, InputObjectTypeExtension,
       InputObjectTypeExtensionData, InputValue, IntValue, InterfaceTypeDefinition,
@@ -681,7 +682,8 @@ use crate::{
 
 // The undescribed cores five `Described<…>` aliases wrap, and the three `…Data` enums the object,
 // interface and schema extensions encode their alternatives in. The scalar, union, enum and input
-// object extensions' four are this dialect's own and come in through `graphqlx::ast` above.
+// object extensions' four are this dialect's own and come in through `graphqlx::ast` above, with
+// the `Extension…` payloads every one of the seven enums holds its data-carrying alternatives in.
 use crate::type_system::{
   DirectiveDefinition, EnumValueDefinition, FieldDefinition, InputValueDefinition,
   InterfaceTypeExtensionData, ObjectTypeExtensionData, SchemaExtensionData,
@@ -5634,10 +5636,9 @@ fn scalar_type_extension<'src>(
 ) -> Out<(ScalarTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
   let data = match (parts.implements, parts.directives) {
-    (implements, Some(directives)) => ScalarTypeExtensionData::Directives {
-      implements,
-      directives,
-    },
+    (implements, Some(directives)) => {
+      ScalarTypeExtensionData::Directives(ExtensionDirectives::new(implements, directives))
+    }
     (Some(implements), None) => ScalarTypeExtensionData::Implements(implements),
     (None, None) => {
       return Err(missing(
@@ -5658,15 +5659,12 @@ fn object_type_extension<'src>(
 ) -> Out<(ObjectTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
   let data = match (parts.implements, parts.directives, parts.fields) {
-    (implements, directives, Some(fields_definition)) => ObjectTypeExtensionData::Fields {
-      implements,
-      directives,
-      fields_definition,
-    },
-    (implements, Some(directives), None) => ObjectTypeExtensionData::Directives {
-      implements,
-      directives,
-    },
+    (implements, directives, Some(fields_definition)) => ObjectTypeExtensionData::Fields(
+      ExtensionFields::new(implements, directives, fields_definition),
+    ),
+    (implements, Some(directives), None) => {
+      ObjectTypeExtensionData::Directives(ExtensionDirectives::new(implements, directives))
+    }
     (Some(implements), None, None) => ObjectTypeExtensionData::Implements(implements),
     (None, None, None) => {
       return Err(missing(
@@ -5687,15 +5685,12 @@ fn interface_type_extension<'src>(
 ) -> Out<(InterfaceTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
   let data = match (parts.implements, parts.directives, parts.fields) {
-    (implements, directives, Some(fields_definition)) => InterfaceTypeExtensionData::Fields {
-      implements,
-      directives,
-      fields_definition,
-    },
-    (implements, Some(directives), None) => InterfaceTypeExtensionData::Directives {
-      implements,
-      directives,
-    },
+    (implements, directives, Some(fields_definition)) => InterfaceTypeExtensionData::Fields(
+      ExtensionFields::new(implements, directives, fields_definition),
+    ),
+    (implements, Some(directives), None) => {
+      InterfaceTypeExtensionData::Directives(ExtensionDirectives::new(implements, directives))
+    }
     (Some(implements), None, None) => InterfaceTypeExtensionData::Implements(implements),
     (None, None, None) => {
       return Err(missing(
@@ -5716,15 +5711,12 @@ fn union_type_extension<'src>(
 ) -> Out<(UnionTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
   let data = match (parts.implements, parts.directives, parts.members) {
-    (implements, directives, Some(member_types)) => UnionTypeExtensionData::Members {
-      implements,
-      directives,
-      member_types,
-    },
-    (implements, Some(directives), None) => UnionTypeExtensionData::Directives {
-      implements,
-      directives,
-    },
+    (implements, directives, Some(member_types)) => {
+      UnionTypeExtensionData::Members(ExtensionMembers::new(implements, directives, member_types))
+    }
+    (implements, Some(directives), None) => {
+      UnionTypeExtensionData::Directives(ExtensionDirectives::new(implements, directives))
+    }
     (Some(implements), None, None) => UnionTypeExtensionData::Implements(implements),
     (None, None, None) => {
       return Err(missing(
@@ -5745,15 +5737,12 @@ fn enum_type_extension<'src>(
 ) -> Out<(EnumTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
   let data = match (parts.implements, parts.directives, parts.values) {
-    (implements, directives, Some(enum_values_definition)) => EnumTypeExtensionData::Values {
-      implements,
-      directives,
-      enum_values_definition,
-    },
-    (implements, Some(directives), None) => EnumTypeExtensionData::Directives {
-      implements,
-      directives,
-    },
+    (implements, directives, Some(enum_values_definition)) => EnumTypeExtensionData::Values(
+      ExtensionValues::new(implements, directives, enum_values_definition),
+    ),
+    (implements, Some(directives), None) => {
+      EnumTypeExtensionData::Directives(ExtensionDirectives::new(implements, directives))
+    }
     (Some(implements), None, None) => EnumTypeExtensionData::Implements(implements),
     (None, None, None) => {
       return Err(missing(
@@ -5774,15 +5763,12 @@ fn input_object_type_extension<'src>(
 ) -> Out<(InputObjectTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
   let data = match (parts.implements, parts.directives, parts.input_fields) {
-    (implements, directives, Some(fields_definition)) => InputObjectTypeExtensionData::Fields {
-      implements,
-      directives,
-      fields_definition,
-    },
-    (implements, Some(directives), None) => InputObjectTypeExtensionData::Directives {
-      implements,
-      directives,
-    },
+    (implements, directives, Some(fields_definition)) => InputObjectTypeExtensionData::Fields(
+      ExtensionFields::new(implements, directives, fields_definition),
+    ),
+    (implements, Some(directives), None) => {
+      InputObjectTypeExtensionData::Directives(ExtensionDirectives::new(implements, directives))
+    }
     (Some(implements), None, None) => InputObjectTypeExtensionData::Implements(implements),
     (None, None, None) => {
       return Err(missing(
@@ -5816,10 +5802,9 @@ fn schema_extension<'src>(
     None => None,
   };
   let data = match (directives, roots) {
-    (directives, Some(root_operation_types_definition)) => SchemaExtensionData::Operations {
-      directives,
-      root_operation_types_definition,
-    },
+    (directives, Some(root_operation_types_definition)) => SchemaExtensionData::Operations(
+      ExtensionOperations::new(directives, root_operation_types_definition),
+    ),
     (Some(directives), None) => SchemaExtensionData::Directives(directives),
     (None, None) => {
       return Err(missing(
