@@ -169,7 +169,7 @@ fn an_extension_payload_is_built_read_and_edited_through_its_accessors() {
   edited.set_implements(Some("Edge")).set_directives("@f");
   assert_eq!(edited, ExtensionDirectives::new(Some("Edge"), "@f"));
 
-  let fields = ExtensionFields::new(None, Some("@d"), "{ id }");
+  let fields = ExtensionFields::<&str, &str, &str>::new(None, Some("@d"), "{ id }");
   assert_eq!(fields.directives(), Some(&"@d"));
   assert_eq!(fields.fields_definition(), &"{ id }");
   assert_eq!(
@@ -179,9 +179,9 @@ fn an_extension_payload_is_built_read_and_edited_through_its_accessors() {
     &"{ name }"
   );
 
-  let values = ExtensionValues::new(Some("Node"), None, "{ RED }");
+  let values = ExtensionValues::<&str, &str, &str>::new(Some("Node"), None, "{ RED }");
   assert_eq!(values.enum_values_definition(), &"{ RED }");
-  let members = ExtensionMembers::new(None, None, "= A | B");
+  let members = ExtensionMembers::<&str, &str, &str>::new(None, None, "= A | B");
   assert_eq!(members.member_types(), &"= A | B");
 }
 
