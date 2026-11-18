@@ -231,8 +231,9 @@ fn block_body(raw: &str) -> &str {
 /// line nor the line that happens to survive steps 5 and 6), leading and trailing blank lines go
 /// (steps 5 and 6), each surviving line is joined by a single line feed whatever terminator the
 /// source spelled (step 8), and `\"""` — §2.9.5's only escape — becomes `"""` on the way past. The
-/// walk measures the lines again; of the line facts the lexer collected, only the capacity they
-/// add up to is read, to size the allocation.
+/// walk measures the lines again. Of the line facts the lexer collected, the conversion reads the
+/// line counts, which answer a block of nothing but blank lines with the empty string before the
+/// walk reads a byte of it, and the capacity they add up to, which sizes the allocation.
 ///
 /// # `Plain` means the lexer looked, and looked at *this* grammar
 ///
@@ -270,6 +271,12 @@ impl<'a> From<LitBlockStr<&'a str>> for Cow<'a, str> {
     match value {
       LitBlockStr::Plain(s) => Cow::Borrowed(block_body(s.as_str())),
       LitBlockStr::Complex(s) => {
+        // Steps 5 and 6 keep the lines between the leading and the trailing blank ones, and the
+        // lexer counted both runs. When they cover every line the value is empty, and the walk
+        // below would read the whole body only to find that out again.
+        if s.leading_blank_lines() >= s.total_lines().saturating_sub(s.trailing_blank_lines()) {
+          return Cow::Owned(String::new());
+        }
         let mut cooked = String::with_capacity(s.required_capacity());
         // The decoder's own block walk. A `String` takes every piece, so it answers `Ok` and there
         // is no refusal to read.

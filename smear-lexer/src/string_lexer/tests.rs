@@ -25,7 +25,7 @@ use tokora::{
 };
 
 use super::{
-  LitBlockStr, LitComplexInlineStr, LitInlineStr, LitStr, SealedWrapper,
+  LitBlockStr, LitComplexBlockStr, LitComplexInlineStr, LitInlineStr, LitStr, SealedWrapper,
   inline::{BytesStringToken, StringToken, lex_inline_str_from_bytes, lex_inline_str_from_str},
 };
 use crate::{
@@ -204,6 +204,56 @@ fn the_rest_of_2_9_4() {
   // `\"""` is a block string's only escape; a backslash in front of anything else is a backslash.
   assert_eq!(cook(r#""""a\"""b""""#), "a\"\"\"b");
   assert_eq!(cook(r#""""a\nb""""#), "a\\nb");
+}
+
+/// A block of nothing but blank lines cooks to an owned empty string, answered from the lexer's
+/// line counts before the walk reads a byte of it.
+///
+/// Steps 5 and 6 remove every line of such a block, and the lexer has already counted that: its
+/// leading and trailing blank lines cover every line it split. Answering from those counts keeps
+/// the empty value from costing a read of the body each time it is cooked. The last case shows the
+/// walk is skipped and not merely quick: a carrier built past the lexer, with a blank block's
+/// counts over a body the walk would keep, still cooks to the empty string.
+#[test]
+fn a_blank_block_is_empty_by_its_line_counts() {
+  const BLANK: &[&str] = &[
+    "\"\"\"   \"\"\"",
+    "\"\"\"\t \t\"\"\"",
+    "\"\"\"\n\"\"\"",
+    "\"\"\"\n   \n  \n\"\"\"",
+    "\"\"\"  \r\n\t\r  \"\"\"",
+  ];
+
+  for literal in BLANK {
+    let Ok(LitStr::Block(block @ LitBlockStr::Complex(_))) = LitStr::try_from(*literal) else {
+      panic!("{literal:?} was expected to lex as a `Complex` block");
+    };
+    let cooked: Cow<'_, str> = block.into();
+    assert!(
+      matches!(cooked, Cow::Owned(ref value) if value.is_empty()),
+      "{literal:?} cooked to {cooked:?}, not an owned empty string"
+    );
+  }
+
+  // A blank one-line block's counts, over a body the walk would cook to `abc`.
+  let Ok(LitStr::Block(LitBlockStr::Complex(blank))) = LitStr::try_from("\"\"\"   \"\"\"") else {
+    panic!("a blank block lexes as `Complex`");
+  };
+  let forged = LitComplexBlockStr::new(
+    "\"\"\"abc\"\"\"",
+    blank.num_escaped_triple_quotes(),
+    blank.has_cr_terminators(),
+    blank.leading_blank_lines(),
+    blank.trailing_blank_lines(),
+    blank.common_indent(),
+    blank.total_lines(),
+    blank.required_capacity(),
+  );
+  let cooked: Cow<'_, str> = LitBlockStr::Complex(forged).into();
+  assert_eq!(
+    cooked, "",
+    "the walk read the body of a block its counts call empty"
+  );
 }
 
 /// The allocation the `Complex` arm asks for covers what it writes.
