@@ -12,8 +12,9 @@ Three consumers, and they do not want the same thing:
 - **`smear-compiler` builds a schema**, so it enables `build` and gets `smear-parser` underneath.
 - **`graphql-proto` reads one** at execution time, and **`smear-derive` will generate from one** —
   neither needs a front end, so both depend on this crate with `default-features = false` and a
-  tier, `std` or `alloc`, and get a `core` + `alloc` representation with `tokora` as the only
-  dependency.
+  tier, `std` or `alloc`, and get a `core` + `alloc` representation with `tokora` as its
+  dependency, plus smol-bytes on a target with pointer-width atomics, for the owned text the
+  crate shares with `graphql-proto`.
 
 It validates nothing about a *document* and parses nothing. Draft §5 validation is
 `smear-compiler`'s.
