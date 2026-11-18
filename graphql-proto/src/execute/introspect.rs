@@ -81,10 +81,7 @@
 
 use std::string::String;
 
-use smear_parser::{
-  graphql::ast::InputValue,
-  lexer::{decode_string_value, string_value_pieces},
-};
+use smear_parser::{graphql::ast::InputValue, lexer::string_value_pieces};
 use smear_schema::{
   InputValueDef, PackedType, Range32, RootOperation, Schema, Sym, Text, TypeId, TypeKind, builtin,
   is_reserved,
@@ -99,6 +96,11 @@ use crate::{
 };
 
 use super::{Coercion, Executor, Mark};
+
+// `std` as well as `test`: its cases read the crate's counting allocator, which only a `std` build
+// of its tests installs.
+#[cfg(all(test, feature = "std"))]
+mod tests;
 
 /// What one meta field resolves to, short of a list.
 #[derive(Clone, Copy)]
@@ -799,8 +801,9 @@ fn root(schema: &Schema, operation: RootOperation) -> Answer {
 ///
 /// The value is looked up in place when it is one piece — any inline string without an escape and
 /// any one-line block string — and assembled only when an escape or a line break splits it. That
-/// assembly is the one allocation this walk makes, it is freed before this returns, and it happens
-/// only where an escape forces it, which is the rule the introspection door keeps for the text it
+/// assembly is the one allocation this walk makes. It is reserved once, at the length the first
+/// walk added up, so the copy never grows it; it is freed before this returns; and it happens only
+/// where an escape forces it, which is the rule the introspection door keeps for the text it
 /// decodes.
 fn literal_type(schema: &Schema, spelling: &[u8], visits: &mut Visits) -> Read {
   // The piece walk, and the probe of its first piece, which is no longer than the spelling.
@@ -808,9 +811,11 @@ fn literal_type(schema: &Schema, spelling: &[u8], visits: &mut Visits) -> Read {
     return Read::Refused;
   }
   let mut pieces = 0usize;
+  let mut len = 0usize;
   let mut found = None;
   let walked = string_value_pieces(spelling, |piece| {
     pieces += 1;
+    len += piece.len();
     if pieces == 1 {
       found = schema.type_by_name(piece.as_bytes()).map(|(id, _)| id);
     }
@@ -823,13 +828,18 @@ fn literal_type(schema: &Schema, spelling: &[u8], visits: &mut Visits) -> Read {
   if pieces <= 1 {
     return Read::Named(found);
   }
-  // The decoder's sizing walk, its copy, and the probe of what it assembled.
-  if !visits.take(byte_units(spelling.len()).saturating_mul(3)) {
+  // The copy, and the probe of what it assembled.
+  if !visits.take(byte_units(spelling.len()).saturating_mul(2)) {
     return Read::Refused;
   }
-  let mut value = String::new();
-  match decode_string_value(spelling, &mut value) {
+  let mut value = String::with_capacity(len);
+  let copied = string_value_pieces(spelling, |piece| {
+    value.push_str(piece);
+    Ok(())
+  });
+  match copied {
     Ok(()) => Read::Named(schema.type_by_name(value.as_bytes()).map(|(id, _)| id)),
+    // Unreachable: the walk above read the same spelling and accepted it.
     Err(_) => Read::Invalid,
   }
 }
