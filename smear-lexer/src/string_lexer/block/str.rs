@@ -543,7 +543,7 @@ mod tests {
         parity(body, &format!("kitchen_sink #{n}"));
         n += 1;
         // Skip past the close that the reference impl found.
-        let (close, _) = find_block_close_logos_reference(body);
+        let BlockClose { close, .. } = find_block_close_logos_reference(body);
         match close {
           Some(off) => i = body_start + off + 3,
           None => break,
