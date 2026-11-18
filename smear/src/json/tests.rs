@@ -25,14 +25,18 @@
 //! `N`: `on_a_small_stack` has the argument, `value_depth` the value walk's numbers and
 //! `the_response_depth_does_not_reach_the_native_stack` the response walk's.
 
-use super::{Error, Json, response::Locations};
+use super::{
+  Error, Json,
+  response::{LineColumn, Locations},
+};
 
 /// Draft §7.1.2's line and column for one offset, through the door the writer uses.
 fn line_column(document: &str, offset: usize) -> (i64, i64) {
   let mut locations = Locations::new(document);
-  locations
+  let LineColumn { line, column } = locations
     .resolve(offset)
-    .expect("the index for a fixture-sized document fits")
+    .expect("the index for a fixture-sized document fits");
+  (line, column)
 }
 
 /// Writes one value through a closure and returns the bytes.
@@ -501,8 +505,9 @@ fn the_index_agrees_with_the_prefix_walk_it_replaced() {
     // index is reused across a response's errors and nothing orders their offsets.
     let offsets = (0..=document.len() + 2).chain((0..=document.len() + 2).rev());
     for offset in offsets {
+      let LineColumn { line, column } = locations.resolve(offset).expect("the corpus is small");
       assert_eq!(
-        locations.resolve(offset).expect("the corpus is small"),
+        (line, column),
         reference(document, offset),
         "disagreed at offset {offset} of {document:?}"
       );

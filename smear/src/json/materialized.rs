@@ -129,17 +129,18 @@ use super::{Error, Json, WriteJson};
 /// macro expands twice into this one module.
 enum Frame<'v, Element, Field> {
   /// A list, and the elements it has left to write.
-  List {
-    rest: slice::Iter<'v, Element>,
-    /// Whether the next element is the first, and so is not preceded by a `,`.
-    first: bool,
-  },
+  List(Open<'v, Element>),
   /// An object, and the fields it has left to write.
-  Object {
-    rest: slice::Iter<'v, Field>,
-    /// Whether the next field is the first.
-    first: bool,
-  },
+  Object(Open<'v, Field>),
+}
+
+/// What is left of a container a walk has opened: [`Frame`]'s payload, shared by its two variants
+/// because a list's elements and an object's fields are walked the same way.
+struct Open<'v, T> {
+  /// The items it has left to write.
+  rest: slice::Iter<'v, T>,
+  /// Whether the next item is the first, and so is not preceded by a `,`.
+  first: bool,
 }
 
 /// Opens one more level of nesting, asking the allocator for room rather than assuming it.
@@ -192,20 +193,20 @@ where
           out.punct('[')?;
           push(
             &mut stack,
-            Frame::List {
+            Frame::List(Open {
               rest: list.values().iter(),
               first: true,
-            },
+            }),
           )?;
         }
         Self::Object(object) => {
           out.punct('{')?;
           push(
             &mut stack,
-            Frame::Object {
+            Frame::Object(Open {
               rest: object.fields().iter(),
               first: true,
-            },
+            }),
           )?;
         }
       }
@@ -216,15 +217,15 @@ where
         let Some(top) = stack.last_mut() else {
           return Ok(());
         };
-        let object = matches!(top, Frame::Object { .. });
+        let object = matches!(top, Frame::Object(_));
         // Everything the frame is asked for is taken in one step, so the borrow of the stack
         // ends before the body below can pop it. The references this yields borrow the value,
         // not the stack, which is what makes that possible.
         let step = match top {
-          Frame::List { rest, first } => rest
+          Frame::List(Open { rest, first }) => rest
             .next()
             .map(|element| (core::mem::replace(first, false), None, element)),
-          Frame::Object { rest, first } => rest.next().map(|field| {
+          Frame::Object(Open { rest, first }) => rest.next().map(|field| {
             (
               core::mem::replace(first, false),
               Some(field.name()),
