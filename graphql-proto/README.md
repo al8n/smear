@@ -7,8 +7,9 @@
 The GraphQL protocol machine, Sans-I/O.
 
 Draft §6 execution as a state machine: it takes events as inputs and emits actions as outputs,
-owning no I/O, no clock and no randomness source. It says which field it needs and waits to be
-told the answer.
+owning no I/O and no clock, and nothing it emits depends on randomness: with `std`, an
+`extensions` map hashes its keys at `RandomState`'s random seed, and it iterates in insertion
+order whatever the seed. It says which field it needs and waits to be told the answer.
 
 It defines no value type. The driver keeps values in its own representation and answers structural
 questions about them through the `Values` trait — the same choice `smear-lexer` makes about its

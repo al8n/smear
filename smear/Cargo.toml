@@ -115,8 +115,8 @@ validator = ["parser", "graphql", "dep:smear-compiler", "smear-schema/build", "d
 # the `proto::Values` trait, so it is `core` + `alloc` for the same reason the schema representation
 # is, and it takes `smear-schema` with default features off so reading a schema does not pull the
 # front end. It brings one THIRD-PARTY crate for its draft §7.1.7 maps, `indexmap` — with
-# `hashbrown` and `equivalent` beneath it, and `foldhash` for the hasher where `std` is off — and
-# both of its tiers turn that on, so a build with no tier compiles none of them.
+# `hashbrown` and `equivalent` beneath it, and with `alloc` `foldhash`, the hasher where `std` is
+# off — and both of its tiers turn that on, so a build with no tier compiles none of them.
 #
 # TWO MORE THIRD-PARTY CRATES ARRIVE HERE, and they are this crate's rather than that one's:
 # `smear::json` — the draft §7.2.1 writer, which is a module of THIS package because it needs both

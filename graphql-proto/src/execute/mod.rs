@@ -1124,13 +1124,13 @@ impl Limits {
   /// How many bytes of `message` one driver-supplied [`RequestError`](super::RequestError) may
   /// carry.
   ///
-  /// Checked by [`RequestError::new`](super::RequestError::new) **before** the message is boxed —
+  /// Checked by [`RequestError::new`](super::RequestError::new) **before** the message is copied —
   /// the text arrives borrowed, so a refusal allocates nothing, which is the difference
   /// [`Extensions::insert`] draws between a ceiling and a receipt — and by
   /// [`RequestError::from_diagnose`](super::RequestError::from_diagnose) after measuring a
   /// rendering it has not yet kept. The result that lists the entry checks it again, against its
-  /// own value. Bytes and not characters, because what is retained is a `Box<str>` and its length
-  /// is what this bounds.
+  /// own value. Bytes and not characters, because what is retained is the message's UTF-8 and its
+  /// length is what this bounds.
   ///
   /// The length factor of the product [`max_request_errors`](Limits::max_request_errors) states.
   #[inline]
