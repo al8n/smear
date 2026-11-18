@@ -74,11 +74,11 @@ macro_rules! use_parser {
 
 /// The trees a group holds, and the span of its braces.
 #[allow(type_alias_bounds)]
-type Group<'inp, Src: Source<usize> + ?Sized> =
+type Group<'inp, Src: Source<usize> + ?Sized + 'inp> =
   (SimpleSpan, Nested<UseTree<GraphqlxSlice<'inp, Src>>>);
 
 /// The glob or the group a `::` led to, and where it ends.
-struct Scope<'inp, Src: Source<usize> + ?Sized> {
+struct Scope<'inp, Src: Source<usize> + ?Sized + 'inp> {
   /// Where the glob or the group ends.
   end: usize,
   /// The glob or the group.
