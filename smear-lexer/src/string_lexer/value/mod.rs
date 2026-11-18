@@ -118,8 +118,8 @@ pub fn string_value_pieces_from_str(
 /// Returns the length in bytes of the value a `StringValue` spelling denotes.
 ///
 /// An exact count, not a bound, because it is the same walk with the bytes added up instead of
-/// written. [`decode_string_value_to_string`] reserves it before it writes, so its `String` grows
-/// once.
+/// written. [`decode_string_value_to_string`] reserves it before it writes, so a `String` with no
+/// room grows once.
 ///
 /// # Errors
 ///
@@ -158,15 +158,21 @@ where
   string_value_pieces(spelling, |piece| out.write_str(piece))
 }
 
-/// Appends the value a `StringValue` spelling denotes to a `String`, reserving exactly its length
-/// first.
+/// Appends the value a `StringValue` spelling denotes to a `String`, reserving its length first.
 ///
 /// [`decode_string_value`] for the writer that can be told how much is coming. The spelling is
-/// measured with [`string_value_len`] before a byte is written, `out` reserves exactly that many
-/// more bytes, and the walk copies the value in: one allocation at most, and none when `out`
-/// already has the room. The generic door cannot say how much is coming, so a `String` handed to
-/// it grows as the pieces arrive, and the last piece of a long value can reallocate it to twice the
-/// room the value needs.
+/// measured with [`string_value_len`] before a byte is written, `out` reserves that many more
+/// bytes with [`String::reserve`], and the walk copies the value in: one allocation at most, and
+/// none when `out` already has the room. The generic door cannot say how much is coming, so a
+/// `String` handed to it grows as the pieces arrive, and the last piece of a long value can
+/// reallocate it to twice the room the value needs.
+///
+/// The reservation is amortized rather than exact, which is what keeps a reused `String` cheap. On
+/// an empty `String` with no room, [`String::reserve`] allocates the length asked for and no more
+/// (`String` allocates at least 8 bytes, so a value shorter than that gets 8), so a one-shot decode
+/// takes one allocation and never doubles. A scratch `String` cleared and handed back for the next
+/// value grows geometrically, so a run of increasingly long values reallocates it a few times; an
+/// exact reservation would reallocate it for every value longer than the one before.
 ///
 /// # Errors
 ///
@@ -177,7 +183,7 @@ pub fn decode_string_value_to_string(
   out: &mut String,
 ) -> Result<(), StringValueError> {
   let len = string_value_len(spelling)?;
-  out.reserve_exact(len);
+  out.reserve(len);
   // The measuring walk accepted the spelling, and a `String` takes every piece, so this walk
   // appends exactly `len` bytes and answers `Ok`.
   string_value_pieces(spelling, |piece| {

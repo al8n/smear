@@ -20,8 +20,9 @@ use super::{
 
 /// Decodes a spelling, or panics with the refusal.
 ///
-/// Through both decoding doors, which must agree: the generic one, and the `String` one, whose room
-/// must be the value's length exactly.
+/// Through both decoding doors, which must agree: the generic one, and the `String` one, which
+/// gives a fresh `String` the value's length and no more, or the 8 bytes a `String` allocates at
+/// least when the value is shorter.
 fn decoded(spelling: &str) -> String {
   let mut out = String::new();
   decode_string_value(spelling.as_bytes(), &mut out)
@@ -30,11 +31,18 @@ fn decoded(spelling: &str) -> String {
   decode_string_value_to_string(spelling.as_bytes(), &mut reserved)
     .unwrap_or_else(|error| panic!("`{spelling}` denotes a value: {error}"));
   assert_eq!(reserved, out, "the two doors disagree on `{spelling}`");
-  assert_eq!(
-    reserved.capacity(),
-    reserved.len(),
-    "the `String` door reserved past the value of `{spelling}`"
-  );
+  if reserved.len() >= 8 {
+    assert_eq!(
+      reserved.capacity(),
+      reserved.len(),
+      "the `String` door reserved past the value of `{spelling}`"
+    );
+  } else {
+    assert!(
+      reserved.capacity() <= 8,
+      "the `String` door reserved past the value of `{spelling}`"
+    );
+  }
   out
 }
 
@@ -380,16 +388,16 @@ fn decoding_appends_to_what_is_there() {
   assert_eq!(out, "> a\u{1f600}bc");
 }
 
-/// The `String` door reserves the value's exact length before it writes, so a long run and the
-/// escape after it land in one allocation.
+/// The `String` door reserves the value's length before it writes, so on a fresh `String` a long
+/// run and the escape after it land in one allocation of exactly the value's length.
 ///
 /// This is the shape that doubles a `String` handed to the generic door: the run is written as one
 /// piece, the `String` grows to fit it, and the escape's one byte then outgrows that room. Through
-/// the `String` door a fresh `String` holds room for the value alone, a scratch `String` with room
-/// for the run and not the escape grows to the value's length rather than to twice its room, and a
-/// `String` that already holds text grows by the value's length past it.
+/// the `String` door a fresh `String` holds room for the value alone. A `String` that already has
+/// room or text is `String::reserve`'s to grow, so there the test pins the value and that the room
+/// holds it, and leaves how much more to the standard library.
 #[test]
-fn the_string_door_reserves_the_value_once_and_exactly() {
+fn the_string_door_reserves_a_fresh_string_once_and_exactly() {
   const RUN: usize = 4096;
   let spelling = format!("\"{}\\n\"", "a".repeat(RUN));
   let value = format!("{}\n", "a".repeat(RUN));
@@ -402,19 +410,51 @@ fn the_string_door_reserves_the_value_once_and_exactly() {
   let mut scratch = String::with_capacity(RUN);
   decode_string_value_to_string(spelling.as_bytes(), &mut scratch).expect("a value");
   assert_eq!(scratch, value);
-  assert_eq!(
-    scratch.capacity(),
-    value.len(),
+  assert!(
+    scratch.capacity() >= value.len(),
     "a scratch `String` with room for the run alone"
   );
 
   let mut held = String::from("> ");
   decode_string_value_to_string(spelling.as_bytes(), &mut held).expect("a value");
   assert_eq!(held, format!("> {value}"));
-  assert_eq!(
-    held.capacity(),
-    held.len(),
+  assert!(
+    held.capacity() >= held.len(),
     "a `String` that already held text"
+  );
+}
+
+/// One scratch `String`, cleared and decoded into once per value, is not reallocated for each value
+/// that is longer than the one before.
+///
+/// The analysis decodes every description into a single scratch `String` it reuses. An exact
+/// reservation grows that `String` to precisely each value's length, so a run of values that each
+/// run a byte longer than the last reallocates it every time; the amortized one doubles it, so the
+/// same run changes its capacity a few times.
+#[test]
+fn a_reused_string_is_not_reallocated_for_every_longer_value() {
+  const FIRST: usize = 4096;
+  const COUNT: usize = 1000;
+
+  let mut scratch = String::new();
+  let mut capacity = scratch.capacity();
+  let mut changes = 0usize;
+  for step in 0..COUNT {
+    let run = FIRST + step;
+    let spelling = format!("\"{}\\n\"", "a".repeat(run));
+    scratch.clear();
+    decode_string_value_to_string(spelling.as_bytes(), &mut scratch).expect("a value");
+    assert_eq!(scratch.len(), run + 1, "the value of step {step}");
+    assert!(scratch.ends_with("a\n"), "the value of step {step}");
+    if scratch.capacity() != capacity {
+      capacity = scratch.capacity();
+      changes += 1;
+    }
+  }
+  assert!(
+    changes <= 4,
+    "{COUNT} values of {FIRST} to {} bytes changed the scratch `String`'s capacity {changes} times",
+    FIRST + COUNT - 1
   );
 }
 

@@ -54,8 +54,9 @@ All notable changes to Smear are documented in this file.
   that refuses a write is answered with the new `StringValueError::Sink`, holding a prefix of the
   value and written to no further; a spelling the decoder refuses still writes nothing. It no
   longer reserves the value's length in a `String` first: the new `decode_string_value_to_string`
-  appends to a `String` after reserving exactly the value's length, for a caller that wants one
-  allocation.
+  appends to a `String` after reserving the value's length, for a caller that wants one
+  allocation: a `String` with no room takes the value's length and no more, and one that is reused
+  grows as `String::reserve` does.
 - `smear`!: `json::Error::SurrogateEscape` is removed. `Json::graphql_string` cooks a literal
   through `smear-lexer`'s `string_value_pieces_from_str`, the decoder the lexer's own conversions
   run, and answers every spelling no lexer produces with `MalformedEscape`: a `\u` escape that
