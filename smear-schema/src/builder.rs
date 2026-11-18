@@ -60,7 +60,6 @@ use super::{
     MAX_FIELD_ARGUMENTS, MAX_SYMBOLS, MAX_WRAPPERS, NameIndex, PackedType, Range32, RootOperation,
     Schema, Sym, Text, TypeDef, TypeFlags, TypeId, TypeKind, TypeMeta, is_name, is_reserved,
   },
-  text::FrozenStr,
 };
 
 // The canonical text of a default value, and the string escaping the introspection door shares.
@@ -1952,7 +1951,7 @@ impl<'a> Model<'a> {
     self.interner.text(sym)
   }
 
-  fn owner(&self, at: Coordinate) -> FrozenStr {
+  fn owner(&self, at: Coordinate) -> String {
     render_owner(self.interner, at)
   }
 
@@ -2072,7 +2071,7 @@ impl<'a> Model<'a> {
 ///
 /// Through [`owner_path`] and [`directive_coordinate`] rather than by concatenating here, so the
 /// text is the output of the same two functions every eager caller used to call.
-fn render_owner(interner: &Interner, at: Coordinate) -> FrozenStr {
+fn render_owner(interner: &Interner, at: Coordinate) -> String {
   let mut segments: [&str; 3] = [""; 3];
   segments[0] = match at.head {
     Head::Schema => "schema",
@@ -2143,7 +2142,7 @@ fn push_owned(
   errors: &mut Vec<SchemaError>,
   kind: SchemaErrorKind,
   subject: &str,
-  owner: FrozenStr,
+  owner: String,
   at: Located,
 ) {
   errors.push(
@@ -2158,7 +2157,7 @@ fn push_at(
   errors: &mut Vec<SchemaError>,
   kind: SchemaErrorKind,
   subject: &str,
-  owner: FrozenStr,
+  owner: String,
   span: SimpleSpan,
   document: u32,
 ) {
@@ -2182,7 +2181,7 @@ fn push_related(
   built_in_document: Option<u32>,
   kind: SchemaErrorKind,
   subject: &str,
-  owner: Option<FrozenStr>,
+  owner: Option<String>,
   at: Located,
   related: Located,
 ) {
@@ -2376,7 +2375,7 @@ impl SchemaBuilder {
       .push(SchemaError::new(kind, subject, at.span).in_document(at.document));
   }
 
-  fn push_owned(&mut self, kind: SchemaErrorKind, subject: &str, owner: FrozenStr, at: Located) {
+  fn push_owned(&mut self, kind: SchemaErrorKind, subject: &str, owner: String, at: Located) {
     push_owned(&mut self.errors, kind, subject, owner, at);
   }
 
@@ -2384,7 +2383,7 @@ impl SchemaBuilder {
     &mut self,
     kind: SchemaErrorKind,
     subject: &str,
-    owner: Option<FrozenStr>,
+    owner: Option<String>,
     at: Located,
     related: Located,
   ) {
@@ -2463,7 +2462,7 @@ impl SchemaBuilder {
   }
 
   /// Renders a [`Coordinate`], for the callers that have `&self` rather than a [`Model`].
-  fn owner(&self, at: Coordinate) -> FrozenStr {
+  fn owner(&self, at: Coordinate) -> String {
     render_owner(&self.interner, at)
   }
 
@@ -3720,7 +3719,7 @@ impl SchemaBuilder {
           .filter(|used| self.text(used.name.sym) == ONE_OF)
           .map(|used| used.name)
           .collect();
-        let subject = FrozenStr::from(self.text(target.sym));
+        let subject = self.text(target.sym).to_owned();
         for at in provided {
           self.push_owned(
             SchemaErrorKind::OneOfOnInputObjectExtension,
@@ -5541,7 +5540,7 @@ impl SchemaBuilder {
       if model.types[index].implements.is_empty() {
         continue;
       }
-      let owner = FrozenStr::from(model.text(model.types[index].name.sym));
+      let owner = model.text(model.types[index].name.sym).to_owned();
       let declared: &[Located] = &model.types[index].implements;
       // Built once per implementing type and read by every interface it declares, which is the
       // whole of the repair: the loop below is the one that was here, in the order it was in.
@@ -6020,7 +6019,7 @@ impl SchemaBuilder {
             } else {
               SchemaErrorKind::CircularOneOfInputField
             };
-            let owner = FrozenStr::from(self.text(self.types[current].name.sym));
+            let owner = self.text(self.types[current].name.sym).to_owned();
             let name = self.text(at.sym).to_owned();
             self.push_owned(kind, &name, owner, at);
           }
@@ -6861,7 +6860,7 @@ impl SchemaBuilder {
         implicated[frame.object] = true;
       }
       implicated[object] = true;
-      let owner = FrozenStr::from(model.text(model.types[object].name.sym));
+      let owner = model.text(model.types[object].name.sym).to_owned();
       let at = model.types[object].input_fields[field_index].name;
       let name = model.text(at.sym).to_owned();
       push_owned(

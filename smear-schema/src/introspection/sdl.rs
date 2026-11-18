@@ -792,7 +792,7 @@ fn attach(error: ResponseError, owner: Option<&str>) -> ResponseError {
 fn check_default_value(default: &str, owner: &str, subject: &str) -> Rendered {
   read_default_value(default, |_| ()).ok_or_else(|| {
     ResponseError::new(ResponseErrorKind::MalformedDefaultValue, default)
-      .owned_by(path(&[owner, subject]).as_str())
+      .owned_by(path(&[owner, subject]))
   })
 }
 

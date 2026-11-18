@@ -10,14 +10,11 @@
 //! direction too: a `SchemaErrors` outlives the SDL it came from and can cross a thread or an FFI
 //! boundary with nothing borrowed.
 
-use std::vec::Vec;
+use std::{boxed::Box, string::String, vec::Vec};
 
 use tokora::SimpleSpan;
 
-use crate::{
-  diagnostic::{Code, Diagnose, Label, Location, PathSegment, Severity},
-  text::{FrozenStr, StrBuf},
-};
+use crate::diagnostic::{Code, Diagnose, Label, Location, PathSegment, Severity};
 
 /// Which of draft §3's rules a [`SchemaError`] reports.
 ///
@@ -1156,8 +1153,8 @@ pub(crate) struct DocumentSpan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SchemaError {
   kind: SchemaErrorKind,
-  subject: FrozenStr,
-  owner: Option<FrozenStr>,
+  subject: Box<str>,
+  owner: Option<Box<str>>,
   span: SimpleSpan,
   /// The second position, in a document that need not be [`SchemaError::document`]: the
   /// definition a duplicate repeats may be in another document.
@@ -1179,8 +1176,8 @@ impl SchemaError {
   }
 
   /// Qualifies the subject with the artifact that owns it.
-  pub(crate) fn owned_by(mut self, owner: impl Into<FrozenStr>) -> Self {
-    self.owner = Some(owner.into());
+  pub(crate) fn owned_by(mut self, owner: impl Into<String>) -> Self {
+    self.owner = Some(owner.into().into_boxed_str());
     self
   }
 
@@ -1492,31 +1489,27 @@ impl core::fmt::Display for SchemaErrors {
 impl core::error::Error for SchemaErrors {}
 
 /// Convenience for the builder: an owner path built from up to three name segments.
-///
-/// Built at its exact length: where the target has pointer-width atomics a path of up to 62 bytes
-/// is held inline and allocates nothing, and any other path allocates once.
-pub(crate) fn owner_path(segments: &[&str]) -> FrozenStr {
-  let dots = segments.len().saturating_sub(1);
-  let len = segments.iter().map(|segment| segment.len()).sum::<usize>() + dots;
-  let mut path = StrBuf::with_capacity(len);
+pub(crate) fn owner_path(segments: &[&str]) -> String {
+  let mut path = String::new();
   for (index, segment) in segments.iter().enumerate() {
     if index > 0 {
-      path.push_str(".");
+      path.push('.');
     }
     path.push_str(segment);
   }
-  path.freeze()
+  path
 }
 
 /// The owner path of a directive *usage*: the element it sits on, then `@name`.
 ///
 /// The `@` is what keeps `Query.@deprecated.reason` from reading as a field path, which matters
 /// because an argument of a directive on a field and an argument of the field itself would
-/// otherwise render identically. Built at its exact length, as [`owner_path`] is.
-pub(crate) fn directive_coordinate(owner: &str, directive: &str) -> FrozenStr {
-  let mut path = StrBuf::with_capacity(owner.len() + directive.len() + 2);
+/// otherwise render identically.
+pub(crate) fn directive_coordinate(owner: &str, directive: &str) -> String {
+  let mut path = String::with_capacity(owner.len() + directive.len() + 2);
   path.push_str(owner);
-  path.push_str(".@");
+  path.push('.');
+  path.push('@');
   path.push_str(directive);
-  path.freeze()
+  path
 }

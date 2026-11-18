@@ -10,9 +10,8 @@
 //! not have. So the choice of representation is a function of the target, and it is made **once**,
 //! here, rather than in every crate that holds such a text.
 //!
-//! This is the lowest crate the users reach: `graphql-proto` through its reader tier, and this
-//! crate's own errors. It sits outside `repr/`, which `smear-noatomic` compiles with no
-//! dependency at all.
+//! This is the lowest crate its users reach: `graphql-proto`, through its reader tier. It sits
+//! outside `repr/`, which `smear-noatomic` compiles with no dependency at all.
 //!
 //! # The two arms
 //!

@@ -249,12 +249,10 @@ impl Owner {
       Self::Unowned => None,
       Self::Schema => Some(String::from("schema")),
       Self::Object(at) => peek_name(response, at).map(String::from),
-      // Copied out of the builder's path: a `ResponseError` keeps its owner as the `Box<str>` this
-      // `String` becomes.
-      Self::Member(outer, inner) => {
-        let path = owner_path(&[peek_name(response, outer)?, peek_name(response, inner)?]);
-        Some(String::from(path.as_str()))
-      }
+      Self::Member(outer, inner) => Some(owner_path(&[
+        peek_name(response, outer)?,
+        peek_name(response, inner)?,
+      ])),
     }
   }
 }

@@ -94,9 +94,6 @@ All notable changes to Smear are documented in this file.
   and the retired map. Both are exported from `interner`.
 - `smear-schema`: `TypeRef`, the `(TypeId, &TypeDef)` pair `Schema::type_by_name` answers, is
   exported at the crate root, where only the private `repr` module named it.
-- `smear-schema`: where the target has pointer-width atomics, a `SchemaError` holds its subject and
-  its owner inline when they are at most 62 bytes long and shares a longer one, so a short one
-  costs no allocation and a clone allocates nothing. Its accessors and `Display` answer as before.
 - `smear-schema` and `smear-compiler`: an `Int` literal stands for a `Float` only while a finite
   double holds its value, as `Float`'s input coercion requires (§3.5.2). `Schema::build` and
   `Rule::ValuesOfCorrectType` refuse one of magnitude `2^1024 - 2^970` or more, the least integer
