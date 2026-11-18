@@ -69,17 +69,9 @@ pub(crate) enum LiteralShape {
   Boolean,
   /// An integer literal, with whether its spelling fit GraphQL's 32-bit signed range and whether
   /// it named a finite double.
-  Int {
-    /// [`fits_i32`], decided where the literal was read.
-    fits_i32: bool,
-    /// [`is_finite`], decided where the literal was read: whether it may stand for a `Float`.
-    is_finite: bool,
-  },
+  Int(IntShape),
   /// A floating-point literal, with whether its spelling named a finite double.
-  Float {
-    /// [`is_finite`], decided where the literal was read.
-    is_finite: bool,
-  },
+  Float(FloatShape),
   /// A string literal, inline or block.
   String,
   /// An unquoted enum member name.
@@ -88,6 +80,24 @@ pub(crate) enum LiteralShape {
   List,
   /// An object literal.
   Object,
+}
+
+/// What an integer literal's spelling was decided to be where the literal was read:
+/// [`LiteralShape::Int`]'s payload, and the one the builder's reduction of an `Int` carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct IntShape {
+  /// [`fits_i32`], decided where the literal was read.
+  pub(crate) fits_i32: bool,
+  /// [`is_finite`], decided where the literal was read: whether it may stand for a `Float`.
+  pub(crate) is_finite: bool,
+}
+
+/// What a floating-point literal's spelling was decided to be where the literal was read:
+/// [`LiteralShape::Float`]'s payload, and the one the builder's reduction of a `Float` carries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct FloatShape {
+  /// [`is_finite`], decided where the literal was read.
+  pub(crate) is_finite: bool,
 }
 
 /// One of the five scalars the specification provides.
@@ -126,11 +136,12 @@ impl BuiltInScalar {
   pub(crate) fn accepts(self, shape: LiteralShape) -> bool {
     match self {
       // The specification's `Int` input coercion takes integer literals only, in 32-bit range.
-      Self::Int => matches!(shape, LiteralShape::Int { fits_i32: true, .. }),
+      Self::Int => matches!(shape, LiteralShape::Int(IntShape { fits_i32: true, .. })),
       // The coercion rules let an `Int` literal stand for a `Float`, and `Float`'s input coercion
       // refuses a value no finite double represents, written as an integer or not (§3.5.2).
       Self::Float => match shape {
-        LiteralShape::Float { is_finite } | LiteralShape::Int { is_finite, .. } => is_finite,
+        LiteralShape::Float(FloatShape { is_finite })
+        | LiteralShape::Int(IntShape { is_finite, .. }) => is_finite,
         _ => false,
       },
       Self::String => shape == LiteralShape::String,
@@ -140,7 +151,7 @@ impl BuiltInScalar {
       // reads the same verdict rather than a `fits_id` of its own.
       Self::ID => match shape {
         LiteralShape::String => true,
-        LiteralShape::Int { fits_i32, .. } => fits_i32,
+        LiteralShape::Int(IntShape { fits_i32, .. }) => fits_i32,
         _ => false,
       },
     }
@@ -176,21 +187,21 @@ pub(crate) fn is_finite(spelling: &[u8]) -> bool {
 mod tests {
   use std::string::String;
 
-  use super::{BuiltInScalar, LiteralShape, fits_i32, is_finite};
+  use super::{BuiltInScalar, FloatShape, IntShape, LiteralShape, fits_i32, is_finite};
 
   /// An `Int` literal's shape, with the two verdicts the reduction decides.
   fn int(spelling: &[u8]) -> LiteralShape {
-    LiteralShape::Int {
+    LiteralShape::Int(IntShape {
       fits_i32: fits_i32(spelling),
       is_finite: is_finite(spelling),
-    }
+    })
   }
 
   /// A `Float` literal's shape, likewise.
   fn float(spelling: &[u8]) -> LiteralShape {
-    LiteralShape::Float {
+    LiteralShape::Float(FloatShape {
       is_finite: is_finite(spelling),
-    }
+    })
   }
 
   #[test]

@@ -53,7 +53,7 @@ use super::{
   error::{
     DocumentSpan, SchemaError, SchemaErrorKind, SchemaErrors, directive_coordinate, owner_path,
   },
-  literal::{BuiltInScalar, LiteralShape, fits_i32, is_finite},
+  literal::{BuiltInScalar, FloatShape, IntShape, LiteralShape, fits_i32, is_finite},
   repr::{
     DefaultKind, Deprecation, DirectiveDef, DirectiveLocation, DirectiveLocations, DirectiveMeta,
     EnumValueMeta, FieldDef, FieldMeta, InputValueDef, InputValueMeta, MAX_DIRECTIVE_ARGUMENTS,
@@ -397,21 +397,70 @@ impl Coordinate {
 /// Which input-value list a check is looking at, since it cannot hold a borrow of one.
 #[derive(Debug, Clone, Copy)]
 enum ArgumentsOf {
-  Field { ty: usize, field: usize },
-  Directive { index: usize },
+  /// The arguments of one field.
+  Field(FieldOf),
+  /// The arguments of the directive definition at this index.
+  Directive(usize),
 }
 
 /// Which directive-usage list a check is looking at, for the reason [`ArgumentsOf`] exists.
 #[derive(Debug, Clone, Copy)]
 enum DirectivesOf {
   Schema,
-  Type { ty: usize },
-  Field { ty: usize, field: usize },
-  FieldArgument { ty: usize, field: usize, arg: usize },
-  InputField { ty: usize, field: usize },
-  EnumValue { ty: usize, value: usize },
-  Directive { index: usize },
-  DirectiveArgument { directive: usize, arg: usize },
+  /// The usages on the type at this index.
+  Type(usize),
+  /// The usages on one field.
+  Field(FieldOf),
+  /// The usages on one argument of a field.
+  FieldArgument(FieldArgumentOf),
+  /// The usages on one field of an input object.
+  InputField(FieldOf),
+  /// The usages on one value of an enum.
+  EnumValue(EnumValueOf),
+  /// The usages on the directive definition at this index.
+  Directive(usize),
+  /// The usages on one argument of a directive definition.
+  DirectiveArgument(DirectiveArgumentOf),
+}
+
+/// One field of a type, by position: [`ArgumentsOf::Field`]'s payload, and the payload of
+/// [`DirectivesOf::Field`] and [`DirectivesOf::InputField`] too, which read the same two indices.
+#[derive(Debug, Clone, Copy)]
+struct FieldOf {
+  /// The index of the type.
+  ty: usize,
+  /// The index of the field in the type's list: its fields, or its input fields.
+  field: usize,
+}
+
+/// One argument of a field, by position: [`DirectivesOf::FieldArgument`]'s payload.
+#[derive(Debug, Clone, Copy)]
+struct FieldArgumentOf {
+  /// The index of the type.
+  ty: usize,
+  /// The index of the field in the type's fields.
+  field: usize,
+  /// The index of the argument in the field's arguments.
+  arg: usize,
+}
+
+/// One value of an enum, by position: [`DirectivesOf::EnumValue`]'s payload.
+#[derive(Debug, Clone, Copy)]
+struct EnumValueOf {
+  /// The index of the type.
+  ty: usize,
+  /// The index of the value in the type's enum values.
+  value: usize,
+}
+
+/// One argument of a directive definition, by position: [`DirectivesOf::DirectiveArgument`]'s
+/// payload.
+#[derive(Debug, Clone, Copy)]
+struct DirectiveArgumentOf {
+  /// The index of the directive definition.
+  directive: usize,
+  /// The index of the argument in the definition's arguments.
+  arg: usize,
 }
 
 /// What one declared argument list's three §3.6.1 rules are called.
@@ -536,10 +585,16 @@ enum Positions<'f, 's> {
   Scan(&'f [RawField]),
   /// Past it: `Sym` to the first position of `fields` that wrote it, [`Positions::ABSENT`]
   /// everywhere else, over a table sized to the whole symbol space.
-  Index {
-    fields: &'f [RawField],
-    of_sym: &'s mut [u32],
-  },
+  Index(IndexedPositions<'f, 's>),
+}
+
+/// A wide field list and the table that says where each of its names first sits:
+/// [`Positions::Index`]'s payload.
+struct IndexedPositions<'f, 's> {
+  /// The list the table indexes.
+  fields: &'f [RawField],
+  /// `Sym` to the first position of `fields` that wrote it, [`Positions::ABSENT`] everywhere else.
+  of_sym: &'s mut [u32],
 }
 
 impl<'f, 's> Positions<'f, 's> {
@@ -568,14 +623,14 @@ impl<'f, 's> Positions<'f, 's> {
         *slot = at as u32;
       }
     }
-    Self::Index { fields, of_sym }
+    Self::Index(IndexedPositions { fields, of_sym })
   }
 
   /// The first position that wrote `name`, or `None`.
   fn of(&self, name: Sym) -> Option<usize> {
     match self {
       Self::Scan(fields) => fields.iter().position(|field| field.name.sym == name),
-      Self::Index { of_sym, .. } => match of_sym[name.get() as usize] {
+      Self::Index(IndexedPositions { of_sym, .. }) => match of_sym[name.get() as usize] {
         Self::ABSENT => None,
         at => Some(at as usize),
       },
@@ -586,7 +641,7 @@ impl<'f, 's> Positions<'f, 's> {
 impl Drop for Positions<'_, '_> {
   /// Clears exactly the slots this list wrote, which is `O(fields)` and not `O(symbols)`.
   fn drop(&mut self) {
-    let Self::Index { fields, of_sym } = self else {
+    let Self::Index(IndexedPositions { fields, of_sym }) = self else {
       return;
     };
     for field in *fields {
@@ -1287,7 +1342,7 @@ impl Drop for RawValue {
 /// `fits_i32` and `is_finite` are **all** a numeric spelling is ever read for — see
 /// [`LiteralShape`] — and both are answerable where the literal is read. So they are answered
 /// there, and what this enum carries is the `bool`s: both for an integer, which may stand for a
-/// `Float`, and `is_finite` for a float. The growth is not bounded, it is *gone*: zero retained at
+/// `Float`, in an [`IntShape`], and `is_finite` for a float, in a [`FloatShape`]. The growth is not bounded, it is *gone*: zero retained at
 /// every `B` above, and one range decision per literal instead of one per check.
 ///
 /// The trade this reverses was made deliberately and is worth naming. Keeping the spelling let all
@@ -1325,12 +1380,9 @@ enum RawShape {
   Boolean,
   /// An integer literal, reduced to [`fits_i32`](crate::literal::fits_i32) and
   /// [`is_finite`](crate::literal::is_finite).
-  Int {
-    fits_i32: bool,
-    is_finite: bool,
-  },
+  Int(IntShape),
   /// A floating-point literal, reduced to [`is_finite`](crate::literal::is_finite).
-  Float(bool),
+  Float(FloatShape),
   String,
   /// An enum member's spelling, interned. The one arm that still retains bytes; see the header.
   Enum(Sym),
@@ -1405,16 +1457,8 @@ impl RawShape {
     match self {
       Self::Null => Some(LiteralShape::Null),
       Self::Boolean => Some(LiteralShape::Boolean),
-      Self::Int {
-        fits_i32,
-        is_finite,
-      } => Some(LiteralShape::Int {
-        fits_i32: *fits_i32,
-        is_finite: *is_finite,
-      }),
-      Self::Float(is_finite) => Some(LiteralShape::Float {
-        is_finite: *is_finite,
-      }),
+      Self::Int(int) => Some(LiteralShape::Int(*int)),
+      Self::Float(float) => Some(LiteralShape::Float(*float)),
       Self::String => Some(LiteralShape::String),
       Self::Enum(_) => Some(LiteralShape::Enum),
       Self::List(_) => Some(LiteralShape::List),
@@ -2033,31 +2077,35 @@ impl<'a> Model<'a> {
   /// and write halves were separated for. See [`Declared`].
   fn arguments(&self, at: ArgumentsOf) -> Args<'a> {
     match at {
-      ArgumentsOf::Field { ty, field } => self.types[ty].fields[field].args.read(),
-      ArgumentsOf::Directive { index } => self.directives[index].args.read(),
+      ArgumentsOf::Field(FieldOf { ty, field }) => self.types[ty].fields[field].args.read(),
+      ArgumentsOf::Directive(index) => self.directives[index].args.read(),
     }
   }
 
   fn directive_uses(&self, at: DirectivesOf) -> &'a [RawDirectiveUse] {
     match at {
       DirectivesOf::Schema => self.schema_directives,
-      DirectivesOf::Type { ty } => &self.types[ty].directives,
-      DirectivesOf::Field { ty, field } => &self.types[ty].fields[field].directives,
+      DirectivesOf::Type(ty) => &self.types[ty].directives,
+      DirectivesOf::Field(FieldOf { ty, field }) => &self.types[ty].fields[field].directives,
       // The two argument arms are the only ones whose list is behind a ceiling, and their
       // `Refused` arm is unreachable: an `arg` position exists only because the loop that minted
       // it read the same list through the gate and stopped when the gate refused. An empty list
       // is what an unreachable arm should degrade to here — no directive to check, so nothing
       // reported — rather than a diagnostic invented about a list nobody may look at.
-      DirectivesOf::FieldArgument { ty, field, arg } => {
+      DirectivesOf::FieldArgument(FieldArgumentOf { ty, field, arg }) => {
         match self.types[ty].fields[field].args.read() {
           Args::Bounded(args) => &args[arg].directives,
           Args::Refused => &[],
         }
       }
-      DirectivesOf::InputField { ty, field } => &self.types[ty].input_fields[field].directives,
-      DirectivesOf::EnumValue { ty, value } => &self.types[ty].enum_values[value].directives,
-      DirectivesOf::Directive { index } => &self.directives[index].directives,
-      DirectivesOf::DirectiveArgument { directive, arg } => {
+      DirectivesOf::InputField(FieldOf { ty, field }) => {
+        &self.types[ty].input_fields[field].directives
+      }
+      DirectivesOf::EnumValue(EnumValueOf { ty, value }) => {
+        &self.types[ty].enum_values[value].directives
+      }
+      DirectivesOf::Directive(index) => &self.directives[index].directives,
+      DirectivesOf::DirectiveArgument(DirectiveArgumentOf { directive, arg }) => {
         match self.directives[directive].args.read() {
           Args::Bounded(args) => &args[arg].directives,
           Args::Refused => &[],
@@ -3155,21 +3203,27 @@ impl SchemaBuilder {
   {
     /// A container whose children are still being reduced.
     enum Frame<'a, S> {
-      List {
-        span: SimpleSpan,
-        values: Vec<RawValue>,
-        rest: core::slice::Iter<'a, ConstInputValue<S>>,
-      },
-      Object {
-        span: SimpleSpan,
-        fields: Vec<RawObjectField>,
-        /// The name of the field whose value is being reduced right now.
-        ///
-        /// One at a time, because the walk is depth-first: a frame reaches its next field only
-        /// once the previous field's whole subtree has been folded into `fields`.
-        pending: Option<Located>,
-        rest: core::slice::Iter<'a, ConstObjectField<S>>,
-      },
+      List(ListFrame<'a, S>),
+      Object(ObjectFrame<'a, S>),
+    }
+
+    /// A list whose entries are still being reduced: [`Frame::List`]'s payload.
+    struct ListFrame<'a, S> {
+      span: SimpleSpan,
+      values: Vec<RawValue>,
+      rest: core::slice::Iter<'a, ConstInputValue<S>>,
+    }
+
+    /// An object whose fields are still being reduced: [`Frame::Object`]'s payload.
+    struct ObjectFrame<'a, S> {
+      span: SimpleSpan,
+      fields: Vec<RawObjectField>,
+      /// The name of the field whose value is being reduced right now.
+      ///
+      /// One at a time, because the walk is depth-first: a frame reaches its next field only
+      /// once the previous field's whole subtree has been folded into `fields`.
+      pending: Option<Located>,
+      rest: core::slice::Iter<'a, ConstObjectField<S>>,
     }
 
     let mut frames: Vec<Frame<'_, S>> = Vec::new();
@@ -3183,10 +3237,10 @@ impl SchemaBuilder {
         // Nothing in hand: take the next child of the innermost open container, or close it.
         match frames.last_mut() {
           None => break,
-          Some(Frame::List { rest, .. }) => match rest.next() {
+          Some(Frame::List(ListFrame { rest, .. })) => match rest.next() {
             Some(entry) => current = Some(entry),
             None => {
-              let Some(Frame::List { span, values, .. }) = frames.pop() else {
+              let Some(Frame::List(ListFrame { span, values, .. })) = frames.pop() else {
                 unreachable!("the frame just matched as a list")
               };
               emit(
@@ -3199,13 +3253,13 @@ impl SchemaBuilder {
               );
             }
           },
-          Some(Frame::Object { rest, pending, .. }) => match rest.next() {
+          Some(Frame::Object(ObjectFrame { rest, pending, .. })) => match rest.next() {
             Some(field) => {
               *pending = Some(self.located(field.name()));
               current = Some(field.value());
             }
             None => {
-              let Some(Frame::Object { span, fields, .. }) = frames.pop() else {
+              let Some(Frame::Object(ObjectFrame { span, fields, .. })) = frames.pop() else {
                 unreachable!("the frame just matched as an object")
               };
               emit(
@@ -3232,12 +3286,14 @@ impl SchemaBuilder {
         // answer read at a different time.
         ConstInputValue::Int(int) => {
           let spelling: &[u8] = int.source().as_ref();
-          RawShape::Int {
+          RawShape::Int(IntShape {
             fits_i32: fits_i32(spelling),
             is_finite: is_finite(spelling),
-          }
+          })
         }
-        ConstInputValue::Float(float) => RawShape::Float(is_finite(float.source().as_ref())),
+        ConstInputValue::Float(float) => RawShape::Float(FloatShape {
+          is_finite: is_finite(float.source().as_ref()),
+        }),
         // The one arm that cannot: an enum member's spelling is resolved against the declared
         // members, and a member declared later in this document — or in a later one — is not a
         // symbol yet. Interned rather than copied, one copy per distinct spelling.
@@ -3253,11 +3309,11 @@ impl SchemaBuilder {
         ConstInputValue::List(list) => {
           if frames.len() < MAX_CONST_VALUE_DEPTH {
             let entries = list.values();
-            frames.push(Frame::List {
+            frames.push(Frame::List(ListFrame {
               span,
               values: Vec::with_capacity(entries.len()),
               rest: entries.iter(),
-            });
+            }));
             continue;
           }
           refused.get_or_insert(span);
@@ -3266,12 +3322,12 @@ impl SchemaBuilder {
         ConstInputValue::Object(object) => {
           if frames.len() < MAX_CONST_VALUE_DEPTH {
             let fields = object.fields();
-            frames.push(Frame::Object {
+            frames.push(Frame::Object(ObjectFrame {
               span,
               fields: Vec::with_capacity(fields.len()),
               pending: None,
               rest: fields.iter(),
-            });
+            }));
             continue;
           }
           refused.get_or_insert(span);
@@ -3295,10 +3351,10 @@ impl SchemaBuilder {
     fn emit<S>(frames: &mut [Frame<'_, S>], answer: &mut Option<RawValue>, value: RawValue) {
       match frames.last_mut() {
         None => *answer = Some(value),
-        Some(Frame::List { values, .. }) => values.push(value),
-        Some(Frame::Object {
+        Some(Frame::List(ListFrame { values, .. })) => values.push(value),
+        Some(Frame::Object(ObjectFrame {
           fields, pending, ..
-        }) => fields.push(RawObjectField {
+        })) => fields.push(RawObjectField {
           name: pending
             .take()
             .expect("an object frame reached a value with no field name waiting on it"),
@@ -4407,7 +4463,7 @@ impl SchemaBuilder {
         model,
         errors,
         names,
-        ArgumentsOf::Field { ty: index, field },
+        ArgumentsOf::Field(FieldOf { ty: index, field }),
         path,
         built_in,
         ArgumentRules {
@@ -4770,7 +4826,7 @@ impl SchemaBuilder {
         model,
         errors,
         names,
-        ArgumentsOf::Directive { index },
+        ArgumentsOf::Directive(index),
         Coordinate::named(at.sym),
         built_in,
         ArgumentRules {
@@ -4806,7 +4862,7 @@ impl SchemaBuilder {
 
     for ty in 0..model.types.len() {
       let owner = Coordinate::named(model.types[ty].name.sym);
-      Self::check_directive_uses(model, errors, names, DirectivesOf::Type { ty }, owner);
+      Self::check_directive_uses(model, errors, names, DirectivesOf::Type(ty), owner);
 
       for field in 0..model.types[ty].fields.len() {
         let path = owner.then(model.types[ty].fields[field].name.sym);
@@ -4814,21 +4870,22 @@ impl SchemaBuilder {
           model,
           errors,
           names,
-          DirectivesOf::Field { ty, field },
+          DirectivesOf::Field(FieldOf { ty, field }),
           path,
         );
 
         // The gate decides whether this field's arguments are visited at all, which is also
         // what makes `DirectivesOf::FieldArgument`'s own refused arm unreachable: an `arg`
         // position exists only for a list admitted here.
-        if let Args::Bounded(declared) = model.arguments(ArgumentsOf::Field { ty, field }) {
+        if let Args::Bounded(declared) = model.arguments(ArgumentsOf::Field(FieldOf { ty, field }))
+        {
           for (arg, argument) in declared.iter().enumerate() {
             let path = path.then(argument.name.sym);
             Self::check_directive_uses(
               model,
               errors,
               names,
-              DirectivesOf::FieldArgument { ty, field, arg },
+              DirectivesOf::FieldArgument(FieldArgumentOf { ty, field, arg }),
               path,
             );
           }
@@ -4841,7 +4898,7 @@ impl SchemaBuilder {
           model,
           errors,
           names,
-          DirectivesOf::InputField { ty, field },
+          DirectivesOf::InputField(FieldOf { ty, field }),
           path,
         );
       }
@@ -4852,7 +4909,7 @@ impl SchemaBuilder {
           model,
           errors,
           names,
-          DirectivesOf::EnumValue { ty, value },
+          DirectivesOf::EnumValue(EnumValueOf { ty, value }),
           path,
         );
       }
@@ -4864,18 +4921,17 @@ impl SchemaBuilder {
         model,
         errors,
         names,
-        DirectivesOf::Directive { index: directive },
+        DirectivesOf::Directive(directive),
         owner,
       );
-      if let Args::Bounded(declared) = model.arguments(ArgumentsOf::Directive { index: directive })
-      {
+      if let Args::Bounded(declared) = model.arguments(ArgumentsOf::Directive(directive)) {
         for (arg, argument) in declared.iter().enumerate() {
           let path = owner.then(argument.name.sym);
           Self::check_directive_uses(
             model,
             errors,
             names,
-            DirectivesOf::DirectiveArgument { directive, arg },
+            DirectivesOf::DirectiveArgument(DirectiveArgumentOf { directive, arg }),
             path,
           );
         }
@@ -4997,8 +5053,7 @@ impl SchemaBuilder {
     // is the `Θ(declared × written)` review found here: a definition past its ceiling is refused
     // at build, and every usage of it then re-scanned the oversized list anyway. The refusal is
     // recorded where the definition is validated; this is the reader being told, by the list.
-    let Args::Bounded(declared) = model.arguments(ArgumentsOf::Directive { index: definition })
-    else {
+    let Args::Bounded(declared) = model.arguments(ArgumentsOf::Directive(definition)) else {
       return;
     };
 
@@ -5132,25 +5187,45 @@ impl SchemaBuilder {
     /// child. That is the same shape [`SchemaBuilder::const_value`] builds the literal with.
     enum Level<'a> {
       /// A list literal's entries, every one of them offered to the same item type.
-      Entries {
-        rest: core::slice::Iter<'a, RawValue>,
-        item: PackedType,
-      },
+      Entries(EntriesLevel<'a>),
       /// An input-object literal's fields, plus what the omitted-required pass will need once they
       /// run out.
-      Fields {
-        rest: core::slice::Iter<'a, RawObjectField>,
-        base: usize,
-        written: &'a [RawObjectField],
-        span: SimpleSpan,
-      },
+      Fields(FieldsLevel<'a>),
+    }
+
+    /// A list literal's open level: [`Level::Entries`]'s payload.
+    struct EntriesLevel<'a> {
+      rest: core::slice::Iter<'a, RawValue>,
+      item: PackedType,
+    }
+
+    /// An input-object literal's open level: [`Level::Fields`]'s payload.
+    struct FieldsLevel<'a> {
+      rest: core::slice::Iter<'a, RawObjectField>,
+      base: usize,
+      written: &'a [RawObjectField],
+      span: SimpleSpan,
     }
 
     /// What the innermost open level had left, read without holding a borrow on the stack.
     enum Step<'a> {
-      Entry(&'a RawValue, PackedType),
-      Field(&'a RawObjectField, usize),
+      Entry(EntryStep<'a>),
+      Field(FieldStep<'a>),
       Close,
+    }
+
+    /// The next entry of a list level, and the item type it is offered to: [`Step::Entry`]'s
+    /// payload.
+    struct EntryStep<'a> {
+      value: &'a RawValue,
+      item: PackedType,
+    }
+
+    /// The next field of an input-object level, and the index of the input object type whose
+    /// declaration it is looked up in: [`Step::Field`]'s payload.
+    struct FieldStep<'a> {
+      field: &'a RawObjectField,
+      base: usize,
     }
 
     let reject = |errors: &mut Vec<SchemaError>, span| {
@@ -5172,18 +5247,21 @@ impl SchemaBuilder {
       let Some((value, expected)) = current.take() else {
         let step = match levels.last_mut() {
           None => return,
-          Some(Level::Entries { rest, item }) => match rest.next() {
-            Some(entry) => Step::Entry(entry, *item),
+          Some(Level::Entries(EntriesLevel { rest, item })) => match rest.next() {
+            Some(entry) => Step::Entry(EntryStep {
+              value: entry,
+              item: *item,
+            }),
             None => Step::Close,
           },
-          Some(Level::Fields { rest, base, .. }) => match rest.next() {
-            Some(field) => Step::Field(field, *base),
+          Some(Level::Fields(FieldsLevel { rest, base, .. })) => match rest.next() {
+            Some(field) => Step::Field(FieldStep { field, base: *base }),
             None => Step::Close,
           },
         };
         match step {
-          Step::Entry(entry, item) => current = Some((entry, item)),
-          Step::Field(field, base) => {
+          Step::Entry(EntryStep { value: entry, item }) => current = Some((entry, item)),
+          Step::Field(FieldStep { field, base }) => {
             let object = Coordinate::named(model.types[base].name.sym);
             let Some(declared) = names
               .first(model.types, base, field.name.sym)
@@ -5218,12 +5296,12 @@ impl SchemaBuilder {
             current = Some((&field.value, declared.ty.packed));
           }
           Step::Close => {
-            let Some(Level::Fields {
+            let Some(Level::Fields(FieldsLevel {
               base,
               written,
               span,
               ..
-            }) = levels.pop()
+            })) = levels.pop()
             else {
               // A list level has nothing owed when its entries run out.
               continue;
@@ -5294,10 +5372,10 @@ impl SchemaBuilder {
         let (Some(item), RawShape::List(entries)) = (expected.list_item(), &value.shape) else {
           continue;
         };
-        levels.push(Level::Entries {
+        levels.push(Level::Entries(EntriesLevel {
           rest: entries.iter(),
           item,
-        });
+        }));
         continue;
       }
 
@@ -5345,12 +5423,12 @@ impl SchemaBuilder {
               _ => reject(errors, value.span),
             }
           }
-          levels.push(Level::Fields {
+          levels.push(Level::Fields(FieldsLevel {
             rest: fields.iter(),
             base,
             written: fields,
             span: value.span,
-          });
+          }));
         }
         TypeKind::Enum => {
           // One index per ENUM, shared by every literal offered to it, for the reason the input
@@ -6464,11 +6542,29 @@ impl SchemaBuilder {
     enum Ask<'a> {
       /// The caller's literal named this field, so the walk descends into that literal and the
       /// field's own default is never consulted. Nothing settles from this.
-      Supplied(usize, &'a RawValue),
+      Supplied(SuppliedField<'a>),
       /// No node of this level named it, so the walk descends into the field's OWN default —
-      /// and `.1` is where the field sits in its object's coverable run, which is what the
-      /// settling step needs to take it out of every later frame's way.
-      Omitted(usize, usize),
+      /// and its `position` is where the field sits in its object's coverable run, which is what
+      /// the settling step needs to take it out of every later frame's way.
+      Omitted(OmittedField),
+    }
+
+    /// A field the caller's literal named, and the literal it gave it: [`Ask::Supplied`]'s payload.
+    #[derive(Clone, Copy)]
+    struct SuppliedField<'a> {
+      /// The field's position in its object's input fields.
+      field: usize,
+      /// The literal the caller wrote for it.
+      literal: &'a RawValue,
+    }
+
+    /// A field no node of the level named: [`Ask::Omitted`]'s payload.
+    #[derive(Clone, Copy)]
+    struct OmittedField {
+      /// The field's position in its object's input fields.
+      field: usize,
+      /// Where the field sits in its object's coverable run.
+      position: usize,
     }
 
     /// What the walk knows about one input field's own `defaultValue`, which is the granularity
@@ -6630,7 +6726,10 @@ impl SchemaBuilder {
         // header says what a tail cost, both times it was one.
         let ask = if let Some(&(field_index, value)) = frame.work.get(frame.cursor) {
           frame.cursor += 1;
-          Ask::Supplied(field_index, value)
+          Ask::Supplied(SuppliedField {
+            field: field_index,
+            literal: value,
+          })
         } else {
           // The next field of `object`'s run this frame still has something to learn from:
           // past the ones that have SETTLED, in one step whoever settled them, and past the
@@ -6666,7 +6765,10 @@ impl SchemaBuilder {
             frame.omitting = taken.map(|_| position);
           }
           match taken {
-            Some((field_index, position)) => Ask::Omitted(field_index, position),
+            Some((field_index, position)) => Ask::Omitted(OmittedField {
+              field: field_index,
+              position,
+            }),
             None => {
               // The rule, in one line. This frame descended into one field's own default and
               // followed every path out of it to the end without meeting a field it had itself
@@ -6694,7 +6796,9 @@ impl SchemaBuilder {
           }
         };
         let field_index = match ask {
-          Ask::Supplied(index, _) | Ask::Omitted(index, _) => index,
+          Ask::Supplied(SuppliedField { field, .. }) | Ask::Omitted(OmittedField { field, .. }) => {
+            field
+          }
         };
 
         // `InputFieldDefaultValueHasCycle`. A field whose named type is not an input object can
@@ -6712,7 +6816,7 @@ impl SchemaBuilder {
         let descend_into = match ask {
           // The caller's literal named this field, so the field's own default is never consulted
           // and `visited` does not grow.
-          Ask::Supplied(_, value) => value,
+          Ask::Supplied(SuppliedField { literal, .. }) => literal,
           // The field's own default, which is the descent `visited` grows for.
           Ask::Omitted(..) => match field.default_value.as_ref() {
             Some(default) => default,
@@ -6726,7 +6830,7 @@ impl SchemaBuilder {
 
         let pushed = match ask {
           Ask::Supplied(..) => None,
-          Ask::Omitted(_, position) => {
+          Ask::Omitted(OmittedField { position, .. }) => {
             let id = field_base[object] + field_index;
             match settling[id] {
               // Grey: the exploration below this field comes back to it.
@@ -7778,7 +7882,7 @@ fn map_nodes<'a>(value: &'a RawValue, out: &mut Vec<&'a [RawObjectField]>) {
       RawShape::Refused => {}
       RawShape::Null
       | RawShape::Boolean
-      | RawShape::Int { .. }
+      | RawShape::Int(_)
       | RawShape::Float(_)
       | RawShape::String
       | RawShape::Enum(_) => {}

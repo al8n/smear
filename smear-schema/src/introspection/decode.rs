@@ -234,8 +234,17 @@ pub(super) enum Owner {
   Schema,
   /// The object beginning at this offset, named by its own `name` member.
   Object(usize),
-  /// The object at `.1` qualified by the object at `.0` — `User.pet`, a field's argument list.
-  Member(usize, usize),
+  /// An object qualified by the object that owns it — `User.pet`, a field's argument list.
+  Member(MemberOf),
+}
+
+/// The offsets of two objects, one qualifying the other: [`Owner::Member`]'s payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct MemberOf {
+  /// The offset of the object that qualifies the member: the type that declares it.
+  pub(super) owner: usize,
+  /// The offset of the object that is qualified.
+  pub(super) member: usize,
 }
 
 impl Owner {
@@ -249,9 +258,9 @@ impl Owner {
       Self::Unowned => None,
       Self::Schema => Some(String::from("schema")),
       Self::Object(at) => peek_name(response, at).map(String::from),
-      Self::Member(outer, inner) => Some(owner_path(&[
-        peek_name(response, outer)?,
-        peek_name(response, inner)?,
+      Self::Member(MemberOf { owner, member }) => Some(owner_path(&[
+        peek_name(response, owner)?,
+        peek_name(response, member)?,
       ])),
     }
   }
@@ -693,7 +702,13 @@ fn field<'a>(scanner: &mut Scanner<'a>, owner_at: usize) -> Scanned<Introspected
       })?,
       "args" => member(scanner, &mut args, |scanner| {
         list(scanner, "__Field.args", |scanner| {
-          input_value(scanner, Owner::Member(owner_at, at))
+          input_value(
+            scanner,
+            Owner::Member(MemberOf {
+              owner: owner_at,
+              member: at,
+            }),
+          )
         })
       })?,
       "type" => member(scanner, &mut ty, |scanner| type_ref(scanner, owner))?,
