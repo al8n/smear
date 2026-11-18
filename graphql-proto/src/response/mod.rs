@@ -169,25 +169,7 @@ pub(super) enum State<V> {
   /// transition is the release: there is no separate call to forget.
   Expanded,
   /// An object whose value is still readable, because a child of it has yet to be offered.
-  Object {
-    /// The value the driver resolved, handed back as the parent value of every child request.
-    value: V,
-    /// How many future reads of `value` remain: children enqueued by `expand` and not yet departed
-    /// from Ready.
-    ///
-    /// The count is *inside* the variant on purpose. A slot holding no object pays nothing for it,
-    /// and — the property that matters more — a stale count is unrepresentable, because `discard`
-    /// and `reset` overwrite the whole state and the number dies with the value it was counting
-    /// reads of. A parallel table would have to be kept in step with two paths that already forget
-    /// things for a living.
-    ///
-    /// Its *meaning* is "outstanding future reads", and that is what a later phase extends. Phase 6
-    /// making list completion resumable adds registered-but-uncreated readers to the meaning; it
-    /// does not redefine it. Carry the meaning, not the formula.
-    pending: u32,
-    /// The concrete object type, after `ResolveAbstractType` where the position was abstract.
-    ty: TypeId,
-  },
+  Object(PendingObject<V>),
   /// A field under one of draft §4's meta-fields, collected and not yet answered: the field of
   /// `entity` the slot's metadata names — or, for `__schema` and `__type` on the query root type,
   /// the field of the schema itself.
@@ -206,6 +188,28 @@ pub(super) enum State<V> {
   MetaLeaf(MetaLeaf),
 }
 
+/// [`State::Object`]'s payload: an object's value, and how many reads of it are still to come.
+#[derive(Debug)]
+pub(super) struct PendingObject<V> {
+  /// The value the driver resolved, handed back as the parent value of every child request.
+  pub(super) value: V,
+  /// How many future reads of `value` remain: children enqueued by `expand` and not yet departed
+  /// from Ready.
+  ///
+  /// The count is *inside* the variant's payload on purpose. A slot holding no object pays nothing
+  /// for it, and — the property that matters more — a stale count is unrepresentable, because
+  /// `discard` and `reset` overwrite the whole state and the number dies with the value it was
+  /// counting reads of. A parallel table would have to be kept in step with two paths that already
+  /// forget things for a living.
+  ///
+  /// Its *meaning* is "outstanding future reads", and that is what a later phase extends. Phase 6
+  /// making list completion resumable adds registered-but-uncreated readers to the meaning; it
+  /// does not redefine it. Carry the meaning, not the formula.
+  pub(super) pending: u32,
+  /// The concrete object type, after `ResolveAbstractType` where the position was abstract.
+  pub(super) ty: TypeId,
+}
+
 /// The entity of the schema a draft §4 meta object stands for.
 ///
 /// Indices rather than borrows, for the reason [`Slot`] holds no lifetime: a field is its owner and
@@ -218,25 +222,27 @@ pub(super) enum Entity {
   Schema,
   /// `__Type`, wrappers and all.
   Type(TypeRef),
-  /// `__Field`: a position in `owner`'s field group, which [`Schema::fields_of`] returns.
-  Field {
-    /// The object or interface type.
-    owner: TypeId,
-    /// The field's position in the group.
-    at: u32,
-  },
+  /// `__Field`: a position in an object or interface type's field group, which
+  /// [`Schema::fields_of`] returns.
+  Field(TypeMember),
   /// `__InputValue`: a row of the schema's input-value table — an argument of a field or a
   /// directive, or a field of an input object.
   InputValue(u32),
-  /// `__EnumValue`: a position in `owner`'s value group, which [`Schema::enum_values_of`] returns.
-  EnumValue {
-    /// The enum type.
-    owner: TypeId,
-    /// The value's position in the group.
-    at: u32,
-  },
+  /// `__EnumValue`: a position in an enum type's value group, which [`Schema::enum_values_of`]
+  /// returns.
+  EnumValue(TypeMember),
   /// `__Directive`: a row of the schema's directive table.
   Directive(u32),
+}
+
+/// A member of a type, by its position in the type's group: what [`Entity::Field`] and
+/// [`Entity::EnumValue`] carry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct TypeMember {
+  /// The type: an object or interface type for a field, an enum type for an enum value.
+  pub(super) owner: TypeId,
+  /// The member's position in the owner's group — its field group or its value group.
+  pub(super) at: u32,
 }
 
 /// A type reference as `__Type` walks it: the named type, and the [`PackedType`] wrapper word
@@ -379,6 +385,8 @@ pub(super) enum Key {
 
 /// One segment of a draft §7.1.2 response path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum Segment<'r> {
   /// A field's response key — its alias when it has one, otherwise its name.
   Field(&'r str),
@@ -1218,7 +1226,7 @@ pub(super) fn node<'r, V>(
     // Every object state renders the same way, because rendering never read the value or the
     // resolved type — only `first_child`. `Expanded` is that fact made into a state, and a meta
     // object is in it by the time any call returns.
-    State::Object { .. } | State::Expanded | State::MetaObject(_) => Node::Object(Children {
+    State::Object(_) | State::Expanded | State::MetaObject(_) => Node::Object(Children {
       schema,
       slots,
       names,

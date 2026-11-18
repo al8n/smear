@@ -300,6 +300,8 @@ impl<V> core::error::Error for TooLarge<V> {}
 /// claiming more than it can ever hold. An entry's own map is refused by those same two, so they
 /// arrive here wrapped, as [`Extensions`](Self::Extensions), and [`Ceiling`] is unchanged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum RequestErrorCeiling {
   /// [`Limits::max_request_errors`] has no room for another entry.
@@ -602,7 +604,7 @@ impl<V> core::error::Error for RefusedEntry<V> {}
 /// **Not `#[non_exhaustive]`**, for the rule [`Node`](crate::Node) records: whatever matches on it
 /// has to answer for every kind of entry, and a third kind must break that `match` rather than fall
 /// into a catch-all.
-#[derive(IsVariant, TryUnwrap, Unwrap)]
+#[derive(IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 pub enum RequestErrorEntry<'r, V> {

@@ -5289,7 +5289,7 @@ fn a_name_the_arena_refuses_is_not_charged_for_its_copy() {
   let mut visits = Visits::new(u32::MAX - 1);
   let refused = interner.intern(&long, &mut visits);
   assert!(
-    matches!(refused, Err(Unstored::Arena { limit }) if limit == CAP),
+    matches!(refused, Err(Unstored::Arena(limit)) if limit == CAP),
     "the arena is what refuses a {}-byte name under a {CAP}-byte cap",
     long.len()
   );

@@ -60,33 +60,27 @@ use super::{
 };
 
 /// What went wrong, with everything the message needs.
+///
+/// Every variant is unit or a newtype. A payload several variants carry, [`FieldBudget`] for one,
+/// is named for what they share.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Raw {
-  /// The driver reported a field error through
-  /// [`handle_field_error`](super::Executor::handle_field_error) or
-  /// [`handle_field_error_with`](super::Executor::handle_field_error_with). The message is held
-  /// out of line.
-  Resolver { message: u32 },
+  /// The driver's message, held out of line as an id into the executor's name table: it reported
+  /// a field error through [`handle_field_error`](super::Executor::handle_field_error) or
+  /// [`handle_field_error_with`](super::Executor::handle_field_error_with).
+  Resolver(u32),
   /// Draft §6.4.3 step 1: a non-null position completed to null.
-  NullInNonNull { parent: TypeId, field: Sym },
+  NullInNonNull(FieldCoordinate),
   /// Draft §6.4.3 step 3: the value of a list-typed position is not a collection.
-  NotAList { parent: TypeId, field: Sym },
+  NotAList(FieldCoordinate),
   /// Draft §6.4.3 step 4: `CoerceResult` could not serialise the value.
-  LeafCoercion {
-    leaf: Sym,
-    parent: TypeId,
-    field: Sym,
-  },
+  LeafCoercion(LeafCoercion),
   /// Draft §6.4.3 step 5: the driver could not name the value's concrete type.
-  AbstractUnresolved {
-    abstract_ty: TypeId,
-    parent: TypeId,
-    field: Sym,
-  },
+  AbstractUnresolved(AbstractUnresolved),
   /// Draft §6.4.3 step 5: the driver named a type that is not a possible type of the position's
   /// abstract type — including a name the schema does not know at all, and a name that is known
   /// but is not an object type.
-  AbstractNotPossible { abstract_ty: TypeId, runtime: u32 },
+  AbstractNotPossible(AbstractNotPossible),
   /// [`AbstractNotPossible`](Raw::AbstractNotPossible) with the offending name unquotable.
   ///
   /// The same failure, and deliberately not a different one: the driver still named a type the
@@ -101,37 +95,13 @@ pub(super) enum Raw {
   /// that could plausibly be in someone's schema — both invite a reader to go looking for a type
   /// that was never named. Saying the name could not be recorded, and which ceiling stopped it, is
   /// the only version that does not lie about what the driver said.
-  AbstractNotPossibleUnnamed {
-    abstract_ty: TypeId,
-    unstored: Unstored,
-  },
+  AbstractNotPossibleUnnamed(AbstractNotPossibleUnnamed),
   /// Draft §6.4.1 step 5.b: a required argument was not provided.
-  ArgumentMissing {
-    field: Sym,
-    argument: Sym,
-    ty: PackedType,
-  },
+  ArgumentMissing(ArgumentRef),
   /// Draft §6.4.1 step 5.f: a non-null argument was given `null`.
-  ArgumentNull {
-    field: Sym,
-    argument: Sym,
-    ty: PackedType,
-  },
+  ArgumentNull(ArgumentRef),
   /// Draft §6.4.1 step 5.d: a required argument names a variable the request did not supply.
-  ArgumentVariableMissing {
-    field: Sym,
-    argument: Sym,
-    ty: PackedType,
-    /// The variable's spelling, or `None` when it could not be interned — for either reason.
-    ///
-    /// The finding does not depend on the spelling: the request did not supply the variable, and
-    /// that is true whether or not its name can be quoted. So an exhausted arena *or* an exhausted
-    /// visit budget shortens this message and leaves the error saying the same thing, rather than
-    /// swapping it for one about a resource — which would report a resource problem where the
-    /// caller has an argument problem. This is why [`Unstored`] is discarded here and carried at
-    /// the two sites whose message names a ceiling.
-    variable: Option<u32>,
-  },
+  ArgumentVariableMissing(ArgumentVariableMissing),
   /// Draft §6.4.1 step 5.j: an argument the executor reads itself holds a value that is not of its
   /// type — `__type`'s `name` that is not a string, or an `includeDeprecated` that is not a
   /// boolean.
@@ -139,20 +109,12 @@ pub(super) enum Raw {
   /// The executor performs step 5.j only for the arguments of draft §4's meta-fields, which it
   /// answers from the schema; every other argument's contents reach the driver unread, as an
   /// [`ArgumentSource`](super::ArgumentSource) whose coercion is the driver's.
-  ArgumentCoercion {
-    field: Sym,
-    argument: Sym,
-    ty: PackedType,
-  },
+  ArgumentCoercion(ArgumentRef),
   /// Draft §6.3 steps 3.a and 3.b: a `@skip`/`@include` condition that is not a readable boolean.
-  DirectiveCondition { fault: ConditionFault },
+  DirectiveCondition(ConditionFault),
   /// Not a specification failure: completing this position would have taken the response past
   /// [`Limits::max_response_slots`](super::Limits::max_response_slots).
-  ResponseBudget {
-    parent: TypeId,
-    field: Sym,
-    limit: u32,
-  },
+  ResponseBudget(FieldBudget),
   /// Not a specification failure: reading this position's written arguments would have taken the
   /// operation past [`Limits::max_selection_visits`](super::Limits::max_selection_visits).
   ///
@@ -164,11 +126,7 @@ pub(super) enum Raw {
   /// [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) rather than billed to a request
   /// that did not choose it. Charging `written` alone was published as bounding the product, and
   /// it does not — the product is zero at zero written and the scan is not. al8n/smear#198.
-  ArgumentBudget {
-    parent: TypeId,
-    field: Sym,
-    limit: u32,
-  },
+  ArgumentBudget(FieldBudget),
   /// Not a specification failure: answering this draft §4 meta field from the schema would have
   /// taken the operation past
   /// [`Limits::max_selection_visits`](super::Limits::max_selection_visits).
@@ -177,33 +135,26 @@ pub(super) enum Raw {
   /// not — or at `__type`, whose name the walk could not afford to look up. Its own variant,
   /// because the work it names is neither a collection nor an argument the request wrote: it is
   /// the schema being read, once per position the request asked for it at.
-  IntrospectionBudget {
-    parent: TypeId,
-    field: Sym,
-    limit: u32,
-  },
+  IntrospectionBudget(FieldBudget),
   /// Not a specification failure: recording this object's response metadata would have taken it
   /// past [`Limits::max_response_metadata`](super::Limits::max_response_metadata).
-  SelectionBudget {
-    parent: TypeId,
-    field: Sym,
-    limit: u32,
-  },
-  /// Not a specification failure: collecting this selection set would take the response metadata
-  /// past [`Limits::max_response_metadata`](super::Limits::max_response_metadata).
+  SelectionBudget(FieldBudget),
+  /// The [`Limits::max_response_metadata`](super::Limits::max_response_metadata) ceiling that
+  /// refused: not a specification failure, but collecting this selection set would take the
+  /// response metadata past it.
   ///
   /// Raised one step earlier than [`SelectionBudget`](Raw::SelectionBudget), at the staging buffer
   /// rather than at the commit, and `expand` rewrites it into that variant so the message can name
   /// the position. The rewrite is an improvement to the message and not a correctness requirement:
   /// if a future path forgets it, this renders a true sentence that is merely less specific, which
   /// is the direction a forgotten step should fail in.
-  MetadataBudget { limit: u32 },
-  /// Not a specification failure: draft §6.3's collection ran past
-  /// [`Limits::max_selection_visits`](super::Limits::max_selection_visits).
+  MetadataBudget(u32),
+  /// The [`Limits::max_selection_visits`](super::Limits::max_selection_visits) ceiling that
+  /// refused: not a specification failure, but draft §6.3's collection ran past it.
   ///
   /// No field is named, because collection is what *discovers* the fields — this is raised inside
   /// the walk, before the position that would have been blamed exists.
-  CollectionBudget { limit: u32 },
+  CollectionBudget(u32),
   /// Not a specification failure: looking up this position's runtime type name would have taken
   /// the operation past [`Limits::max_selection_visits`](super::Limits::max_selection_visits).
   ///
@@ -226,20 +177,15 @@ pub(super) enum Raw {
   /// lookup used to run *after* the interner had already exhausted the visit budget: the ledger
   /// was refusing and the expensive path ran anyway, once more for every remaining element.
   /// al8n/smear#196.
-  RuntimeTypeBudget {
-    abstract_ty: TypeId,
-    parent: TypeId,
-    field: Sym,
-    limit: u32,
-  },
-  /// Not a specification failure: a name would have taken the interner past
-  /// [`Limits::max_interned_bytes`](super::Limits::max_interned_bytes).
+  RuntimeTypeBudget(RuntimeTypeBudget),
+  /// The [`Limits::max_interned_bytes`](super::Limits::max_interned_bytes) ceiling that refused:
+  /// not a specification failure, but a name would have taken the interner past it.
   ///
   /// Distinct from [`ResolverUnstorable`](Raw::ResolverUnstorable), which is the same refusal on a
   /// message the *driver* supplied: that one loses text from an error that is still reported, and
   /// this one means a response key or a type name could not be recorded, so the position it
   /// belongs to cannot be built at all.
-  NameStorage { limit: u32 },
+  NameStorage(u32),
   /// A field's response key is not a name, so no response can carry it (draft §2.1.9, §7.1.2).
   ///
   /// Carries nothing. Half of what it refuses has no rendering at all — a response key need not be
@@ -270,7 +216,7 @@ pub(super) enum Raw {
   /// A draft §7.1.6 map reported with it is kept. The map is checked against the two extension
   /// ceilings and neither of the two that refused the text, so losing the message is no reason to
   /// lose the entries beside it.
-  ResolverUnstorable { unstored: Unstored },
+  ResolverUnstorable(Unstored),
 }
 
 /// Which way a `@skip`/`@include` condition failed to be a boolean.
@@ -285,15 +231,128 @@ pub(super) enum Raw {
 pub(super) enum ConditionFault {
   /// The directive carries no `if` argument at all.
   Missing,
-  /// `if` names a variable the request did not supply. The name is held out of line, and is
-  /// `None` when it could not be interned — see
-  /// [`Raw::ArgumentVariableMissing`](Raw::ArgumentVariableMissing) for why the message shortens
-  /// rather than the error changing, and why the ceiling that refused is not reported here.
-  VariableMissing { variable: Option<u32> },
+  /// The variable's name, held out of line, or `None` when it could not be interned: `if` names a
+  /// variable the request did not supply. See
+  /// [`ArgumentVariableMissing::variable`] for why the message shortens rather than the error
+  /// changing, and why the ceiling that refused is not reported here.
+  VariableMissing(Option<u32>),
   /// `if`'s value is `null`.
   Null,
   /// `if`'s value is neither null nor a boolean.
   NotABoolean,
+}
+
+/// A field of a parent type: what [`Raw::NullInNonNull`] and [`Raw::NotAList`] carry, the position
+/// that failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct FieldCoordinate {
+  /// The type the field is selected on.
+  pub(super) parent: TypeId,
+  /// The field.
+  pub(super) field: Sym,
+}
+
+/// [`Raw::LeafCoercion`]'s payload: the leaf type a value could not be serialised as, and where.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct LeafCoercion {
+  /// The leaf type's name.
+  pub(super) leaf: Sym,
+  /// The type the field is selected on.
+  pub(super) parent: TypeId,
+  /// The field.
+  pub(super) field: Sym,
+}
+
+/// [`Raw::AbstractUnresolved`]'s payload: the abstract type no concrete type was named for, and
+/// where.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct AbstractUnresolved {
+  /// The interface or union the position holds.
+  pub(super) abstract_ty: TypeId,
+  /// The type the field is selected on.
+  pub(super) parent: TypeId,
+  /// The field.
+  pub(super) field: Sym,
+}
+
+/// [`Raw::AbstractNotPossible`]'s payload: the abstract type, and the name the driver gave for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct AbstractNotPossible {
+  /// The interface or union the position holds.
+  pub(super) abstract_ty: TypeId,
+  /// The type name the driver gave, as an id into the executor's name table.
+  pub(super) runtime: u32,
+}
+
+/// [`Raw::AbstractNotPossibleUnnamed`]'s payload: the abstract type, and why the driver's name for
+/// it could not be kept.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct AbstractNotPossibleUnnamed {
+  /// The interface or union the position holds.
+  pub(super) abstract_ty: TypeId,
+  /// The ceiling that refused the name, with its value.
+  pub(super) unstored: Unstored,
+}
+
+/// An argument of a field, with its declared type: what draft §6.4.1's refusals that name nothing
+/// more carry — [`Raw::ArgumentMissing`], [`Raw::ArgumentNull`] and [`Raw::ArgumentCoercion`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ArgumentRef {
+  /// The field the argument belongs to.
+  pub(super) field: Sym,
+  /// The argument.
+  pub(super) argument: Sym,
+  /// The argument's declared type.
+  pub(super) ty: PackedType,
+}
+
+/// [`Raw::ArgumentVariableMissing`]'s payload: an [`ArgumentRef`]'s three, and the variable the
+/// argument named.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ArgumentVariableMissing {
+  /// The field the argument belongs to.
+  pub(super) field: Sym,
+  /// The argument.
+  pub(super) argument: Sym,
+  /// The argument's declared type.
+  pub(super) ty: PackedType,
+  /// The variable's spelling, or `None` when it could not be interned — for either reason.
+  ///
+  /// The finding does not depend on the spelling: the request did not supply the variable, and
+  /// that is true whether or not its name can be quoted. So an exhausted arena *or* an exhausted
+  /// visit budget shortens this message and leaves the error saying the same thing, rather than
+  /// swapping it for one about a resource — which would report a resource problem where the
+  /// caller has an argument problem. This is why [`Unstored`] is discarded here and carried at
+  /// the two sites whose message names a ceiling.
+  pub(super) variable: Option<u32>,
+}
+
+/// A position's field and the ceiling that refused it: what [`Raw`]'s four `…Budget` variants for a
+/// position carry — [`ResponseBudget`](Raw::ResponseBudget),
+/// [`ArgumentBudget`](Raw::ArgumentBudget), [`IntrospectionBudget`](Raw::IntrospectionBudget) and
+/// [`SelectionBudget`](Raw::SelectionBudget).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct FieldBudget {
+  /// The type the field is selected on.
+  pub(super) parent: TypeId,
+  /// The field.
+  pub(super) field: Sym,
+  /// The ceiling that refused.
+  pub(super) limit: u32,
+}
+
+/// [`Raw::RuntimeTypeBudget`]'s payload: the abstract type whose runtime type was not looked up,
+/// the position, and the ceiling that stopped the lookup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct RuntimeTypeBudget {
+  /// The interface or union the position holds.
+  pub(super) abstract_ty: TypeId,
+  /// The type the field is selected on.
+  pub(super) parent: TypeId,
+  /// The field.
+  pub(super) field: Sym,
+  /// The ceiling that refused.
+  pub(super) limit: u32,
 }
 
 /// One row of the executor's error table.
@@ -485,28 +544,26 @@ impl Raw {
   #[inline]
   const fn resource(&self) -> Option<Resource> {
     match self {
-      Self::ResponseBudget { .. } => Some(Resource::ResponseSlots),
-      Self::SelectionBudget { .. } | Self::MetadataBudget { .. } => {
-        Some(Resource::ResponseMetadata)
-      }
-      Self::ArgumentBudget { .. }
-      | Self::CollectionBudget { .. }
-      | Self::RuntimeTypeBudget { .. }
-      | Self::IntrospectionBudget { .. } => Some(Resource::SelectionVisits),
-      Self::NameStorage { .. } => Some(Resource::InternedBytes),
-      Self::Resolver { .. }
-      | Self::ResolverUnstorable { .. }
-      | Self::NullInNonNull { .. }
-      | Self::NotAList { .. }
-      | Self::LeafCoercion { .. }
-      | Self::AbstractUnresolved { .. }
-      | Self::AbstractNotPossible { .. }
-      | Self::AbstractNotPossibleUnnamed { .. }
-      | Self::ArgumentMissing { .. }
-      | Self::ArgumentNull { .. }
-      | Self::ArgumentVariableMissing { .. }
-      | Self::ArgumentCoercion { .. }
-      | Self::DirectiveCondition { .. }
+      Self::ResponseBudget(_) => Some(Resource::ResponseSlots),
+      Self::SelectionBudget(_) | Self::MetadataBudget(_) => Some(Resource::ResponseMetadata),
+      Self::ArgumentBudget(_)
+      | Self::CollectionBudget(_)
+      | Self::RuntimeTypeBudget(_)
+      | Self::IntrospectionBudget(_) => Some(Resource::SelectionVisits),
+      Self::NameStorage(_) => Some(Resource::InternedBytes),
+      Self::Resolver(_)
+      | Self::ResolverUnstorable(_)
+      | Self::NullInNonNull(_)
+      | Self::NotAList(_)
+      | Self::LeafCoercion(_)
+      | Self::AbstractUnresolved(_)
+      | Self::AbstractNotPossible(_)
+      | Self::AbstractNotPossibleUnnamed(_)
+      | Self::ArgumentMissing(_)
+      | Self::ArgumentNull(_)
+      | Self::ArgumentVariableMissing(_)
+      | Self::ArgumentCoercion(_)
+      | Self::DirectiveCondition(_)
       | Self::ResponseKeyUnreadable => None,
     }
   }
@@ -514,29 +571,29 @@ impl Raw {
   #[inline]
   pub(super) const fn kind(&self) -> Kind {
     match self {
-      Self::Resolver { .. } => Kind::Resolver,
-      Self::NullInNonNull { .. } => Kind::NullInNonNull,
-      Self::NotAList { .. } => Kind::NotAList,
-      Self::LeafCoercion { .. } => Kind::LeafCoercion,
-      Self::AbstractUnresolved { .. } => Kind::AbstractUnresolved,
-      Self::AbstractNotPossible { .. } | Self::AbstractNotPossibleUnnamed { .. } => {
+      Self::Resolver(_) => Kind::Resolver,
+      Self::NullInNonNull(_) => Kind::NullInNonNull,
+      Self::NotAList(_) => Kind::NotAList,
+      Self::LeafCoercion(_) => Kind::LeafCoercion,
+      Self::AbstractUnresolved(_) => Kind::AbstractUnresolved,
+      Self::AbstractNotPossible(_) | Self::AbstractNotPossibleUnnamed(_) => {
         Kind::AbstractNotPossible
       }
-      Self::ArgumentMissing { .. } => Kind::ArgumentMissing,
-      Self::ArgumentNull { .. } => Kind::ArgumentNull,
-      Self::ArgumentVariableMissing { .. } => Kind::ArgumentVariableMissing,
-      Self::ArgumentCoercion { .. } => Kind::ArgumentCoercion,
-      Self::DirectiveCondition { .. } => Kind::DirectiveCondition,
-      Self::ResponseBudget { .. }
-      | Self::ArgumentBudget { .. }
-      | Self::SelectionBudget { .. }
-      | Self::CollectionBudget { .. }
-      | Self::MetadataBudget { .. }
-      | Self::NameStorage { .. }
-      | Self::RuntimeTypeBudget { .. }
-      | Self::IntrospectionBudget { .. } => Kind::ExecutorBudget,
+      Self::ArgumentMissing(_) => Kind::ArgumentMissing,
+      Self::ArgumentNull(_) => Kind::ArgumentNull,
+      Self::ArgumentVariableMissing(_) => Kind::ArgumentVariableMissing,
+      Self::ArgumentCoercion(_) => Kind::ArgumentCoercion,
+      Self::DirectiveCondition(_) => Kind::DirectiveCondition,
+      Self::ResponseBudget(_)
+      | Self::ArgumentBudget(_)
+      | Self::SelectionBudget(_)
+      | Self::CollectionBudget(_)
+      | Self::MetadataBudget(_)
+      | Self::NameStorage(_)
+      | Self::RuntimeTypeBudget(_)
+      | Self::IntrospectionBudget(_) => Kind::ExecutorBudget,
       Self::ResponseKeyUnreadable => Kind::ResponseKeyUnreadable,
-      Self::ResolverUnstorable { .. } => Kind::Resolver,
+      Self::ResolverUnstorable(_) => Kind::Resolver,
     }
   }
 }
@@ -687,32 +744,32 @@ impl<V> fmt::Display for Error<'_, V> {
       packed.write(f, schema.name(packed.base()))
     };
     match self.row.raw {
-      Raw::Resolver { message } => f.write_str(self.name(message)),
-      Raw::NullInNonNull { parent, field } => {
+      Raw::Resolver(message) => f.write_str(self.name(message)),
+      Raw::NullInNonNull(FieldCoordinate { parent, field }) => {
         f.write_str("Cannot return null for non-nullable field ")?;
         owner(f, parent, field)?;
         f.write_str(".")
       }
-      Raw::NotAList { parent, field } => {
+      Raw::NotAList(FieldCoordinate { parent, field }) => {
         f.write_str("Expected Iterable, but did not find one for field \"")?;
         owner(f, parent, field)?;
         f.write_str("\".")
       }
-      Raw::LeafCoercion {
+      Raw::LeafCoercion(LeafCoercion {
         leaf,
         parent,
         field,
-      } => {
+      }) => {
         write!(f, "Expected a value of type \"{}\" but ", schema.name(leaf))?;
         f.write_str("received an incompatible value for field \"")?;
         owner(f, parent, field)?;
         f.write_str("\".")
       }
-      Raw::AbstractUnresolved {
+      Raw::AbstractUnresolved(AbstractUnresolved {
         abstract_ty,
         parent,
         field,
-      } => {
+      }) => {
         write!(
           f,
           "Abstract type \"{}\" must resolve to an Object type at runtime for field \"",
@@ -721,41 +778,41 @@ impl<V> fmt::Display for Error<'_, V> {
         owner(f, parent, field)?;
         f.write_str("\".")
       }
-      Raw::AbstractNotPossible {
+      Raw::AbstractNotPossible(AbstractNotPossible {
         abstract_ty,
         runtime,
-      } => write!(
+      }) => write!(
         f,
         "Runtime Object type \"{}\" is not a possible type for \"{}\".",
         self.name(runtime),
         schema.name(schema.type_def(abstract_ty).name())
       ),
-      Raw::AbstractNotPossibleUnnamed {
+      Raw::AbstractNotPossibleUnnamed(AbstractNotPossibleUnnamed {
         abstract_ty,
         unstored,
-      } => {
+      }) => {
         let abstract_name = schema.name(schema.type_def(abstract_ty).name());
         // One sentence per ceiling rather than one sentence with the number swapped: the arena had
         // no room to *keep* the name and the budget had none to *look it up*, and a reader deciding
         // which knob to move is being told two different things.
         match unstored {
-          Unstored::Arena { limit } => write!(
+          Unstored::Arena(limit) => write!(
             f,
             "The runtime Object type is not a possible type for \"{abstract_name}\", and its name \
              could not be stored within the executor's limit of {limit} interned bytes."
           ),
-          Unstored::Budget { limit } => write!(
+          Unstored::Budget(limit) => write!(
             f,
             "The runtime Object type is not a possible type for \"{abstract_name}\", and its name \
              could not be looked up within the executor's limit of {limit} selection visits."
           ),
         }
       }
-      Raw::ArgumentMissing {
+      Raw::ArgumentMissing(ArgumentRef {
         field: _,
         argument,
         ty: packed,
-      } => {
+      }) => {
         write!(
           f,
           "Argument \"{}\" of required type \"",
@@ -764,11 +821,11 @@ impl<V> fmt::Display for Error<'_, V> {
         ty(f, packed)?;
         f.write_str("\" was not provided.")
       }
-      Raw::ArgumentNull {
+      Raw::ArgumentNull(ArgumentRef {
         field: _,
         argument,
         ty: packed,
-      } => {
+      }) => {
         write!(
           f,
           "Argument \"{}\" of non-null type \"",
@@ -777,12 +834,12 @@ impl<V> fmt::Display for Error<'_, V> {
         ty(f, packed)?;
         f.write_str("\" must not be null.")
       }
-      Raw::ArgumentVariableMissing {
+      Raw::ArgumentVariableMissing(ArgumentVariableMissing {
         field: _,
         argument,
         ty: packed,
         variable,
-      } => {
+      }) => {
         write!(
           f,
           "Argument \"{}\" of required type \"",
@@ -801,11 +858,11 @@ impl<V> fmt::Display for Error<'_, V> {
       // The wording `ConditionFault::NotABoolean` already uses for the same failure at a directive
       // argument, so one finding reads one way wherever it is raised. The type it must be is the
       // argument type's base, which for both arguments this is raised for is a built-in scalar.
-      Raw::ArgumentCoercion {
+      Raw::ArgumentCoercion(ArgumentRef {
         field: _,
         argument,
         ty: packed,
-      } => {
+      }) => {
         write!(f, "Argument \"{}\" of type \"", schema.name(argument))?;
         ty(f, packed)?;
         write!(f, "\" must be a {}.", schema.name(packed.base()))
@@ -815,19 +872,17 @@ impl<V> fmt::Display for Error<'_, V> {
       // specification's rather than the schema's, and are written out rather than looked up: a
       // schema whose `@skip` disagrees with §3.13 is already non-conforming, and reading its
       // spelling back would make the message describe the wrong contract.
-      Raw::DirectiveCondition { fault } => match fault {
+      Raw::DirectiveCondition(fault) => match fault {
         ConditionFault::Missing => {
           f.write_str("Argument \"if\" of required type \"Boolean!\" was not provided.")
         }
-        ConditionFault::VariableMissing {
-          variable: Some(variable),
-        } => write!(
+        ConditionFault::VariableMissing(Some(variable)) => write!(
           f,
           "Argument \"if\" of required type \"Boolean!\" was provided the variable \"${}\" \
            which was not provided a runtime value.",
           self.name(variable)
         ),
-        ConditionFault::VariableMissing { variable: None } => f.write_str(
+        ConditionFault::VariableMissing(None) => f.write_str(
           "Argument \"if\" of required type \"Boolean!\" was provided a variable which was not \
            provided a runtime value.",
         ),
@@ -842,22 +897,22 @@ impl<V> fmt::Display for Error<'_, V> {
       // crate's own. It names the ceiling because that is the one thing a reader can act on — the
       // number is static configuration rather than anything about the request, so saying it
       // discloses nothing the operator did not choose to impose.
-      Raw::ResponseBudget {
+      Raw::ResponseBudget(FieldBudget {
         parent,
         field,
         limit,
-      } => {
+      }) => {
         position(f, parent, field)?;
         write!(
           f,
           ": the response would exceed the executor's limit of {limit} positions."
         )
       }
-      Raw::ArgumentBudget {
+      Raw::ArgumentBudget(FieldBudget {
         parent,
         field,
         limit,
-      } => {
+      }) => {
         position(f, parent, field)?;
         write!(
           f,
@@ -865,11 +920,11 @@ impl<V> fmt::Display for Error<'_, V> {
            selection visits."
         )
       }
-      Raw::IntrospectionBudget {
+      Raw::IntrospectionBudget(FieldBudget {
         parent,
         field,
         limit,
-      } => {
+      }) => {
         position(f, parent, field)?;
         write!(
           f,
@@ -877,33 +932,33 @@ impl<V> fmt::Display for Error<'_, V> {
            visits."
         )
       }
-      Raw::SelectionBudget {
+      Raw::SelectionBudget(FieldBudget {
         parent,
         field,
         limit,
-      } => {
+      }) => {
         position(f, parent, field)?;
         write!(
           f,
           ": the response would exceed the executor's limit of {limit} metadata entries."
         )
       }
-      Raw::MetadataBudget { limit } => write!(
+      Raw::MetadataBudget(limit) => write!(
         f,
         "Collecting this selection set would exceed the executor's limit of {limit} metadata \
          entries."
       ),
-      Raw::CollectionBudget { limit } => write!(
+      Raw::CollectionBudget(limit) => write!(
         f,
         "Collecting this operation's fields would exceed the executor's limit of {limit} \
          selection visits."
       ),
-      Raw::RuntimeTypeBudget {
+      Raw::RuntimeTypeBudget(RuntimeTypeBudget {
         abstract_ty,
         parent,
         field,
         limit,
-      } => {
+      }) => {
         // It names the *lookup*, not the type: the executor never learned what the driver's
         // spelling resolves to, so a message saying anything about that type would be inventing
         // the fact this variant exists to withhold.
@@ -918,7 +973,7 @@ impl<V> fmt::Display for Error<'_, V> {
           "\" would exceed the executor's limit of {limit} selection visits."
         )
       }
-      Raw::NameStorage { limit } => write!(
+      Raw::NameStorage(limit) => write!(
         f,
         "A name in this response would exceed the executor's limit of {limit} interned bytes."
       ),
@@ -927,13 +982,13 @@ impl<V> fmt::Display for Error<'_, V> {
       Raw::ResponseKeyUnreadable => f.write_str(
         "A field's response key is not a name and cannot appear in a response (draft \u{a7}2.1.9).",
       ),
-      Raw::ResolverUnstorable { unstored } => match unstored {
-        Unstored::Arena { limit } => write!(
+      Raw::ResolverUnstorable(unstored) => match unstored {
+        Unstored::Arena(limit) => write!(
           f,
           "The driver reported a field error whose message exceeded the executor's storage limit \
            of {limit} interned bytes and was not recorded."
         ),
-        Unstored::Budget { limit } => write!(
+        Unstored::Budget(limit) => write!(
           f,
           "The driver reported a field error whose message could not be recorded within the \
            executor's limit of {limit} selection visits."

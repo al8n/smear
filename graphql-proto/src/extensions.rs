@@ -124,6 +124,7 @@
 
 use core::{fmt, iter::FusedIterator};
 
+use derive_more::IsVariant;
 use indexmap::IndexMap;
 use smear_schema::FrozenStr;
 
@@ -162,7 +163,7 @@ const fn key_hasher() -> KeyHasher {
 }
 
 /// Which ceiling refused an [`Extensions::insert`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum Ceiling {
   /// [`Limits::max_extension_entries`] has no room for another entry.

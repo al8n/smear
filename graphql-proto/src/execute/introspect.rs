@@ -94,8 +94,8 @@ use tokora::{SimpleSpan, span::AsSpan};
 use crate::{
   ArgumentSource, Values,
   collect::{Visits, byte_units},
-  error::Raw,
-  response::{Entity, Key, MetaKind, MetaLeaf, NONE, State, TypeRef},
+  error::{ArgumentRef, FieldBudget, FieldCoordinate, Raw},
+  response::{Entity, Key, MetaKind, MetaLeaf, NONE, State, TypeMember, TypeRef},
 };
 
 use super::{Coercion, Executor, Mark};
@@ -272,7 +272,7 @@ where
         _ => Answer::Null,
       },
       Entity::Type(ty) => return self.answer_type(ctx, slot, ty, field, pending),
-      Entity::Field { owner, at } => {
+      Entity::Field(TypeMember { owner, at }) => {
         let (Some(def), Some(meta)) = (
           schema.fields_of(owner).get(at as usize),
           schema.field_meta_of(owner).get(at as usize),
@@ -306,7 +306,7 @@ where
           _ => Answer::Null,
         }
       }
-      Entity::EnumValue { owner, at } => {
+      Entity::EnumValue(TypeMember { owner, at }) => {
         let (Some(&value), Some(meta)) = (
           schema.enum_values_of(owner).get(at as usize),
           schema.enum_value_meta_of(owner).get(at as usize),
@@ -418,7 +418,7 @@ where
             // builder admits no other `__`-prefixed field name.
             let shown = !is_reserved(schema.name_bytes(def.name()))
               && (include || !meta.deprecation().is_deprecated());
-            shown.then_some(Element::Object(Entity::Field { owner: id, at }))
+            shown.then_some(Element::Object(Entity::Field(TypeMember { owner: id, at })))
           },
         );
       }
@@ -453,8 +453,9 @@ where
           schema.enum_value_order_of(id).iter().copied(),
           |at| {
             let meta = meta.get(at as usize)?;
-            (include || !meta.deprecation().is_deprecated())
-              .then_some(Element::Object(Entity::EnumValue { owner: id, at }))
+            (include || !meta.deprecation().is_deprecated()).then_some(Element::Object(
+              Entity::EnumValue(TypeMember { owner: id, at }),
+            ))
           },
         );
       }
@@ -511,7 +512,7 @@ where
     match answer {
       Answer::Null if self.slots[slot as usize].ty.is_non_null() => {
         let (parent, field) = self.owner(slot);
-        self.fail(slot, Raw::NullInNonNull { parent, field });
+        self.fail(slot, Raw::NullInNonNull(FieldCoordinate { parent, field }));
       }
       Answer::Null => self.slots[slot as usize].state = State::Null,
       Answer::Leaf(leaf) => self.slots[slot as usize].state = State::MetaLeaf(leaf),
@@ -560,11 +561,11 @@ where
           mark,
           pending,
           queued,
-          Raw::IntrospectionBudget {
+          Raw::IntrospectionBudget(FieldBudget {
             parent,
             field,
             limit,
-          },
+          }),
         );
       }
       let Some(member) = element(position) else {
@@ -582,11 +583,11 @@ where
           mark,
           pending,
           queued,
-          Raw::ResponseBudget {
+          Raw::ResponseBudget(FieldBudget {
             parent,
             field,
             limit,
-          },
+          }),
         );
       };
       if let Element::Object(_) = member {
@@ -693,16 +694,16 @@ where
       // — rather than left a placeholder.
       if self.slots[slot as usize].ty.is_non_null() {
         let (parent, field) = self.owner(slot);
-        return self.fail(slot, Raw::NullInNonNull { parent, field });
+        return self.fail(slot, Raw::NullInNonNull(FieldCoordinate { parent, field }));
       }
       self.slots[slot as usize].state = State::Null;
       return;
     };
-    let raw = Raw::ArgumentCoercion {
+    let raw = Raw::ArgumentCoercion(ArgumentRef {
       field: self.meta[slot as usize].field_sym,
       argument: argument.name(),
       ty: argument.ty(),
-    };
+    });
     match self.written_value(slot, argument.name()) {
       Some(location) => self.fail_at(slot, raw, location),
       None => self.fail(slot, raw),
@@ -715,11 +716,11 @@ where
     let limit = self.visits.limit();
     self.fail(
       slot,
-      Raw::IntrospectionBudget {
+      Raw::IntrospectionBudget(FieldBudget {
         parent,
         field,
         limit,
-      },
+      }),
     );
   }
 

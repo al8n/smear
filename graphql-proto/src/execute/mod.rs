@@ -90,9 +90,13 @@ use super::{
     Admission, Allowance, Compared, Fragments, Interner, Scratch, Unstored, Visits, collect_fields,
     metered_variable_key, scan_eq, variable_key,
   },
-  error::{ConditionFault, Raw, Row},
+  error::{
+    AbstractNotPossible, AbstractNotPossibleUnnamed, AbstractUnresolved, ArgumentRef,
+    ArgumentVariableMissing, ConditionFault, FieldBudget, FieldCoordinate, LeafCoercion, Raw, Row,
+    RuntimeTypeBudget,
+  },
   request::name_bytes,
-  response::{Entity, Key, NONE, Slot, State, node},
+  response::{Entity, Key, NONE, PendingObject, Slot, State, node},
 };
 
 mod introspect;
@@ -1433,13 +1437,11 @@ enum Coercion {
   Coerced,
   /// One of §6.4.1's own field errors was raised, and the field is already nulled.
   FieldError,
-  /// A ceiling refused before the coercion finished. The field is already nulled, and this is the
-  /// ceiling that refused — read here rather than at the caller, because a `reset` on the way out
-  /// builds a new ledger and the number would be gone.
-  Refused {
-    /// [`max_selection_visits`](Limits::max_selection_visits), as it stood.
-    limit: u32,
-  },
+  /// The [`max_selection_visits`](Limits::max_selection_visits) ceiling, as it stood when it
+  /// refused before the coercion finished. The field is already nulled, and the ceiling is read
+  /// here rather than at the caller because a `reset` on the way out builds a new ledger and the
+  /// number would be gone.
+  Refused(u32),
 }
 
 /// Why [`Executor::start`] refused.
@@ -1478,28 +1480,42 @@ enum Coercion {
 /// this type still lists exactly the one error `start` raised, because that is all the executor
 /// raises. [`RequestErrorResult`](super::RequestErrorResult)'s header has the two kinds of entry
 /// and who raises each.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum StartError {
   /// The document holds no operation at all.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   NoOperation,
   /// A name was given and no operation carries it.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   UnknownOperation,
   /// No name was given and the document holds more than one operation.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   AmbiguousOperation,
   /// The schema declares no `query` root type.
   ///
   /// Draft §5.2.1.1 makes an operation whose root type the schema does not declare a validation
   /// failure, so a validated document never reaches this or [`NoMutationRoot`](Self::NoMutationRoot);
   /// both are here because `start` is total over the schemas it is handed.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   NoQueryRoot,
   /// The schema declares no `mutation` root type.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   NoMutationRoot,
   /// The schema declares no `subscription` root type.
   ///
   /// Draft §6.2.3.1 step 1 asks for it and step 2 asserts it is an Object type; §5.2.1.1 makes an
   /// operation whose root type the schema does not declare a validation failure, so this is here
   /// on the same terms as the two above — `start` is total over the schemas it is handed.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   NoSubscriptionRoot,
   /// Draft §6.2.3.1 step 5: the subscription's root selection set does not name exactly one field
   /// with an event stream.
@@ -1520,6 +1536,8 @@ pub enum StartError {
   /// `@include` in the root selection set precisely so that it can decide this without runtime
   /// variables. So a validated document does not reach this either; it is here because `start` is
   /// total over the documents it is handed.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   NoSourceField,
   /// Collecting the subscription's root selection set raised an error, so draft §6.2.3.1 had no
   /// `collectedFieldsMap` to count.
@@ -1541,6 +1559,8 @@ pub enum StartError {
   /// `request/error/mod.rs` states. The driver-supplied [`RequestError`](super::RequestError) is
   /// for the request errors raised where no executor exists, not for detail about this one, and the
   /// same line leaves [`NoMutationRoot`](Self::NoMutationRoot)'s span uncarried.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   SourceSelectionRefused,
   /// Draft §6.2.3.1 step 8: `CoerceArgumentValues` rejected an argument of the source field.
   ///
@@ -1560,9 +1580,11 @@ pub enum StartError {
   /// Which argument, and which of §6.4.1's three failures, is not carried — see
   /// [`SourceSelectionRefused`](Self::SourceSelectionRefused) for why, and note that upstream does
   /// carry it. This is an unmet "should" of §7.1.6's `locations`, recorded as one.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   SourceFieldArguments,
-  /// Coercing the source field's arguments took the operation past
-  /// [`max_selection_visits`](Limits::max_selection_visits).
+  /// The [`max_selection_visits`](Limits::max_selection_visits) ceiling that refused: coercing the
+  /// source field's arguments took the operation past it.
   ///
   /// **Separate from [`SourceFieldArguments`](Self::SourceFieldArguments) because the party at
   /// fault is a different one.** That variant says the request does not satisfy an argument the
@@ -1580,10 +1602,7 @@ pub enum StartError {
   ///
   /// The remedy is a larger ceiling or a shorter argument list, and never a change to the
   /// arguments' *values*.
-  SourceFieldArgumentBudget {
-    /// The ceiling that refused.
-    limit: u32,
-  },
+  SourceFieldArgumentBudget(u32),
   /// The document holds more definitions than
   /// [`max_selection_visits`](Limits::max_selection_visits) left the draft §6.1 lookup room to
   /// read.
@@ -1597,6 +1616,8 @@ pub enum StartError {
   /// **A named lookup that finds its operation early is not refused for the definitions behind
   /// it**: the charge is taken per definition read rather than for the slice, so the walk stops
   /// where the answer does.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   OperationLookupRefused,
   /// A draft §7.1.2 response stream is still open, so beginning another operation would orphan the
   /// source stream behind it.
@@ -1615,6 +1636,8 @@ pub enum StartError {
   /// Raised from [`Creating`](super::ResponseStream::Creating) as well as
   /// [`Streaming`](super::ResponseStream::Streaming), because `is_open` is one question and a
   /// driver that has already called its resolver is in the first of them.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   ResponseStreamOpen,
 }
 
@@ -1641,7 +1664,7 @@ impl fmt::Display for StartError {
       Self::SourceFieldArguments => {
         f.write_str("the subscription's source field has an argument the request does not satisfy")
       }
-      Self::SourceFieldArgumentBudget { limit } => write!(
+      Self::SourceFieldArgumentBudget(limit) => write!(
         f,
         "reading the subscription's source field's written arguments would take the operation \
          past `max_selection_visits` ({limit})"
@@ -1664,7 +1687,7 @@ impl core::error::Error for StartError {}
 /// The map is returned in every variant rather than dropped, for the reason a refused
 /// [`Extensions::insert`] returns its value: an entry may be a wasm or FFI handle, and a refusal
 /// that closes one has done more than refuse.
-#[derive(Debug, Clone, PartialEq, Eq, IsVariant, TryUnwrap, Unwrap)]
+#[derive(Debug, Clone, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
@@ -1727,7 +1750,7 @@ impl<V: fmt::Debug> core::error::Error for SetExtensionsError<V> {}
 /// without a map. A driver that ignores the `Err` therefore loses nothing the response was owed:
 /// an error there was a field for is recorded either way, and the map's values are back in its
 /// hands.
-#[derive(IsVariant, TryUnwrap, Unwrap)]
+#[derive(IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
@@ -1932,23 +1955,7 @@ enum Phase<'a, S> {
   /// Draft §6.2.2 `ExecuteMutation`, whose top-level fields are withheld.
   Mutation,
   /// Draft §6.2.3 `Subscribe`.
-  Subscription {
-    /// Draft §7.1.2's response stream, as a state — see [`Stage`], which is the public
-    /// [`ResponseStream`] plus the one state §7.1.2 does not name.
-    stage: Stage,
-    /// The operation's root selection set, re-collected once per event by §6.2.3.2.
-    set: &'a SelectionSet<S>,
-    /// The root Subscription type.
-    root: TypeId,
-    /// The source field's position while §6.2.3.1 is still running, and [`NONE`] afterwards.
-    ///
-    /// It indexes a response tree that only exists during
-    /// [`Creating`](ResponseStream::Creating) — the tree `start` built to collect the root
-    /// selection set, which the transition into [`Streaming`](ResponseStream::Streaming) resets
-    /// away. Holding [`NONE`] outside that state is what makes a stale index unrepresentable
-    /// rather than merely unlikely.
-    source: u32,
-  },
+  Subscription(Subscribing<'a, S>),
 }
 
 impl<S> Clone for Phase<'_, S> {
@@ -1974,20 +1981,58 @@ impl<S> fmt::Debug for Phase<'_, S> {
       Self::Idle => f.write_str("Idle"),
       Self::Query => f.write_str("Query"),
       Self::Mutation => f.write_str("Mutation"),
-      Self::Subscription { stage, source, .. } => f
-        .debug_struct("Subscription")
-        .field("stage", stage)
-        .field("source", source)
-        .finish_non_exhaustive(),
+      Self::Subscription(subscribing) => f.debug_tuple("Subscription").field(subscribing).finish(),
     }
+  }
+}
+
+/// [`Phase::Subscription`]'s payload: what draft §6.2.3 keeps between one source event and the
+/// next.
+///
+/// Its `Clone`, `Copy` and `Debug` are written out for [`Phase`]'s reason: a derive would bound
+/// `S`, and the only `S` here is behind a `&'a`.
+struct Subscribing<'a, S> {
+  /// Draft §7.1.2's response stream, as a state — see [`Stage`], which is the public
+  /// [`ResponseStream`] plus the one state §7.1.2 does not name.
+  stage: Stage,
+  /// The operation's root selection set, re-collected once per event by §6.2.3.2.
+  set: &'a SelectionSet<S>,
+  /// The root Subscription type.
+  root: TypeId,
+  /// The source field's position while §6.2.3.1 is still running, and [`NONE`] afterwards.
+  ///
+  /// It indexes a response tree that only exists during
+  /// [`Creating`](ResponseStream::Creating) — the tree `start` built to collect the root
+  /// selection set, which the transition into [`Streaming`](ResponseStream::Streaming) resets
+  /// away. Holding [`NONE`] outside that state is what makes a stale index unrepresentable
+  /// rather than merely unlikely.
+  source: u32,
+}
+
+impl<S> Clone for Subscribing<'_, S> {
+  #[inline]
+  fn clone(&self) -> Self {
+    *self
+  }
+}
+
+impl<S> Copy for Subscribing<'_, S> {}
+
+impl<S> fmt::Debug for Subscribing<'_, S> {
+  /// The response stream's state and the source field's position, and no borrow of the document,
+  /// for [`Phase`]'s `Debug`'s reason.
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.debug_struct("Subscribing")
+      .field("stage", &self.stage)
+      .field("source", &self.source)
+      .finish_non_exhaustive()
   }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Slotted {
-  Free {
-    next: u32,
-  },
+  /// Free, and this is the next free entry's index, or [`NONE`] at the end of the free list.
+  Free(u32),
   /// Outstanding, and its value still matters.
   Live,
   /// Outstanding, and draft §6.4.4 has already discarded the position it would fill.
@@ -2462,7 +2507,7 @@ where
     // Before the reset, because the reset is what would destroy the evidence. `on_entry` above is
     // the discharge every entry point owes; this refusal performs no state change of its own, so
     // "settle the previous call before doing anything else" still holds over it.
-    if let Phase::Subscription { stage, .. } = self.phase
+    if let Phase::Subscription(Subscribing { stage, .. }) = self.phase
       && stage.published().is_open()
     {
       return Err(StartError::ResponseStreamOpen);
@@ -2567,9 +2612,9 @@ where
         self.reset();
         return Err(StartError::SourceFieldArguments);
       }
-      Coercion::Refused { limit } => {
+      Coercion::Refused(limit) => {
         self.reset();
-        return Err(StartError::SourceFieldArgumentBudget { limit });
+        return Err(StartError::SourceFieldArgumentBudget(limit));
       }
     }
     // The root still holds the `initialValue` and `scratch_args` holds step 8's answer, and both
@@ -2584,12 +2629,12 @@ where
     // and accepting two collected entries leaves it holding two children — both tripped the new
     // line rather than the checks that own them, so the step 5 count's own gate went green under a
     // fault it exists to catch. Put the guard where the value is read, once.
-    self.phase = Phase::Subscription {
+    self.phase = Phase::Subscription(Subscribing {
       stage: Stage::Creating,
       set,
       root,
       source,
-    };
+    });
     Ok(())
   }
 
@@ -2640,13 +2685,13 @@ where
       0,
       Key::Root,
       root_ty,
-      State::Object {
+      State::Object(PendingObject {
         value,
         ty: root_type,
         // `expand` writes the real count on its way out, and does so for the root through the very
         // same path it uses for every other object — which is why the root needed no special case.
         pending: 0,
-      },
+      }),
     ));
     self.meta.push(Meta {
       field: None,
@@ -2737,7 +2782,7 @@ where
       .field
       .expect("only the root has no field, and it is never ready");
     let parent_value = match &self.slots[parent as usize].state {
-      State::Object { value, .. } => value,
+      State::Object(PendingObject { value, .. }) => value,
       // Enumerated rather than a `_`, and that is a decision. A wildcard here would have absorbed
       // `Expanded` silently and handed the driver a `parent_value` from a different object; the
       // compiler naming every variant is what makes a future one impossible to mishandle by
@@ -3193,7 +3238,7 @@ where
       !self
         .slots
         .iter()
-        .any(|slot| matches!(slot.state, State::Object { .. })),
+        .any(|slot| matches!(slot.state, State::Object(_))),
       "a response was delivered with an object value still held: some enqueue or departure path \
        is not accounted"
     );
@@ -3215,19 +3260,19 @@ where
     //
     // The `Response` below borrows the slots, so nothing here may `reset` — and nothing needs to.
     // An event's populations die at the next `start` or drop exactly as a query's do.
-    if let Phase::Subscription {
+    if let Phase::Subscription(Subscribing {
       stage: Stage::Owed(ending),
       set,
       root,
       ..
-    } = self.phase
+    }) = self.phase
     {
-      self.phase = Phase::Subscription {
+      self.phase = Phase::Subscription(Subscribing {
         stage: ending.ended(),
         set,
         root,
         source: NONE,
-      };
+      });
     }
     self.delivered = true;
     Some(Response {
@@ -3264,7 +3309,7 @@ where
   pub const fn response_stream(&self) -> Option<ResponseStream> {
     match self.phase {
       Phase::Idle | Phase::Query | Phase::Mutation => None,
-      Phase::Subscription { stage, .. } => Some(stage.published()),
+      Phase::Subscription(Subscribing { stage, .. }) => Some(stage.published()),
     }
   }
 
@@ -3294,11 +3339,11 @@ where
   /// is `Creating` for exactly that reason.
   #[inline]
   pub fn source_field(&self) -> Option<SourceField<'_, 'a, S, V::Value>> {
-    let Phase::Subscription {
+    let Phase::Subscription(Subscribing {
       stage: Stage::Creating,
       source,
       ..
-    } = self.phase
+    }) = self.phase
     else {
       return None;
     };
@@ -3307,7 +3352,7 @@ where
     let field = meta
       .field
       .expect("draft §6.2.3.1's source field is a collected field and has a node");
-    let State::Object { value, .. } = &self.slots[0].state else {
+    let State::Object(PendingObject { value, .. }) = &self.slots[0].state else {
       // Enumerated by its opposite for the reason the offer path enumerates every variant: the root
       // holds the `initialValue` for as long as `Creating` lasts, because `expand` enqueued exactly
       // one child and nothing has departed. `create_source_event_stream` asserts it on the way in.
@@ -3351,22 +3396,22 @@ where
   /// state to say so.
   pub fn handle_source_stream(&mut self) -> bool {
     self.on_entry();
-    let Phase::Subscription {
+    let Phase::Subscription(Subscribing {
       stage: Stage::Creating,
       set,
       root,
       ..
-    } = self.phase
+    }) = self.phase
     else {
       return false;
     };
     self.reset();
-    self.phase = Phase::Subscription {
+    self.phase = Phase::Subscription(Subscribing {
       stage: Stage::Streaming,
       set,
       root,
       source: NONE,
-    };
+    });
     true
   }
 
@@ -3420,12 +3465,12 @@ where
     event: V::Value,
   ) -> Result<(), SourceEventError<V::Value>> {
     self.on_entry();
-    let Phase::Subscription {
+    let Phase::Subscription(Subscribing {
       stage: Stage::Streaming,
       set,
       root,
       ..
-    } = self.phase
+    }) = self.phase
     else {
       return Err(SourceEventError::NotStreaming(event));
     };
@@ -3436,12 +3481,12 @@ where
       return Err(SourceEventError::Outstanding(event));
     }
     self.reset();
-    self.phase = Phase::Subscription {
+    self.phase = Phase::Subscription(Subscribing {
       stage: Stage::Streaming,
       set,
       root,
       source: NONE,
-    };
+    });
     self.started = true;
     // `ExecuteSubscriptionEvent` is `ExecuteRootSelectionSet` over the same operation, so this is
     // the very call `start` makes — one execution, indistinguishable from a query's from here on.
@@ -3499,12 +3544,12 @@ where
   /// owes no result.
   pub fn handle_source_complete(&mut self) -> bool {
     self.on_entry();
-    let Phase::Subscription {
+    let Phase::Subscription(Subscribing {
       stage: Stage::Streaming,
       set,
       root,
       ..
-    } = self.phase
+    }) = self.phase
     else {
       return false;
     };
@@ -3517,12 +3562,12 @@ where
       self.reset();
       Stage::Completed
     };
-    self.phase = Phase::Subscription {
+    self.phase = Phase::Subscription(Subscribing {
       stage,
       set,
       root,
       source: NONE,
-    };
+    });
     true
   }
 
@@ -3556,12 +3601,12 @@ where
   /// response stream reads [`Failed`](ResponseStream::Failed) once it has.
   pub fn handle_source_error(&mut self) -> bool {
     self.on_entry();
-    let Phase::Subscription {
+    let Phase::Subscription(Subscribing {
       stage: Stage::Streaming,
       set,
       root,
       ..
-    } = self.phase
+    }) = self.phase
     else {
       return false;
     };
@@ -3571,12 +3616,12 @@ where
       self.reset();
       Stage::Failed
     };
-    self.phase = Phase::Subscription {
+    self.phase = Phase::Subscription(Subscribing {
       stage,
       set,
       root,
       source: NONE,
-    };
+    });
     true
   }
 
@@ -3628,9 +3673,9 @@ where
   /// two.
   pub fn unsubscribe(&mut self) -> bool {
     self.on_entry();
-    let Phase::Subscription {
+    let Phase::Subscription(Subscribing {
       stage, set, root, ..
-    } = self.phase
+    }) = self.phase
     else {
       return false;
     };
@@ -3638,12 +3683,12 @@ where
       return false;
     }
     self.reset();
-    self.phase = Phase::Subscription {
+    self.phase = Phase::Subscription(Subscribing {
       stage: Stage::Cancelled,
       set,
       root,
       source: NONE,
-    };
+    });
     true
   }
 
@@ -3670,7 +3715,7 @@ where
       // §6.4.4 takes it from here.
       if ctx.is_null(&value) {
         let (parent, field) = self.owner(slot);
-        self.fail(slot, Raw::NullInNonNull { parent, field });
+        self.fail(slot, Raw::NullInNonNull(FieldCoordinate { parent, field }));
         return;
       }
       ty.nullable()
@@ -3686,7 +3731,7 @@ where
     if let Some(item) = ty.list_item() {
       let Some(len) = ctx.list_len(&value) else {
         let (parent, field) = self.owner(slot);
-        self.fail(slot, Raw::NotAList { parent, field });
+        self.fail(slot, Raw::NotAList(FieldCoordinate { parent, field }));
         return;
       };
       self.slots[slot as usize].state = State::List;
@@ -3715,11 +3760,11 @@ where
           let limit = self.limits.max_response_slots.get();
           self.fail(
             slot,
-            Raw::ResponseBudget {
+            Raw::ResponseBudget(FieldBudget {
               parent,
               field,
               limit,
-            },
+            }),
           );
           return;
         };
@@ -3766,11 +3811,11 @@ where
           let leaf = self.schema.type_def(base).name();
           self.fail(
             slot,
-            Raw::LeafCoercion {
+            Raw::LeafCoercion(LeafCoercion {
               leaf,
               parent,
               field,
-            },
+            }),
           );
         }
       }
@@ -3784,11 +3829,11 @@ where
         let (parent, field) = self.owner(slot);
         self.fail(
           slot,
-          Raw::AbstractUnresolved {
+          Raw::AbstractUnresolved(AbstractUnresolved {
             abstract_ty: base,
             parent,
             field,
-          },
+          }),
         );
         return;
       };
@@ -3812,12 +3857,12 @@ where
         let limit = self.visits.limit();
         self.fail(
           slot,
-          Raw::RuntimeTypeBudget {
+          Raw::RuntimeTypeBudget(RuntimeTypeBudget {
             abstract_ty: base,
             parent,
             field,
             limit,
-          },
+          }),
         );
         return;
       }
@@ -3843,14 +3888,14 @@ where
           // render the arena's cap whatever had refused, so a visit budget exhausted by the probe
           // run reported itself as a full arena.
           let raw = match self.interner.intern(name, &mut self.visits) {
-            Ok(runtime) => Raw::AbstractNotPossible {
+            Ok(runtime) => Raw::AbstractNotPossible(AbstractNotPossible {
               abstract_ty: base,
               runtime,
-            },
-            Err(unstored) => Raw::AbstractNotPossibleUnnamed {
+            }),
+            Err(unstored) => Raw::AbstractNotPossibleUnnamed(AbstractNotPossibleUnnamed {
               abstract_ty: base,
               unstored,
-            },
+            }),
           };
           self.fail(slot, raw);
           return;
@@ -3860,11 +3905,11 @@ where
       base
     };
 
-    self.slots[slot as usize].state = State::Object {
+    self.slots[slot as usize].state = State::Object(PendingObject {
       value,
       ty: object,
       pending: 0,
-    };
+    });
 
     // `MergeSelectionSets`: every field that shared this response key contributes its
     // sub-selections, and §6.3 collects over the concatenation.
@@ -3910,7 +3955,7 @@ where
     // is no abstract type to resolve — and the entity it stands for is what its fields are answered
     // from.
     let (object_type, meta_object) = match &self.slots[slot as usize].state {
-      State::Object { ty, .. } => (*ty, None),
+      State::Object(PendingObject { ty, .. }) => (*ty, None),
       State::MetaObject(entity) => (self.slots[slot as usize].ty.base_id(), Some(*entity)),
       // Enumerated for the reason the offer path is. `Expanded` cannot appear because a slot
       // expands once; the rest are the not-an-object cases this always returned on.
@@ -3972,21 +4017,16 @@ where
         // so the position is attached here, where `owner` is in reach. Rendering then goes through
         // exactly the path a commit-side refusal does — including the root's, which must not say
         // `Query.Query`.
-        (Raw::MetadataBudget { limit }, _) => {
+        (Raw::MetadataBudget(limit), _) => {
           let (parent, field) = self.owner(slot);
-          Raw::SelectionBudget {
+          Raw::SelectionBudget(FieldBudget {
             parent,
             field,
             limit,
-          }
+          })
         }
-        (
-          Raw::DirectiveCondition {
-            fault: ConditionFault::VariableMissing { .. },
-          },
-          Some(bytes),
-        ) => Raw::DirectiveCondition {
-          fault: ConditionFault::VariableMissing {
+        (Raw::DirectiveCondition(ConditionFault::VariableMissing(_)), Some(bytes)) => {
+          Raw::DirectiveCondition(ConditionFault::VariableMissing(
             // `.ok()` on purpose, and the only kind of site where discarding the refusal is right:
             // the spelling is decoration on a finding that does not depend on it, so both ceilings
             // shorten the same sentence and the reader is not told about a resource at all. The
@@ -3996,10 +4036,9 @@ where
             // `None` rather than through a ceiling. It used to be interned raw and rendered as
             // `""` on the way out, so the honest branch printed `$` with nothing after it — see
             // al8n/smear#139.
-            variable: variable_key(bytes)
-              .and_then(|name| self.interner.intern(name, &mut self.visits).ok()),
-          },
-        },
+            variable_key(bytes).and_then(|name| self.interner.intern(name, &mut self.visits).ok()),
+          ))
+        }
         (raw, _) => raw,
       };
       self.fail_at(slot, raw, fault.location);
@@ -4029,9 +4068,7 @@ where
       // budget's, which is exactly what `Exhausted::Unstored` renders.
       if !self.visits.take_bytes(name_bytes(first).len()) {
         exhausted = Some((
-          Exhausted::Unstored(Unstored::Budget {
-            limit: self.visits.limit(),
-          }),
+          Exhausted::Unstored(Unstored::Budget(self.visits.limit())),
           group.first,
         ));
         break;
@@ -4163,20 +4200,20 @@ where
       self.restore(slot, mark);
       let (parent, field) = self.owner(slot);
       let raw = match which {
-        Exhausted::Positions => Raw::ResponseBudget {
+        Exhausted::Positions => Raw::ResponseBudget(FieldBudget {
           parent,
           field,
           limit: self.limits.max_response_slots.get(),
-        },
-        Exhausted::Selections => Raw::SelectionBudget {
+        }),
+        Exhausted::Selections => Raw::SelectionBudget(FieldBudget {
           parent,
           field,
           limit: self.limits.max_response_metadata.get(),
-        },
+        }),
         // The ceiling arrived with the refusal, so there is no second place for the number to come
         // from and no way to take it from the wrong one.
-        Exhausted::Unstored(Unstored::Arena { limit }) => Raw::NameStorage { limit },
-        Exhausted::Unstored(Unstored::Budget { limit }) => Raw::CollectionBudget { limit },
+        Exhausted::Unstored(Unstored::Arena(limit)) => Raw::NameStorage(limit),
+        Exhausted::Unstored(Unstored::Budget(limit)) => Raw::CollectionBudget(limit),
       };
       // `fail_at` rather than `fail`, and the span is the refused selection's own.
       //
@@ -4365,17 +4402,17 @@ where
         let limit = self.visits.limit();
         self.fail(
           slot,
-          Raw::ArgumentBudget {
+          Raw::ArgumentBudget(FieldBudget {
             parent: parent_type,
             field: field_sym,
             limit,
-          },
+          }),
         );
         // One of the two resource exits in this function — the other is the variable
         // spelling's, below. Both are reached only with work still unattempted. The three
         // §6.4.1 field errors further down are not resource exits, and telling them apart is
         // the whole reason this returns a `Coercion` and not a `bool`.
-        return Coercion::Refused { limit };
+        return Coercion::Refused(limit);
       }
       let ty = argument.ty();
       let non_null = ty.is_non_null();
@@ -4440,13 +4477,13 @@ where
               let limit = self.visits.limit();
               self.fail(
                 slot,
-                Raw::ArgumentBudget {
+                Raw::ArgumentBudget(FieldBudget {
                   parent: parent_type,
                   field: field_sym,
                   limit,
-                },
+                }),
               );
-              return Coercion::Refused { limit };
+              return Coercion::Refused(limit);
             }
             // A variable *was* written, so this is step 5.d and not step 5.b: the outer `Some`
             // keeps the error `ArgumentVariableMissing` rather than `ArgumentMissing`, which is
@@ -4501,22 +4538,22 @@ where
             let variable = name.and_then(|name| self.interner.intern(name, &mut self.visits).ok());
             self.fail_at(
               slot,
-              Raw::ArgumentVariableMissing {
+              Raw::ArgumentVariableMissing(ArgumentVariableMissing {
                 field: field_sym,
                 argument: argument.name(),
                 ty,
                 variable,
-              },
+              }),
               location,
             );
           }
           None => self.fail_at(
             slot,
-            Raw::ArgumentMissing {
+            Raw::ArgumentMissing(ArgumentRef {
               field: field_sym,
               argument: argument.name(),
               ty,
-            },
+            }),
             *node.span(),
           ),
         }
@@ -4527,11 +4564,11 @@ where
       if is_null && non_null {
         self.fail_at(
           slot,
-          Raw::ArgumentNull {
+          Raw::ArgumentNull(ArgumentRef {
             field: field_sym,
             argument: argument.name(),
             ty,
-          },
+          }),
           value_span.unwrap_or(*node.span()),
         );
         return Coercion::FieldError;
@@ -4613,8 +4650,8 @@ where
     // discarded, because the two doors are two different knobs and an operator told the wrong one
     // resizes an arena that was never the constraint.
     match self.interner.intern(message, &mut self.visits) {
-      Ok(message) => Raw::Resolver { message },
-      Err(unstored) => Raw::ResolverUnstorable { unstored },
+      Ok(message) => Raw::Resolver(message),
+      Err(unstored) => Raw::ResolverUnstorable(unstored),
     }
   }
 
@@ -5285,7 +5322,7 @@ where
   /// one, and the empty-selection early return — is what catches it, and catches the root with it,
   /// because `start` expands the root through the same path.
   fn settle_pending(&mut self, slot: u32, enqueued: u32) {
-    if let State::Object { pending, .. } = &mut self.slots[slot as usize].state {
+    if let State::Object(PendingObject { pending, .. }) = &mut self.slots[slot as usize].state {
       *pending = enqueued;
     }
     if enqueued == 0 {
@@ -5327,10 +5364,10 @@ where
     self.settle_deferred();
     if !matches!(
       self.phase,
-      Phase::Subscription {
+      Phase::Subscription(Subscribing {
         stage: Stage::Creating,
         ..
-      }
+      })
     ) {
       self.retire_arguments();
     }
@@ -5352,7 +5389,7 @@ where
   /// The transition **is** the release — `Expanded` holds no `V` — which is why there is no
   /// `release_object` to forget to call. Writing the state is the whole operation.
   fn expire(&mut self, slot: u32) {
-    if matches!(self.slots[slot as usize].state, State::Object { .. }) {
+    if matches!(self.slots[slot as usize].state, State::Object(_)) {
       self.slots[slot as usize].state = State::Expanded;
     }
   }
@@ -5363,7 +5400,8 @@ where
   /// true when it does not. Decrement-if-`Object` makes it total: a parent discarded by the very
   /// propagation that removed this child is already `Null` and has nothing to account.
   fn child_departed(&mut self, parent: u32, defer: bool) {
-    let State::Object { pending, .. } = &mut self.slots[parent as usize].state else {
+    let State::Object(PendingObject { pending, .. }) = &mut self.slots[parent as usize].state
+    else {
       return;
     };
     *pending = pending.saturating_sub(1);
@@ -5561,7 +5599,7 @@ where
     self.live += 1;
     if self.free != NONE {
       let index = self.free;
-      let Slotted::Free { next } = self.inflight[index as usize].state else {
+      let Slotted::Free(next) = self.inflight[index as usize].state else {
         unreachable!("the free chain only holds free entries");
       };
       self.free = next;
@@ -5625,14 +5663,14 @@ where
         self.release_entry(id.index);
         None
       }
-      Slotted::Free { .. } => None,
+      Slotted::Free(_) => None,
     }
   }
 
   fn release_entry(&mut self, index: u32) {
     let entry = &mut self.inflight[index as usize];
     entry.generation = entry.generation.wrapping_add(1);
-    entry.state = Slotted::Free { next: self.free };
+    entry.state = Slotted::Free(self.free);
     self.free = index;
   }
 

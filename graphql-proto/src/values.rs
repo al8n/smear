@@ -45,9 +45,9 @@ use derive_more::{IsVariant, TryUnwrap, Unwrap};
 /// a property of the *name*, so a schema that spells `scalar String` out still arrives here as
 /// [`Leaf::String`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Unwrap, TryUnwrap)]
-#[non_exhaustive]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
 pub enum Leaf<'a> {
   /// The built-in `Int`: a signed 32-bit integer (draft §3.5.1).
   #[unwrap(ignore)]

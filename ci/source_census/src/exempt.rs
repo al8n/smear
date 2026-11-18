@@ -95,6 +95,15 @@ const EXTENSION_KEY: &str = "A draft §7.1.7 `extensions` key, which is not sour
      not acquit it because `Extensions<V>` is parameterised by the driver's *value* type and has \
      no source type to hold.";
 
+/// `ArgumentSource::Variable`'s payload, whose three name parameters are one key space.
+const VARIABLE_NAME: &str = "A variable's name as `ArgumentSource::Variable` carries it: the key \
+     the request's `variableValues` are looked up by, which the executor reads out of the \
+     document's spelling once, through `proto::variable_key` — the one conversion the \
+     `Values::variable` row records — and which a driver building or editing the payload already \
+     holds as text. So it is the request's key space and not the document's type, for the reason \
+     that row gives. Test 3 does not acquit it because `NamedVariable<'a, V>` is parameterised by \
+     the driver's value type and has no source type to hold.";
+
 /// The GraphQL lexer's three whole-slice doors, al8n/smear#218.
 const GRAPHQL_WHOLE_SLICE_DOOR: &str = "One token's slice, re-cooked: the GraphQL CST → AST \
      projection hands in the bytes under a single `Name`, `Int` or `Float` token and asks whether \
@@ -656,6 +665,31 @@ pub const EXEMPTIONS: &[Exemption] = &[
              driver's value type and has no source type to hold, so test 3 has nothing to acquit \
              it on. The document the entry is about is the writer's `document`, recorded below; \
              the entry carries only spans into it, which constrain nobody.",
+  },
+  // ── §6.4.1's variable payload, whose name is the request's key ───────────────────────────────
+  Exemption {
+    module: "smear::proto::request",
+    entry: "NamedVariable::new",
+    param: "name",
+    kind: Kind::NotSource,
+    issue: None,
+    reason: VARIABLE_NAME,
+  },
+  Exemption {
+    module: "smear::proto::request",
+    entry: "NamedVariable::set_name",
+    param: "name",
+    kind: Kind::NotSource,
+    issue: None,
+    reason: VARIABLE_NAME,
+  },
+  Exemption {
+    module: "smear::proto::request",
+    entry: "NamedVariable::with_name",
+    param: "name",
+    kind: Kind::NotSource,
+    issue: None,
+    reason: VARIABLE_NAME,
   },
   // ── The draft §7.2.1 writer — two of its `&str`s are output, five are genuinely narrow ───────
   //

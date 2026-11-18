@@ -119,7 +119,10 @@ impl ReqId {
   }
 }
 
-/// A named variable in a GraphQL request, consisting of its name and the value supplied for it.
+/// A variable the document wrote for an argument, and the value the request supplied for it.
+///
+/// [`ArgumentSource::Variable`]'s payload. Built with [`new`](Self::new); edited in place with the
+/// `set_*` setters or by value with the `with_*` ones.
 #[derive(Debug, Clone, Copy)]
 pub struct NamedVariable<'a, V> {
   pub(crate) name: &'a str,
@@ -127,65 +130,67 @@ pub struct NamedVariable<'a, V> {
 }
 
 impl<'a, V> NamedVariable<'a, V> {
-  /// Creates a new named variable with the given name and value.
+  /// Creates the payload from the variable's name, without the `$`, and its value.
   #[inline]
   pub const fn new(name: &'a str, value: V) -> Self {
     Self { name, value }
   }
 
-  /// Returns the name of the variable.
+  /// Returns the variable's name, without the `$`.
   #[inline]
   pub const fn name(&self) -> &'a str {
     self.name
   }
 
-  /// Set the name of the variable.
+  /// Replaces the variable's name.
   #[inline]
-  pub fn set_name(&mut self, name: &'a str) -> &mut Self {
+  pub const fn set_name(&mut self, name: &'a str) -> &mut Self {
     self.name = name;
     self
   }
 
-  /// Set the value of the variable.
+  /// Replaces the value.
   #[inline]
   pub fn set_value(&mut self, value: V) -> &mut Self {
     self.value = value;
     self
   }
 
-  /// Set the name of the variable.
+  /// Returns the payload with its name replaced.
   #[inline]
+  #[must_use]
   pub const fn with_name(mut self, name: &'a str) -> Self {
     self.name = name;
     self
   }
 
-  /// Sets the value of the variable and returns the modified instance.
+  /// Returns the payload with its value replaced.
   #[inline]
+  #[must_use]
   pub fn with_value(mut self, value: V) -> Self {
     self.value = value;
     self
   }
 
-  /// Returns the value of the variable.
+  /// Returns the value, exactly as [`Values::variable`](super::Values::variable) returned it.
   #[inline]
   pub const fn value(&self) -> &V {
     &self.value
   }
 
-  /// Returns a mutable reference to the value of the variable.
+  /// Returns the value, mutably.
   #[inline]
   pub const fn value_mut(&mut self) -> &mut V {
     &mut self.value
   }
 
-  /// Consumes the named variable and returns its value.
+  /// Returns the value, giving up the name.
   #[inline]
   pub fn into_value(self) -> V {
     self.value
   }
 
-  /// Returns the named variable as a tuple of its name and value.
+  /// Returns the name and the value, in that order.
   #[inline]
   pub fn into_parts(self) -> (&'a str, V) {
     (self.name, self.value)
@@ -234,8 +239,8 @@ pub enum ArgumentSource<'a, S, V> {
   /// anywhere. Carrying it makes the checked value and the delivered value the same value by
   /// construction, and it is also one driver call fewer.
   ///
-  /// `name` is still here because draft §6.4.1's own errors name the variable, and because a
-  /// driver's tracing wants it.
+  /// The [`name`](NamedVariable::name) is still here because draft §6.4.1's own errors name the
+  /// variable, and because a driver's tracing wants it.
   ///
   /// # How long the executor owns it
   ///

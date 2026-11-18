@@ -166,16 +166,12 @@ mod groups;
 /// pair the wrong number with the wrong cause, because it is not given a choice of numbers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Unstored {
-  /// [`max_interned_bytes`](super::Limits::max_interned_bytes) has no room for the bytes.
-  Arena {
-    /// [`Limits::max_interned_bytes`](super::Limits::max_interned_bytes)'s value.
-    limit: u32,
-  },
-  /// [`max_selection_visits`](super::Limits::max_selection_visits) had no room for the lookup.
-  Budget {
-    /// [`Visits::limit`]'s value.
-    limit: u32,
-  },
+  /// The [`max_interned_bytes`](super::Limits::max_interned_bytes) ceiling, which has no room for
+  /// the bytes.
+  Arena(u32),
+  /// The [`max_selection_visits`](super::Limits::max_selection_visits) ceiling — [`Visits::limit`]'s
+  /// value — which had no room for the lookup.
+  Budget(u32),
 }
 
 /// The work one pass over `len` bytes costs: one unit per eight-byte chunk, plus one for the tail.
@@ -508,7 +504,7 @@ impl Visits {
       return Ok(());
     }
     Err(Fault {
-      raw: Raw::CollectionBudget { limit: self.limit },
+      raw: Raw::CollectionBudget(self.limit),
       location,
       name: None,
     })
@@ -529,7 +525,7 @@ impl Visits {
   #[cold]
   pub(super) const fn budget_fault(&self, location: SimpleSpan) -> Fault<'static> {
     Fault {
-      raw: Raw::CollectionBudget { limit: self.limit },
+      raw: Raw::CollectionBudget(self.limit),
       location,
       name: None,
     }
@@ -582,7 +578,7 @@ impl Allowance {
       return Ok(());
     }
     Err(Fault {
-      raw: Raw::MetadataBudget { limit: self.limit },
+      raw: Raw::MetadataBudget(self.limit),
       location,
       name: None,
     })
@@ -1059,18 +1055,14 @@ impl Interner {
     // Reading the key is work whose length the document chose, so it is charged before the read
     // and not after it.
     if !visits.take_bytes(bytes.len()) {
-      return Err(Unstored::Budget {
-        limit: visits.limit(),
-      });
+      return Err(Unstored::Budget(visits.limit()));
     }
     let hash = hash_bytes(bytes);
     if !self.heads.is_empty() {
       let mut id = self.heads[self.bucket(hash)];
       while id != NONE {
         if !visits.take(1) {
-          return Err(Unstored::Budget {
-            limit: visits.limit(),
-          });
+          return Err(Unstored::Budget(visits.limit()));
         }
         #[cfg(test)]
         {
@@ -1089,9 +1081,7 @@ impl Interner {
             Compared::Equal => return Ok(id),
             Compared::Differs => (),
             Compared::Refused => {
-              return Err(Unstored::Budget {
-                limit: visits.limit(),
-              });
+              return Err(Unstored::Budget(visits.limit()));
             }
           }
         }
@@ -1112,16 +1102,14 @@ impl Interner {
     // the shape: what follows a charge has to be infallible, or the charge is a bill for work that
     // may not occur. al8n/smear#196.
     let Some(fit) = self.fit(name) else {
-      return Err(Unstored::Arena { limit: self.cap });
+      return Err(Unstored::Arena(self.cap));
     };
     // The key's last read is the copy into the arena, and it is charged like the other two. A
     // refusal here is the budget's and not the arena's, which is what keeps the message pointing
     // at the ceiling that actually stopped it — and the arena has already said yes, so this is the
     // only thing left that can say no.
     if !visits.take_bytes(bytes.len()) {
-      return Err(Unstored::Budget {
-        limit: visits.limit(),
-      });
+      return Err(Unstored::Budget(visits.limit()));
     }
     Ok(self.insert(name, hash, fit))
   }
@@ -1591,8 +1579,8 @@ where
           Err(unstored) => {
             return Err(Fault {
               raw: match unstored {
-                Unstored::Arena { limit } => Raw::NameStorage { limit },
-                Unstored::Budget { limit } => Raw::CollectionBudget { limit },
+                Unstored::Arena(limit) => Raw::NameStorage(limit),
+                Unstored::Budget(limit) => Raw::CollectionBudget(limit),
               },
               // The field's span for the reason the staging charge uses it: a collection-side
               // refusal reports where a commit-side one would, and a commit-side location includes
@@ -2192,9 +2180,7 @@ where
   }
   let Some(argument) = found else {
     return Err(Fault {
-      raw: Raw::DirectiveCondition {
-        fault: ConditionFault::Missing,
-      },
+      raw: Raw::DirectiveCondition(ConditionFault::Missing),
       location: *directive.span(),
       name: None,
     });
@@ -2203,7 +2189,7 @@ where
   // `graphql-js` reports, which for `if: $flag` is the variable and not the directive.
   let location = *argument.value().as_span();
   let unreadable = |fault| Fault {
-    raw: Raw::DirectiveCondition { fault },
+    raw: Raw::DirectiveCondition(fault),
     location,
     name: None,
   };
@@ -2236,9 +2222,7 @@ where
         // so there is no finding about the variable yet.
         Admission::Refused => {
           return Err(Fault {
-            raw: Raw::CollectionBudget {
-              limit: visits.limit(),
-            },
+            raw: Raw::CollectionBudget(visits.limit()),
             location,
             name: None,
           });
@@ -2250,9 +2234,7 @@ where
         // spelling travels as bytes because the caller has an arena to restore before it can mint
         // an id that survives.
         None => Err(Fault {
-          raw: Raw::DirectiveCondition {
-            fault: ConditionFault::VariableMissing { variable: None },
-          },
+          raw: Raw::DirectiveCondition(ConditionFault::VariableMissing(None)),
           location,
           name: Some(spelling),
         }),

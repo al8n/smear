@@ -6275,7 +6275,7 @@ fn the_errors_entry_is_the_one_refusal_start_raised() {
       "subscription { newMessage(roomId: \"1\") }",
       None,
       Limits::default().with_max_selection_visits(NonZeroU32::new(8).expect("eight is not zero")),
-      StartError::SourceFieldArgumentBudget { limit: 8 },
+      StartError::SourceFieldArgumentBudget(8),
     ),
     (
       both,
