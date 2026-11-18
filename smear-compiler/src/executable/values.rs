@@ -15,7 +15,7 @@ use smear_parser::{
 };
 
 use super::{
-  Diagnostic, Ledger, Meter, Rule, TypeId, Validator,
+  Diagnostic, Ledger, Meter, Rule, Settled, TypeId, Validator,
   nodes::{ArgumentLike, DirectiveLike, ObjectFieldLike, ValueLike, name_bytes},
   probe_partition, sort_metered, units,
 };
@@ -818,7 +818,7 @@ where
     }
     let refused = {
       let scratch = &mut *self.scratch;
-      let (ledger, refused) = sort_metered(
+      let Settled { ledger, refused } = sort_metered(
         &mut scratch.keys[base..],
         &mut scratch.paid,
         self.left,
@@ -843,7 +843,7 @@ where
         later as usize,
         name_bytes(fields[later as usize].field_name()),
       );
-      let (ledger, _) = meter.finish();
+      let Settled { ledger, .. } = meter.finish();
       self.left = ledger;
       if compared == Compared::Refused {
         return self.refuse(*fields[later as usize].field_name().as_span());

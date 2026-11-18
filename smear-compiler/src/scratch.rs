@@ -580,6 +580,18 @@ pub(crate) struct MergeFrame {
   pub(crate) part: u32,
 }
 
+/// One level of the value comparison: which child of each value the walk is inside, and how far
+/// through this level's children it is.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct CompareFrame {
+  /// The index of this level's child in the left value.
+  pub(crate) left: u32,
+  /// The index of this level's child in the right value.
+  pub(crate) right: u32,
+  /// The next child of this level to compare.
+  pub(crate) cursor: u32,
+}
+
 /// One merged field set the engine has already met.
 ///
 /// The key is the *content* of the row range, so two expansions that reach the same set of field
@@ -617,7 +629,7 @@ pub(crate) struct MergeMemo {
 pub(crate) struct Names {
   /// Every interned name's bytes, concatenated.
   bytes: Vec<u8>,
-  /// Name id to its `(start, end)` range in [`Names::bytes`].
+  /// Name id to its range in [`Names::bytes`].
   ///
   /// # `usize` and not two `u32`s, which is a decision about what documents are admissible
   ///
@@ -641,7 +653,7 @@ pub(crate) struct Names {
   /// document validated rather than a verdict naming a ceiling they had already raised. That is
   /// this crate's own posture about ceilings: the knob is the bound, and a limit no caller can
   /// reach past is not one.
-  ranges: Vec<(usize, usize)>,
+  ranges: Vec<NameRange>,
   /// Each name's whole [`hash_bytes`], parallel to [`Names::ranges`].
   ///
   /// Eight bytes a name, bought for two things the ledger could not otherwise see. A chain step
@@ -771,7 +783,7 @@ impl Names {
         }
         // What that unit buys: two integers. A bucket collision — the constructible case, and the
         // only one an adversary has — is rejected here without touching a byte.
-        let (start, end) = self.ranges[id as usize];
+        let NameRange { start, end } = self.ranges[id as usize];
         if self.hashes[id as usize] == hash && end - start == key.len() {
           // Charged for the bytes the `memcmp` reads. Reaching here needs the whole stored hash
           // **and** the length to agree, so the bytes are about to be equal and this ordinarily
@@ -828,7 +840,7 @@ impl Names {
     // Nothing above this line mutated anything, so a refusal leaves the interner exactly as it
     // was: there is no half-built state for a later call to read.
     self.bytes.extend_from_slice(key);
-    self.ranges.push((start, end));
+    self.ranges.push(NameRange { start, end });
     self.hashes.push(hash);
     self.chain.push(NONE);
     if self.ranges.len() > self.heads.len() {
@@ -867,6 +879,17 @@ impl Names {
       self.heads[bucket] = id as u32;
     }
   }
+}
+
+/// The half-open range of [`Names::bytes`] that holds one interned name.
+///
+/// `usize`, for the reason [`Names::ranges`] gives.
+#[derive(Debug, Clone, Copy)]
+struct NameRange {
+  /// The offset of the name's first byte.
+  start: usize,
+  /// The offset one past the name's last byte.
+  end: usize,
 }
 
 /// FxHash-style multiply-fold over short keys, finished with an avalanche step.
@@ -1067,7 +1090,7 @@ pub(crate) fn scan_cmp(
   left: &[u8],
   right: &[u8],
   mut charge: impl FnMut(u32) -> bool,
-) -> (core::cmp::Ordering, bool) {
+) -> ScanOrder {
   use core::cmp::Ordering;
 
   let mut held = charge(1);
@@ -1084,10 +1107,32 @@ pub(crate) fn scan_cmp(
     let end = budgeted.min(shared);
     match left[read..end].cmp(&right[read..end]) {
       Ordering::Equal => read = end,
-      other => return (other, held),
+      other => {
+        return ScanOrder {
+          ordering: other,
+          held,
+        };
+      }
     }
   }
-  (left.len().cmp(&right.len()), held)
+  ScanOrder {
+    ordering: left.len().cmp(&right.len()),
+    held,
+  }
+}
+
+/// What [`scan_cmp`] answers: the true ordering, and whether every charge it made was paid.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ScanOrder {
+  /// How the two sides compare, whatever the ledger said.
+  pub(crate) ordering: core::cmp::Ordering,
+  /// Whether every charge held. `false` once the ledger refused one, which the caller reports after
+  /// the sort.
+  #[allow(
+    dead_code,
+    reason = "the one caller, `Meter::cmp`, reads the refusal off the ledger it charges"
+  )]
+  pub(crate) held: bool,
 }
 
 /// `left.cmp(right)`, charging as [`scan_eq`] does, and **stopping at the refusal**.
@@ -1284,8 +1329,8 @@ pub struct Scratch {
   /// Chained for the reason [`Names`] is: a relink is one step per entry and no probe run, so the
   /// walk that rebuilds it can be charged before it starts rather than discovered inside it.
   pub(crate) merge_slots: Vec<u32>,
-  /// The value comparison's frame stack: `(index in the left value, index in the right, cursor)`.
-  pub(crate) merge_compare: Vec<(u32, u32, u32)>,
+  /// The value comparison's frame stack.
+  pub(crate) merge_compare: Vec<CompareFrame>,
   /// Every name a merge comparison is about to look one of its own up against, as a stack.
   ///
   /// One segment per index: an argument list's two sides, and one object literal's fields for each
