@@ -54,6 +54,39 @@ All notable changes to Smear are documented in this file.
   answers every spelling no lexer produces with `MalformedEscape`: a `\u` escape that names a
   surrogate, which was `SurrogateEscape`, and a literal without its `"` or `"""` delimiters, whose
   bytes it wrote as the value.
+- `smear-parser`!: the extension-data enums hold named payloads where fifteen variants had
+  fields. `ExtensionDirectives`, `ExtensionFields` and `ExtensionOperations` are shared by
+  GraphQL and GraphQLx; `ExtensionValues` and `ExtensionMembers` are GraphQLx's, and GraphQL's own
+  `ExtensionValues`, `ExtensionMembers` and `ExtensionInputFields` have fewer fields. Each has
+  `new`, a getter for every field, and `set_*` and `with_*` methods. The enums' accessors
+  (`implements()`, `directives()`, `fields_definition()` and the rest) read as before. Every
+  extension-data enum derives `unwrap_*` and `try_unwrap_*`, by value, by reference and by mutable
+  reference. `smear_parser::graphql::ast` exports GraphQL's `UnionTypeExtensionData`,
+  `EnumTypeExtensionData` and `InputObjectTypeExtensionData`, the shared
+  `ObjectTypeExtensionData`, `InterfaceTypeExtensionData` and `SchemaExtensionData`, and the six
+  payloads, none of which it named before; `smear_parser::graphqlx::ast` exports its five.
+- `smear-parser`!: the variants of the public refusals and of the path and `use` trees hold named
+  payloads or the one value they stand for. `ProjectErrorKind::MissingChild` and `UnexpectedChild`
+  carry `MissingChild` and `UnexpectedChild`, exported from `lossless::project` with a public `new`;
+  `MalformedToken(K)`, `SemanticRule(&'static str)`, `TooDeep(usize)`, `InvalidRawKind(u16)` and
+  `WrongRoot(u16)` carry their value, and so do `Unverified::TooDeep` and `Unverified::WrongRoot`.
+  `Refused::NonUtf8Source` and `Refused::SourceTooLong` carry `NonUtf8Source` and
+  `SourceTooLong`, exported at `smear_parser::lossless` with `const fn new` and `valid_up_to()`,
+  `source_len()` and `max()`. `PathRoot::Parent` carries a `ParentRoot`, exported at
+  `graphqlx::ast`, and `PathRoot::is_relative` is derived, no longer `const`.
+  `UsePrefix::Source` carries a `SourcePrefix`, and `UseTreeKind::Simple` the alias, an
+  `Option<Name>`. `ProjectErrorKind`, `Unverified`, `Refused`, `LosslessView`, `PathRoot`,
+  `UsePrefix` and `UseTreeKind` derive their `is_*` predicates and `unwrap_*` and `try_unwrap_*`;
+  both dialects' `ErrorData` have none for a unit variant, which could only return `()`.
+- `smear-parser`!: every `IntoComponents` implementation returns a named `<Node>Components` struct
+  with public fields, in the order of the tuple it replaces, where it returned a tuple:
+  `ArgumentComponents { span, name, value }`, `ListTypeComponents { span, ty, required }`,
+  `DefinitionTypePathComponents`, `UseTreeComponents` and the rest. A pattern needs no type
+  arguments, so `let ArgumentComponents { span, name, .. } = argument.into_components();` reads a
+  node. Each dialect's `ast` module exports the struct beside the node. `Parsed::into_components`
+  returns `ParsedComponents { document, recovery, errors, tree }`, exported from `graphql` and
+  `graphqlx` beside `Parsed`. The three directive-location enums return a `spelling`
+  beside the span. `Name` and `FragmentName` still return tokora's own `Components`.
 - `smear-schema` and `smear-compiler`: an `Int` literal stands for a `Float` only while a finite
   double holds its value, as `Float`'s input coercion requires (§3.5.2). `Schema::build` and
   `Rule::ValuesOfCorrectType` refuse one of magnitude `2^1024 - 2^970` or more, the least integer
