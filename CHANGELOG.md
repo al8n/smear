@@ -128,9 +128,16 @@ All notable changes to Smear are documented in this file.
   `LexerErrorData::Omitted(n)`, in either dialect, counting the rest and spanning from the first
   of them to the last. It renders as "n more errors in this comment were found and not kept" and
   reports `SyntaxErrorKind::InvalidSyntax`.
-- `smear-lexer`: a `\u` escape in a text source with fewer than four hex digits, before characters
-  of more than one byte, as in `"\u€€€€"`, no longer panics. The escape takes up to four
-  characters whole as its digits, and reports each one that is not hex at its own byte.
+- `smear-lexer`!: a `\u` escape without four hex digits takes as its digits up to four characters
+  after the `u`, and stops before a `"`, `\`, CR or LF, as `\u{` already does, in a text source and
+  a byte source alike. 0.0.1 took the four bytes after the `u` in either source, whatever they were,
+  and a text source panicked when they ended inside a character, as in `"\u€€€€"`. So `"\u12"`,
+  which was an invalid escape that took its closing quote and left the literal unterminated, is now
+  one incomplete escape in a literal that ends at its quote. A byte source reports a digit that is
+  not hex by its character's first byte, and takes an ill-formed sequence as one character.
+  `InvalidUnicodeSequence::taken()` is how many characters the escape took, `is_incomplete()` counts
+  those rather than bytes, and `UnicodeError::invalid_fixed_unicode_escape_sequence` takes the
+  count.
 - `smear-parser`!: `Recovery` counts at every module depth. 0.0.1 released it counting a
   document's top-level elements, so that `projected()` was the length of the document's
   definitions. GraphQLx's recovering type-system doors, and both layers, now count every item

@@ -428,8 +428,12 @@ use tokora::{
 };
 
 /// True if two positioned characters describe the same source position and
-/// (mod `u8` vs `char`) codepoint. Every byte the lexer ever flags this way
-/// is ASCII, so `as u32` is a lossless, direct comparison of the two.
+/// (mod `u8` vs `char`) codepoint. Every byte the lexer flags this way, in an
+/// unsupported character, a suffix or a line terminator, is ASCII, so `as u32`
+/// is a lossless, direct comparison of the two; a wide character would compare
+/// unequal here. The one place a flagged character can be wide is a digit of a
+/// bare `\u` escape, which `same_invalid_unicode_hex_digits` compares by its
+/// first byte instead.
 fn same_positioned_char(byte: &PositionedChar<u8>, str_: &PositionedChar<char>) -> bool {
   byte.position() == str_.position() && byte.char() as u32 == str_.char() as u32
 }
@@ -486,15 +490,20 @@ fn same_escaped_character(byte: &EscapedCharacter<u8>, str_: &EscapedCharacter<c
     && byte.char() as u32 == str_.char() as u32
 }
 
+/// True if a byte source's digit is a text source's at the same position, reported by its first
+/// UTF-8 byte: how a byte source reports a digit of a bare `\u` escape that is not hex, wide or
+/// not.
+fn same_digit(byte: &PositionedChar<u8>, str_: &PositionedChar<char>) -> bool {
+  let mut spelled = [0u8; 4];
+  byte.position() == str_.position()
+    && byte.char() == str_.char().encode_utf8(&mut spelled).as_bytes()[0]
+}
+
 fn same_invalid_unicode_hex_digits(
   byte: &InvalidUnicodeHexDigits<u8>,
   str_: &InvalidUnicodeHexDigits<char>,
 ) -> bool {
-  byte.len() == str_.len()
-    && byte
-      .iter()
-      .zip(str_.iter())
-      .all(|(b, s)| same_positioned_char(b, s))
+  byte.len() == str_.len() && byte.iter().zip(str_.iter()).all(|(b, s)| same_digit(b, s))
 }
 
 fn same_invalid_unicode_sequence(
@@ -502,6 +511,7 @@ fn same_invalid_unicode_sequence(
   str_: &InvalidUnicodeSequence<char>,
 ) -> bool {
   byte.span() == str_.span()
+    && byte.taken() == str_.taken()
     && same_invalid_unicode_hex_digits(byte.digits_ref(), str_.digits_ref())
 }
 

@@ -24,16 +24,14 @@
 //! parsed literal or the errors found; the source argument `src` starts
 //! **after** the opening `"`.
 
-use tokora::{
-  SimpleSpan,
-  utils::{Lexeme, PositionedChar},
-};
+use tokora::{SimpleSpan, utils::Lexeme};
 
-use crate::error::{
-  InvalidUnicodeHexDigits, LexemeErrors, StringError, StringErrors, UnicodeError,
-};
+use crate::error::{LexemeErrors, StringError, StringErrors, UnicodeError};
 
-use super::{LitComplexInlineStr, LitInlineStr, LitPlainInlineStr, utf8_len_for_scalar};
+use super::{
+  super::escape::{ends_escape, fixed_digits},
+  LitComplexInlineStr, LitInlineStr, LitPlainInlineStr, utf8_len_for_scalar,
+};
 
 type Span = SimpleSpan;
 
@@ -83,8 +81,12 @@ fn try_parse_low_surrogate(remainder: &[u8]) -> Option<u32> {
 ///
 /// `abs_backslash` — absolute position of the leading `\`.
 ///
-/// Returns `(bytes_consumed_from_src_pos, capacity_delta)`. Like the sub-lexer's `\u` callbacks,
-/// it takes nothing from the next line, where the literal has ended.
+/// Returns `(bytes_consumed_from_src_pos, capacity_delta)`. Four hex digits are the fixed form.
+/// Anything else is the bare `\u` the sub-lexers' callbacks measure, and this measures it the same
+/// way, through `fixed_digits`: up to four characters, stopping before a `"`, `\`, CR or LF, so the
+/// scan goes on at the quote that closes the literal, the next escape, or the end of the line. The
+/// error it records is never read, since both dialects re-lex a refused literal through the
+/// sub-lexer: the measurement only decides where this scan goes on.
 #[inline]
 fn handle_fixed_unicode(
   src: &[u8],
@@ -92,60 +94,11 @@ fn handle_fixed_unicode(
   abs_backslash: usize,
   errs: &mut LexemeErrors<StringError<u8>>,
 ) -> (usize, usize) {
-  let available = src[src_pos..]
-    .iter()
-    .take(4)
-    .position(|&b: &u8| b == b'\r' || b == b'\n')
-    .unwrap_or_else(|| (src.len() - src_pos).min(4));
-
-  if available == 0 {
-    let span = Span::new(abs_backslash, abs_backslash + 2);
-    errs.push(UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(span)).into());
-    return (0, 0);
-  }
-
-  if available < 4 {
-    // Might be incomplete (all hex so far) or invalid (some non-hex).
-    let hex_bytes = &src[src_pos..src_pos + available];
-    let all_hex = hex_bytes.iter().all(|&b| hex_val(b).is_some());
-    let span = Span::new(abs_backslash, abs_backslash + 2 + available);
-    if all_hex {
-      errs.push(UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(span)).into());
-    } else {
-      let mut invalid = InvalidUnicodeHexDigits::<u8>::default();
-      for (i, &b) in hex_bytes.iter().enumerate() {
-        if hex_val(b).is_none() {
-          invalid.push_fixed(PositionedChar::with_position(b, abs_backslash + 2 + i));
-        }
-      }
-      errs.push(UnicodeError::invalid_fixed_unicode_escape_sequence(invalid, span).into());
-    }
-    return (available, 0);
-  }
-
-  // available == 4: collect any non-hex digits.
-  let hex_bytes = &src[src_pos..src_pos + 4];
-  let mut cp = 0u32;
-  let mut invalid = InvalidUnicodeHexDigits::<u8>::default();
-
-  for (i, &b) in hex_bytes.iter().enumerate() {
-    match hex_val(b) {
-      Some(v) => {
-        if invalid.is_empty() {
-          cp = (cp << 4) | v;
-        }
-      }
-      None => {
-        invalid.push_fixed(PositionedChar::with_position(b, abs_backslash + 2 + i));
-      }
-    }
-  }
-
-  if !invalid.is_empty() {
-    let span = Span::new(abs_backslash, abs_backslash + 6);
-    errs.push(UnicodeError::invalid_fixed_unicode_escape_sequence(invalid, span).into());
-    return (4, 0);
-  }
+  let Some(cp) = src.get(src_pos..src_pos + 4).and_then(parse_u4) else {
+    let digits = fixed_digits(&src[src_pos..]);
+    errs.push(digits.byte_error(abs_backslash).into());
+    return (digits.len(), 0);
+  };
 
   // All 4 hex digits valid — check for surrogate pair.
   if is_high_surrogate(cp) {
@@ -191,7 +144,7 @@ fn handle_braced_unicode(
   let mut all_hex = true;
 
   for (i, &b) in rest.iter().enumerate() {
-    if matches!(b, b'"' | b'\\' | b'\r' | b'\n') {
+    if ends_escape(b) {
       let span = Span::new(abs_backslash, abs_backslash + 3 + i);
       errs.push(UnicodeError::unclosed_braced_unicode_escape(span).into());
       return (i, 0);

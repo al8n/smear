@@ -2,16 +2,17 @@ use tokora::{
   SimpleSpan,
   lexer::Lexable,
   logos::{Lexer, Logos, Source},
-  utils::{Lexeme, PositionedChar},
+  utils::Lexeme,
 };
 
 type Span = SimpleSpan;
 
-use crate::error::{
-  InvalidUnicodeHexDigits, LexemeErrors, StringError, StringErrors, UnicodeError,
-};
+use crate::error::{LexemeErrors, StringError, StringErrors, UnicodeError};
 
-use super::{super::SealedWrapper, LitComplexInlineStr, LitInlineStr, LitPlainInlineStr};
+use super::{
+  super::{SealedWrapper, escape::fixed_digits},
+  LitComplexInlineStr, LitInlineStr, LitPlainInlineStr,
+};
 
 #[derive(Logos, Debug)]
 #[logos(crate = tokora::logos, extras = usize, error(StringError, unmatched))]
@@ -136,54 +137,25 @@ fn handle_fixed_width_escape_unicode(
 /// The callback of the bare `\u` rule: a fixed-width escape whose four hex digits are not all
 /// there.
 ///
-/// It takes up to four characters after the `\u` into the escape's token, as its digits, and none
-/// from the next line, where the literal has ended. The token is measured in bytes and each
-/// character is taken whole, so a digit spelled in more than one byte moves the token's end by its
-/// whole width, and each digit that is not hex is reported at its own byte. Counting characters as
-/// bytes would end the token inside a character, which the sub-lexer refuses with a panic.
+/// It takes up to four characters after the `u` into the escape's token, as its digits, and stops
+/// before the first `"`, `\`, CR or LF, as the braced `\u{` does: the quote then closes the
+/// literal, the backslash begins the next escape, and a line end ends the literal, where it always
+/// did. Digits that are all hex, none included, are too few; otherwise each one that is not hex is
+/// reported at its own byte.
+///
+/// `fixed_digits` measures them in a window of the sixteen bytes after the `u`, so the cost is the
+/// same however long the literal is. A text source's window holds its first four characters whole,
+/// since a character is at most four bytes, so each digit is taken whole and the token ends on a
+/// character boundary: counting characters as bytes would end it inside one, which the sub-lexer
+/// refuses with a panic.
 #[inline]
 fn handle_invalid_escaped_unicode(
   lexer: &mut Lexer<'_, StringToken>,
 ) -> Result<(), StringError<char>> {
-  let span = lexer.span();
-
-  // Each character taken, with its byte offset after the `\u`.
-  let mut buf = [('\0', 0usize); 4];
-  let mut count = 0usize;
-  let digits = lexer
-    .remainder()
-    .char_indices()
-    .take_while(|&(_, c): &(usize, char)| c != '\r' && c != '\n')
-    .take(4);
-  for (index, (offset, c)) in digits.enumerate() {
-    buf[index] = (c, offset);
-    count = index + 1;
-  }
-  let taken = &buf[..count];
-  let len = taken
-    .last()
-    .map_or(0, |&(c, offset): &(char, usize)| offset + c.len_utf8());
-  lexer.bump(len);
-
-  // Four hex digits are the fixed-width rule's, so digits that are all hex here are too few.
-  if taken
-    .iter()
-    .all(|&(c, _): &(char, usize)| c.is_ascii_hexdigit())
-  {
-    return Err(
-      UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(lexer.span().into())).into(),
-    );
-  }
-
-  let mut invalid_digits = InvalidUnicodeHexDigits::default();
-  for &(c, offset) in taken {
-    if !c.is_ascii_hexdigit() {
-      invalid_digits.push_fixed(PositionedChar::with_position(c, span.end + offset));
-    }
-  }
-  Err(
-    UnicodeError::invalid_fixed_unicode_escape_sequence(invalid_digits, lexer.span().into()).into(),
-  )
+  let backslash = lexer.span().start;
+  let digits = fixed_digits(lexer.remainder().as_bytes());
+  lexer.bump(digits.len());
+  Err(digits.text_error(backslash).into())
 }
 
 #[inline(always)]

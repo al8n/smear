@@ -188,24 +188,45 @@ impl<Char> core::ops::DerefMut for InvalidUnicodeHexDigits<Char> {
   }
 }
 
-/// An invalid unicode sequence error.
+/// A fixed-width `\u` escape whose digits are not all hex: the ones that are not, the escape's
+/// span, and how many characters it took as its digits.
+///
+/// A bare `\u` takes up to four characters after the `u` as its digits, and stops before a `"`, a
+/// `\`, a CR or a LF. In a byte source an ill-formed sequence counts as one character, and a digit
+/// is reported by its first byte.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub struct InvalidUnicodeSequence<Char = char> {
   digits: InvalidUnicodeHexDigits<Char>,
   span: Span,
+  /// How many characters the escape took as its digits, an ill-formed sequence counting as one.
+  taken: u8,
 }
 
 impl<Char> InvalidUnicodeSequence<Char> {
   /// Create a new invalid unicode sequence error.
   #[inline(always)]
-  pub(crate) const fn fixed(digits: InvalidUnicodeHexDigits<Char>, span: Span) -> Self {
-    Self { digits, span }
+  pub(crate) const fn fixed(digits: InvalidUnicodeHexDigits<Char>, span: Span, taken: u8) -> Self {
+    Self {
+      digits,
+      span,
+      taken,
+    }
   }
 
-  /// Returns `true` if the sequence also incomplete.
+  /// Returns how many characters the escape took as its digits, an ill-formed sequence counting as
+  /// one: at most four, and fewer when a delimiter, a line end or the end of the input cut it
+  /// short.
   #[inline(always)]
-  pub fn is_incomplete(&self) -> bool {
-    self.span.len() < 6 // \u[0-9a-fA-F]{4} is 6 characters long
+  pub const fn taken(&self) -> u8 {
+    self.taken
+  }
+
+  /// Returns `true` if the escape took fewer than the four digits the fixed form needs.
+  ///
+  /// It counts characters, not bytes, so a digit spelled in more than one byte is one digit.
+  #[inline(always)]
+  pub const fn is_incomplete(&self) -> bool {
+    self.taken < 4
   }
 
   /// Get the invalid unicode hex digits.
@@ -525,14 +546,16 @@ impl<Char> UnicodeError<Char> {
     Self::Fixed(FixedUnicodeEscapeError::Incomplete(lexeme))
   }
 
-  /// Creates an invalid fixed-width unicode escape sequence error.
+  /// Creates an invalid fixed-width unicode escape sequence error: `digits` are the ones that are
+  /// not hex, and `taken` how many characters the escape took as its digits.
   #[inline]
   pub const fn invalid_fixed_unicode_escape_sequence(
     digits: InvalidUnicodeHexDigits<Char>,
     span: Span,
+    taken: u8,
   ) -> Self {
     Self::Fixed(FixedUnicodeEscapeError::InvalidSequence(
-      InvalidUnicodeSequence::fixed(digits, span),
+      InvalidUnicodeSequence::fixed(digits, span, taken),
     ))
   }
 

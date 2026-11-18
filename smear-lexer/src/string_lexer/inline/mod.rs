@@ -3,6 +3,7 @@ use tokora::utils::{DisplayCompact, DisplayHuman, DisplayPretty};
 
 use super::{
   LitPlainInlineStr,
+  escape::ends_escape,
   value::{Invalid, inline_value},
 };
 use std::{borrow::Cow, string::String};
@@ -362,11 +363,12 @@ const fn utf8_len_for_scalar(cp: u32) -> usize {
 /// literal's closing quote, a line break or the next escape to a `}` beyond them.
 ///
 /// All five stops are ASCII, so the one byte scan serves a text source and a byte source alike, and
-/// in a text source the byte after the `}` is a character boundary.
+/// in a text source the byte after the `}` is a character boundary. The four besides the `}` are
+/// `ends_escape`'s, where a bare `\u` stops too.
 #[inline(always)]
 fn braced_escape_close(rest: &[u8]) -> Option<usize> {
   rest
     .iter()
-    .position(|&byte| matches!(byte, b'}' | b'"' | b'\\' | b'\r' | b'\n'))
+    .position(|&byte| byte == b'}' || ends_escape(byte))
     .filter(|&stop| rest[stop] == b'}')
 }

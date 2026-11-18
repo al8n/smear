@@ -11,6 +11,7 @@ use crate::{
   SyntaxErrorKind,
   error::StringError,
   graphqlx::{error::LexerErrorData, lossless::LosslessLexer, syntactic::SyntacticLexer},
+  string_lexer::utf8_cases::LONG_TAIL,
 };
 
 /// One item a lexer answers: its span, and for a refused string literal the kinds of the errors
@@ -152,6 +153,53 @@ fn what_a_line_held_stays_in_its_literals_record() {
       );
       let last = items.last().expect("the next line's name");
       assert_eq!(text(src, last.0), "x", "{lexer}: {src:?}");
+    }
+  }
+}
+
+/// A bare `\u` before wide characters takes them whole and stops before the quote, which closes
+/// the literal, in every lexer: over the text and over its bytes, a lexer answers item for item
+/// alike, the four agree on the literal, and the name after it lexes as it would anywhere. Each
+/// probe runs again before `LONG_TAIL` spaces, which put the fast path's stops in a full vector.
+#[test]
+fn a_bare_unicode_escape_ends_alike_in_every_lexer() {
+  for (probe, end) in [
+    ("\"\\u€€\" x", 10),
+    ("\"\\u1€\" x", 8),
+    ("\"\\u😀\" x", 8),
+    ("\"\\u中文\" x", 10),
+  ] {
+    for tail in [0, LONG_TAIL] {
+      let src = format!("{probe}{}", " ".repeat(tail));
+      let [
+        syntactic_text,
+        syntactic_bytes,
+        lossless_text,
+        lossless_bytes,
+      ] = every_lexer(&src);
+      assert_eq!(syntactic_text.1, syntactic_bytes.1, "syntactic: {src:?}");
+      assert_eq!(lossless_text.1, lossless_bytes.1, "lossless: {src:?}");
+      for (lexer, items) in [
+        syntactic_text,
+        syntactic_bytes,
+        lossless_text,
+        lossless_bytes,
+      ] {
+        assert_eq!(
+          items[0],
+          (
+            SimpleSpan::new(0, end),
+            Some(vec![SyntaxErrorKind::InvalidUnicodeEscape])
+          ),
+          "{lexer}: {src:?}"
+        );
+        let last = items
+          .iter()
+          .rev()
+          .find(|&&(span, _)| !text(&src, span).trim().is_empty())
+          .expect("the name after the literal");
+        assert_eq!(text(&src, last.0), "x", "{lexer}: {src:?}");
+      }
     }
   }
 }

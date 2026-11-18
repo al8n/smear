@@ -2,16 +2,17 @@ use tokora::{
   SimpleSpan,
   lexer::Lexable,
   logos::{Lexer, Logos, Source},
-  utils::{Lexeme, PositionedChar},
+  utils::Lexeme,
 };
 
 type Span = SimpleSpan;
 
-use crate::error::{
-  InvalidUnicodeHexDigits, LexemeErrors, StringError, StringErrors, UnicodeError,
-};
+use crate::error::{LexemeErrors, StringError, StringErrors, UnicodeError};
 
-use super::{super::SealedWrapper, LitComplexInlineStr, LitInlineStr, LitPlainInlineStr};
+use super::{
+  super::{SealedWrapper, escape::fixed_digits},
+  LitComplexInlineStr, LitInlineStr, LitPlainInlineStr,
+};
 
 #[derive(Logos, Debug)]
 #[logos(
@@ -194,110 +195,23 @@ fn handle_unicode_escape(lexer: &mut Lexer<'_, StringToken>) -> Result<(), Strin
   Ok(())
 }
 
+/// The callback of the bare `\u` rule: a fixed-width escape whose four hex digits are not all
+/// there.
+///
+/// It reads as the text source's does: up to four characters after the `u`, stopping before the
+/// first `"`, `\`, CR or LF, measured by `fixed_digits` in a window of sixteen bytes. A byte source
+/// can also hold an ill-formed sequence there, which the escape takes as one character, as it
+/// takes any other: its maximal ill-formed subpart. A digit that is not hex is reported by its
+/// first byte, a character's lead byte or the subpart's first, so on well-formed text the two
+/// sources report the same digits at the same positions over the same span.
 #[inline]
 fn handle_invalid_escaped_unicode(
   lexer: &mut Lexer<'_, StringToken>,
 ) -> Result<(), StringError<u8>> {
-  // We are at b"\\u" with no/partial hex after.
-  let remainder = lexer.remainder();
-
-  // Gather up to 4 following bytes (not decoding UTF-8; we only need ASCII-hex), and none from
-  // the next line, where the literal has ended.
-  let take = remainder
-    .iter()
-    .take(4)
-    .position(|&b: &u8| b == b'\r' || b == b'\n')
-    .unwrap_or_else(|| remainder.len().min(4));
-  let mut buf = [0u8; 4];
-  buf[..take].copy_from_slice(&remainder[..take]);
-
-  // Case 1: some hex provided but fewer than 4 and all seen are hex => Incomplete
-  if take != 4 && buf[..take].iter().all(|b| hex_val(*b).is_some()) {
-    let span = lexer.span();
-    lexer.bump(take); // consume what was there to make progress
-    return Err(
-      UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(Span::new(
-        span.start,
-        span.end + take,
-      )))
-      .into(),
-    );
-  }
-
-  // Case 2: we have 4 bytes, but one or more are non-hex => collect precise invalids
-  let mk_pos_char = |b: u8, pos: usize| PositionedChar::with_position(b, pos);
-
-  let err = match &buf[..take] {
-    [a, b, c, d] => {
-      let span = lexer.span();
-      lexer.bump(4);
-      let mut invalid = InvalidUnicodeHexDigits::default();
-      if hex_val(*a).is_none() {
-        invalid.push_fixed(mk_pos_char(*a, span.end));
-      }
-      if hex_val(*b).is_none() {
-        invalid.push_fixed(mk_pos_char(*b, span.end + 1));
-      }
-      if hex_val(*c).is_none() {
-        invalid.push_fixed(mk_pos_char(*c, span.end + 2));
-      }
-      if hex_val(*d).is_none() {
-        invalid.push_fixed(mk_pos_char(*d, span.end + 3));
-      }
-      UnicodeError::invalid_fixed_unicode_escape_sequence(invalid, lexer.span().into())
-    }
-    [a, b, c] => {
-      let span = lexer.span();
-      lexer.bump(3);
-      let mut invalid = InvalidUnicodeHexDigits::default();
-      if hex_val(*a).is_none() {
-        invalid.push_fixed(mk_pos_char(*a, span.end));
-      }
-      if hex_val(*b).is_none() {
-        invalid.push_fixed(mk_pos_char(*b, span.end + 1));
-      }
-      if hex_val(*c).is_none() {
-        invalid.push_fixed(mk_pos_char(*c, span.end + 2));
-      }
-      if invalid.is_empty() {
-        UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(lexer.span().into()))
-      } else {
-        UnicodeError::invalid_fixed_unicode_escape_sequence(invalid, lexer.span().into())
-      }
-    }
-    [a, b] => {
-      let span = lexer.span();
-      lexer.bump(2);
-      let mut invalid = InvalidUnicodeHexDigits::default();
-      if hex_val(*a).is_none() {
-        invalid.push_fixed(mk_pos_char(*a, span.end));
-      }
-      if hex_val(*b).is_none() {
-        invalid.push_fixed(mk_pos_char(*b, span.end + 1));
-      }
-      if invalid.is_empty() {
-        UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(lexer.span().into()))
-      } else {
-        UnicodeError::invalid_fixed_unicode_escape_sequence(invalid, lexer.span().into())
-      }
-    }
-    [a] => {
-      let span = lexer.span();
-      lexer.bump(1);
-      if hex_val(*a).is_some() {
-        UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(lexer.span().into()))
-      } else {
-        UnicodeError::invalid_fixed_unicode_escape_sequence(
-          PositionedChar::with_position(*a, span.end).into(),
-          lexer.span().into(),
-        )
-      }
-    }
-    [] => UnicodeError::incomplete_fixed_unicode_escape(Lexeme::Range(lexer.span().into())),
-    _ => unreachable!("we only copied up to 4 bytes"),
-  };
-
-  Err(StringError::Unicode(err))
+  let backslash = lexer.span().start;
+  let digits = fixed_digits(lexer.remainder());
+  lexer.bump(digits.len());
+  Err(digits.byte_error(backslash).into())
 }
 
 #[inline(always)]

@@ -20,13 +20,20 @@ use std::{borrow::Cow, format, vec::Vec};
 
 use tokora::{
   SimpleSpan,
+  logos::Lexer,
   utils::{Lexeme, PositionedChar},
 };
 
-use super::{LitBlockStr, LitComplexInlineStr, LitInlineStr, LitStr};
+use super::{
+  LitBlockStr, LitComplexInlineStr, LitInlineStr, LitStr, SealedWrapper,
+  inline::{BytesStringToken, StringToken, lex_inline_str_from_bytes, lex_inline_str_from_str},
+};
 use crate::{
   SyntaxErrorKind,
-  error::{InvalidUnicodeHexDigits, StringError, UnicodeError},
+  error::{
+    FixedUnicodeEscapeError, InvalidUnicodeHexDigits, InvalidUnicodeSequence, StringError,
+    StringErrors, UnicodeError,
+  },
 };
 
 /// Cooks a literal the way a consumer would: lex it, then convert.
@@ -504,7 +511,8 @@ fn a_dangling_backslash_reads_alike_from_text_and_bytes() {
 /// A `\u` before characters of three bytes each takes four of them whole, as its digits: the
 /// escape's token ends on a character boundary, at the closing quote, and each digit is reported at
 /// its own byte. The text source counted those characters as bytes, and ended the token inside the
-/// second one, which its sub-lexer refuses with a panic.
+/// second one, which its sub-lexer refuses with a panic. A byte source takes the same characters,
+/// and reports each by its first byte.
 #[test]
 fn a_fixed_unicode_escape_before_wide_characters_takes_them_whole() {
   let errors = LitStr::try_from("\"\\u€€€€\"").expect_err("no hex digit");
@@ -517,27 +525,366 @@ fn a_fixed_unicode_escape_before_wide_characters_takes_them_whole() {
   assert_eq!(
     errors.as_slice(),
     &[StringError::Unicode(
-      UnicodeError::invalid_fixed_unicode_escape_sequence(digits, SimpleSpan::new(1, 15))
+      UnicodeError::invalid_fixed_unicode_escape_sequence(digits, SimpleSpan::new(1, 15), 4)
     )]
   );
 
-  // One wide character before the quote: the escape takes it and the quote, as it takes any two
-  // characters, and the literal is then unterminated.
+  // One wide character before the quote: the escape takes it and stops before the quote, which
+  // closes the literal.
   let errors = LitStr::try_from("\"\\u€\"").expect_err("no hex digit");
-  let digits = InvalidUnicodeHexDigits::from([
-    PositionedChar::with_position('€', 3),
-    PositionedChar::with_position('"', 6),
+  let digits = InvalidUnicodeHexDigits::from(PositionedChar::with_position('€', 3));
+  assert_eq!(
+    errors.as_slice(),
+    &[StringError::Unicode(
+      UnicodeError::invalid_fixed_unicode_escape_sequence(digits, SimpleSpan::new(1, 6), 1)
+    )]
+  );
+
+  // The same two literals as bytes, each `€` reported by its first byte.
+  let errors = LitStr::try_from("\"\\u€€€€\"".as_bytes()).expect_err("no hex digit");
+  let digits: InvalidUnicodeHexDigits<u8> = InvalidUnicodeHexDigits::from([
+    PositionedChar::with_position(0xE2, 3),
+    PositionedChar::with_position(0xE2, 6),
+    PositionedChar::with_position(0xE2, 9),
+    PositionedChar::with_position(0xE2, 12),
   ]);
   assert_eq!(
     errors.as_slice(),
-    &[
-      StringError::Unicode(UnicodeError::invalid_fixed_unicode_escape_sequence(
-        digits,
-        SimpleSpan::new(1, 7)
-      )),
-      StringError::unterminated_inline_string(),
-    ]
+    &[StringError::Unicode(
+      UnicodeError::invalid_fixed_unicode_escape_sequence(digits, SimpleSpan::new(1, 15), 4)
+    )]
   );
+  let errors = LitStr::try_from("\"\\u€\"".as_bytes()).expect_err("no hex digit");
+  let digits: InvalidUnicodeHexDigits<u8> =
+    InvalidUnicodeHexDigits::from(PositionedChar::with_position(0xE2, 3));
+  assert_eq!(
+    errors.as_slice(),
+    &[StringError::Unicode(
+      UnicodeError::invalid_fixed_unicode_escape_sequence(digits, SimpleSpan::new(1, 6), 1)
+    )]
+  );
+}
+
+/// The first byte of `ch`'s UTF-8 spelling: what a byte source reports a digit by.
+fn lead(ch: char) -> u8 {
+  let mut spelled = [0u8; 4];
+  ch.encode_utf8(&mut spelled);
+  spelled[0]
+}
+
+/// Text digits, each a character at its position, as a byte source reports them: by first byte.
+fn by_lead(digits: &[(char, usize)]) -> Vec<(u8, usize)> {
+  digits.iter().map(|&(ch, at)| (lead(ch), at)).collect()
+}
+
+/// `Incomplete` over `start..end`: a bare `\u` whose digits are all hex, and too few.
+fn incomplete<Char>(start: usize, end: usize) -> StringError<Char> {
+  StringError::Unicode(UnicodeError::incomplete_fixed_unicode_escape(
+    Lexeme::Range(SimpleSpan::new(start, end)),
+  ))
+}
+
+/// `InvalidSequence` over `start..end`: a bare `\u` that took `taken` units, with each digit that
+/// is not hex at its position.
+fn invalid<Char: Copy>(
+  digits: &[(Char, usize)],
+  start: usize,
+  end: usize,
+  taken: u8,
+) -> StringError<Char> {
+  let mut held = InvalidUnicodeHexDigits::default();
+  for &(digit, at) in digits {
+    held.push_fixed(PositionedChar::with_position(digit, at));
+  }
+  StringError::Unicode(UnicodeError::invalid_fixed_unicode_escape_sequence(
+    held,
+    SimpleSpan::new(start, end),
+    taken,
+  ))
+}
+
+/// The invalid fixed escape an error is.
+fn sequence<Char: core::fmt::Debug>(error: &StringError<Char>) -> &InvalidUnicodeSequence<Char> {
+  match error {
+    StringError::Unicode(UnicodeError::Fixed(FixedUnicodeEscapeError::InvalidSequence(
+      sequence,
+    ))) => sequence,
+    other => panic!("an invalid fixed escape, got {other:?}"),
+  }
+}
+
+/// The record the text sub-lexer refuses the literal `src` opens with, and where the literal's
+/// token ends. These are `LitStr::try_from`'s own steps, kept so the end can be read, and the
+/// record is held to `LitStr::try_from`'s.
+fn refused_text(src: &str) -> (StringErrors<char>, usize) {
+  let mut lexer = Lexer::<StringToken>::new(src);
+  lexer.bump(1);
+  let errors = lex_inline_str_from_str(SealedWrapper::from_mut(&mut lexer))
+    .expect_err("the literal is refused");
+  assert_eq!(
+    LitStr::try_from(src).expect_err("the literal is refused"),
+    errors,
+    "{src:?}"
+  );
+  (errors, lexer.span().end)
+}
+
+/// [`refused_text`] over a byte source.
+fn refused_bytes(src: &[u8]) -> (StringErrors<u8>, usize) {
+  let mut lexer = Lexer::<BytesStringToken>::new(src);
+  lexer.bump(1);
+  let errors = lex_inline_str_from_bytes(SealedWrapper::from_mut(&mut lexer))
+    .expect_err("the literal is refused");
+  assert_eq!(
+    LitStr::try_from(src).expect_err("the literal is refused"),
+    errors,
+    "{src:?}"
+  );
+  (errors, lexer.span().end)
+}
+
+/// Holds the literal `src` opens with to its record over a byte source, and to where its token
+/// ends.
+fn check_bytes(src: &[u8], bytes: &[StringError<u8>], end: usize) {
+  let (errors, at) = refused_bytes(src);
+  assert_eq!(errors.as_slice(), bytes, "{src:?} as bytes");
+  assert_eq!(at, end, "{src:?} as bytes: where the literal's token ends");
+}
+
+/// Holds the literal `src` opens with to its record over the text and over its bytes, and to where
+/// its token ends, which the two share.
+fn check(src: &str, text: &[StringError<char>], bytes: &[StringError<u8>], end: usize) {
+  let (errors, at) = refused_text(src);
+  assert_eq!(errors.as_slice(), text, "{src:?} as text");
+  assert_eq!(at, end, "{src:?} as text: where the literal's token ends");
+  check_bytes(src.as_bytes(), bytes, end);
+}
+
+/// Rule (B), row by row: a bare `\u` takes up to four units after the `u` as its digits, and stops
+/// before a `"`, `\`, CR or LF, as the braced `\u{` does. Each row is the record a literal is
+/// refused with and where its token ends, over the text and over its bytes, which report a digit
+/// by its first byte. The last three rows are bytes alone: they hold sequences that are not UTF-8,
+/// and the escape takes each maximal ill-formed one as one unit.
+#[test]
+fn a_bare_unicode_escape_takes_up_to_four_units_and_stops_before_a_delimiter() {
+  // Four wide characters fill the four digits, and the quote after them closes the literal.
+  let digits = [('€', 3), ('€', 6), ('€', 9), ('€', 12)];
+  check(
+    "\"\\u€€€€\"",
+    &[invalid(&digits, 1, 15, 4)],
+    &[invalid(&by_lead(&digits), 1, 15, 4)],
+    16,
+  );
+
+  // One wide character, and the escape stops before the quote, which closes the literal.
+  let digits = [('€', 3)];
+  check(
+    "\"\\u€\"",
+    &[invalid(&digits, 1, 6, 1)],
+    &[invalid(&by_lead(&digits), 1, 6, 1)],
+    7,
+  );
+
+  // Hex digits before the quote are too few, and none is too few too.
+  check("\"\\u12\"", &[incomplete(1, 5)], &[incomplete(1, 5)], 6);
+  check("\"\\u\"", &[incomplete(1, 3)], &[incomplete(1, 3)], 4);
+
+  // A backslash begins the next escape, here the valid `\n`.
+  check("\"\\u\\n\"", &[incomplete(1, 3)], &[incomplete(1, 3)], 6);
+
+  // Two digits that are not hex, then the next escape, which is unknown.
+  check(
+    "\"\\uzz\\q\"",
+    &[
+      invalid(&[('z', 3), ('z', 4)], 1, 5, 2),
+      StringError::unexpected_escaped_character(SimpleSpan::new(5, 7), 'q', 6),
+    ],
+    &[
+      invalid(&[(b'z', 3), (b'z', 4)], 1, 5, 2),
+      StringError::unexpected_escaped_character(SimpleSpan::new(5, 7), b'q', 6),
+    ],
+    8,
+  );
+
+  // A line end stops the escape and ends the literal, as it always did.
+  let digits = [('€', 3)];
+  check(
+    "\"\\u€\nx",
+    &[
+      invalid(&digits, 1, 6, 1),
+      StringError::unterminated_inline_string(),
+    ],
+    &[
+      invalid(&by_lead(&digits), 1, 6, 1),
+      StringError::unterminated_inline_string(),
+    ],
+    6,
+  );
+  check(
+    "\"\\u\r\nx",
+    &[incomplete(1, 3), StringError::unterminated_inline_string()],
+    &[incomplete(1, 3), StringError::unterminated_inline_string()],
+    3,
+  );
+
+  // Ill-formed bytes: `E4 B8` is one unit, before the quote that closes the literal or at the end
+  // of the input; `FF` and `FE` are a unit each, and `1` and `2` fill the four.
+  check_bytes(b"\"\\u\xE4\xB8\"x\"", &[invalid(&[(0xE4, 3)], 1, 5, 1)], 6);
+  check_bytes(
+    b"\"\\u\xFF\xFE12\"",
+    &[invalid(&[(0xFF, 3), (0xFE, 4)], 1, 7, 4)],
+    8,
+  );
+  check_bytes(
+    b"\"\\u\xE4\xB8",
+    &[
+      invalid(&[(0xE4, 3)], 1, 5, 1),
+      StringError::unterminated_inline_string(),
+    ],
+    5,
+  );
+
+  // Four units at most: the fifth wide character is content.
+  let digits = [('😀', 3), ('😀', 7), ('😀', 11), ('😀', 15)];
+  check(
+    "\"\\u😀😀😀😀😀\"",
+    &[invalid(&digits, 1, 19, 4)],
+    &[invalid(&by_lead(&digits), 1, 19, 4)],
+    24,
+  );
+}
+
+/// The measurement reads sixteen bytes after the `u`, which hold the four units it can take,
+/// each whole, and nothing past them: four characters of four bytes end exactly at the sixteenth,
+/// the window cuts a fifth character the escape never takes, and an ASCII unit shifts the rest.
+#[test]
+fn a_bare_unicode_escape_is_measured_in_a_window_of_sixteen_bytes() {
+  let digits = [('😀', 3), ('😀', 7), ('😀', 11), ('😀', 15)];
+  check(
+    "\"\\u😀😀😀😀\"",
+    &[invalid(&digits, 1, 19, 4)],
+    &[invalid(&by_lead(&digits), 1, 19, 4)],
+    20,
+  );
+
+  let digits = [('😀', 3), ('😀', 7), ('😀', 11), ('€', 15)];
+  check(
+    "\"\\u😀😀😀€😀\"",
+    &[invalid(&digits, 1, 18, 4)],
+    &[invalid(&by_lead(&digits), 1, 18, 4)],
+    23,
+  );
+
+  let digits = [('z', 3), ('😀', 4), ('😀', 8), ('😀', 12)];
+  check(
+    "\"\\uz😀😀😀😀\"",
+    &[invalid(&digits, 1, 16, 4)],
+    &[invalid(&by_lead(&digits), 1, 16, 4)],
+    21,
+  );
+}
+
+/// `taken` is how many units a bare `\u` took, a wide character counting as one, and
+/// `is_incomplete()` is fewer than four: `\u€€` took two, in eight bytes, and `\u1€` two, in six.
+#[test]
+fn an_invalid_unicode_sequence_counts_the_units_it_took() {
+  for (src, digits, end, taken) in [
+    ("\"\\u€€\"", &[('€', 3), ('€', 6)][..], 9, 2),
+    ("\"\\u1€\"", &[('€', 4)][..], 7, 2),
+    (
+      "\"\\u€€€€\"",
+      &[('€', 3), ('€', 6), ('€', 9), ('€', 12)][..],
+      15,
+      4,
+    ),
+    ("\"\\u12zz\"", &[('z', 5), ('z', 6)][..], 7, 4),
+  ] {
+    let text = LitStr::try_from(src).expect_err("an invalid escape");
+    let bytes = LitStr::try_from(src.as_bytes()).expect_err("an invalid escape");
+    assert_eq!(
+      text.as_slice(),
+      &[invalid(digits, 1, end, taken)],
+      "{src:?}"
+    );
+    assert_eq!(
+      bytes.as_slice(),
+      &[invalid(&by_lead(digits), 1, end, taken)],
+      "{src:?}"
+    );
+    for counted in [sequence(&text[0]).taken(), sequence(&bytes[0]).taken()] {
+      assert_eq!(counted, taken, "{src:?}");
+    }
+    assert_eq!(sequence(&text[0]).is_incomplete(), taken < 4, "{src:?}");
+    assert_eq!(sequence(&bytes[0]).is_incomplete(), taken < 4, "{src:?}");
+  }
+}
+
+/// Holds a literal's record over the text and over its bytes to one reading: the same number of
+/// errors, the same kinds and spans, the same count of units taken, and each digit at the same
+/// position, the byte one its character's first byte.
+fn assert_text_and_bytes_agree(src: &str) {
+  let text = LitStr::try_from(src).expect_err("the literal is refused");
+  let bytes = LitStr::try_from(src.as_bytes()).expect_err("the literal is refused");
+  assert_eq!(
+    text.len(),
+    bytes.len(),
+    "{src:?}: {text:?} against {bytes:?}"
+  );
+  for (text, bytes) in text.iter().zip(bytes.iter()) {
+    assert_eq!(text.kind(), bytes.kind(), "{src:?}");
+    match (text, bytes) {
+      (
+        StringError::Unicode(UnicodeError::Fixed(FixedUnicodeEscapeError::InvalidSequence(text))),
+        StringError::Unicode(UnicodeError::Fixed(FixedUnicodeEscapeError::InvalidSequence(bytes))),
+      ) => {
+        assert_eq!(text.span(), bytes.span(), "{src:?}");
+        assert_eq!(text.taken(), bytes.taken(), "{src:?}");
+        let text: Vec<(usize, u8)> = text
+          .digits_ref()
+          .iter()
+          .map(|digit| (digit.position(), lead(digit.char())))
+          .collect();
+        let bytes: Vec<(usize, u8)> = bytes
+          .digits_ref()
+          .iter()
+          .map(|digit| (digit.position(), digit.char()))
+          .collect();
+        assert_eq!(text, bytes, "{src:?}");
+      }
+      (
+        StringError::Unicode(UnicodeError::Fixed(FixedUnicodeEscapeError::Incomplete(
+          Lexeme::Range(text),
+        ))),
+        StringError::Unicode(UnicodeError::Fixed(FixedUnicodeEscapeError::Incomplete(
+          Lexeme::Range(bytes),
+        ))),
+      ) => assert_eq!(text, bytes, "{src:?}"),
+      (StringError::Unterminated(text), StringError::Unterminated(bytes)) => {
+        assert_eq!(text, bytes, "{src:?}");
+      }
+      other => panic!("{src:?}: a pair no probe here produces: {other:?}"),
+    }
+  }
+}
+
+/// Text and bytes read a bare `\u` alike, wide digits and line ends included. The last probe is the
+/// control: its line end stops the escape before it takes a digit, which no reading of the escape
+/// could change.
+#[test]
+fn a_bare_unicode_escape_reads_alike_from_text_and_bytes() {
+  for src in [
+    "\"\\u€€\" x",
+    "\"\\u1€\" x",
+    "\"\\u😀\" x",
+    "\"\\u\u{e9}\" x",
+    "\"\\u中文\" x",
+    "\"\\u€\nx",
+    "\"\\u12\"",
+    "\"\\u\"",
+    "\"\\u\r\nx",
+  ] {
+    assert_text_and_bytes_agree(src);
+  }
 }
 
 /// A literal's record keeps its first sixteen errors, in the order found, and one entry counting
