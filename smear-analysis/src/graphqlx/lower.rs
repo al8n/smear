@@ -169,8 +169,8 @@ use super::{
   model::{
     DefKind, DirectiveLocation, MemberKind, ModelBuilder, PathRoot, Root, RootOperation, Written,
   },
-  raw::{Radix, RawArgument, RawField, RawKind, RawValues},
-  resolve::{self, Position, Request, Resolved, Scopes, Wanted},
+  raw::{FloatSpelling, Radix, RawArgument, RawField, RawKind, RawValues},
+  resolve::{self, NonZeroAlias, Position, Request, Resolved, Scopes, Wanted},
   set::{PackageView, ROOT},
   source::SourceMap,
 };
@@ -328,20 +328,36 @@ struct SchemaShape<'d, S> {
 enum Kept {
   /// Written: the root operation `index` of the schema's contribution `part`, its type written at
   /// `at`.
-  Written {
-    part: usize,
-    index: usize,
-    at: Location,
-  },
+  Written(WrittenKept),
   /// Presumed, with no schema definition: the definition `def`, named at `at`.
-  Presumed { def: DefId, at: Location },
+  Presumed(PresumedKept),
+}
+
+/// A root operation a schema definition writes: [`Kept::Written`]'s payload.
+#[derive(Clone, Copy)]
+struct WrittenKept {
+  /// The schema's contribution.
+  part: usize,
+  /// The root operation's index among its contribution's.
+  index: usize,
+  /// Where its type is written.
+  at: Location,
+}
+
+/// A root operation presumed with no schema definition: [`Kept::Presumed`]'s payload.
+#[derive(Clone, Copy)]
+struct PresumedKept {
+  /// The definition.
+  def: DefId,
+  /// Where it is named.
+  at: Location,
 }
 
 impl Kept {
   /// Where the root's type is named.
   fn at(self) -> Location {
     match self {
-      Self::Written { at, .. } | Self::Presumed { at, .. } => at,
+      Self::Written(WrittenKept { at, .. }) | Self::Presumed(PresumedKept { at, .. }) => at,
     }
   }
 }
@@ -424,12 +440,25 @@ enum Read<'v, S> {
 enum Pending<'t, S> {
   /// Lower `ty`: the element of the list `list`, or, with no list, an argument of the occurrence
   /// whose arguments are being gathered.
-  Type {
-    ty: &'t Type<S>,
-    list: Option<TypeExprId>,
-  },
+  Type(PendingType<'t, S>),
   /// Give `occurrence` the arguments gathered from `from` on.
-  Args { occurrence: TypeExprId, from: usize },
+  Args(PendingArgs),
+}
+
+/// A written type to lower: [`Pending::Type`]'s payload.
+struct PendingType<'t, S> {
+  /// The type.
+  ty: &'t Type<S>,
+  /// The list it is the element of, or none for an argument of the occurrence being gathered.
+  list: Option<TypeExprId>,
+}
+
+/// An occurrence to give its arguments: [`Pending::Args`]'s payload.
+struct PendingArgs {
+  /// The occurrence.
+  occurrence: TypeExprId,
+  /// The first argument gathered for it.
+  from: usize,
 }
 
 /// A schema definition or extension, as the schema's contributions take it.
@@ -532,7 +561,7 @@ impl Lowering<'_, '_, '_> {
       Resolved::Def(def) => def,
       // `NonZeroU32` and its kin spell an instantiation of `core`'s `NonZero`, and are no
       // definitions of their own: there is nothing to extend.
-      Resolved::NonZero { primitive, .. } => {
+      Resolved::NonZero(NonZeroAlias { primitive, .. }) => {
         self.alias(declarations, keyword, path, primitive, location);
         return None;
       }
@@ -1468,10 +1497,7 @@ impl Lowering<'_, '_, '_> {
           Resolved::Param(index) if bounded.type_generics().is_none() => index,
           // Name resolution has reported a left side that names nothing.
           Resolved::Unresolved => continue,
-          Resolved::Def(_)
-          | Resolved::NonZero { .. }
-          | Resolved::Module(_)
-          | Resolved::Param(_) => {
+          Resolved::Def(_) | Resolved::NonZero(_) | Resolved::Module(_) | Resolved::Param(_) => {
             self.invalid_bound(
               Location::new(source, *bounded.span()),
               "a bound's left side is one of its definition's own type parameters, written with no \
@@ -1584,10 +1610,9 @@ impl Lowering<'_, '_, '_> {
       Resolved::Def(def) => def,
       // Name resolution has reported a path that names nothing; a directive is wanted, which no
       // type, module or parameter is.
-      Resolved::NonZero { .. }
-      | Resolved::Module(_)
-      | Resolved::Param(_)
-      | Resolved::Unresolved => return application,
+      Resolved::NonZero(_) | Resolved::Module(_) | Resolved::Param(_) | Resolved::Unresolved => {
+        return application;
+      }
     };
     self.builder.resolve_application(application, def);
     if let Some(generics) = name.type_generics() {
@@ -1710,9 +1735,9 @@ impl Lowering<'_, '_, '_> {
       let kind = match value {
         ConstInputValue::Boolean(boolean) => RawKind::Boolean(boolean.value()),
         ConstInputValue::String(_) => RawKind::String,
-        ConstInputValue::Float(float) => RawKind::Float {
+        ConstInputValue::Float(float) => RawKind::Float(FloatSpelling {
           hex: matches!(float.source(), LitFloat::Hex(_)),
-        },
+        }),
         ConstInputValue::Int(int) => RawKind::Int(match int.source() {
           LitInt::Decimal(_) => Radix::Decimal,
           LitInt::Hex(_) => Radix::Hex,
@@ -1821,7 +1846,7 @@ impl Lowering<'_, '_, '_> {
     nested(ty, root, self.type_args.len(), &mut pending);
     while let Some(next) = pending.pop() {
       match next {
-        Pending::Type { ty, list } => {
+        Pending::Type(PendingType { ty, list }) => {
           let id = self.occurrence(site, ty, Position::Type);
           match list {
             Some(list) => self.builder.set_type_expr_list(list, id),
@@ -1829,7 +1854,7 @@ impl Lowering<'_, '_, '_> {
           }
           nested(ty, id, self.type_args.len(), &mut pending);
         }
-        Pending::Args { occurrence, from } => {
+        Pending::Args(PendingArgs { occurrence, from }) => {
           self
             .builder
             .set_type_expr_args(occurrence, self.type_args.get(from..).unwrap_or_default());
@@ -1916,10 +1941,10 @@ impl Lowering<'_, '_, '_> {
       // `NonZeroU32` and its kin name `core`'s `NonZero`, of the primitive they spell. The row is
       // a renamed `NonZero`'s too, so the primitive is noted beside it for instantiation, which
       // expands the alias.
-      Resolved::NonZero {
+      Resolved::NonZero(NonZeroAlias {
         non_zero,
         primitive,
-      } => {
+      }) => {
         self.builder.resolve_named(id, non_zero);
         self.builder.note_non_zero(id, primitive);
       }
@@ -2121,14 +2146,14 @@ impl Lowering<'_, '_, '_> {
     ];
     for (operation, slot) in operations.into_iter().zip(kept) {
       match slot {
-        Some(Kept::Written { part, index, .. }) => {
+        Some(Kept::Written(WrittenKept { part, index, .. })) => {
           if let Some(written) = parts.get(part)
             && let Some(ty) = self.schema_root(declarations, written.entry, index)
           {
             self.builder.set_schema_root(operation, Root::Written(ty));
           }
         }
-        Some(Kept::Presumed { def, .. }) => {
+        Some(Kept::Presumed(PresumedKept { def, .. })) => {
           self.builder.set_schema_root(operation, Root::Presumed(def));
         }
         None => {}
@@ -2173,10 +2198,10 @@ impl Lowering<'_, '_, '_> {
         .get(def.get() as usize)
         .is_some_and(|declared: &Declaration| declared.kind == DefKind::Object)
       {
-        *slot = Some(Kept::Presumed {
+        *slot = Some(Kept::Presumed(PresumedKept {
           def,
           at: self.builder.def_location(def),
-        });
+        }));
       }
     }
   }
@@ -2235,7 +2260,7 @@ impl Lowering<'_, '_, '_> {
           let first = first.at();
           self.duplicate_root(operation.as_str(), at, first);
         }
-        None => *held = Some(Kept::Written { part, index, at }),
+        None => *held = Some(Kept::Written(WrittenKept { part, index, at })),
       }
     }
   }
@@ -2478,22 +2503,22 @@ fn shape_of<'d, S>(
 /// are gathered from `from` on.
 fn nested<'t, S>(ty: &'t Type<S>, id: TypeExprId, from: usize, pending: &mut Vec<Pending<'t, S>>) {
   match ty {
-    Type::List(list) => pending.push(Pending::Type {
+    Type::List(list) => pending.push(Pending::Type(PendingType {
       ty: list.ty(),
       list: Some(id),
-    }),
+    })),
     Type::Path(path) => {
       if let Some(generics) = path.type_generics() {
-        pending.push(Pending::Args {
+        pending.push(Pending::Args(PendingArgs {
           occurrence: id,
           from,
-        });
+        }));
         // Popped first to last.
         for argument in generics.params().iter().rev() {
-          pending.push(Pending::Type {
+          pending.push(Pending::Type(PendingType {
             ty: argument,
             list: None,
-          });
+          }));
         }
       }
     }

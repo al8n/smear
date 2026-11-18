@@ -249,12 +249,27 @@ struct Listed {
 enum Verdict {
   /// The first two entries, and the first two members, that are one type there, each the earlier
   /// first: none when no two are.
-  Compared {
-    entries: Option<(TypeExprId, TypeExprId)>,
-    members: Option<(TypeExprId, TypeExprId)>,
-  },
+  Compared(Comparison),
   /// A limit stopped it before it was known.
   Stopped(Stop),
+}
+
+/// What the comparison found: [`Verdict::Compared`]'s payload.
+#[derive(Clone, Copy)]
+struct Comparison {
+  /// The first two entries that are one type there.
+  entries: Option<Twin>,
+  /// The first two members that are one type there.
+  members: Option<Twin>,
+}
+
+/// Two items of a list that are one type under an instantiation's arguments.
+#[derive(Clone, Copy)]
+struct Twin {
+  /// The earlier of the two.
+  earlier: TypeExprId,
+  /// The later.
+  later: TypeExprId,
 }
 
 /// An argument of a definition's field, beside those of the interface's field it implements, that
@@ -868,11 +883,19 @@ impl Implementing<'_> {
       return;
     };
     match self.verdict(ty, def, listed) {
-      Verdict::Compared { entries, members } => {
-        if let Some((first, later)) = entries {
+      Verdict::Compared(Comparison { entries, members }) => {
+        if let Some(Twin {
+          earlier: first,
+          later,
+        }) = entries
+        {
           self.report_meeting(at, def, List::Implements, first, later);
         }
-        if let Some((first, later)) = members {
+        if let Some(Twin {
+          earlier: first,
+          later,
+        }) = members
+        {
           self.report_meeting(at, def, List::Members, first, later);
         }
       }
@@ -1072,7 +1095,7 @@ impl Implementing<'_> {
           Err(stop) => Verdict::Stopped(stop),
           Ok(entries) => match self.meeting(nullable, def, listed.members) {
             Err(stop) => Verdict::Stopped(stop),
-            Ok(members) => Verdict::Compared { entries, members },
+            Ok(members) => Verdict::Compared(Comparison { entries, members }),
           },
         };
         self.verdicts.insert(nullable, made);
@@ -1086,12 +1109,7 @@ impl Implementing<'_> {
   /// The first two of the run `run` of `distinct`, each under the arguments of `ty`, a named type
   /// of `def`, that are one type, the earlier first: each item a step, and its rebuild the
   /// phase's. One that cannot be rebuilt there is compared with nothing.
-  fn meeting(
-    &mut self,
-    ty: TyId,
-    def: DefId,
-    run: (u32, u32),
-  ) -> Result<Option<(TypeExprId, TypeExprId)>, Stop> {
+  fn meeting(&mut self, ty: TyId, def: DefId, run: (u32, u32)) -> Result<Option<Twin>, Stop> {
     self.under.clear();
     for at in run.0..run.1 {
       if !self.steps.charge(1) {
@@ -1114,7 +1132,10 @@ impl Implementing<'_> {
       if let Some(earlier) = seen.first(position, made)
         && let Some(&(first, _)) = items.get(earlier)
       {
-        return Ok(Some((first, later)));
+        return Ok(Some(Twin {
+          earlier: first,
+          later,
+        }));
       }
     }
     Ok(None)

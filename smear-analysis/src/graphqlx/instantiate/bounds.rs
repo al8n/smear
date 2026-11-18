@@ -88,7 +88,7 @@ enum Verdict {
   /// Every bound holds.
   Holds,
   /// The bound at this index of its definition's, the first in their order that does not hold.
-  Fails { bound: u32 },
+  Fails(u32),
   /// A limit stopped the judging before it was known: `Limits::max_bound_steps`, or a limit on a
   /// type a bound rebuilt under the instantiation's arguments would derive.
   Stopped(Stop),
@@ -170,7 +170,7 @@ impl Typing<'_> {
     }
     match self.verdict(judging, ty, directive, at) {
       Verdict::Holds => {}
-      Verdict::Fails { bound } => {
+      Verdict::Fails(bound) => {
         let written = self.written_argument(
           self.builder.application_type_args(application),
           directive,
@@ -206,7 +206,7 @@ impl Typing<'_> {
     }
     match self.verdict(judging, ty, def, location) {
       Verdict::Holds => {}
-      Verdict::Fails { bound } => {
+      Verdict::Fails(bound) => {
         let written = self
           .builder
           .occurrence(id)
@@ -337,7 +337,7 @@ impl Typing<'_> {
       if non_zero && judging.keys.map_key == Some(interface) {
         continue;
       }
-      return Verdict::Fails { bound: index };
+      return Verdict::Fails(index);
     }
     Verdict::Holds
   }

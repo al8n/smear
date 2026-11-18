@@ -42,7 +42,10 @@ use smear_semantics::duplicates::Duplicates;
 use tokora::diagnostic::Location;
 
 use super::{
-  builtin::{ALIASES, BUILT_INS, CORE, META_TYPES, Replaced, TYPE, Target, namespace, spelled},
+  builtin::{
+    ALIASES, BUILT_INS, BuiltinDefinition, BuiltinName, CORE, META_TYPES, Replaced, TYPE, Target,
+    namespace, spelled,
+  },
   code::{DiagnosticKind, schema},
   collect::{Collected, Found, Items, Placed},
   diagnostic::{Diagnostic, Excerpt, Reporter},
@@ -211,7 +214,11 @@ pub(crate) fn declarations<'d, 'a>(
         primitives.insert(primitive.rank(), at);
         replacing[at] = true;
       }
-      Some(Replaced::Built(package, space, name))
+      Some(Replaced::Built(BuiltinDefinition {
+        package,
+        rank: space,
+        name,
+      }))
         if built.contains_key(&(package, space, name)) =>
       {
         named.insert((package, space, name), at);
@@ -321,7 +328,10 @@ pub(crate) fn declarations<'d, 'a>(
   for (package, alias, target) in ALIASES {
     let def = match target {
       Target::Primitive(primitive) => materialised.get(&primitive.rank()).copied(),
-      Target::Named(owner, name) => {
+      Target::Named(BuiltinName {
+        package: owner,
+        name,
+      }) => {
         let key: (usize, u8, &[u8]) = (owner, TYPE, name.as_bytes());
         built.get(&key).and_then(|at: &usize| ids[*at])
       }

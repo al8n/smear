@@ -21,7 +21,7 @@ use super::{
   limits::Limits,
   model::Model,
   package::Package,
-  resolve::Resolved,
+  resolve::{NonZeroAlias, Resolved},
   rules::Rules,
   text::SourceText,
 };
@@ -86,10 +86,10 @@ pub fn resolve<S: SourceText>(
   let (model, answer) = resolve_door(root, dependencies, module, &spelled, path)?;
   match answer {
     Resolved::Def(def) => Some(model.canonical_name(def).to_string()),
-    Resolved::NonZero {
+    Resolved::NonZero(NonZeroAlias {
       non_zero,
       primitive,
-    } => Some(format!(
+    }) => Some(format!(
       "{}<{}>",
       model.canonical_name(non_zero),
       model.canonical_name(primitive)

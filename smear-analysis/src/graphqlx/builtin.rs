@@ -342,7 +342,16 @@ pub(crate) enum Target {
   /// An intrinsic primitive, which `core` materialises.
   Primitive(Primitive),
   /// The definition of this name in the root module of the built-in package at this index.
-  Named(usize, &'static str),
+  Named(BuiltinName),
+}
+
+/// A name in the root module of a built-in package: [`Target::Named`]'s payload.
+#[derive(Clone, Copy)]
+pub(crate) struct BuiltinName {
+  /// The index of the built-in package.
+  pub(crate) package: usize,
+  /// The name.
+  pub(crate) name: &'static str,
 }
 
 /// GraphQL's built-in scalar names, each with the built-in package whose root module gives it as
@@ -352,8 +361,22 @@ pub(crate) const ALIASES: [(usize, &str, Target); 5] = [
   (CORE, "Int", Target::Primitive(Primitive::signed(32))),
   (CORE, "Float", Target::Primitive(Primitive::F64)),
   (CORE, "Boolean", Target::Primitive(Primitive::Bool)),
-  (ALLOC, "String", Target::Named(ALLOC, "string")),
-  (ALLOC, "ID", Target::Named(ALLOC, "id")),
+  (
+    ALLOC,
+    "String",
+    Target::Named(BuiltinName {
+      package: ALLOC,
+      name: "string",
+    }),
+  ),
+  (
+    ALLOC,
+    "ID",
+    Target::Named(BuiltinName {
+      package: ALLOC,
+      name: "id",
+    }),
+  ),
 ];
 
 /// GraphQL's specified directives, which `core` defines. A root package's own directive of one of
@@ -396,7 +419,18 @@ pub(crate) enum Replaced {
   Primitive(Primitive),
   /// The definition with this name, in the namespace of this rank, in the root module of the
   /// built-in package at this index.
-  Built(usize, u8, &'static [u8]),
+  Built(BuiltinDefinition),
+}
+
+/// A definition of a built-in package, by its namespace and name: [`Replaced::Built`]'s payload.
+#[derive(Clone, Copy)]
+pub(crate) struct BuiltinDefinition {
+  /// The index of the built-in package.
+  pub(crate) package: usize,
+  /// The rank of the namespace the definition is named in.
+  pub(crate) rank: u8,
+  /// The definition's name.
+  pub(crate) name: &'static [u8],
 }
 
 /// Whether `name`, in the namespace of rank `namespace`, is a name of a GraphQL built-in a root
@@ -424,7 +458,11 @@ pub(crate) fn replaced(kind: DefKind, name: &[u8]) -> Option<Replaced> {
         if alias.as_bytes() == name {
           return Some(match target {
             Target::Primitive(primitive) => Replaced::Primitive(primitive),
-            Target::Named(package, named) => Replaced::Built(package, TYPE, named.as_bytes()),
+            Target::Named(BuiltinName { package, name }) => Replaced::Built(BuiltinDefinition {
+              package,
+              rank: TYPE,
+              name: name.as_bytes(),
+            }),
           });
         }
       }
@@ -433,7 +471,13 @@ pub(crate) fn replaced(kind: DefKind, name: &[u8]) -> Option<Replaced> {
     DefKind::Directive => SPECIFIED_DIRECTIVES
       .into_iter()
       .find(|directive: &&str| directive.as_bytes() == name)
-      .map(|directive: &'static str| Replaced::Built(CORE, DIRECTIVE, directive.as_bytes())),
+      .map(|directive: &'static str| {
+        Replaced::Built(BuiltinDefinition {
+          package: CORE,
+          rank: DIRECTIVE,
+          name: directive.as_bytes(),
+        })
+      }),
     _ => None,
   }
 }

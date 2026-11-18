@@ -77,9 +77,19 @@ pub(super) enum Answer {
 #[derive(Clone, Copy)]
 pub(super) enum Alternative {
   /// The arguments of two named types of one definition, pair by pair in order.
-  Arguments(TyId, TyId),
+  Arguments(TyPair),
   /// One pair.
-  Pair(TyId, TyId),
+  Pair(TyPair),
+}
+
+/// Two types, in the order the relation asks them: [`Alternative::Arguments`]'s and
+/// [`Alternative::Pair`]'s payload.
+#[derive(Clone, Copy)]
+pub(super) struct TyPair {
+  /// The type that must be the subtype: the relation's first.
+  pub(super) left: TyId,
+  /// The type that must be the supertype: the relation's second.
+  pub(super) right: TyId,
 }
 
 /// A pair being answered: its alternatives, `alternatives[start..end]`, the one it is trying and
@@ -170,8 +180,14 @@ impl Implementing<'_> {
   /// The pair at `next` of `alternative`, read in place: none past its last.
   fn pair_of(&self, alternative: Alternative, next: u32) -> Option<(TyId, TyId)> {
     match alternative {
-      Alternative::Pair(sub, sup) => (next == 0).then_some((sub, sup)),
-      Alternative::Arguments(sub, sup) => {
+      Alternative::Pair(TyPair {
+        left: sub,
+        right: sup,
+      }) => (next == 0).then_some((sub, sup)),
+      Alternative::Arguments(TyPair {
+        left: sub,
+        right: sup,
+      }) => {
         let sub = self.builder.ty_args(sub).get(next as usize).copied()?;
         let sup = self.builder.ty_args(sup).get(next as usize).copied()?;
         Some((sub, sup))
@@ -287,7 +303,10 @@ impl Implementing<'_> {
     }
     match (below, above) {
       (Shape::List(element), Shape::List(wanted)) => {
-        self.alternatives.push(Alternative::Pair(element, wanted));
+        self.alternatives.push(Alternative::Pair(TyPair {
+          left: element,
+          right: wanted,
+        }));
         Ok(None)
       }
       (Shape::List(_), _) | (_, Shape::List(_)) => Ok(Some(false)),
@@ -299,7 +318,10 @@ impl Implementing<'_> {
         },
       ) => Ok(Some(def == wanted && index == at)),
       (Shape::Named(holder), Shape::Named(target)) if holder == target => {
-        self.alternatives.push(Alternative::Arguments(sub, sup));
+        self.alternatives.push(Alternative::Arguments(TyPair {
+          left: sub,
+          right: sup,
+        }));
         Ok(None)
       }
       (_, Shape::Named(target)) => match self.builder.def_kind(target) {
@@ -359,9 +381,10 @@ impl Implementing<'_> {
       };
       if matches!(self.builder.ty_shape(declared), Some(Shape::Named(named)) if named == interface)
       {
-        self
-          .alternatives
-          .push(Alternative::Arguments(declared, sup));
+        self.alternatives.push(Alternative::Arguments(TyPair {
+          left: declared,
+          right: sup,
+        }));
       }
     }
     Ok(())
@@ -392,7 +415,10 @@ impl Implementing<'_> {
         continue;
       };
       if bounding == interface {
-        self.alternatives.push(Alternative::Arguments(ty, sup));
+        self.alternatives.push(Alternative::Arguments(TyPair {
+          left: ty,
+          right: sup,
+        }));
       }
       self.entry_alternatives(bounding, ty, sup, interface)?;
     }
@@ -463,7 +489,10 @@ impl Implementing<'_> {
         _ => false,
       };
       if fits {
-        self.alternatives.push(Alternative::Pair(sub, member));
+        self.alternatives.push(Alternative::Pair(TyPair {
+          left: sub,
+          right: member,
+        }));
       }
     }
     Ok(())

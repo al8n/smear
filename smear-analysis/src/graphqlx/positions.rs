@@ -351,9 +351,18 @@ enum Step {
   /// To a type a value of it always holds: a list's element, a collection's argument.
   Always(u32),
   /// To an argument of an input object, held when the input object's slot, the first, is.
-  If(u32, u32),
+  If(HeldIf),
   /// To the slot of the type parameter it is.
   Param(u32),
+}
+
+/// A step to an argument of an input object: [`Step::If`]'s payload.
+#[derive(Clone, Copy)]
+struct HeldIf {
+  /// The argument's node.
+  target: u32,
+  /// The input object's slot that holds it: the step is taken when the slot is held.
+  slot: u32,
 }
 
 /// For each slot under `base`, whether a value of its definition, an input object of `model`,
@@ -432,7 +441,7 @@ fn containment(model: &Model, base: &[u32]) -> Vec<bool> {
             if !input {
               steps.push((from, Step::Always(to)));
             } else if let Some(slot) = slot(base, def, dense(index)) {
-              steps.push((from, Step::If(slot, to)));
+              steps.push((from, Step::If(HeldIf { slot, target: to })));
             }
           }
         }
@@ -445,7 +454,7 @@ fn containment(model: &Model, base: &[u32]) -> Vec<bool> {
   let mut waits: Vec<(u32, u32, u32)> = steps
     .iter()
     .filter_map(|&(from, step): &(u32, Step)| match step {
-      Step::If(slot, to) => Some((slot, from, to)),
+      Step::If(HeldIf { slot, target: to }) => Some((slot, from, to)),
       Step::Always(_) | Step::Param(_) => None,
     })
     .collect();
@@ -466,7 +475,7 @@ fn containment(model: &Model, base: &[u32]) -> Vec<bool> {
         for &(_, step) in run(&steps, node, |step: &(u32, Step)| step.0) {
           match step {
             Step::Always(to) => queue.push(Event::Reached(to)),
-            Step::If(slot, to) => {
+            Step::If(HeldIf { slot, target: to }) => {
               if held.get(slot as usize).copied().unwrap_or(false) {
                 queue.push(Event::Reached(to));
               }
@@ -980,7 +989,15 @@ enum Check {
   Answer(Option<Misfit>),
   /// The child it writes on the way, and whether the step down to it passes an argument of a
   /// collection: its answer is made from the child's.
-  Child(TypeExprId, bool),
+  Child(ChildStep),
+}
+
+/// The child an occurrence writes on the way: [`Check::Child`]'s payload.
+struct ChildStep {
+  /// The child.
+  child: TypeExprId,
+  /// Whether the step down to it passes an argument of a collection.
+  through_collection: bool,
 }
 
 /// Whether types fit classes, each type and class judged once, and where, under each written
@@ -1071,7 +1088,10 @@ impl Fits {
           self.answered.insert((at, class), answer);
           break answer;
         }
-        Check::Child(child, argument) => {
+        Check::Child(ChildStep {
+          child,
+          through_collection: argument,
+        }) => {
           self.waiting.push((at, argument));
           at = child;
         }
@@ -1100,7 +1120,12 @@ impl Fits {
     };
     let filled = match (way.under, model.ty(ty).kind()) {
       (Under::Element, TyKind::List(_)) => match written.kind() {
-        TypeExprKind::List(element) => return Check::Child(element, false),
+        TypeExprKind::List(element) => {
+          return Check::Child(ChildStep {
+            child: element,
+            through_collection: false,
+          });
+        }
         // The tree writes no list where the way goes down one.
         _ => None,
       },
@@ -1116,7 +1141,10 @@ impl Fits {
           _ => None,
         };
         if let Some(child) = child {
-          return Check::Child(child, true);
+          return Check::Child(ChildStep {
+            child,
+            through_collection: true,
+          });
         }
         // A slot the occurrence leaves to its default: the way leaves the tree here.
         Some((def, index))

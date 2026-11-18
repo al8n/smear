@@ -259,7 +259,7 @@ pub(crate) enum Resolved {
   Def(DefId),
   /// `NonZeroIN` or `NonZeroUN`: `core`'s `NonZero`, of the primitive whose definition is
   /// `primitive`.
-  NonZero { non_zero: DefId, primitive: DefId },
+  NonZero(NonZeroAlias),
   /// A module.
   // Lowering asks for no module, so only the test-support door reads which one this is.
   Module(#[allow(dead_code)] ModuleId),
@@ -267,6 +267,15 @@ pub(crate) enum Resolved {
   Param(u32),
   /// Nothing: why has been reported.
   Unresolved,
+}
+
+/// `core`'s `NonZero` of a primitive: [`Resolved::NonZero`]'s payload.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct NonZeroAlias {
+  /// `core`'s `NonZero`.
+  pub(crate) non_zero: DefId,
+  /// The definition of the primitive it is of.
+  pub(crate) primitive: DefId,
 }
 
 /// What a name names in the type namespace, which types and modules share, or in the directive
@@ -300,19 +309,41 @@ enum Level {
 #[derive(Clone, Copy)]
 enum Lookup {
   /// One item, at one level.
-  Found(Target, Level),
+  Found(FoundTarget),
   /// Two different items two globs give, each with where its glob is written.
-  Ambiguous((Target, Location), (Target, Location)),
+  Ambiguous(AmbiguousPair),
   /// Nothing.
   Missing,
+}
+
+/// One item a lookup found, and the level that answered: [`Lookup::Found`]'s payload.
+#[derive(Clone, Copy)]
+struct FoundTarget {
+  /// The item.
+  target: Target,
+  /// The level of the module's scope that answered.
+  level: Level,
+}
+
+/// Two different items two globs give: [`Lookup::Ambiguous`]'s and [`Why::Ambiguous`]'s payload.
+#[derive(Clone, Copy)]
+struct AmbiguousPair {
+  /// The item the first glob found, with where that glob is written.
+  first: (Target, Location),
+  /// The different item the second glob gives, with where that glob is written.
+  second: (Target, Location),
 }
 
 impl Lookup {
   /// Whether `self` and `other` found the same thing, at whatever level.
   fn same(self, other: Self) -> bool {
     match (self, other) {
-      (Self::Found(a, _), Self::Found(b, _)) => a == b,
-      (Self::Ambiguous(a, b), Self::Ambiguous(c, d)) => a.0 == c.0 && b.0 == d.0,
+      (Self::Found(FoundTarget { target: a, .. }), Self::Found(FoundTarget { target: b, .. })) => {
+        a == b
+      }
+      (Self::Ambiguous(a), Self::Ambiguous(b)) => {
+        a.first.0 == b.first.0 && a.second.0 == b.second.0
+      }
       (Self::Missing, Self::Missing) => true,
       _ => false,
     }
@@ -366,9 +397,18 @@ pub(crate) enum Root {
   /// `^::`.
   Dependency,
   /// `..::`, this many times, written here.
-  Parent(usize, Location),
+  Parent(ParentLevels),
   /// A root of a kind this analyzer does not know, the whole path written here.
   Unknown(Location),
+}
+
+/// `..::`, written a number of times: [`Root::Parent`]'s payload.
+#[derive(Clone, Copy)]
+pub(crate) struct ParentLevels {
+  /// How many times.
+  pub(crate) count: usize,
+  /// Where it is written.
+  pub(crate) at: Location,
 }
 
 /// One segment of a path: its spelling and where it is written.
@@ -393,24 +433,17 @@ enum Within<'p> {
 #[derive(Clone, Copy)]
 enum Why<'p> {
   /// Nothing of the name is in the scope of `module`, where the path stands.
-  NotInScope { module: ModuleId, wanted: Wanted },
+  NotInScope(ModuleWanted),
   /// Nothing of the name, in either namespace, is in the scope of `module`, nor is a package it
   /// may reach named so: a `use` item's path of one segment.
-  NothingInScope { module: ModuleId },
+  NothingInScope(ModuleId),
   /// `module`, which the path names `within`, declares nothing of the name.
-  NotIn {
-    module: ModuleId,
-    within: Within<'p>,
-    wanted: Wanted,
-  },
+  NotIn(NotInModule<'p>),
   /// `module`, which the path names `within`, declares nothing of the name in either namespace:
   /// the last segment of a `use` item's path.
-  NotDeclared {
-    module: ModuleId,
-    within: Within<'p>,
-  },
+  NotDeclared(ModuleWithin<'p>),
   /// The name names `found`, which is not what is wanted.
-  WrongKind { found: Target, wanted: Wanted },
+  WrongKind(KindMismatch),
   /// The name is a generic parameter, and segments follow it.
   ParamNotModule,
   /// The name is a generic parameter, alone where a module is wanted.
@@ -423,10 +456,7 @@ enum Why<'p> {
   /// A primitive whose width the path's package may not have.
   Unavailable(Primitive),
   /// Two globs give the name two different items, each with where its glob is written.
-  Ambiguous {
-    first: (Target, Location),
-    second: (Target, Location),
-  },
+  Ambiguous(AmbiguousPair),
   /// More segments than `Limits::max_path_segments`: this many.
   TooLong(usize),
   /// A `use` item's groups nested deeper than `Limits::max_use_depth`: this deep.
@@ -445,11 +475,50 @@ enum Why<'p> {
   NoDirectory,
   /// A string source that names a file of its package, which is in this directory, relative to
   /// the package's root.
-  File { directory: &'p [u8] },
+  File(&'p [u8]),
   /// A string source that names its package's root module and binds no name with `as`.
   Unnamed,
   /// A root, a prefix or a tree of a kind this analyzer does not know.
   Unknown,
+}
+
+/// A module the name is not in the scope of: [`Why::NotInScope`]'s payload.
+#[derive(Clone, Copy)]
+struct ModuleWanted {
+  /// The module, where the path stands.
+  module: ModuleId,
+  /// What is wanted.
+  wanted: Wanted,
+}
+
+/// A module that declares nothing of the name: [`Why::NotIn`]'s payload.
+#[derive(Clone, Copy)]
+struct NotInModule<'p> {
+  /// The module.
+  module: ModuleId,
+  /// How the path names it.
+  within: Within<'p>,
+  /// What is wanted.
+  wanted: Wanted,
+}
+
+/// A module that declares nothing of the name in either namespace: [`Why::NotDeclared`]'s
+/// payload.
+#[derive(Clone, Copy)]
+struct ModuleWithin<'p> {
+  /// The module.
+  module: ModuleId,
+  /// How the path names it.
+  within: Within<'p>,
+}
+
+/// A name that names what is not wanted: [`Why::WrongKind`]'s payload.
+#[derive(Clone, Copy)]
+struct KindMismatch {
+  /// What the name names.
+  found: Target,
+  /// What is wanted.
+  wanted: Wanted,
 }
 
 /// A path that does not resolve: where, what is written there, and why.
@@ -714,31 +783,31 @@ impl Scopes<'_> {
         }
         let query = Query::wanting(request.module, first.name, names.find(first.name), wanted);
         match self.lookup(query) {
-          Lookup::Found(target, _) if rest.is_empty() => {
+          Lookup::Found(FoundTarget { target, .. }) if rest.is_empty() => {
             return self
               .finish(target, wanted, package)
               .map_err(|why: Why<'static>| failure(first, why, true));
           }
-          Lookup::Found(Target::Module(module), _) => (module, rest, Within::After(first.name)),
-          Lookup::Found(found, _) => {
-            let why = Why::WrongKind {
+          Lookup::Found(FoundTarget {
+            target: Target::Module(module),
+            ..
+          }) => (module, rest, Within::After(first.name)),
+          Lookup::Found(FoundTarget { target: found, .. }) => {
+            let why = Why::WrongKind(KindMismatch {
               found,
               wanted: Wanted::Module,
-            };
+            });
             return Err(failure(first, why, false));
           }
-          Lookup::Ambiguous(one, other) => {
-            let why = Why::Ambiguous {
-              first: one,
-              second: other,
-            };
+          Lookup::Ambiguous(pair) => {
+            let why = Why::Ambiguous(pair);
             return Err(failure(first, why, rest.is_empty()));
           }
           Lookup::Missing => {
-            let why = Why::NotInScope {
+            let why = Why::NotInScope(ModuleWanted {
               module: request.module,
               wanted,
-            };
+            });
             return Err(failure(first, why, rest.is_empty()));
           }
         }
@@ -755,7 +824,7 @@ impl Scopes<'_> {
         }
         (module, rest, Within::After(first.name))
       }
-      Root::Parent(count, at) => match self.up(request.module, count) {
+      Root::Parent(ParentLevels { count, at }) => match self.up(request.module, count) {
         Some(module) => (module, segments, Within::Parent),
         None => {
           return Err(Box::new(Failure {
@@ -802,11 +871,11 @@ impl Scopes<'_> {
             .finish(target, wanted, package)
             .map_err(|why: Why<'static>| failure(segment, why, false)),
           None => {
-            let why = Why::NotIn {
+            let why = Why::NotIn(NotInModule {
               module,
               within,
               wanted,
-            };
+            });
             Err(failure(segment, why, false))
           }
         };
@@ -817,18 +886,18 @@ impl Scopes<'_> {
           within = Within::After(segment.name);
         }
         Some(found) => {
-          let why = Why::WrongKind {
+          let why = Why::WrongKind(KindMismatch {
             found,
             wanted: Wanted::Module,
-          };
+          });
           return Err(failure(segment, why, false));
         }
         None => {
-          let why = Why::NotIn {
+          let why = Why::NotIn(NotInModule {
             module,
             within,
             wanted: Wanted::Module,
-          };
+          });
           return Err(failure(segment, why, false));
         }
       }
@@ -853,19 +922,19 @@ impl Scopes<'_> {
       (Target::NonZero(primitive), Wanted::Type) => {
         self.usable(primitive, package)?;
         match self.non_zero {
-          Some(non_zero) => Ok(Resolved::NonZero {
+          Some(non_zero) => Ok(Resolved::NonZero(NonZeroAlias {
             non_zero,
             primitive,
-          }),
+          })),
           // The prelude answers `NonZeroIN` only while `core` has `NonZero`, as it always does.
-          None => Err(Why::WrongKind {
+          None => Err(Why::WrongKind(KindMismatch {
             found: target,
             wanted,
-          }),
+          })),
         }
       }
       (Target::Module(module), Wanted::Module) => Ok(Resolved::Module(module)),
-      (found, wanted) => Err(Why::WrongKind { found, wanted }),
+      (found, wanted) => Err(Why::WrongKind(KindMismatch { found, wanted })),
     }
   }
 
@@ -886,10 +955,16 @@ impl Scopes<'_> {
   fn lookup(&self, query: Query<'_>) -> Lookup {
     if let Some(sym) = query.sym {
       if let Some(target) = self.declared(query.module, query.namespace, sym, query.module_first) {
-        return Lookup::Found(target, Level::Declared);
+        return Lookup::Found(FoundTarget {
+          target,
+          level: Level::Declared,
+        });
       }
       if let Some(bound) = self.bound(query.module, query.namespace, sym, query.exclude) {
-        return Lookup::Found(bound.target, Level::Explicit);
+        return Lookup::Found(FoundTarget {
+          target: bound.target,
+          level: Level::Explicit,
+        });
       }
     }
     if query.explicit_only {
@@ -908,13 +983,19 @@ impl Scopes<'_> {
       }
     }
     if let Some(target) = self.prelude(query.namespace, query.sym, query.name) {
-      return Lookup::Found(target, Level::Prelude);
+      return Lookup::Found(FoundTarget {
+        target,
+        level: Level::Prelude,
+      });
     }
     if query.packages
       && query.namespace == TYPE
       && let Some(root) = self.package_root(self.package_of(query.module), query.name)
     {
-      return Lookup::Found(Target::Module(root), Level::Package);
+      return Lookup::Found(FoundTarget {
+        target: Target::Module(root),
+        level: Level::Package,
+      });
     }
     Lookup::Missing
   }
@@ -960,13 +1041,19 @@ impl Scopes<'_> {
       match first {
         None => first = Some((found, glob.at)),
         Some((seen, seen_at)) if seen != found => {
-          return Lookup::Ambiguous((seen, seen_at), (found, glob.at));
+          return Lookup::Ambiguous(AmbiguousPair {
+            first: (seen, seen_at),
+            second: (found, glob.at),
+          });
         }
         Some(_) => {}
       }
     }
     match first {
-      Some((target, _)) => Lookup::Found(target, Level::Glob),
+      Some((target, _)) => Lookup::Found(FoundTarget {
+        target,
+        level: Level::Glob,
+      }),
       None => Lookup::Missing,
     }
   }
@@ -1121,8 +1208,8 @@ impl Scopes<'_> {
       Why::UnknownPackage => titled(DiagnosticKind::UnknownPackage),
       Why::Ambiguous { .. } => titled(DiagnosticKind::AmbiguousGlob),
       Why::Url => titled(DiagnosticKind::UrlUnsupported),
-      Why::File { .. } => titled(DiagnosticKind::FilePathUse),
-      Why::NotInScope { .. } | Why::WrongKind { .. } | Why::Unavailable(_) if failure.single => {
+      Why::File(_) => titled(DiagnosticKind::FilePathUse),
+      Why::NotInScope(_) | Why::WrongKind(_) | Why::Unavailable(_) if failure.single => {
         graphql(position).unwrap_or_else(|| titled(DiagnosticKind::UnresolvedPath))
       }
       _ => titled(DiagnosticKind::UnresolvedPath),
@@ -1136,7 +1223,7 @@ impl Scopes<'_> {
       .message(message)
       .primary_label(title)
       .help(help);
-    if let Why::Ambiguous { first, second } = failure.why {
+    if let Why::Ambiguous(AmbiguousPair { first, second }) = failure.why {
       builder = builder
         .label(first.1, "one glob gives it here")
         .label(second.1, "another gives it here");
@@ -1155,17 +1242,17 @@ impl Scopes<'_> {
     let package = self.package_of(module);
     let name = failure.name;
     match failure.why {
-      Why::NotInScope {
+      Why::NotInScope(ModuleWanted {
         module,
         wanted: Wanted::Module,
-      } => (
+      }) => (
         format!(
           "no module named `{}` is in scope here, and no package this one reaches is named so",
           Excerpt(name)
         ),
         self.hint(names, Some(module), None, Wanted::Module, name, position),
       ),
-      Why::NotInScope { module, wanted } => (
+      Why::NotInScope(ModuleWanted { module, wanted }) => (
         format!(
           "no {} named {} is in scope here",
           wanted.noun(),
@@ -1173,18 +1260,18 @@ impl Scopes<'_> {
         ),
         self.hint(names, Some(module), None, wanted, name, position),
       ),
-      Why::NothingInScope { module } => (
+      Why::NothingInScope(module) => (
         format!(
           "nothing named `{}` is in scope here, and no package this one reaches is named so",
           Excerpt(name)
         ),
         self.hint(names, Some(module), None, Wanted::Module, name, position),
       ),
-      Why::NotIn {
+      Why::NotIn(NotInModule {
         module: holder,
         within,
         wanted,
-      } => (
+      }) => (
         format!(
           "{} declares no {} named {}",
           place(within),
@@ -1193,10 +1280,10 @@ impl Scopes<'_> {
         ),
         self.hint(names, None, Some(holder), wanted, name, position),
       ),
-      Why::NotDeclared {
+      Why::NotDeclared(ModuleWithin {
         module: holder,
         within,
-      } => (
+      }) => (
         format!(
           "{} declares nothing named `{}`",
           place(within),
@@ -1204,7 +1291,7 @@ impl Scopes<'_> {
         ),
         self.hint(names, None, Some(holder), Wanted::Module, name, position),
       ),
-      Why::WrongKind { found, wanted } => (
+      Why::WrongKind(KindMismatch { found, wanted }) => (
         format!(
           "`{}` names {}, where a {} is wanted",
           Excerpt(name),
@@ -1331,7 +1418,7 @@ impl Scopes<'_> {
            and its name is a GraphQLx name",
         ),
       ),
-      Why::File { directory } => (
+      Why::File(directory) => (
         format!(
           "the string source `{}` names a file, and a string source names a directory, whose \
            files are one module",
@@ -1531,7 +1618,7 @@ impl Scopes<'_> {
     // What the suggestion is quoted as, as `explain` quotes the name: with `@` only where a
     // directive alone is wanted, and bare in a `use` item's path, which names either namespace.
     let quoting = match failure.why {
-      Why::NotInScope { module, wanted } => {
+      Why::NotInScope(ModuleWanted { module, wanted }) => {
         if wanted != Wanted::Directive {
           for &(spelling, _) in params {
             if !search.open() {
@@ -1544,16 +1631,16 @@ impl Scopes<'_> {
         self.offer_scope(&mut search, names, module, wanted.namespace(), packages);
         wanted
       }
-      Why::NothingInScope { module } => {
+      Why::NothingInScope(module) => {
         self.offer_scope(&mut search, names, module, TYPE, true);
         self.offer_scope(&mut search, names, module, DIRECTIVE, false);
         Wanted::Module
       }
-      Why::NotIn { module, wanted, .. } => {
+      Why::NotIn(NotInModule { module, wanted, .. }) => {
         self.offer_declared(&mut search, names, module, wanted.namespace());
         wanted
       }
-      Why::NotDeclared { module, .. } => {
+      Why::NotDeclared(ModuleWithin { module, .. }) => {
         self.offer_declared(&mut search, names, module, TYPE);
         self.offer_declared(&mut search, names, module, DIRECTIVE);
         Wanted::Module
@@ -1748,7 +1835,7 @@ impl Scopes<'_> {
       if count == 0 {
         (Root::Relative, rest)
       } else {
-        (Root::Parent(count, at), rest)
+        (Root::Parent(ParentLevels { count, at }), rest)
       }
     };
     let segments: Vec<Segment<'_>> = rest
@@ -1792,10 +1879,10 @@ pub(crate) fn root<S: AsRef<[u8]>>(path: &Path<S>, source: SourceId) -> Root {
     PathRoot::Relative => Root::Relative,
     PathRoot::Package(_) => Root::Package,
     PathRoot::Dependency(_) => Root::Dependency,
-    PathRoot::Parent(parent) => Root::Parent(
-      parent.count().get(),
-      Location::new(source.get(), *parent.span()),
-    ),
+    PathRoot::Parent(parent) => Root::Parent(ParentLevels {
+      count: parent.count().get(),
+      at: Location::new(source.get(), *parent.span()),
+    }),
     // `PathRoot` is `#[non_exhaustive]`: a root of a kind this analyzer does not know names no
     // module it can find, and is reported as an item of an unknown kind is.
     _ => Root::Unknown(Location::new(source.get(), *path.span())),

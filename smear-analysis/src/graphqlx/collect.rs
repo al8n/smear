@@ -129,9 +129,17 @@ pub(crate) struct Found<'d> {
 /// A definition the definition limit counts.
 enum Counted<'n> {
   /// A type or a directive, of its kind, spelled so.
-  Definition(DefKind, &'n [u8]),
+  Definition(CountedDefinition<'n>),
   /// A primitive's, which `core` makes.
   Primitive(Primitive),
+}
+
+/// A type or a directive the definition limit counts: [`Counted::Definition`]'s payload.
+struct CountedDefinition<'n> {
+  /// Its kind.
+  kind: DefKind,
+  /// How it is spelled.
+  name: &'n [u8],
 }
 
 /// What would add a module the module limit refuses.
@@ -139,7 +147,15 @@ enum Adding<'n> {
   /// A directory of the package being walked, as the file paths spell it.
   Directory(&'n [u8]),
   /// A `mod` named so, naming its module at the location.
-  Mod(Location, &'n [u8]),
+  Mod(AddedMod<'n>),
+}
+
+/// A `mod` that would add a module: [`Adding::Mod`]'s payload.
+struct AddedMod<'n> {
+  /// Where it names its module.
+  at: Location,
+  /// The name it is spelled with.
+  name: &'n [u8],
 }
 
 /// Finds every module of `packages`, which are in id order and numbered by `sources`, and
@@ -560,13 +576,25 @@ impl<'d> Walk<'d, '_> {
         if self.widths.wrote(primitive) {
           return true;
         }
-        let made = self.room(location, Counted::Definition(kind, spelling));
+        let made = self.room(
+          location,
+          Counted::Definition(CountedDefinition {
+            kind,
+            name: spelling,
+          }),
+        );
         if made {
           self.widths.make(primitive);
         }
         made
       }
-      None => self.room(location, Counted::Definition(kind, spelling)),
+      None => self.room(
+        location,
+        Counted::Definition(CountedDefinition {
+          kind,
+          name: spelling,
+        }),
+      ),
     }
   }
 
@@ -621,7 +649,7 @@ impl<'d> Walk<'d, '_> {
       self.declared_twice(at, name, found);
       return Some(found);
     }
-    if !self.module_room(Adding::Mod(at, name)) {
+    if !self.module_room(Adding::Mod(AddedMod { at, name })) {
       return None;
     }
     let description: Option<(&'d [u8], Location)> =
@@ -698,7 +726,7 @@ impl<'d> Walk<'d, '_> {
           Excerpt(directory)
         ),
       ),
-      Adding::Mod(at, name) => (
+      Adding::Mod(AddedMod { at, name }) => (
         at,
         format!(
           "`mod {}` declares a module that would pass the limit of {max} modules the model may \
@@ -722,10 +750,15 @@ impl<'d> Walk<'d, '_> {
     let kind = DiagnosticKind::ResourceLimit;
     let max = self.max_definitions;
     let what = match counted {
-      Counted::Definition(DefKind::Directive, name) => {
+      Counted::Definition(CountedDefinition {
+        kind: DefKind::Directive,
+        name,
+      }) => {
         format!("the directive `@{}`", Excerpt(name))
       }
-      Counted::Definition(_, name) => format!("the type `{}`", Excerpt(name)),
+      Counted::Definition(CountedDefinition { name, .. }) => {
+        format!("the type `{}`", Excerpt(name))
+      }
       Counted::Primitive(primitive) => {
         format!("the primitive `{}` written here", spelled(primitive))
       }

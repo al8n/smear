@@ -42,20 +42,27 @@ pub(super) struct SharedRootOperationType;
 #[derive(Clone, Copy)]
 enum Taking {
   /// Written: the occurrence, its type, and the object type it names.
-  Written {
-    occurrence: TypeExprId,
-    ty: TyId,
-    def: DefId,
-  },
+  Written(WrittenRoot),
   /// Presumed: the object type.
   Presumed(DefId),
+}
+
+/// A root written as an object type: [`Taking::Written`]'s payload.
+#[derive(Clone, Copy)]
+struct WrittenRoot {
+  /// The occurrence.
+  occurrence: TypeExprId,
+  /// Its type.
+  ty: TyId,
+  /// The object type it names.
+  def: DefId,
 }
 
 impl Taking {
   /// The object type the root names.
   const fn def(self) -> DefId {
     match self {
-      Self::Written { def, .. } | Self::Presumed(def) => def,
+      Self::Written(WrittenRoot { def, .. }) | Self::Presumed(def) => def,
     }
   }
 }
@@ -99,17 +106,17 @@ impl Visitor for SharedRootOperationType {
       };
       let (at, label) = match (later, first) {
         (
-          Taking::Written { occurrence, .. },
-          Taking::Written {
+          Taking::Written(WrittenRoot { occurrence, .. }),
+          Taking::Written(WrittenRoot {
             occurrence: written,
             ..
-          },
+          }),
         ) => (
           model.type_expr(occurrence).location(),
           model.type_expr(written).location(),
         ),
-        (Taking::Written { occurrence, .. }, Taking::Presumed(def))
-        | (Taking::Presumed(def), Taking::Written { occurrence, .. }) => (
+        (Taking::Written(WrittenRoot { occurrence, .. }), Taking::Presumed(def))
+        | (Taking::Presumed(def), Taking::Written(WrittenRoot { occurrence, .. })) => (
           model.type_expr(occurrence).location(),
           model.def(def).location(),
         ),
@@ -149,11 +156,11 @@ fn takes_part(model: &Model, root: Option<Root>) -> Option<Taking> {
       {
         return None;
       }
-      Some(Taking::Written {
+      Some(Taking::Written(WrittenRoot {
         occurrence,
         ty,
         def,
-      })
+      }))
     }
   }
 }
@@ -162,9 +169,11 @@ fn takes_part(model: &Model, root: Option<Root>) -> Option<Taking> {
 /// presumed, and the other written as that definition with no type argument.
 fn one(model: &Model, a: Taking, b: Taking) -> bool {
   match (a, b) {
-    (Taking::Written { ty: x, .. }, Taking::Written { ty: y, .. }) => x == y,
-    (Taking::Presumed(def), Taking::Written { ty, .. })
-    | (Taking::Written { ty, .. }, Taking::Presumed(def)) => matches!(
+    (Taking::Written(WrittenRoot { ty: x, .. }), Taking::Written(WrittenRoot { ty: y, .. })) => {
+      x == y
+    }
+    (Taking::Presumed(def), Taking::Written(WrittenRoot { ty, .. }))
+    | (Taking::Written(WrittenRoot { ty, .. }), Taking::Presumed(def)) => matches!(
       model.ty(ty).kind(),
       TyKind::Named(NamedTy { def: named, args }) if named == def && args.is_empty()
     ),

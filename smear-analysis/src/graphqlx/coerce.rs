@@ -352,7 +352,7 @@ use super::{
     Bytes, Collection, DefKind, IntPrimitive, LiteralKind, ModelBuilder, Primitive, Resolution,
     Shape, Text, Written,
   },
-  raw::{Radix, RawArgument, RawKind, RawNode, RawPath, RawTree, RawValues, UNREAD},
+  raw::{FloatSpelling, Radix, RawArgument, RawKind, RawNode, RawPath, RawTree, RawValues, UNREAD},
   resolve::{Position, Request, Resolved, Root, Scopes, Segment, Wanted},
   set::ROOT,
   source::SourceMap,
@@ -655,14 +655,29 @@ struct Recorded {
 enum Owed {
   /// That the value of the tree `tree`, written at `site`, which says the code it is refused
   /// with, fit the type they give it.
-  Value { tree: u32, site: Site },
+  Value(OwedValue),
   /// That the argument `argument`, which the application `application` leaves out with no
   /// default, its type a bare nullable type parameter of the definition, take no non-null type
   /// from them, which would make it required.
-  Omitted {
-    application: ApplicationId,
-    argument: MemberId,
-  },
+  Omitted(OmittedArgument),
+}
+
+/// A value owed a fit: [`Owed::Value`]'s payload.
+#[derive(Clone, Copy)]
+struct OwedValue {
+  /// The tree whose value is owed.
+  tree: u32,
+  /// Where it is written, which says the code it is refused with.
+  site: Site,
+}
+
+/// An argument an application leaves out: [`Owed::Omitted`]'s payload.
+#[derive(Clone, Copy)]
+struct OmittedArgument {
+  /// The application.
+  application: ApplicationId,
+  /// The argument it leaves out.
+  argument: MemberId,
 }
 
 /// What a definition's recorded rows come to under one instantiation's arguments.
@@ -700,28 +715,51 @@ enum Counted {
   /// element or a key of a set or a map whose identity goes in the slot `slot` of the elements
   /// being searched. `paid` when its step was charged where it was scheduled, as a child of a
   /// list, a set, a map or an object literal is.
-  Node {
-    node: u32,
-    ty: Option<TyId>,
-    slot: Option<u32>,
-    paid: bool,
-  },
+  Node(NodeCount),
   /// A read: the count of the default whose tree is `tree`, against `ty`, judged when `ty` is not
   /// the type the default is written against.
-  Fill {
-    tree: u32,
-    ty: Option<TyId>,
-    judged: bool,
-  },
+  Fill(FillCount),
   /// In a judged count, the set or the map literal `node`, as `held` says, whose elements or keys,
   /// read against `of`, counted since have their identities from the slot `start` on: searched for
   /// one held twice.
-  Held {
-    start: u32,
-    held: Held,
-    node: u32,
-    of: TyId,
-  },
+  Held(HeldCount),
+}
+
+/// A node to count: [`Counted::Node`]'s payload.
+#[derive(Clone, Copy)]
+struct NodeCount {
+  /// The node.
+  node: u32,
+  /// The type it is made against.
+  ty: Option<TyId>,
+  /// The slot of the elements being searched that its identity goes in, in a judged count.
+  slot: Option<u32>,
+  /// Whether its step was charged where it was scheduled.
+  paid: bool,
+}
+
+/// A read of a default to count: [`Counted::Fill`]'s payload.
+#[derive(Clone, Copy)]
+struct FillCount {
+  /// The default's tree.
+  tree: u32,
+  /// The type it is counted against.
+  ty: Option<TyId>,
+  /// Whether `ty` is not the type the default is written against.
+  judged: bool,
+}
+
+/// A set or a map literal whose elements or keys are searched: [`Counted::Held`]'s payload.
+#[derive(Clone, Copy)]
+struct HeldCount {
+  /// The first slot the identities of the elements or keys counted since are held in.
+  start: u32,
+  /// Whether the literal is a set or a map.
+  held: Held,
+  /// The literal's node.
+  node: u32,
+  /// The type its elements or keys are read against.
+  of: TyId,
 }
 
 /// A default being counted: its tree and the type it is counted against, where its own entries of
@@ -745,15 +783,31 @@ struct Frame {
 enum Asked {
   /// A copy of this many rows is made; under a type its default is not written against, `fits`
   /// says whether each of its nodes takes its type as a written one would.
-  Copy { rows: u32, fits: bool },
+  Copy(CopiedRows),
   /// Nothing is made: the argument, or the field, is absent, its copy holding a copy of itself;
   /// under a type its default is not written against, `fits` says whether each node its count
   /// reached takes its type as a written one would.
-  Absent { fits: bool },
+  Absent(AbsentRows),
   /// The budget cannot pay: the asker is past it.
   Starved,
   /// A type its count reads under type arguments passes this limit: the asker is past it.
   Unbuilt(Limit),
+}
+
+/// A copy of a default, made: [`Asked::Copy`]'s payload.
+#[derive(Clone, Copy)]
+struct CopiedRows {
+  /// How many rows the copy makes.
+  rows: u32,
+  /// Whether each of its nodes takes its type as a written one would.
+  fits: bool,
+}
+
+/// A copy of a default that is not made: [`Asked::Absent`]'s payload.
+#[derive(Clone, Copy)]
+struct AbsentRows {
+  /// Whether each node its count reached takes its type as a written one would.
+  fits: bool,
 }
 
 /// Where a merge of an object literal's fields with its input object's defaults has got to: the
@@ -772,7 +826,16 @@ enum Next {
   /// A field the literal sets.
   Set(SetField),
   /// The default of a field the literal leaves out: the field, and the default's tree.
-  Default(MemberId, u32),
+  Default(DefaultedField),
+}
+
+/// A field a literal leaves out, and its default: [`Next::Default`]'s payload.
+#[derive(Clone, Copy)]
+struct DefaultedField {
+  /// The field.
+  field: MemberId,
+  /// The default's tree.
+  tree: u32,
 }
 
 /// A field an object literal sets: the input object's field, where its name is written, in the
@@ -816,9 +879,7 @@ enum Base {
   /// An integer primitive, or `NonZero` of one.
   Int(Range),
   /// `f32` when `single`, and `f64` otherwise.
-  Float {
-    single: bool,
-  },
+  Float(FloatBase),
   String,
   Id,
   Bytes,
@@ -829,11 +890,27 @@ enum Base {
   /// A set of this element.
   Set(TyId),
   /// A map from this key to this value.
-  Map(TyId, TyId),
+  Map(MapTypes),
   /// `core`'s `TypeRef`: a path that names a definition.
   TypeRef,
   /// Any literal, kept as written: a custom scalar that is no collection.
   Kept,
+}
+
+/// A float type: [`Base::Float`]'s payload.
+#[derive(Clone, Copy)]
+struct FloatBase {
+  /// Whether it is `f32`, and not `f64`.
+  single: bool,
+}
+
+/// A map's key and value types: [`Base::Map`]'s and [`Class::Map`]'s payload.
+#[derive(Clone, Copy)]
+struct MapTypes {
+  /// The key's type.
+  key: TyId,
+  /// The value's type.
+  value: TyId,
 }
 
 /// What a node is made against a type, told by the node's syntactic kind and the type alone.
@@ -851,14 +928,23 @@ enum Class {
   Lone(TyId),
   /// An object literal against the input object `def`, its fields' rows of the trees starting at
   /// `first`: an `Object` row, then each field it sets against the field's type.
-  Object { def: DefId, first: u32 },
+  Object(ObjectClass),
   /// A set literal against a set of this element: a `Set` row, then each element against it.
   Set(TyId),
   /// A map literal against a map from this key to this value: a `Map` row, then each key against
   /// the key and each value against the value.
-  Map(TyId, TyId),
+  Map(MapTypes),
   /// Any other node against a named type: one row, its kind told by what the type takes.
   Leaf(Base),
+}
+
+/// An input object a literal is made against: [`Class::Object`]'s payload.
+#[derive(Clone, Copy)]
+struct ObjectClass {
+  /// The input object.
+  def: DefId,
+  /// The first of the trees of its fields' rows.
+  first: u32,
 }
 
 /// Why a node does not fit.
@@ -882,21 +968,57 @@ enum Why {
   ByteRange,
   /// A path that names no value of the enum `def`: `name`, its last segment, is none of its
   /// values.
-  NoValue { def: DefId, name: Sym },
+  NoValue(NoSuchValue),
   /// A decimal integer of `digits` significant digits whose conversion, `cost` steps, the budget
   /// could not pay for.
-  Costly { digits: u64, cost: u32 },
+  Costly(CostlyDigits),
   /// `null` for `field`, a required field of the input object `def`.
-  Required { def: DefId, field: MemberId },
+  Required(RequiredField),
   /// A literal of the OneOf input object `def` that writes `written` fields, not one.
-  OneOf { def: DefId, written: u32 },
+  OneOf(OneOfCount),
   /// `null` for the one field a literal of the OneOf input object `def` writes.
-  OneOfNull { def: DefId },
+  OneOfNull(DefId),
   /// Another literal where the collection `expected` is expected; or, with none expected, a
   /// collection literal where no collection of its shape is.
-  Collection { expected: Option<Collection> },
+  Collection(Option<Collection>),
   /// A type it takes under type arguments that cannot be built, as this says.
   Unbuilt(Stop),
+}
+
+/// A name that is none of an enum's values: [`Why::NoValue`]'s payload.
+#[derive(Clone, Copy)]
+struct NoSuchValue {
+  /// The enum.
+  def: DefId,
+  /// The path's last segment.
+  name: Sym,
+}
+
+/// An integer whose conversion the budget could not pay for: [`Why::Costly`]'s payload.
+#[derive(Clone, Copy)]
+struct CostlyDigits {
+  /// How many significant digits it has.
+  digits: u64,
+  /// What its conversion costs, in steps.
+  cost: u32,
+}
+
+/// A required field given `null`: [`Why::Required`]'s payload.
+#[derive(Clone, Copy)]
+struct RequiredField {
+  /// The input object.
+  def: DefId,
+  /// The field.
+  field: MemberId,
+}
+
+/// A OneOf literal that writes other than one field: [`Why::OneOf`]'s payload.
+#[derive(Clone, Copy)]
+struct OneOfCount {
+  /// The OneOf input object.
+  def: DefId,
+  /// How many fields the literal writes.
+  written: u32,
 }
 
 /// The code a node that does not fit is reported with.
@@ -907,7 +1029,17 @@ enum Coded {
   /// One of smear's own.
   Kind(DiagnosticKind),
   /// One of GraphQL's that is the same at every site, with its label.
-  Schema(Code, &'static str),
+  Schema(SchemaCode),
+}
+
+/// One of GraphQL's codes that is the same at every site, with its label: [`Coded::Schema`]'s
+/// payload.
+#[derive(Clone, Copy)]
+struct SchemaCode {
+  /// The code.
+  code: Code,
+  /// Its label.
+  label: &'static str,
 }
 
 /// A node that does not fit, and why: the node may be an element of the value being made.
@@ -925,17 +1057,9 @@ enum Ident {
   Bool(bool),
   /// An integer: its sign, kept for a magnitude that is not zero alone, so that `-0` is `0`, and
   /// its magnitude, a run of the phase's own.
-  Int {
-    negative: bool,
-    start: u32,
-    len: u32,
-  },
+  Int(Digits),
   /// An `id`'s integer, read as its decimal digits, so that it is one with the string of them.
-  Decimal {
-    negative: bool,
-    start: u32,
-    len: u32,
-  },
+  Decimal(Digits),
   /// A float's bits, of its value in its type: an `f64`'s, or an `f32`'s, the literal rounded once
   /// to `f32`; `-0.0` is `0.0`.
   Float(u64),
@@ -944,6 +1068,17 @@ enum Ident {
   Bytes(Bytes),
   /// An enum value.
   Member(MemberId),
+}
+
+/// An integer's identity: [`Ident::Int`]'s and [`Ident::Decimal`]'s payload.
+#[derive(Clone, Copy)]
+struct Digits {
+  /// Whether it is negative, kept for a magnitude that is not zero alone.
+  negative: bool,
+  /// Where its magnitude's run of the phase's own starts.
+  start: u32,
+  /// How long the run is.
+  len: u32,
 }
 
 /// An integer's magnitude once converted: its run of the phase's own magnitudes, its bit length,
@@ -1026,23 +1161,48 @@ enum Task {
   /// Make a node's row, and push what it holds.
   Make(Making),
   /// Make a node's row one unresolved row, and report why, where it is written.
-  Refuse(Making, Why),
+  Refuse(Refusal),
   /// Give `value`, a list, a set or a map as `held` says, the rows made since `from` among the
   /// open values' rows: a map's in pairs, each key and then its value. A set or a map written in
   /// the source `check` is first searched for an element or a key held twice.
-  Close {
-    value: ValueId,
-    from: usize,
-    held: Held,
-    check: Option<u32>,
-  },
+  Close(CloseTask),
   /// Give the input object `object` its entries: the open entries from `entries` on, each with
   /// its value, the rows made since `from` among the open values' rows, in the same order.
-  CloseObject {
-    object: ValueId,
-    from: usize,
-    entries: usize,
-  },
+  CloseObject(CloseObjectTask),
+}
+
+/// A node refused, and why: [`Task::Refuse`]'s payload.
+#[derive(Clone, Copy)]
+struct Refusal {
+  /// The node's row.
+  making: Making,
+  /// Why it does not fit.
+  why: Why,
+}
+
+/// A list, a set or a map to give its rows: [`Task::Close`]'s payload.
+#[derive(Clone, Copy)]
+struct CloseTask {
+  /// The value.
+  value: ValueId,
+  /// The first of the open values' rows made since it opened.
+  from: usize,
+  /// Whether it is a list, a set or a map.
+  held: Held,
+  /// The source a set or a map is written in, which is first searched for an element or a key held
+  /// twice.
+  check: Option<u32>,
+}
+
+/// An input object to give its entries: [`Task::CloseObject`]'s payload.
+#[derive(Clone, Copy)]
+struct CloseObjectTask {
+  /// The input object.
+  object: ValueId,
+  /// The first of the open values' rows made since it opened.
+  from: usize,
+  /// The first of the open entries it takes.
+  entries: usize,
 }
 
 /// What coercion keeps while it writes.
@@ -1336,7 +1496,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       self.recorded.push(Recorded {
         def,
         ty,
-        owed: Owed::Value { tree, site },
+        owed: Owed::Value(OwedValue { tree, site }),
       });
     }
   }
@@ -1357,10 +1517,10 @@ impl<'p> Coercion<'_, 'p, '_> {
       self.recorded.push(Recorded {
         def,
         ty,
-        owed: Owed::Omitted {
+        owed: Owed::Omitted(OmittedArgument {
           application,
           argument,
-        },
+        }),
       });
     }
   }
@@ -1488,9 +1648,9 @@ impl<'p> Coercion<'_, 'p, '_> {
         Err(stop) => return Checked::Stopped(stop),
       };
       let tree = match recorded.owed {
-        Owed::Value { tree, .. } => tree,
+        Owed::Value(OwedValue { tree, .. }) => tree,
         // Required where the arguments make its type non-null.
-        Owed::Omitted { .. } => {
+        Owed::Omitted(_) => {
           if self.builder.ty_non_null(under) {
             return Checked::Unfit(dense(row));
           }
@@ -1532,11 +1692,11 @@ impl<'p> Coercion<'_, 'p, '_> {
     };
     let used = self.used(def);
     match recorded.owed {
-      Owed::Value { tree, site } => self.report_value(at, &used, tree, site),
-      Owed::Omitted {
+      Owed::Value(OwedValue { tree, site }) => self.report_value(at, &used, tree, site),
+      Owed::Omitted(OmittedArgument {
         application,
         argument,
-      } => self.report_omitted(at, &used, application, argument),
+      }) => self.report_omitted(at, &used, application, argument),
     }
   }
 
@@ -1797,9 +1957,9 @@ impl<'p> Coercion<'_, 'p, '_> {
       self.record(tree, ty, Site::Default);
     }
     let (rows, fits) = match self.ask(tree, ty, library, expected.rebuilt) {
-      Asked::Copy { rows, fits } => (Some(rows), fits),
+      Asked::Copy(CopiedRows { rows, fits }) => (Some(rows), fits),
       // Absent, its copy holding a copy of itself: what its count reached is judged all the same.
-      Asked::Absent { fits } => (None, fits),
+      Asked::Absent(AbsentRows { fits }) => (None, fits),
       Asked::Starved => {
         self.starved(at, Stop::Steps);
         return false;
@@ -1971,10 +2131,10 @@ impl<'p> Coercion<'_, 'p, '_> {
           return Asked::Starved;
         }
         self.paid = self.paid.saturating_add(u64::from(rows));
-        Asked::Copy {
+        Asked::Copy(CopiedRows {
           rows,
           fits: !self.unfit.contains(&(tree, ty)),
-        }
+        })
       }
       Count::Past => Asked::Starved,
       Count::Unbuilt(limit) => Asked::Unbuilt(limit),
@@ -1983,9 +2143,9 @@ impl<'p> Coercion<'_, 'p, '_> {
         if !library && !self.charge(1) {
           return Asked::Starved;
         }
-        Asked::Absent {
+        Asked::Absent(AbsentRows {
           fits: !self.unfit.contains(&(tree, ty)),
-        }
+        })
       }
     }
   }
@@ -2065,51 +2225,53 @@ impl<'p> Coercion<'_, 'p, '_> {
         return self.verdict(Count::Past);
       };
       let counted = match entry {
-        Counted::Node {
+        Counted::Node(NodeCount {
           node,
           ty,
           slot,
           paid,
-        } => self.count_node(node, ty, slot, charged, paid),
+        }) => self.count_node(node, ty, slot, charged, paid),
         // A poisoned frame makes no copy, and a default its type is written against holds nothing
         // it judges: the read is passed over.
-        Counted::Fill { judged: false, .. } if self.poisoned() => Ok(()),
-        Counted::Fill { tree, ty, judged } => match self.counts.get(&(tree, ty)).copied() {
-          Some(Count::Rows(rows)) => {
-            if self.unfit.contains(&(tree, ty)) {
-              self.misfit();
+        Counted::Fill(FillCount { judged: false, .. }) if self.poisoned() => Ok(()),
+        Counted::Fill(FillCount { tree, ty, judged }) => {
+          match self.counts.get(&(tree, ty)).copied() {
+            Some(Count::Rows(rows)) => {
+              if self.unfit.contains(&(tree, ty)) {
+                self.misfit();
+              }
+              self.add_rows(rows, charged)
             }
-            self.add_rows(rows, charged)
-          }
-          // The read is cut: the copy would hold a copy of itself. The count's first meeting
-          // reports the cycle.
-          Some(Count::Counting) => {
-            if !self.met {
-              self.met = true;
-              self.cycle(tree, ty);
+            // The read is cut: the copy would hold a copy of itself. The count's first meeting
+            // reports the cycle.
+            Some(Count::Counting) => {
+              if !self.met {
+                self.met = true;
+                self.cycle(tree, ty);
+              }
+              self.poison();
+              Ok(())
             }
-            self.poison();
-            Ok(())
-          }
-          Some(Count::Poisoned) => {
-            if self.unfit.contains(&(tree, ty)) {
-              self.misfit();
+            Some(Count::Poisoned) => {
+              if self.unfit.contains(&(tree, ty)) {
+                self.misfit();
+              }
+              self.poison();
+              Ok(())
             }
-            self.poison();
-            Ok(())
+            Some(verdict @ (Count::Past | Count::Unbuilt(_))) => Err(verdict),
+            None => {
+              self.open(tree, ty, judged);
+              Ok(())
+            }
           }
-          Some(verdict @ (Count::Past | Count::Unbuilt(_))) => Err(verdict),
-          None => {
-            self.open(tree, ty, judged);
-            Ok(())
-          }
-        },
-        Counted::Held {
+        }
+        Counted::Held(HeldCount {
           start,
           held,
           node,
           of,
-        } => match self.held_once(start, held, charged) {
+        }) => match self.held_once(start, held, charged) {
           Ok(once) => {
             // What a search finds depends on its literal and the type its identities are read
             // against alone, and is kept by the two.
@@ -2148,12 +2310,12 @@ impl<'p> Coercion<'_, 'p, '_> {
       .get(tree as usize)
       .map(|tree: &RawTree| tree.root)
     {
-      self.counting.push(Counted::Node {
+      self.counting.push(Counted::Node(NodeCount {
         node: root,
         ty,
         slot: None,
         paid: false,
-      });
+      }));
     }
   }
 
@@ -2317,7 +2479,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         let searched = judged.then_some((Held::Set, element));
         self.count_items(node, raw, (element, element), searched, pay)?;
       }
-      Class::Map(key, value) => {
+      Class::Map(MapTypes { key, value }) => {
         // A last key with no value is dropped, as the copy drops it: looked at, it is paid for.
         let searched = judged.then_some((Held::Map, key));
         if self.count_items(node, raw, (key, value), searched, pay)? % 2 == 1 {
@@ -2333,15 +2495,15 @@ impl<'p> Coercion<'_, 'p, '_> {
           self.add_rows(1, charged)?;
         } else {
           // Counted next, before anything else is scheduled: it pays its step as it is counted.
-          self.counting.push(Counted::Node {
+          self.counting.push(Counted::Node(NodeCount {
             node,
             ty: Some(under),
             slot: None,
             paid: false,
-          });
+          }));
         }
       }
-      Class::Object { def, first } => {
+      Class::Object(ObjectClass { def, first }) => {
         // Each field the literal writes is a step the first time it is read against `def`.
         let fields = self
           .fields_of(node, def, first, charged)
@@ -2365,24 +2527,24 @@ impl<'p> Coercion<'_, 'p, '_> {
               let expected = self
                 .under(set.field, env, !charged)
                 .map_err(unbuilt_count)?;
-              self.counting.push(Counted::Node {
+              self.counting.push(Counted::Node(NodeCount {
                 node: set.node,
                 ty: expected.ty,
                 slot: None,
                 paid: true,
-              });
+              }));
             }
-            Next::Default(field, tree) => {
+            Next::Default(DefaultedField { field, tree }) => {
               // A read is paid before it is pushed: no charge covers work pushed before it.
               if charged && !self.charge(1) {
                 return Err(Count::Past);
               }
               let expected = self.under(field, env, !charged).map_err(unbuilt_count)?;
-              self.counting.push(Counted::Fill {
+              self.counting.push(Counted::Fill(FillCount {
                 tree,
                 ty: expected.ty,
                 judged: expected.rebuilt,
-              });
+              }));
             }
           }
         }
@@ -2412,7 +2574,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         }
       }
       Err(Refused {
-        why: Why::Costly { .. },
+        why: Why::Costly(_),
         ..
       }) => return Err(Count::Past),
       Err(refused) => {
@@ -2533,9 +2695,9 @@ impl<'p> Coercion<'_, 'p, '_> {
   fn rendered_len(&self, ident: Ident) -> usize {
     match ident {
       Ident::Bool(_) => 1,
-      Ident::Int { len, .. } => (len as usize).saturating_add(1),
+      Ident::Int(Digits { len, .. }) => (len as usize).saturating_add(1),
       // An `id`'s integer is in `i32`'s range: a sign and at most ten digits.
-      Ident::Decimal { .. } => 11,
+      Ident::Decimal(_) => 11,
       Ident::Float(_) => 8,
       Ident::Text(text) => self.builder.kept_text(text).len(),
       Ident::Bytes(bytes) => self.builder.kept_bytes(bytes).len(),
@@ -2577,12 +2739,12 @@ impl<'p> Coercion<'_, 'p, '_> {
         Some(false) => self.misfit(),
         None => {
           let start = dense(self.held.len());
-          self.counting.push(Counted::Held {
+          self.counting.push(Counted::Held(HeldCount {
             start,
             held,
             node,
             of,
-          });
+          }));
           slots = true;
         }
       }
@@ -2599,12 +2761,12 @@ impl<'p> Coercion<'_, 'p, '_> {
         self.held.push(None);
         slot
       });
-      self.counting.push(Counted::Node {
+      self.counting.push(Counted::Node(NodeCount {
         node: child,
         ty: Some(ty),
         slot,
         paid: true,
-      });
+      }));
       pushed = pushed.saturating_add(1);
       let next = self
         .raw
@@ -2661,7 +2823,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       }
       (_, Some((field, tree))) => {
         merge.default = merge.default.saturating_add(1);
-        Some(Next::Default(field, tree))
+        Some(Next::Default(DefaultedField { field, tree }))
       }
       (None, None) => None,
     }
@@ -2977,18 +3139,18 @@ impl<'p> Coercion<'_, 'p, '_> {
     while let Some(task) = self.stack.pop() {
       match task {
         Task::Make(making) => self.make(making),
-        Task::Refuse(making, why) => self.unfit(making, why),
-        Task::Close {
+        Task::Refuse(Refusal { making, why }) => self.unfit(making, why),
+        Task::Close(CloseTask {
           value,
           from,
           held,
           check,
-        } => self.close(value, from, held, check),
-        Task::CloseObject {
+        }) => self.close(value, from, held, check),
+        Task::CloseObject(CloseObjectTask {
           object,
           from,
           entries,
-        } => self.close_object(object, from, entries),
+        }) => self.close_object(object, from, entries),
       }
     }
     let value = self.items.get(base).copied();
@@ -3033,25 +3195,25 @@ impl<'p> Coercion<'_, 'p, '_> {
       ),
       Class::List(element) => self.open_items(id, making, Held::List, (element, element)),
       Class::Set(element) => self.open_items(id, making, Held::Set, (element, element)),
-      Class::Map(key, value) => self.open_items(id, making, Held::Map, (key, value)),
+      Class::Map(MapTypes { key, value }) => self.open_items(id, making, Held::Map, (key, value)),
       Class::Lone(element) => {
         if mode.written() && source >= self.supplied && !self.charge(1) {
           self.path(id, raw.kind);
           self.lone_limit(at);
         } else {
           let from = self.items.len();
-          self.stack.push(Task::Close {
+          self.stack.push(Task::Close(CloseTask {
             value: id,
             from,
             held: Held::List,
             check: None,
-          });
+          }));
           self
             .stack
             .push(Task::Make(making.child(node, Some(element))));
         }
       }
-      Class::Object { def, first } => self.object(id, making, def, first),
+      Class::Object(ObjectClass { def, first }) => self.object(id, making, def, first),
       Class::Leaf(base) => {
         self.path(id, raw.kind);
         match self.leaf(Some(id), node, tree, base) {
@@ -3079,12 +3241,12 @@ impl<'p> Coercion<'_, 'p, '_> {
       Held::Set | Held::Map if making.mode.written() => Some(making.tree.source),
       Held::List | Held::Set | Held::Map => None,
     };
-    self.stack.push(Task::Close {
+    self.stack.push(Task::Close(CloseTask {
       value: id,
       from,
       held,
       check,
-    });
+    }));
     self.children.clear();
     let mut child = making.node.saturating_add(1);
     while child < raw.after {
@@ -3190,20 +3352,20 @@ impl<'p> Coercion<'_, 'p, '_> {
   fn render(&mut self, ident: Ident) {
     match ident {
       Ident::Bool(flag) => self.key_bytes.push(u8::from(flag)),
-      Ident::Int {
+      Ident::Int(Digits {
         negative,
         start,
         len,
-      } => {
+      }) => {
         self.key_bytes.push(u8::from(negative));
         let magnitude = run_of(&self.magnitudes, start, len);
         self.key_bytes.extend_from_slice(magnitude);
       }
-      Ident::Decimal {
+      Ident::Decimal(Digits {
         negative,
         start,
         len,
-      } => {
+      }) => {
         // An `id`'s integer is in `i32`'s range: at most four bytes, eleven characters.
         let mut value: u64 = 0;
         for (place, byte) in run_of(&self.magnitudes, start, len)
@@ -3301,10 +3463,10 @@ impl<'p> Coercion<'_, 'p, '_> {
     if mode.written() {
       self.unknown_fields(node, def, first, source);
       if one_of && fields.written != 1 {
-        let why = Why::OneOf {
+        let why = Why::OneOf(OneOfCount {
           def,
           written: fields.written,
-        };
+        });
         self.refuse(Refused { node, why }, source, making.ty, mode);
       }
       if !self.required_left_out(def, fields, at, library, env) {
@@ -3313,11 +3475,11 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
     let from = self.items.len();
     let entries = self.entries.len();
-    self.stack.push(Task::CloseObject {
+    self.stack.push(Task::CloseObject(CloseObjectTask {
       object: id,
       from,
       entries,
-    });
+    }));
     // The entries' tasks are pushed in order, then reversed, so that the first is made first.
     let tasks = self.stack.len();
     let alone = one_of && fields.written == 1;
@@ -3331,7 +3493,10 @@ impl<'p> Coercion<'_, 'p, '_> {
           self.stack.push(task);
           continue;
         }
-        Next::Default(field, default) => (field, default),
+        Next::Default(DefaultedField {
+          field,
+          tree: default,
+        }) => (field, default),
       };
       let Some(default_tree) = self.raw.trees.get(default as usize).copied() else {
         continue;
@@ -3354,10 +3519,10 @@ impl<'p> Coercion<'_, 'p, '_> {
       // copy would be made. So its rows are among those already paid for.
       if mode.written() {
         let (fits, made) = match self.ask(default, ty, library, expected.rebuilt) {
-          Asked::Copy { fits, .. } => (fits, true),
+          Asked::Copy(CopiedRows { fits, .. }) => (fits, true),
           // Absent, its copy holding a copy of itself: what its count reached is judged all the
           // same.
-          Asked::Absent { fits } => (fits, false),
+          Asked::Absent(AbsentRows { fits }) => (fits, false),
           Asked::Starved => {
             self.object_starved(at, Stop::Steps);
             merge.default = merge.default_end;
@@ -3416,7 +3581,10 @@ impl<'p> Coercion<'_, 'p, '_> {
       Err(stop) => {
         let written = self.member_type(set.field);
         let value = making.child(set.node, written);
-        return Task::Refuse(value, Why::Unbuilt(stop));
+        return Task::Refuse(Refusal {
+          making: value,
+          why: Why::Unbuilt(stop),
+        });
       }
     };
     let value = making.child(set.node, expected.ty);
@@ -3424,16 +3592,19 @@ impl<'p> Coercion<'_, 'p, '_> {
       return Task::Make(value);
     }
     if expected.non_null && !self.raw.defaults.contains_key(&set.field) {
-      return Task::Refuse(
-        value,
-        Why::Required {
+      return Task::Refuse(Refusal {
+        making: value,
+        why: Why::Required(RequiredField {
           def,
           field: set.field,
-        },
-      );
+        }),
+      });
     }
     if alone {
-      return Task::Refuse(value, Why::OneOfNull { def });
+      return Task::Refuse(Refusal {
+        making: value,
+        why: Why::OneOfNull(def),
+      });
     }
     Task::Make(value)
   }
@@ -3734,9 +3905,11 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
     let class = match builder.ty_shape(ty) {
       Some(Shape::Named(def)) => match (self.base(def, ty), kind) {
-        (Some(Base::Object(def)), RawKind::Object(first)) => Class::Object { def, first },
+        (Some(Base::Object(def)), RawKind::Object(first)) => {
+          Class::Object(ObjectClass { def, first })
+        }
         (Some(Base::Set(element)), RawKind::Set) => Class::Set(element),
-        (Some(Base::Map(key, value)), RawKind::Map) => Class::Map(key, value),
+        (Some(Base::Map(types)), RawKind::Map) => Class::Map(types),
         (Some(base), _) => Class::Leaf(base),
         (None, _) => return Class::NoValue,
       },
@@ -3767,15 +3940,15 @@ impl<'p> Coercion<'_, 'p, '_> {
       }
       return match (collection, self.builder.ty_args(ty)) {
         (Collection::Set, &[element]) => Some(Base::Set(element)),
-        (Collection::Map, &[key, value]) => Some(Base::Map(key, value)),
+        (Collection::Map, &[key, value]) => Some(Base::Map(MapTypes { key, value })),
         _ => None,
       };
     }
     if let Some(primitive) = self.primitive(def) {
       return Some(match primitive {
         Primitive::Bool => Base::Bool,
-        Primitive::F32 => Base::Float { single: true },
-        Primitive::F64 => Base::Float { single: false },
+        Primitive::F32 => Base::Float(FloatBase { single: true }),
+        Primitive::F64 => Base::Float(FloatBase { single: false }),
         Primitive::Int(IntPrimitive { signed, width }) => Base::Int(Range {
           signed,
           width,
@@ -3877,21 +4050,21 @@ impl<'p> Coercion<'_, 'p, '_> {
       }
       (Base::Int(range), RawKind::Int(radix)) => {
         let (negative, converted) = self.int(id, node, tree, radix, range)?;
-        Ok(Some(Ident::Int {
+        Ok(Some(Ident::Int(Digits {
           negative: negative && converted.len != 0,
           start: converted.start,
           len: converted.len,
-        }))
+        })))
       }
       (Base::Id, RawKind::Int(radix)) => {
         let (negative, converted) = self.int(id, node, tree, radix, ID_RANGE)?;
-        Ok(Some(Ident::Decimal {
+        Ok(Some(Ident::Decimal(Digits {
           negative: negative && converted.len != 0,
           start: converted.start,
           len: converted.len,
-        }))
+        })))
       }
-      (Base::Float { single }, RawKind::Float { .. } | RawKind::Int(_)) => {
+      (Base::Float(FloatBase { single }), RawKind::Float(_) | RawKind::Int(_)) => {
         let bits = self.float(id, node, tree, single)?;
         Ok(Some(Ident::Float(bits)))
       }
@@ -3911,7 +4084,7 @@ impl<'p> Coercion<'_, 'p, '_> {
           _ => None,
         };
         if expected.is_some() || matches!(kind, RawKind::Set | RawKind::Map) {
-          Err(refused(Why::Collection { expected }))
+          Err(refused(Why::Collection(expected)))
         } else {
           Err(refused(Why::Kind))
         }
@@ -3943,10 +4116,10 @@ impl<'p> Coercion<'_, 'p, '_> {
       return Err(refused(out));
     }
     let Some(converted) = self.converted(node, source, radix, scanned) else {
-      return Err(refused(Why::Costly {
+      return Err(refused(Why::Costly(CostlyDigits {
         digits: scanned.significant,
         cost: number::decimal_cost(scanned.significant),
-      }));
+      })));
     };
     if !number::fits(
       scanned.negative,
@@ -4100,7 +4273,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       match self.prefix(row, path, tree) {
         Resolved::Def(found) if found == def => {}
         Resolved::Unresolved => return Ok(None),
-        Resolved::Def(_) | Resolved::NonZero { .. } | Resolved::Module(_) | Resolved::Param(_) => {
+        Resolved::Def(_) | Resolved::NonZero(_) | Resolved::Module(_) | Resolved::Param(_) => {
           return Err(refused(Why::Kind));
         }
       }
@@ -4112,7 +4285,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         }
         Ok(Some(Ident::Member(member)))
       }
-      None => Err(refused(Why::NoValue { def, name: last })),
+      None => Err(refused(Why::NoValue(NoSuchValue { def, name: last }))),
     }
   }
 
@@ -4215,9 +4388,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       }
       Resolved::Unresolved => Ok(None),
       // A module is never answered where a type is wanted: the resolver refuses it, and reports it.
-      Resolved::Param(_) | Resolved::NonZero { .. } | Resolved::Module(_) => {
-        Err(refused(Why::Kind))
-      }
+      Resolved::Param(_) | Resolved::NonZero(_) | Resolved::Module(_) => Err(refused(Why::Kind)),
     }
   }
 
@@ -4345,7 +4516,7 @@ impl<'p> Coercion<'_, 'p, '_> {
           RawKind::Null => LiteralKind::Null,
           RawKind::Boolean(_) => LiteralKind::Boolean,
           RawKind::Int(_) => LiteralKind::Int,
-          RawKind::Float { .. } => LiteralKind::Float,
+          RawKind::Float(_) => LiteralKind::Float,
           RawKind::String => LiteralKind::String,
           RawKind::Path(_) => LiteralKind::Enum,
           RawKind::List => LiteralKind::List,
@@ -4502,10 +4673,10 @@ impl<'p> Coercion<'_, 'p, '_> {
       return read;
     }
     let read = match self.kind(node) {
-      RawKind::Float { hex: false } | RawKind::Int(Radix::Decimal) => {
+      RawKind::Float(FloatSpelling { hex: false }) | RawKind::Int(Radix::Decimal) => {
         number::decimal_float(self.written(node, source))
       }
-      RawKind::Float { hex: true } => number::hex_float(self.written(node, source)),
+      RawKind::Float(FloatSpelling { hex: true }) => number::hex_float(self.written(node, source)),
       RawKind::Int(radix) => match self.scanned(node, source, radix) {
         // A hexadecimal, octal or binary integer, which costs nothing to convert.
         Some(scanned) if scanned.significant <= number::max_digits(radix, FLOAT_BITS) => self
@@ -4630,7 +4801,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         ),
         Some(String::from("a byte is an integer from 0 to 2^8 - 1")),
       ),
-      Why::NoValue { def, name: wanted } => {
+      Why::NoValue(NoSuchValue { def, name: wanted }) => {
         let builder: &ModelBuilder = &*self.builder;
         let first = (def, Sym::new(0));
         let last = (def, Sym::new(u32::MAX));
@@ -4648,7 +4819,7 @@ impl<'p> Coercion<'_, 'p, '_> {
           near,
         )
       }
-      Why::Costly { digits, cost } => {
+      Why::Costly(CostlyDigits { digits, cost }) => {
         let max = self.values.max();
         (
           Coded::Kind(DiagnosticKind::ResourceLimit),
@@ -4663,17 +4834,17 @@ impl<'p> Coercion<'_, 'p, '_> {
           )),
         )
       }
-      Why::Required { def, field } => {
+      Why::Required(RequiredField { def, field }) => {
         let builder: &ModelBuilder = &*self.builder;
         let field: &[u8] = match builder.member_name(field) {
           Some(sym) => builder.spelling(sym),
           None => b"",
         };
         (
-          Coded::Schema(
-            schema::MISSING_REQUIRED_INPUT_OBJECT_FIELD,
-            "missing required input object field",
-          ),
+          Coded::Schema(SchemaCode {
+            code: schema::MISSING_REQUIRED_INPUT_OBJECT_FIELD,
+            label: "missing required input object field",
+          }),
           format!(
             "the field `{}` of `{}` is required, and `null` is given",
             Excerpt(field),
@@ -4682,7 +4853,7 @@ impl<'p> Coercion<'_, 'p, '_> {
           None,
         )
       }
-      Why::OneOf { def, written } => (
+      Why::OneOf(OneOfCount { def, written }) => (
         Coded::Site,
         format!(
           "`{}` is a OneOf input object, which takes exactly one field, and this literal writes \
@@ -4691,7 +4862,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         ),
         None,
       ),
-      Why::OneOfNull { def } => (
+      Why::OneOfNull(def) => (
         Coded::Site,
         format!(
           "`{}` is a OneOf input object, and the one field this literal writes is `null`",
@@ -4699,7 +4870,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         ),
         None,
       ),
-      Why::Collection { expected } => {
+      Why::Collection(expected) => {
         let (message, help) = match expected {
           Some(Collection::Set) => (
             format!("`{literal}` is no value of `{name}`, a set, which takes a set literal"),
@@ -4741,7 +4912,9 @@ impl<'p> Coercion<'_, 'p, '_> {
         let (code, label) = site.refusal();
         Diagnostic::builder(code, at).primary_label(label)
       }
-      Coded::Schema(code, label) => Diagnostic::builder(code, at).primary_label(label),
+      Coded::Schema(SchemaCode { code, label }) => {
+        Diagnostic::builder(code, at).primary_label(label)
+      }
     }
     .message(message);
     if let Some(help) = help {

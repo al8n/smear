@@ -38,9 +38,7 @@ pub(crate) enum RawKind {
   Boolean(bool),
   Int(Radix),
   /// A float literal, hexadecimal when `hex`.
-  Float {
-    hex: bool,
-  },
+  Float(FloatSpelling),
   String,
   /// A path: its row of the table's paths.
   Path(u32),
@@ -50,6 +48,14 @@ pub(crate) enum RawKind {
   /// An object: its first row of the table's fields, the row of its first field, each later field
   /// the next row.
   Object(u32),
+}
+
+/// How a float literal is spelled: [`RawKind::Float`]'s payload. One byte, so the kind stays one
+/// word.
+#[derive(Clone, Copy)]
+pub(crate) struct FloatSpelling {
+  /// Whether it is hexadecimal.
+  pub(crate) hex: bool,
 }
 
 /// One literal a value writes: 32 bytes at most.
