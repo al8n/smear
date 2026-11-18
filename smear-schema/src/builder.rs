@@ -1479,15 +1479,15 @@ impl core::fmt::Debug for RawShape {
     match self {
       Self::Null => f.write_str("Null"),
       Self::Boolean => f.write_str("Boolean"),
-      Self::Int {
+      Self::Int(IntShape {
         fits_i32,
         is_finite,
-      } => f
+      }) => f
         .debug_struct("Int")
         .field("fits_i32", fits_i32)
         .field("is_finite", is_finite)
         .finish(),
-      Self::Float(is_finite) => f.debug_tuple("Float").field(is_finite).finish(),
+      Self::Float(FloatShape { is_finite }) => f.debug_tuple("Float").field(is_finite).finish(),
       Self::String => f.write_str("String"),
       Self::Enum(sym) => f.debug_tuple("Enum").field(sym).finish(),
       Self::List(values) => write!(f, "List({} entries)", values.len()),
