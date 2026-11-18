@@ -13,8 +13,8 @@
 //!
 //! That provenance stays live rather than being a note about how these numbers were once obtained.
 //! These conversions run the decoder's walks in `value`, which `smear`'s response writer runs too,
-//! and `smear`'s `tests/json_writer.rs` holds that writer to `apollo-parser` on block strings — so
-//! a drift here has a gate to get past that is not this file.
+//! and `smear`'s `tests/json_writer.rs` holds that writer to `apollo-parser` on block strings and on
+//! inline escapes — so a drift here has a gate to get past that is not this file.
 
 use std::{borrow::Cow, format, vec::Vec};
 
