@@ -189,7 +189,7 @@ impl Visitor for ReprMisuse {
                 .build(),
             );
           }
-          Some(ValueKind::Type { def, .. }) => {
+          Some(ValueKind::Type(def)) => {
             if let Some(lang) = string_of(model, arguments, keys.lang) {
               pairs.push(((def, lang), application, part.has_errors()));
             }

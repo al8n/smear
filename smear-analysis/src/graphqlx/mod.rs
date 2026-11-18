@@ -479,11 +479,11 @@ pub use id::{
 pub use limits::Limits;
 pub use model::{
   Application, ApplicationArgument, Builtins, CanonicalName, Collection, Contribution,
-  Contributions, Def, DefKind, Description, DirectiveLocation, Extern, Externs, FloatValue,
-  IntValue, Literal, LiteralKind, Member, MemberKind, Model, Module, ModuleKind, Namespace,
-  ObjectEntry, Origin, PackageInfo, PackageKind, Path, PathRoot, Primitive, Resolution, Root,
-  RootOperation, Schema, Ty, TyKind, TypeBound, TypeExpr, TypeExprKind, TypeParam, TypeParams,
-  Value, ValueKind,
+  Contributions, Def, DefKind, Description, DirectiveLocation, EnumValueRef, Extern, Externs,
+  FloatValue, IntPrimitive, IntValue, Literal, LiteralKind, Member, MemberKind, Model, Module,
+  ModuleKind, NamedTy, NamedTypeExpr, Namespace, ObjectEntry, Origin, PackageInfo, PackageKind,
+  Path, PathRoot, Primitive, Resolution, Root, RootOperation, Schema, Ty, TyKind, TypeBound,
+  TypeExpr, TypeExprKind, TypeParam, TypeParamRef, TypeParams, Value, ValueKind,
 };
 pub use package::{IntegerProvider, Layout, Package, SourceFile, Tier};
 pub use rules::UnboundedInstantiation;

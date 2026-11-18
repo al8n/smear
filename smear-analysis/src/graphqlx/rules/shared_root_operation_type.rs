@@ -21,8 +21,8 @@
 use std::format;
 
 use crate::graphqlx::{
-  Contribution, Cx, DefId, DefKind, Diagnostic, Model, Root, RootOperation, TyId, TyKind,
-  TypeExprId, TypeExprKind, Visitor, code::schema, diagnostic::Excerpt,
+  Contribution, Cx, DefId, DefKind, Diagnostic, Model, NamedTy, NamedTypeExpr, Root, RootOperation,
+  TyId, TyKind, TypeExprId, TypeExprKind, Visitor, code::schema, diagnostic::Excerpt,
 };
 
 /// Reports each root operation type that is one type with an earlier root's.
@@ -140,7 +140,7 @@ fn takes_part(model: &Model, root: Option<Root>) -> Option<Taking> {
     Root::Presumed(def) => Some(Taking::Presumed(def)),
     Root::Written(occurrence) => {
       let written = model.type_expr(occurrence);
-      let TypeExprKind::Named { def, .. } = written.kind() else {
+      let TypeExprKind::Named(NamedTypeExpr { def, .. }) = written.kind() else {
         return None;
       };
       let ty = written.ty();
@@ -166,7 +166,7 @@ fn one(model: &Model, a: Taking, b: Taking) -> bool {
     (Taking::Presumed(def), Taking::Written { ty, .. })
     | (Taking::Written { ty, .. }, Taking::Presumed(def)) => matches!(
       model.ty(ty).kind(),
-      TyKind::Named { def: named, args } if named == def && args.is_empty()
+      TyKind::Named(NamedTy { def: named, args }) if named == def && args.is_empty()
     ),
     (Taking::Presumed(_), Taking::Presumed(_)) => false,
   }

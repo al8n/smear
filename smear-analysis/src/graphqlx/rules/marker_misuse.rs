@@ -25,8 +25,8 @@
 use std::format;
 
 use crate::graphqlx::{
-  Contribution, Cx, DefId, DefKind, Diagnostic, DiagnosticKind, PackageKind, Site, TypeExprId,
-  TypeExprKind, Visitor, diagnostic::Excerpt,
+  Contribution, Cx, DefId, DefKind, Diagnostic, DiagnosticKind, NamedTypeExpr, PackageKind, Site,
+  TypeExprId, TypeExprKind, Visitor, diagnostic::Excerpt,
 };
 
 use super::{Nesting, Silence, own_contribution};
@@ -112,7 +112,7 @@ impl Visitor for MarkerMisuse {
     let kind = DiagnosticKind::MarkerMisuse;
     // The definition the occurrence names; none for a type parameter, which is no marker.
     let interface = match occurrence.kind() {
-      TypeExprKind::Named { def: named, .. } => Some(model.def(named)),
+      TypeExprKind::Named(NamedTypeExpr { def: named, .. }) => Some(model.def(named)),
       TypeExprKind::Param { .. } => None,
       _ => return,
     };

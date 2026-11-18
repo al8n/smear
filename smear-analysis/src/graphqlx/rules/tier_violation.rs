@@ -51,8 +51,8 @@ use std::{collections::BTreeMap, format, vec, vec::Vec};
 
 use crate::graphqlx::{
   ApplicationArgument, ApplicationId, Cx, DefId, DefKind, Diagnostic, DiagnosticKind, MemberId,
-  MemberKind, Model, Origin, Resolution, Site, Tier, TypeExprId, TypeExprKind, TypeParam, Visitor,
-  diagnostic::Excerpt,
+  MemberKind, Model, NamedTypeExpr, Origin, Resolution, Site, Tier, TypeExprId, TypeExprKind,
+  TypeParam, Visitor, diagnostic::Excerpt,
 };
 
 use super::Silence;
@@ -170,7 +170,7 @@ impl Visitor for TierViolation {
           ))
           .build(),
       ),
-      TypeExprKind::Named { def, args, .. } => {
+      TypeExprKind::Named(NamedTypeExpr { def, args }) => {
         let home = model.module(model.def(def).module()).package();
         if home == writer {
           return;

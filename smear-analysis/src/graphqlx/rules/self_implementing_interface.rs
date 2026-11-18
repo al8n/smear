@@ -21,7 +21,7 @@ use std::{format, vec::Vec};
 use smear_semantics::scc;
 
 use crate::graphqlx::{
-  Contribution, Cx, DefId, DefKind, Diagnostic, TypeExprKind, Visitor, code::schema,
+  Contribution, Cx, DefId, DefKind, Diagnostic, NamedTypeExpr, TypeExprKind, Visitor, code::schema,
   diagnostic::Excerpt, id::dense,
 };
 
@@ -56,7 +56,8 @@ impl Visitor for SelfImplementingInterface {
         return;
       }
       for entry in definition.implements() {
-        if let TypeExprKind::Named { def: named, .. } = model.type_expr(*entry).kind()
+        if let TypeExprKind::Named(NamedTypeExpr { def: named, .. }) =
+          model.type_expr(*entry).kind()
           && model.def(named).kind() == DefKind::Interface
         {
           reaches.push(named.get());

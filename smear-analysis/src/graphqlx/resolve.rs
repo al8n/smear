@@ -77,7 +77,7 @@ use super::{
   diagnostic::{Diagnostic, Excerpt, Reporter},
   id::{DefId, ModuleId, PackageId, SourceId, Sym, dense},
   limits::Limits,
-  model::{ModelBuilder, ModuleKind, Primitive},
+  model::{IntPrimitive, ModelBuilder, ModuleKind, Primitive},
   package::{IntegerProvider, Layout},
   set::{PackageView, ROOT},
   source::SourceMap,
@@ -1888,7 +1888,7 @@ fn kind_of(target: Target) -> &'static str {
 /// The help of a primitive whose width a package may not have.
 fn unavailable(primitive: Primitive) -> String {
   let width = match primitive {
-    Primitive::Int { width, .. } => width,
+    Primitive::Int(IntPrimitive { width, .. }) => width,
     Primitive::Bool | Primitive::F32 | Primitive::F64 => 0,
   };
   format!(

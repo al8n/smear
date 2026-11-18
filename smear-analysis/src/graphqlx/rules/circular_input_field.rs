@@ -84,7 +84,8 @@ use std::{
 };
 
 use crate::graphqlx::{
-  Contribution, Cx, DefId, DefKind, Diagnostic, MemberId, Model, TyId, TyKind, Visitor,
+  Contribution, Cx, DefId, DefKind, Diagnostic, MemberId, Model, NamedTy, TyId, TyKind,
+  TypeParamRef, Visitor,
   code::schema,
   diagnostic::Excerpt,
   id::dense,
@@ -238,8 +239,8 @@ fn alternatives_of(model: &Model, input: DefId) -> Alternatives {
       continue;
     };
     match model.ty(model.type_expr(occurrence).ty()).kind() {
-      TyKind::Param { def, index } if def == input => alternatives.params.push(index),
-      TyKind::Named { def, .. } if is_input(model, def) => alternatives.fields = true,
+      TyKind::Param(TypeParamRef { def, index }) if def == input => alternatives.params.push(index),
+      TyKind::Named(NamedTy { def, .. }) if is_input(model, def) => alternatives.fields = true,
       _ => alternatives.leaf = true,
     }
   }
@@ -338,13 +339,13 @@ impl Carried {
         let complete = model.ty(ty);
         let non_null = complete.non_null();
         match complete.kind() {
-          TyKind::Param { def, index } if def == input => {
+          TyKind::Param(TypeParamRef { def, index }) if def == input => {
             if let Some(slot) = slot(&work.base, input, index) {
               let level = if non_null { 2 } else { 1 };
               seeds.push((slot, level));
             }
           }
-          TyKind::Named { def, .. } if is_input(model, def) && non_null => {
+          TyKind::Named(NamedTy { def, .. }) if is_input(model, def) && non_null => {
             if let Some(to) = work.node(&mut stack, ty) {
               work.entries.push(Entry {
                 from: Origin::Root,
@@ -365,7 +366,7 @@ impl Carried {
       let Some(&from) = work.nodes.get(&ty) else {
         continue;
       };
-      let TyKind::Named { def: holder, args } = model.ty(ty).kind() else {
+      let TyKind::Named(NamedTy { def: holder, args }) = model.ty(ty).kind() else {
         continue;
       };
       for (position, &argument) in args.iter().enumerate() {
@@ -374,7 +375,7 @@ impl Carried {
         };
         let given = model.ty(argument);
         match given.kind() {
-          TyKind::Param { def, index } => {
+          TyKind::Param(TypeParamRef { def, index }) => {
             if let Some(target) = slot(&work.base, def, index) {
               work.rules.push(Rule {
                 from,
@@ -384,7 +385,7 @@ impl Carried {
               });
             }
           }
-          TyKind::Named { def, .. } if is_input(model, def) => {
+          TyKind::Named(NamedTy { def, .. }) if is_input(model, def) => {
             if let Some(to) = work.node(&mut stack, argument) {
               let threshold = if given.non_null() { 1 } else { 2 };
               work.entries.push(Entry {
@@ -676,7 +677,7 @@ impl Work<'_> {
       return;
     };
     let model = self.model;
-    let TyKind::Named { def, args } = model.ty(ty).kind() else {
+    let TyKind::Named(NamedTy { def, args }) = model.ty(ty).kind() else {
       return;
     };
     if self.alternatives.contains_key(&def) {
@@ -732,13 +733,13 @@ impl Work<'_> {
         continue;
       };
       match self.model.ty(argument).kind() {
-        TyKind::Param { def: holder, index } => {
+        TyKind::Param(TypeParamRef { def: holder, index }) => {
           if let Some(slot) = slot(&self.base, holder, index) {
             owner = Some(holder);
             slots.push(slot);
           }
         }
-        TyKind::Named { def: inner, .. } if is_input(self.model, inner) => {
+        TyKind::Named(NamedTy { def: inner, .. }) if is_input(self.model, inner) => {
           others.push(Other::Ty(argument));
         }
         // A scalar, an enum, a list: an alternative a finite value always satisfies.
@@ -760,7 +761,7 @@ impl Work<'_> {
       return;
     };
     let model = self.model;
-    let TyKind::Named { def: holder, args } = model.ty(ty).kind() else {
+    let TyKind::Named(NamedTy { def: holder, args }) = model.ty(ty).kind() else {
       return;
     };
     let Some(group) = self.groups.get(id as usize) else {
@@ -781,13 +782,15 @@ impl Work<'_> {
         continue;
       };
       match model.ty(argument).kind() {
-        TyKind::Param { def, index } => {
+        TyKind::Param(TypeParamRef { def, index }) => {
           if let Some(slot) = slot(&self.base, def, index) {
             owner = Some(def);
             slots.push(slot);
           }
         }
-        TyKind::Named { def, .. } if is_input(model, def) => others.push(Other::Ty(argument)),
+        TyKind::Named(NamedTy { def, .. }) if is_input(model, def) => {
+          others.push(Other::Ty(argument))
+        }
         _ => return,
       }
     }
@@ -955,7 +958,7 @@ impl Requirements<'_> {
           continue;
         }
         match self.model.ty(ty).kind() {
-          TyKind::Named { def, .. } if is_input(self.model, def) => {
+          TyKind::Named(NamedTy { def, .. }) if is_input(self.model, def) => {
             if let Some(target) = self.requirement(ty) {
               self.edges.push((node, target, !non_null, Some(field)));
             }
@@ -1028,7 +1031,7 @@ impl Requirements<'_> {
             continue;
           };
           let ty = model.type_expr(occurrence).ty();
-          if let TyKind::Named { def: inner, .. } = model.ty(ty).kind()
+          if let TyKind::Named(NamedTy { def: inner, .. }) = model.ty(ty).kind()
             && is_input(model, inner)
             && let Some(target) = self.requirement(ty)
           {
@@ -1042,7 +1045,7 @@ impl Requirements<'_> {
   /// The node `ty`, an input object's type, requires: its definition's for one with no argument,
   /// and its own for an instantiation, made the first time.
   fn requirement(&mut self, ty: TyId) -> Option<u32> {
-    let TyKind::Named { def, args } = self.model.ty(ty).kind() else {
+    let TyKind::Named(NamedTy { def, args }) = self.model.ty(ty).kind() else {
       return None;
     };
     if args.is_empty() {
@@ -1074,7 +1077,7 @@ impl Requirements<'_> {
   /// Makes the edges of `node`, the requirement of the instantiation `ty`.
   fn instantiation(&mut self, node: u32, ty: TyId) {
     let carried = self.carried;
-    let TyKind::Named { def, args } = self.model.ty(ty).kind() else {
+    let TyKind::Named(NamedTy { def, args }) = self.model.ty(ty).kind() else {
       return;
     };
     if let Some(alternatives) = carried.alternatives(def) {
@@ -1092,7 +1095,7 @@ impl Requirements<'_> {
         continue;
       }
       // A slot an ordinary input object carries passes no field of a OneOf: a OneOf carries none.
-      if let TyKind::Named { def: inner, .. } = self.model.ty(argument).kind()
+      if let TyKind::Named(NamedTy { def: inner, .. }) = self.model.ty(argument).kind()
         && is_input(self.model, inner)
         && let Some(target) = self.requirement(argument)
       {
@@ -1126,7 +1129,7 @@ impl Requirements<'_> {
         continue;
       };
       match model.ty(argument).kind() {
-        TyKind::Named { def: inner, .. } if is_input(model, inner) => {
+        TyKind::Named(NamedTy { def: inner, .. }) if is_input(model, inner) => {
           if let Some(target) = self.requirement(argument) {
             self.edges.push((node, target, true, None));
           }
@@ -1165,7 +1168,7 @@ impl Requirements<'_> {
         continue;
       };
       match model.ty(argument).kind() {
-        TyKind::Named { def: inner, .. } if is_input(model, inner) => {
+        TyKind::Named(NamedTy { def: inner, .. }) if is_input(model, inner) => {
           if let Some(target) = self.requirement(argument) {
             self.edges.push((any, target, true, None));
           }

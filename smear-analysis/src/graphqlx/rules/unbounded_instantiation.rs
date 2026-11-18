@@ -36,8 +36,9 @@ use smear_semantics::scc;
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  ApplicationId, Cx, DefId, Diagnostic, DiagnosticKind, MemberId, Model, Resolution, Site, Ty,
-  TyId, TyKind, TypeExprId, TypeExprKind, TypeParam, Visitor, diagnostic::Excerpt,
+  ApplicationId, Cx, DefId, Diagnostic, DiagnosticKind, MemberId, Model, NamedTy, NamedTypeExpr,
+  Resolution, Site, Ty, TyId, TyKind, TypeExprId, TypeExprKind, TypeParam, TypeParamRef, Visitor,
+  diagnostic::Excerpt,
 };
 
 /// The label at a written type argument that grows.
@@ -191,12 +192,12 @@ impl Visitor for UnboundedInstantiation {
       return;
     }
     // A list is never marked, and holds only what its element, which is written, holds.
-    let TyKind::Named { def, .. } = model.ty(own).kind() else {
+    let TyKind::Named(NamedTy { def, .. }) = model.ty(own).kind() else {
       return;
     };
     // An occurrence whose own type is a named type is a named occurrence.
     let written: &[TypeExprId] = match occurrence.kind() {
-      TypeExprKind::Named { args, .. } => args,
+      TypeExprKind::Named(NamedTypeExpr { args, .. }) => args,
       TypeExprKind::Param { .. } | TypeExprKind::List { .. } | TypeExprKind::Unresolved => &[],
     };
     let name = Excerpt(model.def(def).name().as_bytes());
@@ -511,7 +512,7 @@ impl<'a> Build<'a> {
       return Ok(None);
     }
     match view.kind() {
-      TyKind::Param { def, index } => Ok(self.param(def, index).map(Tail::Param)),
+      TyKind::Param(TypeParamRef { def, index }) => Ok(self.param(def, index).map(Tail::Param)),
       TyKind::Named { .. } | TyKind::List { .. } => {
         self.node(ty).map(|node: u32| Some(Tail::Type(node)))
       }
@@ -560,14 +561,14 @@ impl<'a> Build<'a> {
         continue;
       }
       match view.kind() {
-        TyKind::List { element } => {
+        TyKind::List(element) => {
           let holder = self.node(ty)?;
           if let Some(tail) = self.tail(element)? {
             self.contain(tail, holder);
           }
           self.pending.push(element);
         }
-        TyKind::Named { def, args } => {
+        TyKind::Named(NamedTy { def, args }) => {
           let holder = self.node(ty)?;
           for (position, &argument) in args.iter().enumerate() {
             let index = number(position)?;
@@ -597,8 +598,8 @@ impl<'a> Build<'a> {
       let occurrence = model.type_expr(id);
       self.enter(occurrence.ty())?;
       match occurrence.kind() {
-        TypeExprKind::Named { args, .. } => self.occurrences.extend_from_slice(args),
-        TypeExprKind::List { element } => self.occurrences.push(element),
+        TypeExprKind::Named(NamedTypeExpr { args, .. }) => self.occurrences.extend_from_slice(args),
+        TypeExprKind::List(element) => self.occurrences.push(element),
         TypeExprKind::Param { .. } | TypeExprKind::Unresolved => {}
       }
     }
@@ -764,7 +765,7 @@ impl<'a> Build<'a> {
         continue;
       };
       let default = match ty.kind() {
-        TyKind::Named { def, .. } => model
+        TyKind::Named(NamedTy { def, .. }) => model
           .def(def)
           .type_params()
           .nth(index as usize)
@@ -783,11 +784,11 @@ impl<'a> Build<'a> {
   /// `0` for a list whose element holds one; `None` when nothing it holds does.
   fn held(&self, ty: Ty<'_>) -> Option<u32> {
     match ty.kind() {
-      TyKind::Named { args, .. } => args
+      TyKind::Named(NamedTy { args, .. }) => args
         .iter()
         .position(|argument: &TyId| holds(&self.found, *argument))
         .and_then(|position: usize| u32::try_from(position).ok()),
-      TyKind::List { element } => holds(&self.found, element).then_some(0),
+      TyKind::List(element) => holds(&self.found, element).then_some(0),
       TyKind::Param { .. } | TyKind::Unresolved => None,
     }
   }

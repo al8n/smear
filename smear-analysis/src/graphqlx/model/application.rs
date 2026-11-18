@@ -115,7 +115,7 @@ impl Model {
 ///     match (name, model.value(argument.value()).kind()) {
 ///       ("lang", ValueKind::String(text)) => lang = Some(text),
 ///       ("type", ValueKind::String(text)) => host = Some(text),
-///       ("for", ValueKind::Type { def, .. }) => target = Some(def),
+///       ("for", ValueKind::Type(def)) => target = Some(def),
 ///       _ => {}
 ///     }
 ///   }

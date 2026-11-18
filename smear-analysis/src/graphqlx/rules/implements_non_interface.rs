@@ -18,7 +18,8 @@
 use std::{format, string::String};
 
 use crate::graphqlx::{
-  Cx, DefId, DefKind, Diagnostic, Path, TypeExprKind, Visitor, code::schema, diagnostic::Excerpt,
+  Cx, DefId, DefKind, Diagnostic, NamedTypeExpr, Path, TypeExprKind, Visitor, code::schema,
+  diagnostic::Excerpt,
 };
 
 use super::supplied;
@@ -60,7 +61,7 @@ impl Visitor for ImplementsNonInterface {
       for entry in part.implements() {
         let occurrence = model.type_expr(*entry);
         let what: String = match occurrence.kind() {
-          TypeExprKind::Named { def: named, .. } => {
+          TypeExprKind::Named(NamedTypeExpr { def: named, .. }) => {
             let named = model.def(named);
             let kind = match named.kind() {
               DefKind::Interface => continue,

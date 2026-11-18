@@ -27,15 +27,19 @@ pub use build::ModelBuilder;
 pub(crate) use build::{Bytes, Occurrence, Segments, Shape, Stored, Text, Written};
 pub use def::{
   Collection, Contribution, Contributions, Def, DefKind, DirectiveLocation, Extern, Externs,
-  Origin, Primitive, TypeBound, TypeParam, TypeParams,
+  IntPrimitive, Origin, Primitive, TypeBound, TypeParam, TypeParams,
 };
 pub use member::{Member, MemberKind};
 pub use module::{Module, ModuleKind};
 pub use name::{CanonicalName, Description, Namespace};
 pub(crate) use satisfy::{Keys, Steps};
 pub use schema::{Builtins, Root, RootOperation, Schema};
-pub use ty::{Path, PathRoot, Ty, TyKind, TypeExpr, TypeExprKind};
-pub use value::{FloatValue, IntValue, Literal, LiteralKind, ObjectEntry, Value, ValueKind};
+pub use ty::{
+  NamedTy, NamedTypeExpr, Path, PathRoot, Ty, TyKind, TypeExpr, TypeExprKind, TypeParamRef,
+};
+pub use value::{
+  EnumValueRef, FloatValue, IntValue, Literal, LiteralKind, ObjectEntry, Value, ValueKind,
+};
 
 use super::{
   id::{
@@ -359,8 +363,10 @@ const _: () = {
   let _ = assert_send_sync::<Description<'static>>;
   let _ = assert_send_sync::<TypeExpr<'static>>;
   let _ = assert_send_sync::<TypeExprKind<'static>>;
+  let _ = assert_send_sync::<NamedTypeExpr<'static>>;
   let _ = assert_send_sync::<Ty<'static>>;
   let _ = assert_send_sync::<TyKind<'static>>;
+  let _ = assert_send_sync::<NamedTy<'static>>;
   let _ = assert_send_sync::<Path<'static>>;
   let _ = assert_send_sync::<Value<'static>>;
   let _ = assert_send_sync::<ValueKind<'static>>;

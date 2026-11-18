@@ -60,7 +60,7 @@ use tokora::diagnostic::{Code, Location};
 
 use crate::graphqlx::{
   ApplicationId, Collection, Contribution, Cx, DefId, Diagnostic, MemberId, MemberKind, Model,
-  Resolution, TyId, TyKind, TypeExprId, TypeExprKind, Visitor,
+  NamedTy, NamedTypeExpr, Resolution, TyId, TyKind, TypeExprId, TypeExprKind, Visitor,
   code::schema,
   diagnostic::Excerpt,
   id::dense,
@@ -248,7 +248,7 @@ impl Visitor for DeprecatedRequired {
     if let Some(report) = self.forced(model, cx.def(), occurrence.location()) {
       cx.report(report);
     }
-    let TypeExprKind::Named { args: written, .. } = occurrence.kind() else {
+    let TypeExprKind::Named(NamedTypeExpr { args: written, .. }) = occurrence.kind() else {
       return;
     };
     let complete = occurrence.ty();
@@ -290,7 +290,7 @@ impl DeprecatedRequired {
   /// `written` type arguments is refused for: its type's own failure, else one among what its
   /// fill derives.
   fn judge(&mut self, model: &Model, ty: TyId, written: u32) -> Option<Found> {
-    let TyKind::Named { args, .. } = model.ty(ty).kind() else {
+    let TyKind::Named(NamedTy { args, .. }) = model.ty(ty).kind() else {
       return None;
     };
     if args.is_empty() {
@@ -445,7 +445,7 @@ fn verdict(
     return *kept;
   }
   let mut found: Option<Own> = None;
-  if let TyKind::Named { def, args } = model.ty(ty).kind() {
+  if let TyKind::Named(NamedTy { def, args }) = model.ty(ty).kind() {
     'arguments: for (slot, argument) in args.iter().enumerate() {
       if !model.ty(*argument).non_null() {
         continue;

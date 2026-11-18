@@ -2,6 +2,7 @@
 
 use core::num::NonZeroU32;
 
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
@@ -63,75 +64,126 @@ impl<'a> Path<'a> {
 }
 
 /// What one written type occurrence is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum TypeExprKind<'a> {
   /// A definition, and the arguments written for it.
-  #[non_exhaustive]
-  Named {
-    /// The definition it names.
-    def: DefId,
-    /// The arguments as written, in order: fewer than the definition's parameters when trailing
-    /// defaults fill the rest, and none for an alias such as `NonZeroU32`. The complete
-    /// instantiation is the occurrence's type.
-    args: &'a [TypeExprId],
-  },
-  /// One of a definition's type parameters.
-  #[non_exhaustive]
-  Param {
-    /// The definition the parameter belongs to.
-    def: DefId,
-    /// The parameter's position: its index among the definition's type parameters. An extension
-    /// names its target's parameters by position, so a name it gives past them has a position
-    /// past them too; and a definition that replaces a GraphQL built-in declares no parameter, so
-    /// a name its refused list gives has a position no parameter has. Each such list is refused
-    /// where it is written, and the occurrence's type is the unresolved one.
-    index: u32,
-  },
-  /// A list.
-  #[non_exhaustive]
-  List {
-    /// Its element, as written.
-    element: TypeExprId,
-  },
+  Named(NamedTypeExpr<'a>),
+  /// One of a definition's type parameters, by its [`index`](TypeParamRef::index), which may lie
+  /// past every parameter the definition has: an extension names its target's parameters by
+  /// position, so a name it gives past them has a position past them too; and a definition that
+  /// replaces a GraphQL built-in declares no parameter, so a name its refused list gives has a
+  /// position no parameter has. Each such list is refused where it is written, and the
+  /// occurrence's type is the unresolved one.
+  Param(TypeParamRef),
+  /// A list, of its element as written.
+  List(TypeExprId),
   /// A path that did not resolve. Only an analysis that is not ok has one, within the extent of
   /// the error that says why.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Unresolved,
 }
 
-/// What one type is: the shapes of [`TypeExprKind`], with every argument a type.
+/// A definition, and the arguments written for it: [`TypeExprKind::Named`]'s payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NamedTypeExpr<'a> {
+  pub(crate) def: DefId,
+  pub(crate) args: &'a [TypeExprId],
+}
+
+impl<'a> NamedTypeExpr<'a> {
+  /// The definition it names.
+  #[inline]
+  pub const fn def(&self) -> DefId {
+    self.def
+  }
+
+  /// The arguments as written, in order: fewer than the definition's parameters when trailing
+  /// defaults fill the rest, and none for an alias such as `NonZeroU32`. The complete
+  /// instantiation is the occurrence's type.
+  #[inline]
+  pub const fn args(&self) -> &'a [TypeExprId] {
+    self.args
+  }
+}
+
+/// One of a definition's type parameters, by its position: [`TypeExprKind::Param`]'s and
+/// [`TyKind::Param`]'s payload. What the position may be is each variant's to say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TypeParamRef {
+  pub(crate) def: DefId,
+  pub(crate) index: u32,
+}
+
+impl TypeParamRef {
+  /// The definition the parameter belongs to.
+  #[inline]
+  pub const fn def(&self) -> DefId {
+    self.def
+  }
+
+  /// The parameter's position: its index among the definition's type parameters.
+  #[inline]
+  pub const fn index(&self) -> u32 {
+    self.index
+  }
+}
+
+/// What one type is: the shapes of [`TypeExprKind`], with every argument a type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum TyKind<'a> {
   /// A definition with every argument it has: the written ones, then the defaults that filled the
   /// rest, substituted, with an alias expanded.
-  #[non_exhaustive]
-  Named {
-    /// The definition.
-    def: DefId,
-    /// Every argument, in the definition's order. A collection's key or element, the first
-    /// argument of a definition `@set` or `@map` makes one, is non-null here however it is written,
-    /// so it may differ in nullness from the type of the occurrence that writes it.
-    args: &'a [TyId],
-  },
+  Named(NamedTy<'a>),
   /// One of a definition's type parameters: the `T` of `Page<T>` and the `U` of `Cursor<U>` are
   /// two types.
-  #[non_exhaustive]
-  Param {
-    /// The definition the parameter belongs to.
-    def: DefId,
-    /// The parameter's index among the definition's type parameters.
-    index: u32,
-  },
-  /// A list.
-  #[non_exhaustive]
-  List {
-    /// Its element.
-    element: TyId,
-  },
+  Param(TypeParamRef),
+  /// A list, of its element.
+  List(TyId),
   /// The one type every unresolved occurrence shares, which a rule tests for before it compares
   /// two types.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Unresolved,
+}
+
+/// A definition with every argument it has: [`TyKind::Named`]'s payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NamedTy<'a> {
+  pub(crate) def: DefId,
+  pub(crate) args: &'a [TyId],
+}
+
+impl<'a> NamedTy<'a> {
+  /// The type `def` names, with `args`, every argument it has.
+  ///
+  /// Crate-private: the model builds these, and nothing outside the crate has a model to point
+  /// into.
+  #[inline]
+  pub(crate) const fn new(def: DefId, args: &'a [TyId]) -> Self {
+    Self { def, args }
+  }
+
+  /// The definition.
+  #[inline]
+  pub const fn def(&self) -> DefId {
+    self.def
+  }
+
+  /// Every argument, in the definition's order: the written ones, then the defaults that filled
+  /// the rest. A collection's key or element, the first argument of a definition `@set` or `@map`
+  /// makes one, is non-null here however it is written, so it may differ in nullness from the type
+  /// of the occurrence that writes it.
+  #[inline]
+  pub const fn args(&self) -> &'a [TyId] {
+    self.args
+  }
 }
 
 impl Model {
@@ -210,11 +262,11 @@ impl Model {
   /// let instantiations = model.instantiations(page);
   /// assert_eq!(instantiations.len(), 2);
   /// for &ty in instantiations {
-  ///   let TyKind::Named { def, args, .. } = model.ty(ty).kind() else {
+  ///   let TyKind::Named(named) = model.ty(ty).kind() else {
   ///     panic!("an instantiation is a named type");
   ///   };
-  ///   assert_eq!(def, page);
-  ///   assert_eq!(args.len(), 1);
+  ///   assert_eq!(named.def(), page);
+  ///   assert_eq!(named.args().len(), 1);
   /// }
   /// ```
   //
@@ -313,17 +365,15 @@ impl<'a> TypeExpr<'a> {
     let model: &'a Model = self.model;
     let row = self.row();
     match row.shape {
-      KIND_NAMED => TypeExprKind::Named {
+      KIND_NAMED => TypeExprKind::Named(NamedTypeExpr {
         def: row.def,
         args: row.args.of(&model.type_expr_args),
-      },
-      KIND_PARAM => TypeExprKind::Param {
+      }),
+      KIND_PARAM => TypeExprKind::Param(TypeParamRef {
         def: row.def,
         index: row.index,
-      },
-      KIND_LIST => TypeExprKind::List {
-        element: row.element,
-      },
+      }),
+      KIND_LIST => TypeExprKind::List(row.element),
       KIND_UNRESOLVED => TypeExprKind::Unresolved,
       _ => TypeExprKind::Unresolved,
     }
@@ -367,8 +417,9 @@ impl<'a> TypeExpr<'a> {
 
   /// The arguments as written, in order, whatever the occurrence resolved to: one that did not
   /// resolve, or that names a type parameter, keeps those it was written with. They are the same
-  /// as [`kind`](Self::kind)'s `args` for a named occurrence, and the walk reaches them for every
-  /// shape. A list has none: its element is the one [`kind`](Self::kind) answers.
+  /// as [`kind`](Self::kind)'s [`args`](NamedTypeExpr::args) for a named occurrence, and the walk
+  /// reaches them for every shape. A list has none: its element is the one [`kind`](Self::kind)
+  /// answers.
   #[inline]
   pub fn written_args(&self) -> &'a [TypeExprId] {
     let model: &'a Model = self.model;
@@ -415,17 +466,12 @@ impl<'a> Ty<'a> {
     let model: &'a Model = self.model;
     let row = self.row();
     match row.shape {
-      KIND_NAMED => TyKind::Named {
-        def: row.def,
-        args: row.args.of(&model.ty_args),
-      },
-      KIND_PARAM => TyKind::Param {
+      KIND_NAMED => TyKind::Named(NamedTy::new(row.def, row.args.of(&model.ty_args))),
+      KIND_PARAM => TyKind::Param(TypeParamRef {
         def: row.def,
         index: row.index,
-      },
-      KIND_LIST => TyKind::List {
-        element: row.element,
-      },
+      }),
+      KIND_LIST => TyKind::List(row.element),
       KIND_UNRESOLVED => TyKind::Unresolved,
       _ => TyKind::Unresolved,
     }

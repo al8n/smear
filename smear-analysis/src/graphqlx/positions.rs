@@ -139,8 +139,9 @@ use std::{
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  ApplicationId, DefId, DefKind, MemberId, MemberKind, Model, Resolution, SourceMap, TyId, TyKind,
-  TypeExprId, TypeExprKind, diagnostic::Excerpt, id::dense, rules::one_of_in,
+  ApplicationId, DefId, DefKind, MemberId, MemberKind, Model, NamedTy, NamedTypeExpr, Resolution,
+  SourceMap, TyId, TyKind, TypeExprId, TypeExprKind, TypeParamRef, diagnostic::Excerpt, id::dense,
+  rules::one_of_in,
 };
 
 /// A class of type a position takes.
@@ -410,17 +411,17 @@ fn containment(model: &Model, base: &[u32]) -> Vec<bool> {
       continue;
     };
     match model.ty(ty).kind() {
-      TyKind::Param { def, index } => {
+      TyKind::Param(TypeParamRef { def, index }) => {
         if let Some(slot) = slot(base, def, index) {
           steps.push((from, Step::Param(slot)));
         }
       }
-      TyKind::List { element } => {
+      TyKind::List(element) => {
         if let Some(to) = node_of(&mut types, &mut stack, element) {
           steps.push((from, Step::Always(to)));
         }
       }
-      TyKind::Named { def, args } => {
+      TyKind::Named(NamedTy { def, args }) => {
         let definition = model.def(def);
         let input = definition.kind() == DefKind::InputObject;
         if definition.collection().is_some() || input {
@@ -635,7 +636,7 @@ impl Graph<'_> {
       self.operations.push((node, at));
     }
     let complete = model.ty(occurrence.ty());
-    let TyKind::Param { def, .. } = complete.kind() else {
+    let TyKind::Param(TypeParamRef { def, .. }) = complete.kind() else {
       return;
     };
     if def != written.owner() || complete.non_null() {
@@ -684,7 +685,7 @@ impl Graph<'_> {
     if complete.is_closed() {
       return;
     }
-    let TyKind::Named { def, args } = complete.kind() else {
+    let TyKind::Named(NamedTy { def, args }) = complete.kind() else {
       return;
     };
     let written = application.type_args();
@@ -725,7 +726,7 @@ impl Graph<'_> {
         continue;
       };
       match model.ty(ty).kind() {
-        TyKind::Param { def, index } => {
+        TyKind::Param(TypeParamRef { def, index }) => {
           if let Some(to) = slot(self.base, def, index) {
             // A type parameter given non-null, `T!`: the instantiation that gives it to a member's
             // whole type is refused where it is written, for its `!`, as any is, whatever the slot
@@ -734,12 +735,12 @@ impl Graph<'_> {
             self.edges.push((from, to, at, model.ty(ty).non_null()));
           }
         }
-        TyKind::List { element } => {
+        TyKind::List(element) => {
           if let Some(to) = self.open(model, element, at) {
             self.edges.push((from, to, at, true));
           }
         }
-        TyKind::Named { def, args } => {
+        TyKind::Named(NamedTy { def, args }) => {
           let definition = model.def(def);
           let collection = definition.collection().is_some();
           // An enum hides its arguments: it takes no type parameter, as the generic-enum rule
@@ -1099,17 +1100,19 @@ impl Fits {
     };
     let filled = match (way.under, model.ty(ty).kind()) {
       (Under::Element, TyKind::List { .. }) => match written.kind() {
-        TypeExprKind::List { element } => return Check::Child(element, false),
+        TypeExprKind::List(element) => return Check::Child(element, false),
         // The tree writes no list where the way goes down one.
         _ => None,
       },
-      (Under::Argument(index), TyKind::Named { def, args }) => {
+      (Under::Argument(index), TyKind::Named(NamedTy { def, args })) => {
         // The way down a collection goes to one of its arguments.
         if args.get(index as usize).is_none() {
           return Check::Answer(None);
         }
         let child = match written.kind() {
-          TypeExprKind::Named { args: given, .. } => given.get(index as usize).copied(),
+          TypeExprKind::Named(NamedTypeExpr { args: given, .. }) => {
+            given.get(index as usize).copied()
+          }
           _ => None,
         };
         if let Some(child) = child {
@@ -1143,7 +1146,7 @@ impl Fits {
         continue;
       }
       let way = match model.ty(next).kind() {
-        TyKind::List { element } => {
+        TyKind::List(element) => {
           if !pushed {
             self.stack.push((next, true));
             self.stack.push((element, false));
@@ -1154,7 +1157,7 @@ impl Fits {
             ..below
           })
         }
-        TyKind::Named { def, args } if model.def(def).collection().is_some() => {
+        TyKind::Named(NamedTy { def, args }) if model.def(def).collection().is_some() => {
           if !pushed {
             self.stack.push((next, true));
             self
@@ -1174,7 +1177,7 @@ impl Fits {
               })
             })
         }
-        TyKind::Named { def, .. } => leaf(def, model.def(def).kind(), class),
+        TyKind::Named(NamedTy { def, .. }) => leaf(def, model.def(def).kind(), class),
         TyKind::Param { .. } | TyKind::Unresolved => None,
       };
       self.judged.insert((next, class), way);
@@ -1311,7 +1314,7 @@ impl<V: Copy> Derived<V> {
       return *kept;
     }
     let mut found: Option<Fill<V>> = None;
-    if let TyKind::Named { def, args } = model.ty(ty).kind()
+    if let TyKind::Named(NamedTy { def, args }) = model.ty(ty).kind()
       && args.len() > written as usize
       && self
         .refused(model, def, &mut judge)
@@ -1430,7 +1433,7 @@ impl<V: Copy> Derived<V> {
     judge: &mut impl FnMut(TyId) -> Option<V>,
   ) -> Option<Option<Failure<V>>> {
     match model.ty(ty).kind() {
-      TyKind::Named { def, args } => {
+      TyKind::Named(NamedTy { def, args }) => {
         if look == Look::Fill && self.writes(model, ty) {
           return Some(None);
         }
@@ -1460,8 +1463,8 @@ impl<V: Copy> Derived<V> {
 /// The argument `index` of `ty`, of `model`, or its element: what a type holds, in order.
 fn held_at(model: &Model, ty: TyId, index: u32) -> Option<TyId> {
   match model.ty(ty).kind() {
-    TyKind::Named { args, .. } => args.get(index as usize).copied(),
-    TyKind::List { element } => (index == 0).then_some(element),
+    TyKind::Named(NamedTy { args, .. }) => args.get(index as usize).copied(),
+    TyKind::List(element) => (index == 0).then_some(element),
     TyKind::Param { .. } | TyKind::Unresolved => None,
   }
 }
@@ -1475,11 +1478,11 @@ fn written_types(model: &Model) -> Vec<TyId> {
   let mut written: Vec<TyId> = Vec::new();
   for id in model.type_exprs() {
     let occurrence = model.type_expr(id);
-    let TypeExprKind::Named { args: given, .. } = occurrence.kind() else {
+    let TypeExprKind::Named(NamedTypeExpr { args: given, .. }) = occurrence.kind() else {
       continue;
     };
     let ty = occurrence.ty();
-    let TyKind::Named { args, .. } = model.ty(ty).kind() else {
+    let TyKind::Named(NamedTy { args, .. }) = model.ty(ty).kind() else {
       continue;
     };
     if args.is_empty() {
@@ -1524,7 +1527,7 @@ pub(crate) fn taking(
   slot: u32,
   derived: Option<(u32, TyId)>,
 ) -> Option<Taking> {
-  let TyKind::Named { def, args } = model.ty(ty).kind() else {
+  let TyKind::Named(NamedTy { def, args }) = model.ty(ty).kind() else {
     return None;
   };
   let definition = Excerpt(model.def(def).name().as_bytes());
@@ -1557,10 +1560,10 @@ pub(crate) fn taking(
       },
     });
   };
-  let TyKind::Named {
+  let TyKind::Named(NamedTy {
     def: derived_def,
     args: derived_args,
-  } = model.ty(derived).kind()
+  }) = model.ty(derived).kind()
   else {
     return None;
   };

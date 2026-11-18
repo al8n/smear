@@ -349,8 +349,8 @@ use super::{
   id::{ApplicationId, DefId, MemberId, SourceId, Sym, TyId, TypeExprId, ValueId, dense},
   instantiate::{applies, binding, own_package},
   model::{
-    Bytes, Collection, DefKind, LiteralKind, ModelBuilder, Primitive, Resolution, Shape, Text,
-    Written,
+    Bytes, Collection, DefKind, IntPrimitive, LiteralKind, ModelBuilder, Primitive, Resolution,
+    Shape, Text, Written,
   },
   raw::{Radix, RawArgument, RawKind, RawNode, RawPath, RawTree, RawValues, UNREAD},
   resolve::{Position, Request, Resolved, Root, Scopes, Segment, Wanted},
@@ -3776,7 +3776,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         Primitive::Bool => Base::Bool,
         Primitive::F32 => Base::Float { single: true },
         Primitive::F64 => Base::Float { single: false },
-        Primitive::Int { signed, width } => Base::Int(Range {
+        Primitive::Int(IntPrimitive { signed, width }) => Base::Int(Range {
           signed,
           width,
           non_zero: false,
@@ -3822,7 +3822,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       return None;
     };
     match self.primitive(def)? {
-      Primitive::Int { signed, width } if width >= 1 => Some(Range {
+      Primitive::Int(IntPrimitive { signed, width }) if width >= 1 => Some(Range {
         signed,
         width,
         non_zero: true,

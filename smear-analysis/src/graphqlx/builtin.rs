@@ -32,7 +32,7 @@
 use std::{format, string::String};
 
 use super::{
-  model::{DefKind, Primitive},
+  model::{DefKind, IntPrimitive, Primitive},
   package::{IntegerProvider, Tier},
 };
 
@@ -444,7 +444,9 @@ pub(crate) fn spelled(primitive: Primitive) -> String {
     Primitive::Bool => String::from("bool"),
     Primitive::F32 => String::from("f32"),
     Primitive::F64 => String::from("f64"),
-    Primitive::Int { signed, width } => format!("{}{width}", if signed { 'i' } else { 'u' }),
+    Primitive::Int(IntPrimitive { signed, width }) => {
+      format!("{}{width}", if signed { 'i' } else { 'u' })
+    }
   }
 }
 
@@ -494,7 +496,7 @@ pub(crate) fn written(spelling: &[u8]) -> Option<Primitive> {
 /// gives that signedness.
 pub(crate) fn available(primitive: Primitive, integers: Option<&IntegerProvider>) -> bool {
   match primitive {
-    Primitive::Int { signed, width } => {
+    Primitive::Int(IntPrimitive { signed, width }) => {
       CORE_WIDTHS.contains(&width)
         || integers.is_some_and(|provider: &IntegerProvider| {
           let range = if signed {

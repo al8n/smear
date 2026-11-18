@@ -17,7 +17,8 @@
 //! The rule reads the public model and nothing else.
 
 use crate::graphqlx::{
-  Cx, Diagnostic, DiagnosticKind, Primitive, TyKind, TypeExprId, TypeExprKind, Visitor,
+  Cx, Diagnostic, DiagnosticKind, IntPrimitive, NamedTy, NamedTypeExpr, Primitive, TyKind,
+  TypeExprId, TypeExprKind, Visitor,
 };
 
 use super::Silence;
@@ -56,10 +57,10 @@ impl Visitor for NonZeroArgument {
     let model = cx.model();
     let occurrence = model.type_expr(ty);
     let non_zero = model.builtins().non_zero();
-    let TypeExprKind::Named {
+    let TypeExprKind::Named(NamedTypeExpr {
       def: named,
       args: written_args,
-    } = occurrence.kind()
+    }) = occurrence.kind()
     else {
       return;
     };
@@ -68,18 +69,18 @@ impl Visitor for NonZeroArgument {
     }
     // `NonZero` of its one argument, unless the occurrence has the unresolved type.
     let argument = match model.ty(occurrence.ty()).kind() {
-      TyKind::Named {
+      TyKind::Named(NamedTy {
         def,
         args: &[argument],
-      } if def == non_zero => model.ty(argument),
+      }) if def == non_zero => model.ty(argument),
       _ => return,
     };
     let integer = match argument.kind() {
-      TyKind::Named { def, args } => {
+      TyKind::Named(NamedTy { def, args }) => {
         args.is_empty()
           && matches!(
             model.def(def).intrinsic(),
-            Some(Primitive::Int { width, .. }) if width >= 1
+            Some(Primitive::Int(IntPrimitive { width, .. })) if width >= 1
           )
       }
       _ => false,

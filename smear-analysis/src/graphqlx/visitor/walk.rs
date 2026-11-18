@@ -292,7 +292,7 @@ impl<'a> Walk<'a> {
     while let Some(id) = self.types.pop() {
       visitor.type_expr(&mut self.cx, id);
       let occurrence: TypeExpr<'a> = model.type_expr(id);
-      if let TypeExprKind::List { element } = occurrence.kind() {
+      if let TypeExprKind::List(element) = occurrence.kind() {
         self.types.push(element);
       }
       // The arguments as written, whatever the occurrence resolved to: one that did not resolve
