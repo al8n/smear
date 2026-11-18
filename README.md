@@ -358,7 +358,7 @@ enumerating the members rather than by reading the umbrella's own table.
 
 ## Feature Flags
 
-Seventeen features, and five aliases. The lexer is not one of them: it is the irreducible base, the
+Eighteen features, and five aliases. The lexer is not one of them: it is the irreducible base, the
 parser cannot exist without it, and a gate that can only ever be on is not a gate.
 
 | Feature | Description | Default |
@@ -372,6 +372,7 @@ parser cannot exist without it, and a gate that can only ever be on is not a gat
 | `proto` | `smear::proto` — draft §6 query, serial mutation and subscription execution as a Sans-I/O state machine. It returns a response tree that `smear::json` writes as §7.2.1 JSON. Implies `validator`, because execution is entered with a document the §5 rules have already accepted. Adds no third-party dependency and defines no value type: the driver's own representation reaches it through a trait | |
 | `introspection` | `Schema::from_introspection`, building a schema from a draft §4 response. Implies `validator`; needs `std` or `alloc`, which it does not imply. Adds no third-party dependency | |
 | `analysis` | `smear::analysis` — the GraphQLx schema analyzer: GraphQLx packages in, a resolved model and its diagnostics out, and rules as visitors over the model, smear's own and a consumer's. Implies `parser` and `graphqlx`; needs `std` or `alloc`, which it does not imply. Adds no third-party dependency | |
+| `serde` | `Serialize` and `Deserialize` for `proto::Limits`, so a deployment can read the executor's ceilings from its own configuration; a field the input leaves out takes its default. Takes effect with `proto`, which it does not imply, and implies no tier. Adds `serde` | |
 | `materialized-numbers` | A second set of GraphQL value productions whose `Int` and `Float` leaves carry a number instead of a source slice. One tree, generic over the integer: `Int` is `i32` — the width draft §3.5.1 specifies — or `i64`, the reading that takes §2.9.1's unbounded grammar at its word and accepts literals the specification does not; a refusal names which. `Float` is `f64` at both, because draft §3.5.2 says `Float` **is** IEEE 754 double precision. **Numbers only** — strings keep their slice, because materialisation is required to allocate nothing the slice parser did not already allocate. Implies `parser` and `graphql`; adds no dependency, leaves the slice AST and the slice parser untouched, and keeps the slice parser available for the literals neither width can hold | |
 | `rowan_0_17` | The lossless CST tower, over `rowan` 0.17. Implies `parser` and no tier; the tower needs `std` | |
 | `bytes_1` | Support the `bytes::Bytes` source type, from `bytes` 1. Implies no tier | |

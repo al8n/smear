@@ -24,9 +24,10 @@ does not put the front end in the graph.
 |---------|-------------|---------|
 | `alloc` | The executor, the response tree, the request errors and the `Values` trait, without the standard library. `std` gives the same API; with neither, the crate is `no_std` and exports nothing. Implied by no feature | |
 | `std` | Standard library support, and with it the executor; it does not turn `alloc` on. Off, the crate is `no_std` | ✓ |
+| `serde` | `Serialize` and `Deserialize` for `Limits`, so a deployment can read the executor's ceilings from its own configuration; a field the input leaves out takes its default. Implies no tier | |
 
-The crate has no capability feature, so a `default-features = false` consumer names `std` or
-`alloc` itself.
+`serde` is the one feature beside the tiers and it implies neither, so a `default-features = false`
+consumer names `std` or `alloc` itself.
 
 ## Part of the Smear Ecosystem
 

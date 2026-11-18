@@ -535,6 +535,8 @@ pub use values::{Leaf, Values};
 pub mod __features {
   /// `alloc`, as this crate resolved it.
   pub const ALLOC: bool = cfg!(feature = "alloc");
+  /// `serde`, as this crate resolved it.
+  pub const SERDE: bool = cfg!(feature = "serde");
   /// `std`, as this crate resolved it.
   pub const STD: bool = cfg!(feature = "std");
 }

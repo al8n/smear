@@ -676,51 +676,65 @@ pub struct Limits {
   pub(crate) max_request_error_locations: NonZeroU32,
 }
 
+// The ten defaults a deserialised `Limits` falls back to, one per field. Gated on `serde` like the
+// attributes that name them: with the feature off nothing calls them, and an ungated one is
+// `dead_code`, which CI denies.
+
+#[cfg(feature = "serde")]
 #[inline(always)]
 const fn default_max_inflight() -> NonZeroU32 {
   DEFAULT_IN_FLIGHT
 }
 
+#[cfg(feature = "serde")]
 #[inline(always)]
 const fn default_max_response_slots() -> NonZeroU32 {
   DEFAULT_RESPONSE_SLOTS
 }
 
+#[cfg(feature = "serde")]
 #[inline(always)]
 const fn default_max_response_metadata() -> NonZeroU32 {
   DEFAULT_RESPONSE_METADATA
 }
 
+#[cfg(feature = "serde")]
 #[inline(always)]
 const fn default_max_selection_visits() -> NonZeroU32 {
   DEFAULT_SELECTION_VISITS
 }
 
+#[cfg(feature = "serde")]
 #[inline(always)]
 const fn default_max_interned_bytes() -> NonZeroU32 {
   DEFAULT_INTERNED_BYTES
 }
 
+#[cfg(feature = "serde")]
 #[inline(always)]
 const fn default_max_extension_entries() -> NonZeroU32 {
   DEFAULT_EXTENSION_ENTRIES
 }
 
+#[cfg(feature = "serde")]
 #[inline(always)]
 const fn default_max_extension_key_bytes() -> NonZeroU32 {
   DEFAULT_EXTENSION_KEY_BYTES
 }
 
+#[cfg(feature = "serde")]
 #[inline(always)]
 const fn default_max_request_errors() -> NonZeroU32 {
   DEFAULT_REQUEST_ERRORS
 }
 
+#[cfg(feature = "serde")]
 #[inline(always)]
 const fn default_max_request_error_message_bytes() -> NonZeroU32 {
   DEFAULT_REQUEST_ERROR_MESSAGE_BYTES
 }
 
+#[cfg(feature = "serde")]
 #[inline(always)]
 const fn default_max_request_error_locations() -> NonZeroU32 {
   DEFAULT_REQUEST_ERROR_LOCATIONS

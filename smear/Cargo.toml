@@ -139,6 +139,14 @@ introspection = ["validator", "smear-compiler/introspection", "smear-schema/intr
 # the edge the feature fence in `src/lib.rs` reads that crate's witnesses through.
 analysis = ["parser", "graphqlx", "dep:smear-analysis", "dep:smear-semantics"]
 
+# `Serialize` and `Deserialize` for `proto::Limits`, so a deployment can read the executor's
+# ceilings from its own configuration; a field the input leaves out takes its default. The
+# umbrella twin of `graphql-proto/serde`, forwarded weakly: without `proto` there is no `Limits`
+# and this asks `graphql-proto` for nothing, so it implies neither `proto` nor a tier. The feature
+# fence in `src/lib.rs` asserts the two agree, because the impls are not namespaced and no
+# re-export could hide them.
+serde = ["graphql-proto?/serde"]
+
 # The four source backings. Each forwards to `smear-lexer`, which is where the `Source`
 # implementations live; the `dep:` half survives only for the three this package's own test
 # targets still name by type, and the `tokora/<backing>` half is kept beside it rather than left
