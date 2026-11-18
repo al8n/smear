@@ -266,7 +266,7 @@ impl Nesting {
     let occurrence = model.type_expr(ty);
     // What the walk reaches under it: its written arguments, whatever it resolved to, or a list's
     // element.
-    let list = matches!(occurrence.kind(), TypeExprKind::List { .. });
+    let list = matches!(occurrence.kind(), TypeExprKind::List(_));
     let children = dense(occurrence.written_args().len()).saturating_add(u32::from(list));
     self.pending = self.pending.saturating_add(children);
     self.lists &= list;

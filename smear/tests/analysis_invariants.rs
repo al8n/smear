@@ -210,7 +210,8 @@ impl<'n> Invariants<'n> {
       }
       self.walked[index] = true;
       match model.ty(id).kind() {
-        TyKind::Named { def, args, .. } => {
+        TyKind::Named(named) => {
+          let (def, args) = (named.def(), named.args());
           let params = model.def(def).type_params().len();
           if args.len() != params {
             self.fail(format!(
@@ -224,7 +225,7 @@ impl<'n> Invariants<'n> {
           }
           self.pending.extend_from_slice(args);
         }
-        TyKind::List { element, .. } => self.pending.push(element),
+        TyKind::List(element) => self.pending.push(element),
         TyKind::Unresolved => self.fail(format!(
           "type {} of the {} {} is the unresolved type",
           id.get(),
@@ -293,7 +294,8 @@ impl Visitor for Invariants<'_> {
     let occurrence = model.type_expr(ty);
     match occurrence.kind() {
       TypeExprKind::Unresolved => self.fail(format!("occurrence {} is unresolved", ty.get())),
-      TypeExprKind::Named { def, args, .. } => {
+      TypeExprKind::Named(named) => {
+        let (def, args) = (named.def(), named.args());
         let params = model.def(def).type_params().len();
         if args.len() > params {
           self.fail(format!(

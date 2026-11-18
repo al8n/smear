@@ -74,7 +74,8 @@ impl Visitor for Retired {
 fn spell(model: &Model, ty: TyId) -> String {
   let ty = model.ty(ty);
   let mut text = match ty.kind() {
-    TyKind::Named { def, args, .. } => {
+    TyKind::Named(named) => {
+      let (def, args) = (named.def(), named.args());
       let mut text = model.canonical_name(def).to_string();
       if !args.is_empty() {
         let args: Vec<String> = args.iter().map(|&arg: &TyId| spell(model, arg)).collect();
@@ -84,12 +85,15 @@ fn spell(model: &Model, ty: TyId) -> String {
       }
       text
     }
-    TyKind::List { element, .. } => format!("[{}]", spell(model, element)),
-    TyKind::Param { def, index, .. } => model
-      .def(def)
+    TyKind::List(element) => format!("[{}]", spell(model, element)),
+    TyKind::Param(param) => model
+      .def(param.def())
       .type_params()
-      .nth(index as usize)
-      .map_or_else(|| format!("#{index}"), |param| param.name().to_string()),
+      .nth(param.index() as usize)
+      .map_or_else(
+        || format!("#{}", param.index()),
+        |type_param| type_param.name().to_string(),
+      ),
     _ => String::from("?"),
   };
   if ty.non_null() {
@@ -181,14 +185,16 @@ fn main() {
     .lookup(Namespace::Type, "^::app::Page")
     .expect("`app` declares `Page`");
   assert_eq!(model.type_expr(occurrence).written_args().len(), 1);
-  let TyKind::Named { def, args, .. } = model.ty(model.type_expr(occurrence).ty()).kind() else {
+  let TyKind::Named(named) = model.ty(model.type_expr(occurrence).ty()).kind() else {
     panic!("`points` is typed by a named type");
   };
+  let (def, args) = (named.def(), named.args());
   assert_eq!(def, page);
   assert_eq!(args.len(), 2);
-  let TyKind::Named { def: filled, .. } = model.ty(args[1]).kind() else {
+  let TyKind::Named(named) = model.ty(args[1]).kind() else {
     panic!("the filled argument is a named type");
   };
+  let filled = named.def();
   assert_eq!(filled, model.builtins().string());
 
   // The applications on those fields: each argument, and whether a default filled it.

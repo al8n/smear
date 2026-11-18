@@ -189,7 +189,8 @@ fn messages(analysis: &Analysis) -> Vec<String> {
 fn shown(model: &Model, id: TyId) -> String {
   let ty = model.ty(id);
   let mut text = match ty.kind() {
-    TyKind::Named { def, args, .. } => {
+    TyKind::Named(named_ty) => {
+      let (def, args) = (named_ty.def(), named_ty.args());
       let name = model.def(def).name();
       if args.is_empty() {
         String::from(name)
@@ -198,8 +199,8 @@ fn shown(model: &Model, id: TyId) -> String {
         format!("{name}<{}>", args.join(", "))
       }
     }
-    TyKind::Param { def, index, .. } => format!("{}#{index}", model.def(def).name()),
-    TyKind::List { element, .. } => format!("[{}]", shown(model, element)),
+    TyKind::Param(param) => format!("{}#{}", model.def(param.def()).name(), param.index()),
+    TyKind::List(element) => format!("[{}]", shown(model, element)),
     _ => String::from("?"),
   };
   if ty.non_null() {
@@ -1497,13 +1498,15 @@ fn the_phase_and_the_accessor_agree() {
   let mut judged = 0;
   let mut failed = 0;
   for occurrence in every_occurrence(&analysis, Packages::Root) {
-    let TypeExprKind::Named { def, .. } = model.type_expr(occurrence).kind() else {
+    let TypeExprKind::Named(named_expr) = model.type_expr(occurrence).kind() else {
       continue;
     };
+    let def = named_expr.def();
     let bounds = model.def(def).bounds();
-    let TyKind::Named { args, .. } = model.ty(model.type_expr(occurrence).ty()).kind() else {
+    let TyKind::Named(named_ty) = model.ty(model.type_expr(occurrence).ty()).kind() else {
       continue;
     };
+    let args = named_ty.args();
     if bounds.is_empty() {
       continue;
     }
@@ -1533,9 +1536,10 @@ fn the_phase_and_the_accessor_agree() {
   let model = analysis.model();
   for (owner, used, written, meant) in ASKS {
     let occurrence = field_occurrence(model, owner, used);
-    let TyKind::Named { def, args, .. } = model.ty(model.type_expr(occurrence).ty()).kind() else {
+    let TyKind::Named(named_ty) = model.ty(model.type_expr(occurrence).ty()).kind() else {
       panic!("{owner}.{used} is a named type");
     };
+    let (def, args) = (named_ty.def(), named_ty.args());
     let bound = model.def(def).bounds()[0];
     let argument = args[bound.parameter() as usize];
     let goal = field_type(model, owner, written);
@@ -1580,7 +1584,8 @@ const ORDERED_GEO: (&str, &str) = (
 fn structure(model: &Model, id: TyId) -> String {
   let ty = model.ty(id);
   let mut text = match ty.kind() {
-    TyKind::Named { def, args, .. } => {
+    TyKind::Named(named_ty) => {
+      let (def, args) = (named_ty.def(), named_ty.args());
       let name = model.def(def).name();
       if args.is_empty() {
         String::from(name)
@@ -1592,8 +1597,8 @@ fn structure(model: &Model, id: TyId) -> String {
         format!("{name}<{}>", args.join(", "))
       }
     }
-    TyKind::Param { def, index, .. } => format!("{}#{index}", model.def(def).name()),
-    TyKind::List { element, .. } => format!("[{}]", structure(model, element)),
+    TyKind::Param(param) => format!("{}#{}", model.def(param.def()).name(), param.index()),
+    TyKind::List(element) => format!("[{}]", structure(model, element)),
     _ => String::from("?"),
   };
   if ty.non_null() {

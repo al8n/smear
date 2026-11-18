@@ -183,7 +183,7 @@ fn shown(model: &Model, id: ValueId) -> String {
     ValueKind::Float(float) => format!("Float {}", float.text()),
     ValueKind::String(text) => format!("String {text:?}"),
     ValueKind::Bytes(bytes) => format!("Bytes {bytes:?}"),
-    ValueKind::Enum { .. } => format!("Enum {}", spelled(model, value.path())),
+    ValueKind::Enum(_) => format!("Enum {}", spelled(model, value.path())),
     ValueKind::List(items) => {
       let items: Vec<String> = items
         .iter()
@@ -286,7 +286,7 @@ fn a_values_type_is_the_type_it_was_coerced_against() {
   let ty = member_ty(model, input_field(model, "I", "l"));
   assert_eq!(model.value(list).ty(), ty);
   assert!(model.ty(ty).non_null());
-  let TyKind::List { element, .. } = model.ty(ty).kind() else {
+  let TyKind::List(element) = model.ty(ty).kind() else {
     panic!("`[Int!]!` is no list");
   };
   let ValueKind::List(&[item]) = model.value(list).kind() else {
@@ -395,10 +395,10 @@ fn a_lone_value_stands_for_a_list_of_itself() {
     assert_eq!(model.value(id).location(), literal);
     assert!(model.value(id).written());
   }
-  let TyKind::List { element, .. } = model.ty(ty).kind() else {
+  let TyKind::List(element) = model.ty(ty).kind() else {
     panic!("`[[Int]]` is no list");
   };
-  let TyKind::List { element: int, .. } = model.ty(element).kind() else {
+  let TyKind::List(int) = model.ty(element).kind() else {
     panic!("`[Int]` is no list");
   };
   assert_eq!(model.value(outer).ty(), ty);
@@ -971,9 +971,9 @@ fn strings_are_cooked() {
 /// The enum value `owner.name` is: its enum and its value's name.
 fn enum_of(model: &Model, owner: &str, name: &str) -> (String, String) {
   match model.value(default(model, owner, name)).kind() {
-    ValueKind::Enum { def, value, .. } => (
-      String::from(model.def(def).name()),
-      String::from(model.member(value).name()),
+    ValueKind::Enum(enum_value) => (
+      String::from(model.def(enum_value.def()).name()),
+      String::from(model.member(enum_value.value()).name()),
     ),
     other => panic!("`{owner}.{name}` is no enum value: {other:?}"),
   }
@@ -996,10 +996,10 @@ fn a_bare_enum_value_resolves_against_the_expected_enum() {
     (String::from("Paint"), String::from("RED"))
   );
   let paint = model.def(type_def(model, "Paint")).enum_values();
-  let ValueKind::Enum { value, .. } = model.value(default(model, "I", "p")).kind() else {
+  let ValueKind::Enum(enum_value) = model.value(default(model, "I", "p")).kind() else {
     panic!("`p` is no enum value");
   };
-  assert_eq!(Some(value), paint.into_iter().nth(1));
+  assert_eq!(Some(enum_value.value()), paint.into_iter().nth(1));
   assert_eq!(shown_default(model, "I", "c"), "Enum RED");
 }
 

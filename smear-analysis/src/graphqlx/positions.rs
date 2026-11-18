@@ -1099,7 +1099,7 @@ impl Fits {
       return Check::Answer(None);
     };
     let filled = match (way.under, model.ty(ty).kind()) {
-      (Under::Element, TyKind::List { .. }) => match written.kind() {
+      (Under::Element, TyKind::List(_)) => match written.kind() {
         TypeExprKind::List(element) => return Check::Child(element, false),
         // The tree writes no list where the way goes down one.
         _ => None,
@@ -1178,7 +1178,7 @@ impl Fits {
             })
         }
         TyKind::Named(NamedTy { def, .. }) => leaf(def, model.def(def).kind(), class),
-        TyKind::Param { .. } | TyKind::Unresolved => None,
+        TyKind::Param(_) | TyKind::Unresolved => None,
       };
       self.judged.insert((next, class), way);
     }
@@ -1444,8 +1444,8 @@ impl<V: Copy> Derived<V> {
         }
         if args.is_empty() { Some(None) } else { None }
       }
-      TyKind::List { .. } => None,
-      TyKind::Param { .. } | TyKind::Unresolved => Some(None),
+      TyKind::List(_) => None,
+      TyKind::Param(_) | TyKind::Unresolved => Some(None),
     }
   }
 
@@ -1465,7 +1465,7 @@ fn held_at(model: &Model, ty: TyId, index: u32) -> Option<TyId> {
   match model.ty(ty).kind() {
     TyKind::Named(NamedTy { args, .. }) => args.get(index as usize).copied(),
     TyKind::List(element) => (index == 0).then_some(element),
-    TyKind::Param { .. } | TyKind::Unresolved => None,
+    TyKind::Param(_) | TyKind::Unresolved => None,
   }
 }
 

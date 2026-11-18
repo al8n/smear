@@ -226,7 +226,7 @@ impl Model {
     let Some(row) = self.defs.get(def.get() as usize) else {
       return false;
     };
-    if matches!(row.intrinsic, Some(Primitive::Int { .. } | Primitive::Bool))
+    if matches!(row.intrinsic, Some(Primitive::Int(_) | Primitive::Bool))
       || keys.string == Some(def)
       || keys.id == Some(def)
       || row.kind == DefKind::Enum
@@ -245,7 +245,7 @@ impl Model {
           .defs
           .get(argument.def.get() as usize)
           .and_then(|row: &DefRow| row.intrinsic),
-        Some(Primitive::Int { .. })
+        Some(Primitive::Int(_))
       ),
       _ => false,
     }

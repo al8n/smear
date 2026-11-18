@@ -170,7 +170,8 @@ fn type_def(model: &Model, name: &str) -> DefId {
 fn shown(model: &Model, id: TyId) -> String {
   let ty = model.ty(id);
   let mut text = match ty.kind() {
-    TyKind::Named { def, args, .. } => {
+    TyKind::Named(named_ty) => {
+      let (def, args) = (named_ty.def(), named_ty.args());
       let name = model.def(def).name();
       if args.is_empty() {
         String::from(name)
@@ -179,8 +180,8 @@ fn shown(model: &Model, id: TyId) -> String {
         format!("{name}<{}>", args.join(", "))
       }
     }
-    TyKind::Param { def, index, .. } => format!("{}#{index}", model.def(def).name()),
-    TyKind::List { element, .. } => format!("[{}]", shown(model, element)),
+    TyKind::Param(param) => format!("{}#{}", model.def(param.def()).name(), param.index()),
+    TyKind::List(element) => format!("[{}]", shown(model, element)),
     _ => String::from("?"),
   };
   if ty.non_null() {
@@ -1528,9 +1529,12 @@ fn values_under_type_arguments_are_numbered_in_the_walks_order() {
 /// Whether the type `id` names a type parameter, anywhere in it.
 fn names_param(model: &Model, id: TyId) -> bool {
   match model.ty(id).kind() {
-    TyKind::Param { .. } => true,
-    TyKind::Named { args, .. } => args.iter().any(|arg: &TyId| names_param(model, *arg)),
-    TyKind::List { element, .. } => names_param(model, element),
+    TyKind::Param(_) => true,
+    TyKind::Named(named_ty) => named_ty
+      .args()
+      .iter()
+      .any(|arg: &TyId| names_param(model, *arg)),
+    TyKind::List(element) => names_param(model, element),
     _ => false,
   }
 }

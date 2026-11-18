@@ -167,7 +167,7 @@ fn named(model: &Model, root: TypeExprId, stack: &mut Vec<TypeExprId>, reaches: 
         }
       }
       TypeExprKind::List(element) => stack.push(element),
-      TypeExprKind::Param { .. } | TypeExprKind::Unresolved => {}
+      TypeExprKind::Param(_) | TypeExprKind::Unresolved => {}
     }
   }
 }

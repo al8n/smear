@@ -158,7 +158,7 @@ impl Visitor for TierViolation {
     let kind = DiagnosticKind::Tier;
     let package = Excerpt(model.package(writer).name().as_bytes());
     match occurrence.kind() {
-      TypeExprKind::List { .. } if declared < Tier::Alloc => cx.report(
+      TypeExprKind::List(_) if declared < Tier::Alloc => cx.report(
         Diagnostic::builder(kind.code(), occurrence.location())
           .severity(kind.severity())
           .message(format!(

@@ -168,8 +168,9 @@ fn names_of<'a>(model: &'a Model, members: &[MemberId]) -> Vec<&'a str> {
 fn written(model: &Model, id: TypeExprId) -> String {
   let occurrence = model.type_expr(id);
   let mut text = match occurrence.kind() {
-    TypeExprKind::List { element, .. } => format!("[{}]", written(model, element)),
-    TypeExprKind::Named { def, args, .. } => {
+    TypeExprKind::List(element) => format!("[{}]", written(model, element)),
+    TypeExprKind::Named(named_expr) => {
+      let (def, args) = (named_expr.def(), named_expr.args());
       let path = spelled(model, occurrence.path());
       if args.is_empty() {
         format!("{path}={}", model.def(def).name())
@@ -181,7 +182,9 @@ fn written(model: &Model, id: TypeExprId) -> String {
         format!("{path}={}<{}>", model.def(def).name(), args.join(", "))
       }
     }
-    TypeExprKind::Param { index, .. } => format!("{}=#{index}", spelled(model, occurrence.path())),
+    TypeExprKind::Param(param) => {
+      format!("{}=#{}", spelled(model, occurrence.path()), param.index())
+    }
     _ => format!("{}=?", spelled(model, occurrence.path())),
   };
   if occurrence.non_null() {
@@ -279,7 +282,7 @@ fn valued(model: &Model, id: ValueId) -> String {
     ValueKind::Int(int) => format!("Int {}", int.text()),
     ValueKind::Float(float) => format!("Float {}", float.text()),
     ValueKind::String(text) => format!("String {text:?}"),
-    ValueKind::Enum { .. } => format!("Enum {}", spelled(model, value.path())),
+    ValueKind::Enum(_) => format!("Enum {}", spelled(model, value.path())),
     ValueKind::List(items) => {
       let items: Vec<String> = items
         .iter()
@@ -1219,16 +1222,14 @@ fn an_alias_occurrence_keeps_its_spelling_and_names_non_zero() {
     .member(ids(model.def(t).fields())[0])
     .ty()
     .expect("typed");
-  let TypeExprKind::Named {
-    def: named_def,
-    args,
-    ..
-  } = model.type_expr(a).kind()
-  else {
+  let TypeExprKind::Named(named_expr) = model.type_expr(a).kind() else {
     panic!("`NonZeroU32` names `NonZero`");
   };
-  assert_eq!(named_def, def(model, Namespace::Type, "^::core::NonZero"));
-  assert!(args.is_empty());
+  assert_eq!(
+    named_expr.def(),
+    def(model, Namespace::Type, "^::core::NonZero")
+  );
+  assert!(named_expr.args().is_empty());
   assert_eq!(
     model.type_expr(a).path_location(),
     Some(named(schema, text, "a: ", "NonZeroU32", 0))
@@ -1328,10 +1329,10 @@ fn a_type_keeps_its_written_path_arguments_and_nullness() {
     .member(ids(model.def(shapes).fields())[0])
     .ty()
     .expect("typed");
-  let TypeExprKind::List { element: inner, .. } = model.type_expr(grid).kind() else {
+  let TypeExprKind::List(inner) = model.type_expr(grid).kind() else {
     panic!("a list");
   };
-  let TypeExprKind::List { element: int, .. } = model.type_expr(inner).kind() else {
+  let TypeExprKind::List(int) = model.type_expr(inner).kind() else {
     panic!("a list");
   };
   assert_eq!(
@@ -1367,9 +1368,10 @@ fn type_occurrences_are_numbered_outer_first() {
 
   // `A`, then `B` and what it nests, then `D`; then the next field's type.
   let first = f.get();
-  let TypeExprKind::Named { args, .. } = model.type_expr(f).kind() else {
+  let TypeExprKind::Named(named_expr) = model.type_expr(f).kind() else {
     panic!("`A` resolves");
   };
+  let args = named_expr.args();
   assert_eq!(
     args,
     [TypeExprId::new(first + 1), TypeExprId::new(first + 3)]
@@ -1399,11 +1401,10 @@ fn a_parameter_shadows_a_type_of_its_module() {
     ["T=#0", "Box=Box<T=#0>"]
   );
   let value = model.member(ids(model.def(boxed).fields())[0]).ty();
-  let Some(TypeExprKind::Param { def: owner, .. }) = value.map(|id| model.type_expr(id).kind())
-  else {
+  let Some(TypeExprKind::Param(param)) = value.map(|id| model.type_expr(id).kind()) else {
     panic!("a parameter");
   };
-  assert_eq!(owner, boxed);
+  assert_eq!(param.def(), boxed);
   let plain = def(model, Namespace::Type, "^::app::Plain");
   assert_eq!(member_types(model, model.def(plain).fields()), ["T=T"]);
 }
@@ -1432,12 +1433,12 @@ fn an_extension_names_parameters_by_position() {
     ["A=#0", "Y=#1", "Pair=Pair<Y=#1, X=#0>", "R=#2"]
   );
   for field in model.def(pair).fields() {
-    if let Some(TypeExprKind::Param { def: owner, .. }) = model
+    if let Some(TypeExprKind::Param(param)) = model
       .member(field)
       .ty()
       .map(|id| model.type_expr(id).kind())
     {
-      assert_eq!(owner, pair);
+      assert_eq!(param.def(), pair);
     }
   }
   // The name past `Pair`'s parameters keeps its position, and its type is the unresolved one.
@@ -1726,9 +1727,10 @@ fn a_contributions_paths_resolve_where_it_is_written() {
     .member(ids(model.def(shape).fields())[1])
     .ty()
     .expect("typed");
-  let TypeExprKind::Named { def: local, .. } = model.type_expr(from_m).kind() else {
+  let TypeExprKind::Named(named_expr) = model.type_expr(from_m).kind() else {
     panic!("`Local` resolves");
   };
+  let local = named_expr.def();
   assert_eq!(local, def(model, Namespace::Type, "^::app::m::Local"));
   let extension = model
     .def(shape)
@@ -1751,9 +1753,10 @@ fn a_contributions_paths_resolve_where_it_is_written() {
     .member(ids(model.def(deprecated).arguments())[0])
     .ty()
     .expect("typed");
-  let TypeExprKind::Named { def: local, .. } = model.type_expr(reason).kind() else {
+  let TypeExprKind::Named(named_expr) = model.type_expr(reason).kind() else {
     panic!("`Local` resolves");
   };
+  let local = named_expr.def();
   assert_eq!(local, def(model, Namespace::Type, "^::app::Local"));
 }
 

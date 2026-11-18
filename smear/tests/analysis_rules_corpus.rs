@@ -157,8 +157,8 @@ fn an_ok_corpus_file_keeps_a_literal_only_where_nothing_is_coerced() {
       }
       let ty = model.ty(value.ty());
       let custom = match ty.kind() {
-        TyKind::Named { def, .. } => {
-          let def = model.def(def);
+        TyKind::Named(named) => {
+          let def = model.def(named.def());
           def.kind() == DefKind::Scalar
             && def.collection().is_none()
             && def.origin() == Origin::User

@@ -115,15 +115,16 @@ fn written_args_answers_the_arguments_of_every_shape() {
   let model = analysis.model();
 
   let a = model.type_expr(field_type(&analysis, "^::app::G", "a"));
-  let TypeExprKind::Named { args, .. } = a.kind() else {
+  let TypeExprKind::Named(named) = a.kind() else {
     panic!("`a` names `Page`: {:?}", a.kind());
   };
+  let args = named.args();
   assert_eq!(a.written_args().len(), 1);
   assert_eq!(a.written_args(), args);
 
   let b = model.type_expr(field_type(&analysis, "^::app::G", "b"));
   assert!(
-    matches!(b.kind(), TypeExprKind::Param { .. }),
+    matches!(b.kind(), TypeExprKind::Param(_)),
     "`b` names `T`: {:?}",
     b.kind()
   );
@@ -135,11 +136,11 @@ fn written_args_answers_the_arguments_of_every_shape() {
 
   let d = model.type_expr(field_type(&analysis, "^::app::G", "d"));
   assert!(d.written_args().is_empty(), "{:?}", d.written_args());
-  let TypeExprKind::List { element, .. } = d.kind() else {
+  let TypeExprKind::List(element) = d.kind() else {
     panic!("`d` is a list: {:?}", d.kind());
   };
   assert!(
-    matches!(model.type_expr(element).kind(), TypeExprKind::Named { .. }),
+    matches!(model.type_expr(element).kind(), TypeExprKind::Named(_)),
     "{:?}",
     model.type_expr(element).kind()
   );
@@ -167,7 +168,7 @@ fn an_applications_type_and_type_arguments_are_its_instantiation() {
   assert_eq!(args.len(), 2, "{args:?}");
   let written = model.type_expr(tagged.type_args()[0]).ty();
   assert_eq!(args[0], written);
-  let TyKind::List { element, .. } = model.ty(args[1]).kind() else {
+  let TyKind::List(element) = model.ty(args[1]).kind() else {
     panic!(
       "the default `[A]` fills a list: {:?}",
       model.ty(args[1]).kind()
@@ -175,9 +176,10 @@ fn an_applications_type_and_type_arguments_are_its_instantiation() {
   };
   assert_eq!(element, written);
   let ty = tagged.ty().expect("`@tag<Int>` has a type");
-  let TyKind::Named { def, args: of, .. } = model.ty(ty).kind() else {
+  let TyKind::Named(named) = model.ty(ty).kind() else {
     panic!("its type is a named type: {:?}", model.ty(ty).kind());
   };
+  let (def, of) = (named.def(), named.args());
   assert_eq!(def, tag);
   assert_eq!(of, args);
 

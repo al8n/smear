@@ -113,7 +113,7 @@ impl Visitor for MarkerMisuse {
     // The definition the occurrence names; none for a type parameter, which is no marker.
     let interface = match occurrence.kind() {
       TypeExprKind::Named(NamedTypeExpr { def: named, .. }) => Some(model.def(named)),
-      TypeExprKind::Param { .. } => None,
+      TypeExprKind::Param(_) => None,
       _ => return,
     };
     if let Some(interface) = interface

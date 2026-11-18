@@ -145,7 +145,7 @@ impl Reach {
             }
           }
         }
-        TyKind::Param { .. } | TyKind::Unresolved => {}
+        TyKind::Param(_) | TyKind::Unresolved => {}
       }
     }
     // The edges reversed, by their target, and the walk back from the seeds.
@@ -270,7 +270,7 @@ impl Reach {
             named: Some(def),
           }
         }
-        TyKind::Param { .. } | TyKind::Unresolved => Answer::default(),
+        TyKind::Param(_) | TyKind::Unresolved => Answer::default(),
       };
       self.asked.insert(next, answer);
     }
@@ -285,7 +285,7 @@ fn holds_type_ref(model: &Model, ty: TyId, type_ref: DefId) -> bool {
     match model.ty(ty).kind() {
       TyKind::List(element) => ty = element,
       TyKind::Named(NamedTy { def, .. }) => return def == type_ref,
-      TyKind::Param { .. } | TyKind::Unresolved => return false,
+      TyKind::Param(_) | TyKind::Unresolved => return false,
     }
   }
 }

@@ -198,7 +198,7 @@ impl Visitor for UnboundedInstantiation {
     // An occurrence whose own type is a named type is a named occurrence.
     let written: &[TypeExprId] = match occurrence.kind() {
       TypeExprKind::Named(NamedTypeExpr { args, .. }) => args,
-      TypeExprKind::Param { .. } | TypeExprKind::List { .. } | TypeExprKind::Unresolved => &[],
+      TypeExprKind::Param(_) | TypeExprKind::List(_) | TypeExprKind::Unresolved => &[],
     };
     let name = Excerpt(model.def(def).name().as_bytes());
     if found.marked {
@@ -513,9 +513,7 @@ impl<'a> Build<'a> {
     }
     match view.kind() {
       TyKind::Param(TypeParamRef { def, index }) => Ok(self.param(def, index).map(Tail::Param)),
-      TyKind::Named { .. } | TyKind::List { .. } => {
-        self.node(ty).map(|node: u32| Some(Tail::Type(node)))
-      }
+      TyKind::Named(_) | TyKind::List(_) => self.node(ty).map(|node: u32| Some(Tail::Type(node))),
       TyKind::Unresolved => Ok(None),
     }
   }
@@ -582,7 +580,7 @@ impl<'a> Build<'a> {
             self.pending.push(argument);
           }
         }
-        TyKind::Param { .. } | TyKind::Unresolved => {}
+        TyKind::Param(_) | TyKind::Unresolved => {}
       }
     }
     Ok(())
@@ -600,7 +598,7 @@ impl<'a> Build<'a> {
       match occurrence.kind() {
         TypeExprKind::Named(NamedTypeExpr { args, .. }) => self.occurrences.extend_from_slice(args),
         TypeExprKind::List(element) => self.occurrences.push(element),
-        TypeExprKind::Param { .. } | TypeExprKind::Unresolved => {}
+        TypeExprKind::Param(_) | TypeExprKind::Unresolved => {}
       }
     }
     Ok(())
@@ -770,7 +768,7 @@ impl<'a> Build<'a> {
           .type_params()
           .nth(index as usize)
           .and_then(|param: TypeParam<'a>| param.default()),
-        TyKind::Param { .. } | TyKind::List { .. } | TyKind::Unresolved => None,
+        TyKind::Param(_) | TyKind::List(_) | TyKind::Unresolved => None,
       };
       if let Some(record) = self.found.get_mut(at) {
         record.holds = true;
@@ -789,7 +787,7 @@ impl<'a> Build<'a> {
         .position(|argument: &TyId| holds(&self.found, *argument))
         .and_then(|position: usize| u32::try_from(position).ok()),
       TyKind::List(element) => holds(&self.found, element).then_some(0),
-      TyKind::Param { .. } | TyKind::Unresolved => None,
+      TyKind::Param(_) | TyKind::Unresolved => None,
     }
   }
 }
