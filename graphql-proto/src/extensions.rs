@@ -458,7 +458,7 @@ impl<V> Extensions<V> {
   /// driver's handle is neither duplicated nor dropped. The cost is one reallocation of each, on
   /// the one path where the map is over the ceiling.
   pub(crate) fn shrink_to_ceiling(&mut self, max_entries: u32) {
-    if self.high_water > max_entries {
+    if self.capacity() > max_entries as usize {
       self.entries.shrink_to_fit();
       // At most `max_entries` of this map's own ceiling, which is a `u32`.
       self.high_water = self.entries.len() as u32;
