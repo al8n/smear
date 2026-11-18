@@ -94,6 +94,17 @@ All notable changes to Smear are documented in this file.
   and the retired map. Both are exported from `interner`.
 - `smear-schema`: `TypeRef`, the `(TypeId, &TypeDef)` pair `Schema::type_by_name` answers, is
   exported at the crate root, where only the private `repr` module named it.
+- `smear-compiler`!: `Context::Member` and `Context::Usage` hold named payloads, exported at the
+  crate root beside `Context`, where they had the fields `owner` and `name`, and `variable` and
+  `expected`: `MemberContext` has `owner()` and `name()`, and `UsageContext` has `variable()` and
+  `expected()`. They are built by the validator, and a caller reads them off the diagnostics it
+  is handed.
+- `smear-schema` and `smear-compiler`: the public enums derive their `is_*` predicates, and each
+  one with data `unwrap_*` and `try_unwrap_*`, by value, by reference and by mutable reference.
+  `Context`, `MergeConflict`, `Refusal`, `ResponseErrorKind` and `IntrospectionError` are new to
+  it; `Context::None`, which could only return `()`, has no `unwrap_*`. `Rule` and
+  `SchemaErrorKind`, of more than sixteen variants, and the enums under `repr` derive nothing new.
+  Both crates take `derive_more` as a dependency for it, with no feature in front of it.
 - `smear-schema` and `smear-compiler`: an `Int` literal stands for a `Float` only while a finite
   double holds its value, as `Float`'s input coercion requires (§3.5.2). `Schema::build` and
   `Rule::ValuesOfCorrectType` refuse one of magnitude `2^1024 - 2^970` or more, the least integer
