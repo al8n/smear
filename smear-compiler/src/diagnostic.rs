@@ -29,28 +29,75 @@ pub enum Context {
   Type(Sym),
   /// A schema-side member of a schema-side owner: an argument of a field or directive, or a field
   /// of an input object.
-  Member {
-    /// The owning field, directive or input object type.
-    owner: Sym,
-    /// The argument or input field.
-    name: Sym,
-  },
+  Member(MemberContext),
   /// The grammar location a directive was written at.
   Location(DirectiveLocation),
   /// The type expected in the position.
   Expected(PackedType),
   /// A variable usage: the variable's declared type against the type its position expects.
-  Usage {
-    /// The type the operation declared the variable with.
-    variable: PackedType,
-    /// The type the position expects.
-    expected: PackedType,
-  },
+  Usage(UsageContext),
   /// A plain count — how many root fields a subscription collected, or the budget a document
   /// exceeded.
   Count(u32),
   /// Which of draft 5.3.2's three checks two selections sharing a response name failed.
   Merge(MergeConflict),
+}
+
+/// A schema-side member and the owner it belongs to: [`Context::Member`]'s payload.
+///
+/// The owner is the field, directive or input object type that declares the member, and the member
+/// is its argument or input field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MemberContext {
+  pub(crate) owner: Sym,
+  pub(crate) name: Sym,
+}
+
+impl MemberContext {
+  /// The validator builds these; a caller reads the diagnostics it hands back.
+  #[inline]
+  pub(crate) const fn new(owner: Sym, name: Sym) -> Self {
+    Self { owner, name }
+  }
+
+  /// Returns the owning field, directive or input object type.
+  #[inline]
+  pub const fn owner(&self) -> Sym {
+    self.owner
+  }
+
+  /// Returns the argument or input field.
+  #[inline]
+  pub const fn name(&self) -> Sym {
+    self.name
+  }
+}
+
+/// A variable's declared type and the type its position expects: [`Context::Usage`]'s payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct UsageContext {
+  pub(crate) variable: PackedType,
+  pub(crate) expected: PackedType,
+}
+
+impl UsageContext {
+  /// The validator builds these; a caller reads the diagnostics it hands back.
+  #[inline]
+  pub(crate) const fn new(variable: PackedType, expected: PackedType) -> Self {
+    Self { variable, expected }
+  }
+
+  /// Returns the type the operation declared the variable with.
+  #[inline]
+  pub const fn variable(&self) -> PackedType {
+    self.variable
+  }
+
+  /// Returns the type the position expects.
+  #[inline]
+  pub const fn expected(&self) -> PackedType {
+    self.expected
+  }
 }
 
 /// Why two selections that share a response name could not be merged (draft 5.3.2).
@@ -334,11 +381,11 @@ where
       Context::None => {}
       Context::Root(operation) => write!(f, ", no `{operation}` root operation type")?,
       Context::Type(sym) => write!(f, " on type `{}`", self.schema.name(*sym))?,
-      Context::Member { owner, name } => write!(
+      Context::Member(member) => write!(
         f,
         " of `{}.{}`",
-        self.schema.name(*owner),
-        self.schema.name(*name)
+        self.schema.name(member.owner()),
+        self.schema.name(member.name())
       )?,
       Context::Location(location) => write!(f, " at {location}")?,
       Context::Expected(ty) => {
@@ -346,7 +393,8 @@ where
         ty.write(f, self.schema.name(ty.base()))?;
         f.write_str("`")?;
       }
-      Context::Usage { variable, expected } => {
+      Context::Usage(usage) => {
+        let UsageContext { variable, expected } = usage;
         f.write_str(", declared `")?;
         variable.write(f, self.schema.name(variable.base()))?;
         f.write_str("` used where `")?;

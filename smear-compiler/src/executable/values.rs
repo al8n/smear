@@ -20,7 +20,7 @@ use super::{
   probe_partition, sort_metered, units,
 };
 use crate::{
-  diagnostic::Context,
+  diagnostic::{Context, MemberContext, UsageContext},
   schema::{DirectiveLocation, PackedType, Range32, Sym, TypeKind},
   scratch::{
     BYTES_PER_UNIT, Compared, NONE, ValueFrame, ValueLevel, count_units, probe_cmp, scan_eq,
@@ -361,10 +361,7 @@ where
       {
         if check && self.on(Rule::RequiredArguments) {
           let context = match owner {
-            Some(owner) => Context::Member {
-              owner,
-              name: definition.name(),
-            },
+            Some(owner) => Context::Member(MemberContext::new(owner, definition.name())),
             None => Context::Expected(definition.ty()),
           };
           self.report_name(Rule::RequiredArguments, name, context)?;
@@ -433,10 +430,7 @@ where
         }
         if !supplied {
           let context = match owner {
-            Some(owner) => Context::Member {
-              owner,
-              name: definition.name(),
-            },
+            Some(owner) => Context::Member(MemberContext::new(owner, definition.name())),
             None => Context::Expected(definition.ty()),
           };
           let diagnostic = Diagnostic::new(Rule::RequiredArguments, blame).context(context);
@@ -549,10 +543,10 @@ where
               && field.field_value().is_null()
             {
               if check && self.on(Rule::InputObjectRequiredFields) {
-                let context = Context::Member {
-                  owner: self.schema.type_def(TypeId::new(frame.object)).name(),
-                  name: definition.name(),
-                };
+                let context = Context::Member(MemberContext::new(
+                  self.schema.type_def(TypeId::new(frame.object)).name(),
+                  definition.name(),
+                ));
                 self.report_name(Rule::InputObjectRequiredFields, name, context)?;
               }
               continue;
@@ -926,10 +920,10 @@ where
         }
         if !supplied {
           let diagnostic = Diagnostic::new(Rule::InputObjectRequiredFields, value.value_span())
-            .context(Context::Member {
-              owner: definition.name(),
-              name: field_definition.name(),
-            });
+            .context(Context::Member(MemberContext::new(
+              definition.name(),
+              field_definition.name(),
+            )));
           self.emit(diagnostic)?;
         }
       }
@@ -1310,10 +1304,7 @@ where
       return self.report_name(
         Rule::AllVariableUsagesAreAllowed,
         name,
-        Context::Usage {
-          variable: declared,
-          expected,
-        },
+        Context::Usage(UsageContext::new(declared, expected)),
       );
     }
     ControlFlow::Continue(())
