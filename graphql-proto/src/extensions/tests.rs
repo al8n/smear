@@ -4,8 +4,9 @@
 //! a request error result — live beside the retainers, in `execute/tests.rs` and
 //! `request/error/tests.rs`. These are the container's: the order a serialiser writes, which a
 //! hashed map keeps only because insertion order is what it iterates; the ceilings a key too long
-//! to be stored meets without being looked up, and the replacements they still let through; and
-//! the room a clone holds, which is its own entries' and none of its source's.
+//! to be stored meets without being looked up, and the replacements they still let through; the
+//! room a clone holds, which is its own entries' and none of its source's; and what a shrink to a
+//! ceiling keeps, which is every entry, in order, with the value it had.
 
 use core::num::NonZeroU32;
 
@@ -296,6 +297,77 @@ fn a_clone_holds_room_for_its_own_entries_and_none_of_its_sources() {
     "the clone holds the source's entries, none"
   );
   assert_eq!(emptied.capacity(), 0, "and marks no room at all");
+}
+
+/// A driver value with an allocation of its own, whose address says whether it was moved or made
+/// again.
+type Boxed = std::boxed::Box<Value>;
+
+/// Each entry's key and the address of its value, in the order the map iterates them.
+fn held(map: &Extensions<Boxed>) -> std::vec::Vec<(std::string::String, *const Value)> {
+  map
+    .iter()
+    .map(|(key, value)| (key.into(), core::ptr::from_ref::<Value>(value)))
+    .collect()
+}
+
+/// A map grown past a ceiling and shrunk to it keeps its entries in their order, each with its own
+/// value, finds every one of them again, and marks room for them alone.
+///
+/// The values are boxes, so keeping a value means keeping its allocation: a shrink that cloned the
+/// values, or rebuilt them, would hand back equal values at other addresses. The survivors are
+/// scattered through the entry vector rather than a run at either end of it, so their order is
+/// carried across the gaps the removals left. And they are looked up again afterwards, because the
+/// shrink builds a new hash index under a new hasher, and an index that lost an entry would still
+/// iterate it.
+#[test]
+fn a_shrink_keeps_order_values_and_lookups_and_marks_its_length() {
+  /// The entries the grown map keeps, in insertion order.
+  const KEPT: [usize; 4] = [5, 17, 40, 63];
+
+  let lax =
+    Limits::default().with_max_extension_entries(NonZeroU32::new(GROWN as u32).expect("not zero"));
+  let mut map: Extensions<Boxed> = Extensions::new(&lax);
+  for index in 0..GROWN {
+    map
+      .insert(&std::format!("k{index}"), Boxed::new(index as Value))
+      .expect("the lax map has room");
+  }
+  for index in (0..GROWN).filter(|index| !KEPT.contains(index)) {
+    map
+      .remove(&std::format!("k{index}"))
+      .expect("every key was inserted");
+  }
+  let before = held(&map);
+  let key_bytes = map.key_bytes();
+
+  map.shrink_to_ceiling(GROWN as u32);
+  assert_eq!(
+    map.capacity(),
+    GROWN,
+    "a mark at the ceiling is not over it, so nothing is rebuilt"
+  );
+
+  map.shrink_to_ceiling(KEPT.len() as u32);
+  assert_eq!(map.len(), KEPT.len());
+  assert_eq!(
+    map.capacity(),
+    map.len(),
+    "the shrunk map marks only the entries it holds"
+  );
+  assert_eq!(
+    held(&map),
+    before,
+    "the same keys in the same order, each with the value it had, where it had it"
+  );
+  assert_eq!(map.key_bytes(), key_bytes, "and the same key bytes");
+  for index in KEPT {
+    assert_eq!(
+      map.get(&std::format!("k{index}")).map(|value| **value),
+      Some(index as Value),
+      "`k{index}` is found again"
+    );
+  }
 }
 
 /// Cloning a map grown and emptied allocates nothing, so the clone holds none of the room its

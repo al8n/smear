@@ -479,13 +479,25 @@ impl<V> Extensions<V> {
   /// re-attach that. Re-deriving the allocations here keeps acceptance exactly as documented and
   /// makes the ceiling mean what it says.
   ///
-  /// Nothing is cloned. `IndexMap::shrink_to_fit` moves the entries into an entry vector of their
-  /// own size and rebuilds the hash index for them, so no `V: Clone` bound appears anywhere and a
-  /// driver's handle is neither duplicated nor dropped. The cost is one reallocation of each, on
-  /// the one path where the map is over the ceiling.
+  /// # Rebuilt at the cost of what it holds
+  ///
+  /// Nothing is cloned. The entries move, in order, out of the grown map through its owning
+  /// iterator and into a fresh one sized to them, so no `V: Clone` bound appears anywhere and a
+  /// driver's handle is neither duplicated nor dropped. The owning iterator reads the dense entry
+  /// vector, and the old hash index is freed without being read, so the work follows the entries
+  /// the map holds and not the room it grew to: one hash of each key, `key_bytes` bytes in all,
+  /// which every caller has checked against its own ceiling first.
+  ///
+  /// Not `IndexMap::shrink_to_fit`, which keeps the hash index and rebuilds it smaller by scanning
+  /// the old one for the entries still in it. That scan is as long as the most entries the map ever
+  /// held, so a map kept down to one entry from a million would be read through room for a
+  /// million on its way in.
   pub(crate) fn shrink_to_ceiling(&mut self, max_entries: u32) {
     if self.capacity() > max_entries as usize {
-      self.entries.shrink_to_fit();
+      let fresh = IndexMap::with_capacity_and_hasher(self.entries.len(), key_hasher());
+      let grown = core::mem::replace(&mut self.entries, fresh);
+      // The keys are distinct, so each is new here and the reserved room is never outgrown.
+      self.entries.extend(grown);
       // At most `max_entries` of this map's own ceiling, which is a `u32`.
       self.high_water = self.entries.len() as u32;
     }
