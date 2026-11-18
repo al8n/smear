@@ -37,6 +37,10 @@
 //! is reserved from the decoded length before a byte of it is written, and [`decode_string_value`]
 //! writes them to any `fmt::Write`. A printer that re-encodes the value walks the pieces too and
 //! needs no buffer of its own.
+//!
+//! A caller can refuse a piece, as a `fmt::Write` refuses a write, and the walk stops at the
+//! refusal, so the rest of a long literal is neither decoded nor handed to a writer that has
+//! already failed.
 
 use core::fmt;
 
@@ -55,20 +59,23 @@ use crate::error::StringValueError;
 /// The pieces concatenate to the value and never split a character, so each is valid UTF-8 on its
 /// own. Nothing allocates.
 ///
+/// `piece` answers each piece as a [`fmt::Write`] answers a write. `Err(fmt::Error)` refuses it,
+/// and the walk stops there: nothing after the refused piece is decoded or handed out. A caller
+/// that takes every piece answers `Ok(())`.
+///
 /// # Errors
 ///
 /// [`StringValueError`]: a spelling with no delimiters, content that is not UTF-8, or a backslash
 /// that begins no escape. A refusal can come after some pieces were handed out; a caller that
 /// must write nothing on a refusal walks the spelling with [`string_value_len`] first, as
 /// [`decode_string_value`] does, and so meets every refusal before it writes.
+///
+/// [`StringValueError::Sink`] when `piece` refused one, which was the last piece it was handed.
 pub fn string_value_pieces(
   spelling: &[u8],
-  mut piece: impl FnMut(&str),
+  mut piece: impl FnMut(&str) -> fmt::Result,
 ) -> Result<(), StringValueError> {
-  walk(spelling, &mut |text: &str| -> fmt::Result {
-    piece(text);
-    Ok(())
-  })
+  walk(spelling, &mut piece)
 }
 
 /// Returns the length in bytes of the value a `StringValue` spelling denotes.
@@ -78,10 +85,14 @@ pub fn string_value_pieces(
 ///
 /// # Errors
 ///
-/// As [`string_value_pieces`].
+/// The spelling's refusals, as [`string_value_pieces`] gives them. Never
+/// [`StringValueError::Sink`]: adding a piece's length up refuses nothing.
 pub fn string_value_len(spelling: &[u8]) -> Result<usize, StringValueError> {
   let mut len = 0usize;
-  string_value_pieces(spelling, |piece| len += piece.len())?;
+  string_value_pieces(spelling, |piece| {
+    len += piece.len();
+    Ok(())
+  })?;
   Ok(len)
 }
 
@@ -97,8 +108,9 @@ pub fn string_value_len(spelling: &[u8]) -> Result<usize, StringValueError> {
 ///
 /// # Errors
 ///
-/// As [`string_value_pieces`], with nothing written; and [`StringValueError::Sink`] when `out`
-/// refuses a write, after which nothing more is written to it.
+/// The spelling's refusals, as [`string_value_pieces`] gives them, with nothing written; and
+/// [`StringValueError::Sink`] when `out` refuses a write, after which nothing more is written to
+/// it.
 pub fn decode_string_value<W>(spelling: &[u8], out: &mut W) -> Result<(), StringValueError>
 where
   W: fmt::Write + ?Sized,

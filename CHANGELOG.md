@@ -43,6 +43,10 @@ All notable changes to Smear are documented in this file.
   it; so are those of every unit variant of the token enums and of both `LexerErrorData`s, and
   the `digit` ones of `DecimalHint`, `HexHint`, `OctalHint` and `BinaryHint`, which derive
   `is_digit` alone.
+- `smear-lexer`!: `string_value_pieces` takes a callback that returns `core::fmt::Result`, answering
+  each piece as a `fmt::Write` answers a write. A piece it refuses stops the walk, with nothing
+  after it decoded or handed out, and the walk answers `StringValueError::Sink`. A callback that
+  takes every piece returns `Ok(())`.
 - `smear-lexer`: `decode_string_value` writes to any `core::fmt::Write`: a `String` as before, a
   `&mut dyn fmt::Write`, or the `fmt::Formatter` a `Display` implementation is handed. A writer
   that refuses a write is answered with the new `StringValueError::Sink`, holding a prefix of the

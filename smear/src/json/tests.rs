@@ -234,6 +234,9 @@ fn a_spelling_without_its_delimiters_is_refused() {
 
 /// A sink that refuses midway through a literal is answered with `Sink`, not `MalformedEscape`:
 /// what came before the refusal is written, and nothing is written after it.
+///
+/// Nothing after it is decoded either, which no sink can see: `smear-lexer`'s
+/// `a_refused_piece_stops_the_walk` counts the pieces the walk hands out past a refusal.
 #[test]
 fn a_sink_that_refuses_midway_through_a_literal_answers_sink() {
   /// Takes `room` bytes, refuses the first write that would pass them, and counts every write it
@@ -270,6 +273,25 @@ fn a_sink_that_refuses_midway_through_a_literal_answers_sink() {
   assert_eq!(json.graphql_string(r#""ab\ncd""#), Err(Error::Sink));
   let sink = json.into_inner();
   assert_eq!(sink.written, "\"ab");
+  assert_eq!(
+    sink.asked_after, 0,
+    "the sink was written to after it refused"
+  );
+
+  // Room for the opening quote alone, so the literal's first piece, `ab`, is the write refused,
+  // with every escape after it still to come.
+  let mut json = Json::new(Cramped {
+    written: String::new(),
+    room: 1,
+    refused: false,
+    asked_after: 0,
+  });
+  assert_eq!(json.graphql_string(r#""ab\ncd\tef\rgh""#), Err(Error::Sink));
+  let sink = json.into_inner();
+  assert_eq!(
+    sink.written, "\"",
+    "the opening quote, and nothing of the value"
+  );
   assert_eq!(
     sink.asked_after, 0,
     "the sink was written to after it refused"

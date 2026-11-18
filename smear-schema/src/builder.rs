@@ -243,7 +243,10 @@ impl TextArena {
       && self.text.capacity() - start >= spelling.len()
       && start + spelling.len() <= MAX_TEXT_BYTES as usize
     {
-      if let Err(error) = string_value_pieces(spelling, |piece| self.text.push_str(piece)) {
+      if let Err(error) = string_value_pieces(spelling, |piece| {
+        self.text.push_str(piece);
+        Ok(())
+      }) {
         self.text.truncate(start);
         return Err(error);
       }
@@ -255,7 +258,10 @@ impl TextArena {
       return Ok(Text::NONE);
     };
     // Cannot refuse: the sizing walk above read the same spelling and accepted it.
-    string_value_pieces(spelling, |piece| self.text.push_str(piece))?;
+    string_value_pieces(spelling, |piece| {
+      self.text.push_str(piece);
+      Ok(())
+    })?;
     Ok(text)
   }
 

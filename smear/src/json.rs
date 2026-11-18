@@ -488,7 +488,8 @@ impl<W: fmt::Write> Json<W> {
   /// a block string is a backslash.
   ///
   /// A spelling no lexer produces — an escape outside that list, or no delimiters — is
-  /// [`Error::MalformedEscape`], once the value before it has been written.
+  /// [`Error::MalformedEscape`], once the value before it has been written. A sink that refuses a
+  /// write is [`Error::Sink`] at that write: nothing after it is decoded.
   pub fn graphql_string(&mut self, literal: &str) -> Result<(), Error> {
     self.out.write_char('"')?;
     cook(&mut self.out, literal)?;
@@ -652,18 +653,16 @@ fn write_control<W: fmt::Write>(out: &mut W, byte: u8) -> fmt::Result {
 /// Writes the value of a GraphQL string literal, JSON-escaped, as `string_value_pieces` hands it
 /// out a piece at a time.
 ///
-/// The pieces arrive through a closure that cannot fail, so it keeps the sink's first refusal and
-/// writes nothing after it; the walk then finishes on its own, and that refusal is the answer.
+/// The sink's first refusal ends the walk: nothing after the refused piece is decoded, and the
+/// refusal is the answer.
 fn cook<W: fmt::Write>(out: &mut W, literal: &str) -> Result<(), Error> {
-  let mut written: fmt::Result = Ok(());
-  let cooked = string_value_pieces(literal.as_bytes(), |piece| {
-    if written.is_ok() {
-      written = escape(out, piece);
+  string_value_pieces(literal.as_bytes(), |piece| escape(out, piece)).map_err(|refusal| {
+    if refusal.is_sink() {
+      Error::Sink
+    } else {
+      // Every other refusal is of the spelling, so of a literal no lexer produced: an escape it
+      // would refuse, no delimiters, or content that is not UTF-8, which a `&str` cannot hold.
+      Error::MalformedEscape
     }
-  });
-  written?;
-  // Every refusal of the spelling is a literal no lexer produced: an escape it would refuse, no
-  // delimiters, or content that is not UTF-8, which a `&str` cannot hold. `Sink` is not among
-  // them, since the closure above cannot fail.
-  cooked.map_err(|_| Error::MalformedEscape)
+  })
 }

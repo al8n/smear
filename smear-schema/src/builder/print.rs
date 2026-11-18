@@ -199,7 +199,10 @@ fn spelling<K: Sink>(bytes: &[u8], span: SimpleSpan, sink: &mut K) -> Result<(),
 /// Writes a `StringValue` spelling as the quoted string graphql-js prints for its value.
 fn quote_spelling<K: Sink>(spelling: &[u8], sink: &mut K) -> Result<(), StringValueError> {
   sink.put("\"");
-  string_value_pieces(spelling, |piece| escape(piece, sink))?;
+  string_value_pieces(spelling, |piece| {
+    escape(piece, sink);
+    Ok(())
+  })?;
   sink.put("\"");
   Ok(())
 }

@@ -568,12 +568,13 @@ pub const EXEMPTIONS: &[Exemption] = &[
     element: None,
     issue: None,
     reason: "Why `decode_string_value` and its two siblings refused a `StringValue` spelling a \
-             caller handed them, or why the writer a caller handed `decode_string_value` stopped \
-             taking the value. A decoder outcome rather than a parse position: none of the three \
-             refusals of a spelling is reachable from a spelling the parsers lexed — the lexer \
-             refuses each first, as a `LexerError` that answers the contract — `Sink` is the \
-             caller's own writer failing, and the one offset it carries is into the caller's \
-             spelling, not into any document, which is `MintError`'s class.",
+             caller handed them, or why the writer a caller handed `decode_string_value`, or the \
+             callback it handed `string_value_pieces`, stopped taking the value. A decoder \
+             outcome rather than a parse position: none of the three refusals of a spelling is \
+             reachable from a spelling the parsers lexed — the lexer refuses each first, as a \
+             `LexerError` that answers the contract — `Sink` is the caller's own writer or \
+             callback failing, and the one offset it carries is into the caller's spelling, not \
+             into any document, which is `MintError`'s class.",
   },
   // ── Phase E's four refusals about a value the caller built ──────────────────────────────────
   Exemption {

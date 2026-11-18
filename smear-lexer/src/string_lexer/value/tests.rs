@@ -180,10 +180,61 @@ fn a_piece_is_whole_text() {
     "\"\"\"\n  \u{e9}\u{e9}\n  \\\"\"\"\u{2603}\n\"\"\"",
   ] {
     let mut pieces: Vec<String> = Vec::new();
-    string_value_pieces(spelling.as_bytes(), |piece| pieces.push(piece.into()))
-      .expect("the spelling denotes a value");
+    string_value_pieces(spelling.as_bytes(), |piece| {
+      pieces.push(piece.into());
+      Ok(())
+    })
+    .expect("the spelling denotes a value");
     assert!(pieces.len() > 1, "`{spelling}` came back as one piece");
     assert_eq!(pieces.concat(), decoded(spelling));
+  }
+}
+
+/// A refused piece stops the walk: the answer is `Sink`, and no piece after the refused one is
+/// handed out.
+///
+/// Counted at the callback, because that is the only place the difference shows. A walk that went
+/// on past the refusal, into a callback that ignored the rest, would write nothing more either, and
+/// would still decode every escape left in the literal.
+#[test]
+fn a_refused_piece_stops_the_walk() {
+  // A spelling, and how many pieces its value is handed out as.
+  const CASES: &[(&str, usize)] = &[
+    // `a`, a line feed, `b`, a line feed and `c`, two of them escapes.
+    (r#""a\nb\nc""#, 5),
+    // `x`, a line feed and `y`, from a block string.
+    ("\"\"\"\n  x\n  y\n\"\"\"", 3),
+  ];
+
+  for &(spelling, pieces) in CASES {
+    let mut handed = 0;
+    string_value_pieces(spelling.as_bytes(), |_| {
+      handed += 1;
+      Ok(())
+    })
+    .expect("the spelling denotes a value");
+    assert_eq!(handed, pieces, "`{spelling}` taken whole");
+
+    for refused in 1..=pieces {
+      let mut handed = 0;
+      let walked = string_value_pieces(spelling.as_bytes(), |_| {
+        handed += 1;
+        if handed == refused {
+          Err(fmt::Error)
+        } else {
+          Ok(())
+        }
+      });
+      assert_eq!(
+        walked,
+        Err(StringValueError::Sink),
+        "`{spelling}`, refusing piece {refused}"
+      );
+      assert_eq!(
+        handed, refused,
+        "`{spelling}` handed out a piece after piece {refused} was refused"
+      );
+    }
   }
 }
 

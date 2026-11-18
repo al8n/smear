@@ -814,6 +814,7 @@ fn literal_type(schema: &Schema, spelling: &[u8], visits: &mut Visits) -> Read {
     if pieces == 1 {
       found = schema.type_by_name(piece.as_bytes()).map(|(id, _)| id);
     }
+    Ok(())
   });
   if walked.is_err() {
     return Read::Invalid;
