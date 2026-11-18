@@ -271,6 +271,7 @@ macro_rules! impl_source_ordering {
 }
 
 mod block;
+mod escape;
 mod inline;
 mod value;
 

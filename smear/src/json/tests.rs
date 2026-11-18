@@ -190,21 +190,22 @@ fn an_inline_literal_is_cooked_before_it_is_escaped() {
 /// The deliberate answer for a lone surrogate, at the one place one can be spelled.
 ///
 /// A `&str` cannot hold a surrogate, so the only way one reaches this writer is as an *escape* in
-/// a GraphQL literal — and it is refused rather than emitted or replaced. Emitting `\uD800` would
-/// produce exactly what this workspace's own introspection decoder refuses to read
-/// (`smear-schema/src/introspection/json.rs`), so the writer would be writing what its sibling
-/// reader rejects; substituting U+FFFD would change the response and say nothing.
+/// a GraphQL literal — and it is refused rather than emitted or replaced, as every escape the lexer
+/// would refuse is. Emitting `\uD800` would produce exactly what this workspace's own introspection
+/// decoder refuses to read (`smear-schema/src/introspection/json.rs`), so the writer would be
+/// writing what its sibling reader rejects; substituting U+FFFD would change the response and say
+/// nothing.
 ///
 /// Unreachable from a literal this workspace lexed — `smear-lexer` raises `UnpairedSurrogate`
-/// before a `StringValue` exists — so this is a total function's honest branch and not a live path.
+/// before a `StringValue` exists — so this is an honest answer and not a live path.
 #[test]
 fn a_lone_surrogate_escape_is_refused() {
-  assert_eq!(cook(r#""\ud800""#), Err(Error::SurrogateEscape));
-  assert_eq!(cook(r#""\udc00""#), Err(Error::SurrogateEscape));
-  assert_eq!(cook(r#""\ud800\u0041""#), Err(Error::SurrogateEscape));
-  assert_eq!(cook(r#""\ud800\udbff""#), Err(Error::SurrogateEscape));
-  assert_eq!(cook(r#""\u{d800}""#), Err(Error::SurrogateEscape));
-  assert_eq!(cook(r#""\u{dfff}""#), Err(Error::SurrogateEscape));
+  assert_eq!(cook(r#""\ud800""#), Err(Error::MalformedEscape));
+  assert_eq!(cook(r#""\udc00""#), Err(Error::MalformedEscape));
+  assert_eq!(cook(r#""\ud800\u0041""#), Err(Error::MalformedEscape));
+  assert_eq!(cook(r#""\ud800\udbff""#), Err(Error::MalformedEscape));
+  assert_eq!(cook(r#""\u{d800}""#), Err(Error::MalformedEscape));
+  assert_eq!(cook(r#""\u{dfff}""#), Err(Error::MalformedEscape));
 }
 
 #[test]
@@ -216,6 +217,59 @@ fn a_malformed_escape_is_refused_rather_than_panicked_on() {
   assert_eq!(cook(r#""\u{110000}""#), Err(Error::MalformedEscape));
   assert_eq!(cook(r#""\u{1234567}""#), Err(Error::MalformedEscape));
   assert_eq!(cook("\"\\\""), Err(Error::MalformedEscape));
+}
+
+/// A spelling without its delimiters is no literal, which no lexer produces, and it is refused
+/// rather than written as though its bytes were the value.
+#[test]
+fn a_spelling_without_its_delimiters_is_refused() {
+  for spelling in ["", "abc", "\"", "\"abc", "abc\"", "\"\"\"abc\"", "\"\"\"\""] {
+    assert_eq!(cook(spelling), Err(Error::MalformedEscape), "`{spelling}`");
+  }
+}
+
+/// A sink that refuses midway through a literal is answered with `Sink`, not `MalformedEscape`:
+/// what came before the refusal is written, and nothing is written after it.
+#[test]
+fn a_sink_that_refuses_midway_through_a_literal_answers_sink() {
+  /// Takes `room` bytes, refuses the first write that would pass them, and counts every write it
+  /// is asked for after that one.
+  struct Cramped {
+    written: String,
+    room: usize,
+    refused: bool,
+    asked_after: usize,
+  }
+
+  impl core::fmt::Write for Cramped {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+      if self.refused {
+        self.asked_after += 1;
+        return Err(core::fmt::Error);
+      }
+      if self.written.len() + s.len() > self.room {
+        self.refused = true;
+        return Err(core::fmt::Error);
+      }
+      self.written.push_str(s);
+      Ok(())
+    }
+  }
+
+  // The opening quote and `ab` fit, and the line feed's JSON escape, `\n`, does not.
+  let mut json = Json::new(Cramped {
+    written: String::new(),
+    room: 3,
+    refused: false,
+    asked_after: 0,
+  });
+  assert_eq!(json.graphql_string(r#""ab\ncd""#), Err(Error::Sink));
+  let sink = json.into_inner();
+  assert_eq!(sink.written, "\"ab");
+  assert_eq!(
+    sink.asked_after, 0,
+    "the sink was written to after it refused"
+  );
 }
 
 #[test]
@@ -247,26 +301,18 @@ fn a_block_literal_gets_draft_2_9_4() {
   assert_eq!(cook(r#""""a\nb""""#).unwrap(), r#""a\\nb""#);
 }
 
-/// The second implementation, and it belongs to somebody else.
+/// The writer's cooking agrees with the lexer's own `Cow` conversions.
 ///
-/// `smear-lexer` cooks its own literals through `Cow` conversions on its literal types, written
-/// long before this module and with no knowledge of it. Agreeing with it on a corpus is a real
-/// check on this walk, so this is a differential and not a restatement.
+/// The two share one implementation, `smear-lexer`'s reading of a `StringValue`, and
+/// `tests/json_writer.rs` holds that reading to `apollo-parser`, which shares no code with it.
+/// What this pins is that the two doors into it agree. The writer hands the
+/// spelling to `string_value_pieces` and escapes each piece as it arrives; the conversion takes
+/// the delimiters off a lexed literal and builds the value whole, for `Json::string` to escape.
 ///
-/// # It used to be inline-only, and it used to need a workaround
-///
-/// The corpus below now spells the braced escape and the block-string shapes that this test could
-/// not ask the oracle about, and it converts the `Plain` variant through the same door as the
-/// `Complex` one instead of un-delimiting it here. That is #163 landing: the conversion panicked
-/// on `\u{1F600}`, its `Plain` arm answered the source spelling where its `Complex` arm answered
-/// the cooked value, and its block dedent was not draft §2.9.4's. All three are repaired in
-/// `smear-lexer`, so what this test measures is now the whole of both implementations rather than
-/// the part of one that could be reached.
-///
-/// [`Json::graphql_string`](super::Json::graphql_string) still cooks the literal itself. Routing
-/// it through the conversion is a separate change with its own cost — a `Cow` per string on the
-/// response path against a walk that writes straight into the sink — and this test is what would
-/// have to disagree first for that change to be wrong.
+/// The corpus spells the braced escape and the block-string shapes, and converts the `Plain`
+/// variant through the same door as the `Complex` one. That is #163's repair of the conversion,
+/// which panicked on `\u{1F600}`, answered the source spelling from its `Plain` arm and the cooked
+/// value from its `Complex` one, and dedented a block string other than as draft §2.9.4 does.
 #[test]
 fn the_lexers_own_cooking_agrees() {
   use smear_lexer::LitStr;

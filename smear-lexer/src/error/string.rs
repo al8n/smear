@@ -907,12 +907,15 @@ impl<Char> TryFrom<StringErrors<Char>> for StringError<Char> {
 /// Why a `StringValue` spelling denotes no value — what
 /// [`decode_string_value`](crate::decode_string_value),
 /// [`string_value_len`](crate::string_value_len) and
-/// [`string_value_pieces`](crate::string_value_pieces) refuse.
+/// [`string_value_pieces`](crate::string_value_pieces) refuse — or why `decode_string_value`
+/// stopped writing it.
 ///
-/// None of the three is reachable from a spelling the parsers lexed. A missing delimiter and a bad
-/// escape are what the lexer itself refuses, and so is content that is not UTF-8: a text source
-/// cannot hold it, and the byte lexer refuses such a string literal (smear#246). A decoder that
-/// reads a spelling rather than trusting where it came from answers them instead of guessing.
+/// None of the three refusals of a spelling is reachable from a spelling the parsers lexed. A
+/// missing delimiter and a bad escape are what the lexer itself refuses, and so is content that is
+/// not UTF-8: a text source cannot hold it, and the byte lexer refuses such a string literal
+/// (smear#246). A decoder that reads a spelling rather than trusting where it came from answers
+/// them instead of guessing. [`Sink`](Self::Sink) is not about the spelling at all: it is the
+/// caller's writer refusing a write.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 #[non_exhaustive]
 pub enum StringValueError {
@@ -928,4 +931,12 @@ pub enum StringValueError {
   /// surrogate or past U+10FFFF.
   #[error("the backslash at byte {0} begins no string escape")]
   InvalidEscape(usize),
+  /// The writer [`decode_string_value`](crate::decode_string_value) was handed refused a write. It
+  /// holds a prefix of the value, and nothing was written to it after the refusal.
+  ///
+  /// [`core::fmt::Error`] carries nothing, so neither does this: a `fmt::Write` implementation
+  /// reports only *that* it failed, and inventing a cause here would be a claim the writer never
+  /// made.
+  #[error("the writer refused a write")]
+  Sink,
 }

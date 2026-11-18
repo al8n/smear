@@ -12,9 +12,9 @@
 //! and rejects the literal outright. That one is settled by the character it names.
 //!
 //! That provenance stays live rather than being a note about how these numbers were once obtained.
-//! `smear`'s `tests/json_writer.rs` holds its response writer to `apollo-parser` on block strings,
-//! and its `src/json/tests.rs` holds these conversions to that writer over a corpus that overlaps
-//! this one — so a drift here has two gates to get past, and neither of them is this file.
+//! These conversions run the decoder's walks in `value`, which `smear`'s response writer runs too,
+//! and `smear`'s `tests/json_writer.rs` holds that writer to `apollo-parser` on block strings — so
+//! a drift here has a gate to get past that is not this file.
 
 use std::{borrow::Cow, format, vec::Vec};
 
@@ -243,11 +243,10 @@ fn required_capacity_covers_the_cooked_value() {
 /// Reaches `Cow::from`'s `Complex` arm directly, bypassing the lexer entirely.
 ///
 /// The real lexer never hands this conversion an escape draft §2.9.1 does not name — the test
-/// below this one checks exactly that — which is why an external caller could never observe
-/// [`normalize_str_to_string`](super::normalize_str_to_string)'s copy-through claim failing to
-/// hold. [`LitComplexInlineStr::new`] is `pub(crate)`, so a test in this crate can still ask the
-/// conversion the question the lexer never gets to ask: what does it do with a sequence only
-/// `u32::from_str_radix` — not the grammar — accepts.
+/// below this one checks exactly that — which is why an external caller could never observe the
+/// conversion's copy-through claim failing to hold. [`LitComplexInlineStr::new`] is `pub(crate)`,
+/// so a test in this crate can still ask the conversion the question the lexer never gets to ask:
+/// what does it do with a sequence only `u32::from_str_radix` — not the grammar — accepts.
 fn force_complex_cook(source: &str) -> Cow<'_, str> {
   LitInlineStr::Complex(LitComplexInlineStr::new(source, source.len())).into()
 }

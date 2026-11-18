@@ -5,12 +5,13 @@
 //! Two places, and neither is this file's own reading of the specification. The block-string cases
 //! are draft §2.9.4's worked example and graphql-js's `blockString-test` cases, which an
 //! independent Python port of `BlockStringValue()` reproduced byte for byte before any of this was
-//! written. And every literal the lexer accepts is also cooked by the `Cow` conversions in the
-//! modules beside this one — the ones `string_lexer/tests.rs` holds to `apollo-parser` — so
-//! [`the_byte_decoder_agrees_with_the_cow_conversions`] makes those two answer the same question
-//! over the same spellings, and a drift in either is caught by the other.
+//! written. And the `Cow` conversions in the modules beside this one run these same walks over a
+//! lexed literal, which `string_lexer/tests.rs` holds to `apollo-parser`, a reading that shares no
+//! code with this one. [`the_byte_decoder_agrees_with_the_cow_conversions`] then pins that the two
+//! doors into the walks, the spelling here and the lexed carrier there, reach the same value.
 
-use std::{borrow::Cow, string::String, vec::Vec};
+use core::fmt;
+use std::{borrow::Cow, format, string::String, vec::Vec};
 
 use super::{
   super::LitStr, StringValueError, decode_string_value, string_value_len, string_value_pieces,
@@ -126,8 +127,10 @@ fn a_block_string_is_block_string_value() {
 
 /// Every literal the lexer accepts decodes the way its `Cow` conversion cooks it.
 ///
-/// The conversions read the line facts the lexer measured, and this decoder reads nothing but the
-/// spelling, so the two reach the value by different routes and agree only if both are right.
+/// The two run the same walks, so what this pins is the two doors into them. The decoder takes the
+/// delimiters off the spelling and refuses a backslash that begins no escape; the conversion takes
+/// them off a lexed carrier and copies such a backslash through. On a literal the lexer accepted
+/// the two must not differ.
 #[test]
 fn the_byte_decoder_agrees_with_the_cow_conversions() {
   const CORPUS: &[&str] = &[
@@ -237,11 +240,114 @@ fn a_value_that_is_not_utf8_is_refused() {
   }
 }
 
-/// `decode_string_value` appends, and reserves the decoded length rather than the spelling's.
+/// `decode_string_value` appends to what the writer already holds.
 #[test]
 fn decoding_appends_to_what_is_there() {
   let mut out = String::from("> ");
   decode_string_value(br#""a\u{1F600}b""#, &mut out).expect("a value");
   decode_string_value(b"\"\"\"\n  c\n\"\"\"", &mut out).expect("a value");
   assert_eq!(out, "> a\u{1f600}bc");
+}
+
+/// A writer with room for `room` bytes: it refuses the first write that would pass them, and
+/// counts every write it is asked for after that one.
+struct Cramped {
+  written: String,
+  room: usize,
+  refused: bool,
+  asked_after: usize,
+}
+
+impl Cramped {
+  fn new(room: usize) -> Self {
+    Self {
+      written: String::new(),
+      room,
+      refused: false,
+      asked_after: 0,
+    }
+  }
+}
+
+impl fmt::Write for Cramped {
+  fn write_str(&mut self, s: &str) -> fmt::Result {
+    if self.refused {
+      self.asked_after += 1;
+      return Err(fmt::Error);
+    }
+    if self.written.len() + s.len() > self.room {
+      self.refused = true;
+      return Err(fmt::Error);
+    }
+    self.written.push_str(s);
+    Ok(())
+  }
+}
+
+/// A writer that refuses midway holds a prefix of the value and the answer is `Sink`, and the walk
+/// stops there rather than writing on into a writer that failed.
+#[test]
+fn a_writer_that_refuses_midway_holds_a_prefix_and_answers_sink() {
+  // The spelling, the writer's room in bytes, and the prefix it holds after the refusal.
+  const CASES: &[(&str, usize, &str)] = &[
+    // An inline value's pieces are `ab`, a line feed and `cd`, and the third does not fit.
+    (r#""ab\ncd""#, 3, "ab\n"),
+    // An escape's character is a piece of its own, and this one needs four bytes.
+    (r#""ab\u{1F600}cd""#, 5, "ab"),
+    // A block value's pieces are `x`, a line feed and `y`, and the second does not fit.
+    ("\"\"\"\n  x\n  y\n\"\"\"", 1, "x"),
+    // With no room the first piece is refused, and nothing is written.
+    (r#""ab""#, 0, ""),
+  ];
+
+  for &(spelling, room, prefix) in CASES {
+    let mut out = Cramped::new(room);
+    assert_eq!(
+      decode_string_value(spelling.as_bytes(), &mut out),
+      Err(StringValueError::Sink),
+      "`{spelling}` into {room} bytes"
+    );
+    assert_eq!(out.written, prefix, "`{spelling}` into {room} bytes");
+    assert_eq!(
+      out.asked_after, 0,
+      "`{spelling}` was written on after the refusal"
+    );
+  }
+
+  // A refusal of the spelling is met before a byte is written, so a writer with no room never
+  // hears of it.
+  let mut out = Cramped::new(0);
+  assert_eq!(
+    decode_string_value(b"\"ab\\q\"", &mut out),
+    Err(StringValueError::InvalidEscape(3))
+  );
+  assert!(!out.refused, "a refused spelling was written");
+}
+
+/// A spelling that displays as its value, through the `Formatter` it is handed.
+struct Displayed(&'static [u8]);
+
+impl fmt::Display for Displayed {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    decode_string_value(self.0, f).map_err(|_| fmt::Error)
+  }
+}
+
+/// Any `fmt::Write` takes the value: a `String`, a `&mut dyn fmt::Write`, and the `Formatter` a
+/// `Display` implementation is handed.
+#[test]
+fn every_kind_of_writer_takes_the_value() {
+  const SPELLING: &[u8] = br#""a\u{1F600}\tb""#;
+  const VALUE: &str = "a\u{1f600}\tb";
+
+  let mut string = String::new();
+  decode_string_value(SPELLING, &mut string).expect("a value");
+  assert_eq!(string, VALUE);
+
+  let mut behind = String::new();
+  let dynamic: &mut dyn fmt::Write = &mut behind;
+  decode_string_value(SPELLING, dynamic).expect("a value");
+  assert_eq!(behind, VALUE);
+
+  assert_eq!(format!("{}", Displayed(SPELLING)), VALUE);
 }

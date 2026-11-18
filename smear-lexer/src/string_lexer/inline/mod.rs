@@ -1,7 +1,10 @@
 use derive_more::{From, IsVariant, TryUnwrap, Unwrap};
 use tokora::utils::{DisplayCompact, DisplayHuman, DisplayPretty};
 
-use super::LitPlainInlineStr;
+use super::{
+  LitPlainInlineStr,
+  value::{Invalid, inline_value},
+};
 use std::{borrow::Cow, string::String};
 
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
@@ -238,9 +241,19 @@ impl<'a> From<LitInlineStr<&'a str>> for Cow<'a, str> {
     match value {
       LitInlineStr::Plain(s) => Cow::Borrowed(inline_body(s.as_str())),
       LitInlineStr::Complex(s) => {
-        let mut builder = String::with_capacity(s.required_capacity());
-        normalize_str_to_string(inline_body(s.as_str()), &mut builder);
-        Cow::Owned(builder)
+        let mut cooked = String::with_capacity(s.required_capacity());
+        // The decoder's own inline walk. It copies a backslash that begins no escape through as
+        // content rather than refusing, and a `String` takes every piece, so it answers `Ok`
+        // whatever the carrier holds and there is no refusal to read.
+        let _ = inline_value(
+          inline_body(s.as_str()),
+          Invalid::CopyThrough,
+          &mut |piece: &str| -> core::fmt::Result {
+            cooked.push_str(piece);
+            Ok(())
+          },
+        );
+        Cow::Owned(cooked)
       }
     }
   }
@@ -328,114 +341,6 @@ impl_common_traits!(LitComplexInlineStr::<&'a [u8]>::as_bytes);
 // same order — see `impl_source_ordering`.
 impl_source_ordering!(LitComplexInlineStr::<&'a str>::as_str);
 impl_source_ordering!(LitComplexInlineStr::<&'a [u8]>::as_bytes);
-
-/// Applies draft §2.9.1's escapes to an inline literal's body.
-///
-/// # Every escape the lexer accepts, and no panic for the ones it does not
-///
-/// `\"` `\\` `\/` `\b` `\f` `\n` `\r` `\t`, the fixed-width `\uXXXX` — including a surrogate
-/// **pair**, which is two escapes spelling one character — and the braced `\u{X…}` of one to six
-/// digits. The braced form is the one this used to be missing: `read_hex4` read the `{` as a hex
-/// digit and panicked on it, so `Cow::from` of `"\u{1F600}"` aborted on a literal
-/// `handle_braced_escape_unicode` in this very module accepts. A conversion on an
-/// already-lexed literal is not allowed to be a panic site, so nothing here can panic: a sequence
-/// the escape grammar does not cover is copied through as it was spelled, for the same reason
-/// `inline_body` hands back a slice that carries no delimiters rather than panicking on one.
-#[inline]
-fn normalize_str_to_string(src: &str, output: &mut String) {
-  let mut rest = src;
-  while let Some(at) = rest.find('\\') {
-    output.push_str(&rest[..at]);
-    let after = &rest[at + 1..];
-    match read_escape(after) {
-      Some((ch, consumed)) => {
-        output.push(ch);
-        rest = &after[consumed..];
-      }
-      None => {
-        output.push('\\');
-        rest = after;
-      }
-    }
-  }
-  output.push_str(rest);
-}
-
-/// Reads one escape body — everything after the backslash — as its character and byte span.
-#[inline]
-fn read_escape(after: &str) -> Option<(char, usize)> {
-  let ch = after.chars().next()?;
-  let simple = match ch {
-    '"' => '"',
-    '\\' => '\\',
-    '/' => '/',
-    'b' => '\u{8}',
-    'f' => '\u{c}',
-    'n' => '\n',
-    'r' => '\r',
-    't' => '\t',
-    'u' => return read_unicode_escape(&after[1..]).map(|(ch, span)| (ch, span + 1)),
-    _ => return None,
-  };
-  Some((simple, ch.len_utf8()))
-}
-
-/// Reads a `\u` escape body — everything after the `u` — in either of draft §2.9.1's spellings.
-#[inline]
-fn read_unicode_escape(after: &str) -> Option<(char, usize)> {
-  if let Some(rest) = after.strip_prefix('{') {
-    let close = rest.find('}')?;
-    let digits = rest.get(..close)?;
-    // draft §2.9.1 names one to six hex digits. `u32::from_str_radix` bounds neither that count
-    // nor the character class — it takes a leading `+`, and has no digit-count limit at all — so
-    // both are checked here rather than trusted to the parse.
-    if !(1..=6).contains(&digits.len()) || !is_hex_digits(digits) {
-      return None;
-    }
-    let scalar = u32::from_str_radix(digits, 16).ok()?;
-    // `+ 2` for the braces the offset above does not span.
-    return char::from_u32(scalar).map(|ch| (ch, close + 2));
-  }
-
-  let leading = hex4(after)?;
-  // A leading surrogate is a character only with its trailing half, which the grammar spells as a
-  // second `\u` escape immediately after this one. Anything else is not a character at all.
-  if (0xD800..0xDC00).contains(&leading) {
-    let tail = after.get(4..)?.strip_prefix("\\u")?;
-    let trailing = hex4(tail)?;
-    if !(0xDC00..0xE000).contains(&trailing) {
-      return None;
-    }
-    let combined = 0x1_0000 + ((leading - 0xD800) << 10) + (trailing - 0xDC00);
-    return char::from_u32(combined).map(|ch| (ch, 10));
-  }
-
-  char::from_u32(leading).map(|ch| (ch, 4))
-}
-
-/// Reads exactly four hex digits.
-///
-/// `get` rather than an index: it answers `None` on a slice shorter than four bytes *and* on one
-/// whose fourth byte is inside a character, which is what lets the caller index at `4` afterwards.
-#[inline]
-fn hex4(digits: &str) -> Option<u32> {
-  let digits = digits.get(..4)?;
-  // `from_str_radix` accepts a leading `+` that draft §2.9.1's four hex digits does not.
-  if !is_hex_digits(digits) {
-    return None;
-  }
-  u32::from_str_radix(digits, 16).ok()
-}
-
-/// Whether every byte is one of draft §2.9.1's hex digits, `0-9`, `A-F`, or `a-f`.
-///
-/// `u32::from_str_radix` accepts strictly more than this — a leading `+` sign, at least — which is
-/// why both unicode-escape readers check the character class themselves rather than trusting the
-/// parse to fail on whatever the grammar does not name.
-#[inline]
-fn is_hex_digits(s: &str) -> bool {
-  s.bytes().all(|b| b.is_ascii_hexdigit())
-}
 
 #[inline(always)]
 const fn utf8_len_for_scalar(cp: u32) -> usize {

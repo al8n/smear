@@ -27,6 +27,17 @@ All notable changes to Smear are documented in this file.
   `indexmap` with either tier and on foldhash with `alloc`, and `smear-schema` on smol-bytes 0.2
   with either tier where the target has pointer-width atomics. A build with no tier compiles none
   of them.
+- `smear-lexer`: `decode_string_value` writes to any `core::fmt::Write`: a `String` as before, a
+  `&mut dyn fmt::Write`, or the `fmt::Formatter` a `Display` implementation is handed. A writer
+  that refuses a write is answered with the new `StringValueError::Sink`, holding a prefix of the
+  value and written to no further; a spelling the decoder refuses still writes nothing. It no
+  longer reserves the value's length in a `String` first: a caller that wants one allocation
+  reserves `string_value_len` before it.
+- `smear`!: `json::Error::SurrogateEscape` is removed. `Json::graphql_string` cooks a literal
+  through `smear-lexer`'s `string_value_pieces`, the decoder the lexer's own conversions run, and
+  answers every spelling no lexer produces with `MalformedEscape`: a `\u` escape that names a
+  surrogate, which was `SurrogateEscape`, and a literal without its `"` or `"""` delimiters, whose
+  bytes it wrote as the value.
 - `smear-schema` and `smear-compiler`: an `Int` literal stands for a `Float` only while a finite
   double holds its value, as `Float`'s input coercion requires (§3.5.2). `Schema::build` and
   `Rule::ValuesOfCorrectType` refuse one of magnitude `2^1024 - 2^970` or more, the least integer

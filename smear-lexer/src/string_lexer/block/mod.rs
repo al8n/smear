@@ -13,7 +13,7 @@ pub(crate) use self::{
 mod str;
 mod u8_slice;
 
-use super::LitPlainBlockStr;
+use super::{LitPlainBlockStr, value::block_value};
 
 variant_type!(
   /// A block string representation in GraphQL containing one or more escaped triple quotes,
@@ -197,22 +197,6 @@ fn leading_ws_indent(bytes: &[u8]) -> usize {
     .count()
 }
 
-#[inline(always)]
-fn chop_indent(s: &str, mut n: usize) -> &str {
-  let bytes = s.as_bytes();
-  let mut i = 0usize;
-  while i < bytes.len() && n > 0 {
-    match bytes[i] {
-      b' ' | b'\t' => {
-        i += 1;
-        n -= 1;
-      }
-      _ => break,
-    }
-  }
-  &s[i..]
-}
-
 /// Strips a block literal's `"""` delimiters.
 ///
 /// Total on a slice that does not carry them, for the reason the inline conversion's `inline_body`
@@ -241,12 +225,14 @@ fn block_body(raw: &str) -> &str {
 /// # The algorithm is §2.9.4's, step for step
 ///
 /// [`Plain`](LitBlockStr::Plain) is the case where the algorithm is the identity — the lexer's
-/// `is_clean` — so it is a reslice. [`Complex`](LitBlockStr::Complex) replays the steps from the
-/// line facts the lexer already collected: the common indent comes off every line **but the first
-/// of the raw split** (step 4, which exempts neither a blank line nor the line that happens to
-/// survive steps 5 and 6), leading and trailing blank lines go (steps 5 and 6), each surviving
-/// line is joined by a single line feed whatever terminator the source spelled (step 8), and
-/// `\"""` — §2.9.5's only escape — becomes `"""` on the way past.
+/// `is_clean` — so it is a reslice. [`Complex`](LitBlockStr::Complex) runs the steps through the
+/// block walk [`decode_string_value`](crate::decode_string_value) takes too: the common indent
+/// comes off every line **but the first of the raw split** (step 4, which exempts neither a blank
+/// line nor the line that happens to survive steps 5 and 6), leading and trailing blank lines go
+/// (steps 5 and 6), each surviving line is joined by a single line feed whatever terminator the
+/// source spelled (step 8), and `\"""` — §2.9.5's only escape — becomes `"""` on the way past. The
+/// walk measures the lines again; of the line facts the lexer collected, only the capacity they
+/// add up to is read, to size the allocation.
 ///
 /// # `Plain` means the lexer looked, and looked at *this* grammar
 ///
@@ -284,117 +270,17 @@ impl<'a> From<LitBlockStr<&'a str>> for Cow<'a, str> {
     match value {
       LitBlockStr::Plain(s) => Cow::Borrowed(block_body(s.as_str())),
       LitBlockStr::Complex(s) => {
-        // Inner content between the surrounding delimiters.
-        let inner = block_body(s.as_str());
-
-        let total_lines = s.total_lines();
-        let leading_blank_lines = s.leading_blank_lines();
-        let trailing_blank_lines = s.trailing_blank_lines(); // already the "effective" trailing
-        let common_indent = s.common_indent();
-        let cap = s.required_capacity();
-
-        let keep_start = leading_blank_lines;
-        let keep_end = total_lines.saturating_sub(trailing_blank_lines);
-
-        // Fast-return for empty result.
-        if keep_start >= keep_end {
-          return std::borrow::Cow::Owned(String::new());
-        }
-
-        // Write one logical line body:
-        // - dedent unless this is the first line of the RAW split (§2.9.4 step 4 exempts that one
-        //   line and nothing else — not a blank line, and not the first line that survives steps 5
-        //   and 6, which is a different line whenever the block opens with a terminator),
-        // - unescape \"\"\" -> """
-        #[inline(always)]
-        fn write_line(out: &mut String, line: &str, dedent: usize, is_first_raw_line: bool) {
-          let body = if is_first_raw_line {
-            line
-          } else {
-            chop_indent(line, dedent)
-          };
-
-          // Copy with `\"\"\"` → `"""` (drop the backslash)
-          let b = body.as_bytes();
-          let mut i = 0usize;
-          let mut chunk_start = 0usize;
-          while i < b.len() {
-            if b[i] == b'\\'
-              && i + 3 < b.len()
-              && b[i + 1] == b'"'
-              && b[i + 2] == b'"'
-              && b[i + 3] == b'"'
-            {
-              // Flush up to the backslash
-              // (safe to slice: split points are ASCII)
-              unsafe {
-                out
-                  .as_mut_vec()
-                  .extend_from_slice(&body.as_bytes()[chunk_start..i]);
-              }
-              out.push_str(r#"""""#); // three quotes
-              i += 4; // skip backslash + 3 quotes
-              chunk_start = i;
-            } else {
-              i += 1;
-            }
-          }
-          // Flush tail
-          unsafe {
-            out
-              .as_mut_vec()
-              .extend_from_slice(&body.as_bytes()[chunk_start..]);
-          }
-        }
-
-        // Iterate logical lines of `inner`, honoring CR, LF, or CRLF.
-        let mut out = String::with_capacity(cap);
-        let mut i = 0usize;
-        let bytes = inner.as_bytes();
-        let mut line_idx = 0usize;
-
-        while line_idx < total_lines {
-          // find [line_start, line_end) + terminator length
-          let line_start = i;
-          let mut line_end = i;
-          let mut term_len = 0usize;
-
-          while line_end < bytes.len() {
-            match bytes[line_end] {
-              b'\n' => {
-                term_len = 1;
-                break;
-              }
-              b'\r' => {
-                if line_end + 1 < bytes.len() && bytes[line_end + 1] == b'\n' {
-                  term_len = 2;
-                } else {
-                  term_len = 1;
-                }
-                break;
-              }
-              _ => line_end += 1,
-            }
-          }
-          // After the loop, line_end points to the first terminator byte (or end of slice).
-          let body = &inner[line_start..line_end];
-
-          // Keep line?
-          if line_idx >= keep_start && line_idx < keep_end {
-            write_line(&mut out, body, common_indent, line_idx == 0);
-
-            // Emit normalized newline between kept lines
-            if line_idx + 1 < keep_end {
-              out.push('\n');
-            }
-          }
-
-          // Advance past the terminator
-          i = (line_end + term_len).min(inner.len());
-          line_idx += 1;
-        }
-
-        Cow::Owned(out)
+        let mut cooked = String::with_capacity(s.required_capacity());
+        // The decoder's own block walk. A `String` takes every piece, so it answers `Ok` and there
+        // is no refusal to read.
+        let _ = block_value(
+          block_body(s.as_str()),
+          &mut |piece: &str| -> core::fmt::Result {
+            cooked.push_str(piece);
+            Ok(())
+          },
+        );
+        Cow::Owned(cooked)
       }
     }
   }

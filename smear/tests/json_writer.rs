@@ -746,8 +746,10 @@ fn every_string_survives_the_round_trip() {
 /// specification's worked example, which #163 repaired, but because it is in this workspace and an
 /// oracle that shares a repository with its subject can be wrong in the same direction.
 /// `apollo-parser` is a dev-dependency of this package already, is a different organisation's
-/// implementation, and cooks a `StringValue` into a `String` through its own code. The differential
-/// against `smear-lexer` lives in `src/json/tests.rs` and is a second check, not this one.
+/// implementation, and cooks a `StringValue` into a `String` through its own code. The writer cooks
+/// through `smear-lexer`'s decoder, so this is that decoder's oracle as well; `src/json/tests.rs`
+/// holds the writer to the lexer's own conversions, which run the same decoder, and is a second
+/// check of the doors rather than of the reading.
 #[test]
 fn block_string_cooking_agrees_with_apollo_parser() {
   const CORPUS: &[&str] = &[

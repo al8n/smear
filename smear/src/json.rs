@@ -93,12 +93,12 @@
 //!
 //! And the two that are listed to be closed rather than tracked. **Operating-system resources** —
 //! descriptors, handles, threads, locks — is empty by construction: this module's whole import list
-//! is [`core::fmt`], `std::vec::Vec`, [`itoa`] and [`zmij`], and it opens, spawns and locks
-//! nothing. **Non-termination** is not a fifth resource but a way of making any of the four
-//! infinite, and it needs a cycle: the response tree is the executor's slabs, which are a tree by
-//! construction, and a materialised value is an owned tree over `Vec` with no shared and no
-//! interior-mutable node, so neither can contain one. A driver's own `WriteJson` can, and that is
-//! the driver's.
+//! is [`core::fmt`], `std::vec::Vec`, [`itoa`], [`zmij`] and `smear-lexer`'s
+//! [`string_value_pieces`], and it opens, spawns and locks nothing. **Non-termination** is not a
+//! fifth resource but a way of making any of the four infinite, and it needs a cycle: the response
+//! tree is the executor's slabs, which are a tree by construction, and a materialised value is an
+//! owned tree over `Vec` with no shared and no interior-mutable node, so neither can contain one. A
+//! driver's own `WriteJson` can, and that is the driver's.
 //!
 //! **Static storage is deliberately not on the list, and it is the one to check next.** A `Vec` in
 //! a `static` or a thread-local is (2) plus *retention*: a peak that is freed with the call is
@@ -118,7 +118,7 @@
 //! | `write_response_with`'s `segments` | heap | the deepest error path in the response | one `try_reserve` per path, [`Error::Allocation`] |
 //! | `response::Locations`'s checkpoints | heap | the document's length | one `try_reserve_exact`, [`Error::Allocation`] |
 //! | [`materialized`]'s value stack | heap | the value's own nesting, which nothing recorded | `try_reserve` per level, amortised, [`Error::Allocation`] |
-//! | every walk in this module | native stack | **nothing recurses**: `write_node`, the value walk, both string-cooking walks, the location arithmetic and the escape scan are loops, and the only frame locals that are not words are [`itoa`]'s and [`zmij`]'s fixed buffers | — |
+//! | every walk in this module | native stack | **nothing recurses**: `write_node`, the value walk, the string-cooking walk `smear-lexer` runs for it, the location arithmetic and the escape scan are loops, and the only frame locals that are not words are [`itoa`]'s and [`zmij`]'s fixed buffers | — |
 //! | the caller's `write_leaf`, `WriteJson` and `Display` | both | the caller's | the caller's |
 //!
 //! **And which rows are measured, said exactly, because "measured" is what the last enumeration
@@ -168,6 +168,8 @@
 
 use core::fmt;
 
+use smear_lexer::string_value_pieces;
+
 pub use response::{
   write_request_error_result, write_request_error_result_with, write_response, write_response_with,
 };
@@ -203,17 +205,17 @@ pub enum Error {
   /// Draft §3.5.2's `Float` is a finite IEEE 754 double and JSON has no number literal for a NaN
   /// or an infinity.
   NonFiniteFloat,
-  /// A GraphQL `\u` escape named a UTF-16 surrogate code point.
+  /// A GraphQL string literal carried an escape the lexer would not have produced, or is no
+  /// literal at all because its `"` or `"""` delimiters are missing.
   ///
-  /// Both spellings reach it — a lone `\uD800`, and the braced `\u{D800}` — because neither names
-  /// a Unicode scalar value and so neither has a character to write. A *paired* `𐀀` is
-  /// not this: it names U+10000 and is written as that one character.
-  SurrogateEscape,
-  /// A GraphQL string literal carried an escape the lexer would not have produced.
+  /// The escapes include a `\u` that names a UTF-16 surrogate in either spelling, a lone `\uD800`
+  /// or the braced `\u{D800}`: neither names a Unicode scalar value, so neither has a character to
+  /// write. A *paired* `\uD800\uDC00` is not this: it names U+10000 and is written as that one
+  /// character.
   ///
-  /// Unreachable from a literal this workspace lexed — `smear-lexer` validates every escape before
-  /// a `StringValue` exists — and present because the cooking walk must be total. A `panic!` here
-  /// would be the same walk with the failure mode of the two crates it was written to avoid.
+  /// Unreachable from a literal this workspace lexed — `smear-lexer` validates every escape and
+  /// both delimiters before a `StringValue` exists. [`Json::graphql_string`] answers it rather than
+  /// panicking because it reads whatever spelling a caller hands it.
   MalformedEscape,
   /// The allocator refused room for one of the writer's own buffers.
   ///
@@ -271,8 +273,9 @@ impl fmt::Display for Error {
     f.write_str(match self {
       Self::Sink => "the output sink refused the write",
       Self::NonFiniteFloat => "a Float that is not finite has no JSON number literal",
-      Self::SurrogateEscape => "a \\u escape named a UTF-16 surrogate, which is not a character",
-      Self::MalformedEscape => "a string literal carried a malformed escape",
+      Self::MalformedEscape => {
+        "a string literal carried a malformed escape or lacked its delimiters"
+      }
       Self::Allocation => "the allocator refused room for a buffer this response needs",
     })
   }
@@ -465,38 +468,30 @@ impl<W: fmt::Write> Json<W> {
   /// the empty inline string and does not begin with three quotes, and the shortest block string
   /// is `""""""`.
   ///
-  /// # Why the writer cooks the literal itself
+  /// # How the literal is cooked
   ///
   /// The materialised value tree keeps a string leaf as its **source slice, escapes and all** —
   /// that is what makes materialisation allocate nothing — so something has to apply draft §2.9.1's
   /// escapes and draft §2.9.4's block-string algorithm before a JSON string can be written.
   ///
-  /// `smear-lexer` has a second implementation of that, as `Cow<str>` conversions on its literal
-  /// types, and this writer does **not** route through them. The reason it did not used to be a
-  /// cost argument at all: measured on this tree, `Cow::from(LitInlineStr::from(…))` **panicked**
-  /// on `\u{1F600}`, its two variants disagreed about whether they answered the value or the
-  /// spelling, and its block dedent was not draft §2.9.4's. #163 repaired all three, so that
-  /// argument is spent and the remaining one is the cost: a `Cow` is a **`String` per literal that
-  /// needed cooking**, where this walk writes each cooked character straight into the sink and the
-  /// allocation gates in this module's tests are what say so. Routing through the conversions is
-  /// therefore a decision with a number attached, and not one this door makes on its own.
+  /// That is `smear-lexer`'s [`string_value_pieces`], the one reading of a `StringValue` in this
+  /// workspace, which the lexer's own `Cow<str>` conversions run too. It hands the value out a
+  /// piece at a time, and each piece is escaped into the sink as it arrives: the literal is walked
+  /// once, and no `String` is built for it. A `Cow` conversion would cost a **`String` per literal
+  /// that needed cooking**, and the allocation gates in this module's tests are what say this door
+  /// costs none.
   ///
-  /// The conversions are a differential oracle in this module's tests either way — a second
-  /// implementation is worth having — and that differential now covers the whole of both, escapes
-  /// and block strings alike, rather than the part of one that could be reached.
-  ///
-  /// # Escapes
+  /// # Escapes, and what is refused
   ///
   /// Inline: `\"` `\\` `\/` `\b` `\f` `\n` `\r` `\t`, the fixed-width `\uXXXX` including a
   /// surrogate **pair**, and the braced `\u{X…}`. Block: `\"""`, and nothing else — a backslash in
   /// a block string is a backslash.
+  ///
+  /// A spelling no lexer produces — an escape outside that list, or no delimiters — is
+  /// [`Error::MalformedEscape`], once the value before it has been written.
   pub fn graphql_string(&mut self, literal: &str) -> Result<(), Error> {
     self.out.write_char('"')?;
-    if let Some(raw) = block_body(literal) {
-      cook_block(&mut self.out, raw)?;
-    } else {
-      cook_inline(&mut self.out, inline_body(literal))?;
-    }
+    cook(&mut self.out, literal)?;
     self.out.write_char('"')?;
     Ok(())
   }
@@ -646,23 +641,6 @@ fn escape<W: fmt::Write>(out: &mut W, value: &str) -> fmt::Result {
   out.write_str(&value[flushed..])
 }
 
-/// Writes one already-cooked character with JSON's escapes applied.
-fn escape_char<W: fmt::Write>(out: &mut W, ch: char) -> fmt::Result {
-  let two = match ch {
-    '"' => '"',
-    '\\' => '\\',
-    '\u{8}' => 'b',
-    '\u{c}' => 'f',
-    '\n' => 'n',
-    '\r' => 'r',
-    '\t' => 't',
-    '\0'..='\u{1f}' => return write_control(out, ch as u8),
-    other => return out.write_char(other),
-  };
-  out.write_char('\\')?;
-  out.write_char(two)
-}
-
 /// Writes a control character below U+0020 as `\u00XX`.
 fn write_control<W: fmt::Write>(out: &mut W, byte: u8) -> fmt::Result {
   const HEX: [u8; 16] = *b"0123456789abcdef";
@@ -671,227 +649,21 @@ fn write_control<W: fmt::Write>(out: &mut W, byte: u8) -> fmt::Result {
   out.write_char(HEX[usize::from(byte & 0x0f)] as char)
 }
 
-/// Returns a block string's raw body, or `None` when the literal is an inline string.
-fn block_body(literal: &str) -> Option<&str> {
-  let bytes = literal.as_bytes();
-  if bytes.len() >= 6 && bytes.starts_with(b"\"\"\"") && bytes.ends_with(b"\"\"\"") {
-    Some(&literal[3..literal.len() - 3])
-  } else {
-    None
-  }
-}
-
-/// Returns an inline string's raw body.
+/// Writes the value of a GraphQL string literal, JSON-escaped, as `string_value_pieces` hands it
+/// out a piece at a time.
 ///
-/// Total on a malformed literal — a caller that hands over something that is not a literal at all
-/// gets its own bytes back rather than a panic — because the delimiters are the lexer's guarantee
-/// and this module does not re-check the lexer.
-fn inline_body(literal: &str) -> &str {
-  literal
-    .strip_prefix('"')
-    .and_then(|rest| rest.strip_suffix('"'))
-    .unwrap_or(literal)
-}
-
-/// Applies draft §2.9.1's escapes and writes the result JSON-escaped.
-fn cook_inline<W: fmt::Write>(out: &mut W, raw: &str) -> Result<(), Error> {
-  let mut rest = raw;
-  while let Some(at) = rest.find('\\') {
-    escape(out, &rest[..at])?;
-    let after = &rest[at + 1..];
-    let (ch, consumed) = read_escape(after)?;
-    escape_char(out, ch)?;
-    rest = &after[consumed..];
-  }
-  escape(out, rest)?;
-  Ok(())
-}
-
-/// Reads one escape body — everything after the backslash — returning its character and how many
-/// bytes it spans.
-fn read_escape(after: &str) -> Result<(char, usize), Error> {
-  let mut chars = after.chars();
-  let ch = chars.next().ok_or(Error::MalformedEscape)?;
-  let simple = match ch {
-    '"' => '"',
-    '\\' => '\\',
-    '/' => '/',
-    'b' => '\u{8}',
-    'f' => '\u{c}',
-    'n' => '\n',
-    'r' => '\r',
-    't' => '\t',
-    'u' => return read_unicode_escape(&after[1..]).map(|(ch, span)| (ch, span + 1)),
-    _ => return Err(Error::MalformedEscape),
-  };
-  Ok((simple, ch.len_utf8()))
-}
-
-/// Reads a `\u` escape body — everything after the `u` — in either spelling.
-fn read_unicode_escape(after: &str) -> Result<(char, usize), Error> {
-  if let Some(rest) = after.strip_prefix('{') {
-    let close = rest.find('}').ok_or(Error::MalformedEscape)?;
-    let scalar = hex(&rest[..close])?;
-    return char::from_u32(scalar)
-      .map(|ch| (ch, close + 2))
-      .ok_or(surrogate_or_malformed(scalar));
-  }
-
-  let leading = hex4(after)?;
-  // A leading surrogate is only a character with its trailing half, which draft §2.9.1 spells as a
-  // second `\u` escape immediately after this one. Anything else is not a character at all.
-  if (0xD800..0xDC00).contains(&leading) {
-    let tail = after.get(4..).ok_or(Error::SurrogateEscape)?;
-    let tail = tail.strip_prefix("\\u").ok_or(Error::SurrogateEscape)?;
-    let trailing = hex4(tail)?;
-    if !(0xDC00..0xE000).contains(&trailing) {
-      return Err(Error::SurrogateEscape);
+/// The pieces arrive through a closure that cannot fail, so it keeps the sink's first refusal and
+/// writes nothing after it; the walk then finishes on its own, and that refusal is the answer.
+fn cook<W: fmt::Write>(out: &mut W, literal: &str) -> Result<(), Error> {
+  let mut written: fmt::Result = Ok(());
+  let cooked = string_value_pieces(literal.as_bytes(), |piece| {
+    if written.is_ok() {
+      written = escape(out, piece);
     }
-    let combined = 0x1_0000 + ((leading - 0xD800) << 10) + (trailing - 0xDC00);
-    return char::from_u32(combined)
-      .map(|ch| (ch, 10))
-      .ok_or(Error::MalformedEscape);
-  }
-
-  char::from_u32(leading)
-    .map(|ch| (ch, 4))
-    .ok_or(surrogate_or_malformed(leading))
-}
-
-/// Says which refusal a non-scalar code point earned.
-const fn surrogate_or_malformed(scalar: u32) -> Error {
-  if 0xD800 <= scalar && scalar < 0xE000 {
-    Error::SurrogateEscape
-  } else {
-    Error::MalformedEscape
-  }
-}
-
-/// Reads exactly four hex digits.
-fn hex4(digits: &str) -> Result<u32, Error> {
-  let digits = digits.get(..4).ok_or(Error::MalformedEscape)?;
-  hex(digits)
-}
-
-/// Reads one to six hex digits as a code point.
-fn hex(digits: &str) -> Result<u32, Error> {
-  if digits.is_empty() || digits.len() > 6 {
-    return Err(Error::MalformedEscape);
-  }
-  let mut scalar = 0u32;
-  for digit in digits.chars() {
-    scalar = (scalar << 4) | digit.to_digit(16).ok_or(Error::MalformedEscape)?;
-  }
-  Ok(scalar)
-}
-
-/// Applies draft §2.9.4's `BlockStringValue` and writes the result JSON-escaped.
-///
-/// Two passes over the body and no buffer: the first measures the common indentation and which
-/// lines survive, the second writes. The specification replaces `\"""` with `"""` *before* the
-/// dedent, and doing it during the write is equivalent — a backslash is not whitespace, so the
-/// replacement cannot change any line's indentation or whether it is blank.
-fn cook_block<W: fmt::Write>(out: &mut W, raw: &str) -> Result<(), Error> {
-  let mut indent = usize::MAX;
-  let mut keep_from = 0usize;
-  let mut keep_to = 0usize;
-  for (seen, line) in Lines::new(raw).enumerate() {
-    if blank(line) {
-      continue;
-    }
-    // Step 3.a: the common indent is measured over every line but the first of the RAW split,
-    // which is not the same as the first line that survives steps 5 and 6.
-    if seen > 0 {
-      indent = indent.min(leading_whitespace(line));
-    }
-    if keep_to == 0 {
-      keep_from = seen;
-    }
-    keep_to = seen + 1;
-  }
-  let indent = if indent == usize::MAX { 0 } else { indent };
-
-  let mut written = 0usize;
-  for (at, line) in Lines::new(raw).enumerate() {
-    if at < keep_from || at >= keep_to {
-      continue;
-    }
-    if written > 0 {
-      escape_char(out, '\n')?;
-    }
-    let body = if at == 0 { line } else { chop(line, indent) };
-    write_block_line(out, body)?;
-    written += 1;
-  }
-  Ok(())
-}
-
-/// Writes one block-string line, turning `\"""` into `"""` on the way past.
-fn write_block_line<W: fmt::Write>(out: &mut W, line: &str) -> Result<(), Error> {
-  let mut rest = line;
-  while let Some(at) = rest.find("\\\"\"\"") {
-    escape(out, &rest[..at])?;
-    escape(out, "\"\"\"")?;
-    rest = &rest[at + 4..];
-  }
-  escape(out, rest)?;
-  Ok(())
-}
-
-/// Splits on draft §2.1.1's line terminators: a line feed, a carriage return, or the pair.
-struct Lines<'a> {
-  rest: Option<&'a str>,
-}
-
-impl<'a> Lines<'a> {
-  #[inline]
-  const fn new(text: &'a str) -> Self {
-    Self { rest: Some(text) }
-  }
-}
-
-impl<'a> Iterator for Lines<'a> {
-  type Item = &'a str;
-
-  fn next(&mut self) -> Option<&'a str> {
-    let rest = self.rest?;
-    match rest.find(['\n', '\r']) {
-      None => {
-        self.rest = None;
-        Some(rest)
-      }
-      Some(at) => {
-        let width = if rest.as_bytes()[at] == b'\r' && rest.as_bytes().get(at + 1) == Some(&b'\n') {
-          2
-        } else {
-          1
-        };
-        self.rest = Some(&rest[at + width..]);
-        Some(&rest[..at])
-      }
-    }
-  }
-}
-
-/// Returns whether a line is draft §2.9.4's "only whitespace", which is spaces and tabs.
-fn blank(line: &str) -> bool {
-  line.bytes().all(|byte| byte == b' ' || byte == b'\t')
-}
-
-/// Counts a line's leading spaces and tabs.
-fn leading_whitespace(line: &str) -> usize {
-  line
-    .bytes()
-    .take_while(|&byte| byte == b' ' || byte == b'\t')
-    .count()
-}
-
-/// Removes up to `indent` leading whitespace characters.
-fn chop(line: &str, indent: usize) -> &str {
-  let taken = line
-    .bytes()
-    .take(indent)
-    .take_while(|&byte| byte == b' ' || byte == b'\t')
-    .count();
-  &line[taken..]
+  });
+  written?;
+  // Every refusal of the spelling is a literal no lexer produced: an escape it would refuse, no
+  // delimiters, or content that is not UTF-8, which a `&str` cannot hold. `Sink` is not among
+  // them, since the closure above cannot fail.
+  cooked.map_err(|_| Error::MalformedEscape)
 }

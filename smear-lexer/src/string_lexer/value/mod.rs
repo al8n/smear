@@ -1,36 +1,46 @@
-//! Draft §2.9's `StringValue` static semantics, read off the bytes of a spelling.
+//! Draft §2.9's `StringValue` static semantics, read off the bytes of a spelling: the one place
+//! this workspace applies them.
 //!
 //! # Why this reads a spelling and not a literal
 //!
-//! The carriers above keep their source, and their `Cow` conversions cook it — over `&str`, from
-//! the line facts the lexer measured on the way past. Neither reaches a caller that holds the
-//! spelling alone, and the callers that matter do: a parsed `StringValue` publishes its source and
-//! nothing the lexer measured, `smear-schema`'s builder is generic over `S: AsRef<[u8]>`, and an
-//! executor answering `__type(name:)` meets the literal in a document of any source type. So the
-//! three functions here take the spelling — delimiters included — and apply §2.9.1's escapes or
+//! The carriers above keep their source, and a caller that holds one cooks it with a `Cow`
+//! conversion. That door does not reach a caller that holds the spelling alone, and the callers
+//! that matter do: a parsed `StringValue` publishes its source and nothing the lexer measured,
+//! `smear-schema`'s builder is generic over `S: AsRef<[u8]>`, and an executor answering
+//! `__type(name:)` meets the literal in a document of any source type. So the three public
+//! functions here take the spelling — delimiters included — and apply §2.9.1's escapes or
 //! §2.9.4's `BlockStringValue()` themselves.
+//!
+//! # One reading behind every door
+//!
+//! The walks here are the only ones. The `Cow` conversions run them over a lexed carrier's body,
+//! and `smear`'s JSON writer runs them through [`string_value_pieces`]. The inline walk reads every
+//! escape with the one escape reader, `escape`, and its caller says what a backslash that begins
+//! no escape is: a refusal here, and content in the `Cow` conversion, which answers on a literal
+//! the lexer already accepted and so must neither panic nor refuse.
 //!
 //! # Bytes in, text out
 //!
 //! The spelling is bytes because a source is; the value is text because draft §2.9 says a string is
 //! a sequence of Unicode scalar values. The two meet once, where the delimiters come off: the
 //! content is checked for UTF-8 there, and every escape produces a scalar value, so every piece
-//! handed out afterwards is a `&str` and an out-buffer is a `String` with no check left to make.
-//! The parsers' byte lexer refuses a string literal that is not UTF-8 (smear#246), so a spelling
-//! they lexed passes that check; [`StringValueError::NotUtf8`] answers a spelling from anywhere
-//! else.
+//! handed out afterwards is a `&str`, which any [`core::fmt::Write`] takes with no check left to
+//! make. The parsers' byte lexer refuses a string literal that is not UTF-8 (smear#246), so a
+//! spelling they lexed passes that check; [`StringValueError::NotUtf8`] answers a spelling from
+//! anywhere else.
 //!
-//! # Pieces, and the two callers that want them
+//! # Pieces, and the callers that want them
 //!
 //! [`string_value_pieces`] hands the value out as consecutive `&str` pieces — runs of the
 //! spelling's own bytes, one escape's character, a line feed between two block lines — and never
-//! splits a character across two of them. [`string_value_len`] adds them up and
-//! [`decode_string_value`] appends them, which is how an arena is reserved from the decoded length
-//! before a byte of it is written. A printer that re-encodes the value walks the pieces too and
+//! splits a character across two of them. [`string_value_len`] adds them up, which is how an arena
+//! is reserved from the decoded length before a byte of it is written, and [`decode_string_value`]
+//! writes them to any `fmt::Write`. A printer that re-encodes the value walks the pieces too and
 //! needs no buffer of its own.
 
-use std::string::String;
+use core::fmt;
 
+use super::escape::{Escape, escape};
 use crate::error::StringValueError;
 
 /// Walks the value a GraphQL `StringValue` spelling denotes, one piece at a time.
@@ -49,33 +59,22 @@ use crate::error::StringValueError;
 ///
 /// [`StringValueError`]: a spelling with no delimiters, content that is not UTF-8, or a backslash
 /// that begins no escape. A refusal can come after some pieces were handed out; a caller that
-/// writes them somewhere sizes the value with [`string_value_len`] first, as [`decode_string_value`]
-/// does, and so meets every refusal before it writes.
+/// must write nothing on a refusal walks the spelling with [`string_value_len`] first, as
+/// [`decode_string_value`] does, and so meets every refusal before it writes.
 pub fn string_value_pieces(
   spelling: &[u8],
   mut piece: impl FnMut(&str),
 ) -> Result<(), StringValueError> {
-  let (content, block) = match spelling {
-    [b'"', b'"', b'"', content @ .., b'"', b'"', b'"'] => (content, true),
-    // `"""` opens a block string and nothing else, so a spelling that starts with one and does not
-    // end with one is no string at all rather than an inline one holding quotes.
-    [b'"', b'"', b'"', ..] => return Err(StringValueError::Unquoted),
-    [b'"', content @ .., b'"'] => (content, false),
-    _ => return Err(StringValueError::Unquoted),
-  };
-  let content = core::str::from_utf8(content).map_err(|_| StringValueError::NotUtf8)?;
-  if block {
-    block_value(content, &mut piece);
+  walk(spelling, &mut |text: &str| -> fmt::Result {
+    piece(text);
     Ok(())
-  } else {
-    inline_value(content, &mut piece)
-  }
+  })
 }
 
 /// Returns the length in bytes of the value a `StringValue` spelling denotes.
 ///
-/// The sizing half of [`decode_string_value`]: an exact count, not a bound, because it is the same
-/// walk with the bytes added up instead of written.
+/// An exact count, not a bound, because it is the same walk with the bytes added up instead of
+/// written. A `String` that reserves it before [`decode_string_value`] grows once.
 ///
 /// # Errors
 ///
@@ -86,108 +85,115 @@ pub fn string_value_len(spelling: &[u8]) -> Result<usize, StringValueError> {
   Ok(len)
 }
 
-/// Appends the value a `StringValue` spelling denotes to `out`, reserving exactly its length
-/// first.
+/// Appends the value a `StringValue` spelling denotes to `out`.
 ///
-/// Two walks over the spelling — [`string_value_len`], then the copy — so `out` grows by one
-/// reservation of the decoded length at most, and a refusal leaves it as it was.
+/// The spelling is checked whole before a byte is written, so a refused spelling writes nothing. A
+/// writer that fails midway has received a prefix of the value, and the answer is
+/// [`StringValueError::Sink`]. A `String` caller that wants one allocation reserves
+/// [`string_value_len`] first.
+///
+/// Any [`core::fmt::Write`] takes the value: a `String`, a `&mut dyn fmt::Write`, or the
+/// [`fmt::Formatter`] a `Display` implementation is handed.
 ///
 /// # Errors
 ///
-/// As [`string_value_pieces`], with nothing appended.
-pub fn decode_string_value(spelling: &[u8], out: &mut String) -> Result<(), StringValueError> {
-  let len = string_value_len(spelling)?;
-  out.reserve(len);
-  let start = out.len();
-  let decoded = string_value_pieces(spelling, |piece| out.push_str(piece));
-  // Unreachable: the sizing walk above read the same spelling and accepted it. Undone rather than
-  // assumed, so a caller is never handed half a value beside an error.
-  if decoded.is_err() {
-    out.truncate(start);
-  }
-  decoded
+/// As [`string_value_pieces`], with nothing written; and [`StringValueError::Sink`] when `out`
+/// refuses a write, after which nothing more is written to it.
+pub fn decode_string_value<W>(spelling: &[u8], out: &mut W) -> Result<(), StringValueError>
+where
+  W: fmt::Write + ?Sized,
+{
+  // The checking walk: it meets every refusal of the spelling before a byte reaches `out`.
+  string_value_len(spelling)?;
+  walk(spelling, &mut |piece: &str| out.write_str(piece))
 }
 
-/// An inline string's content, its escapes applied.
-fn inline_value<F: FnMut(&str)>(content: &str, piece: &mut F) -> Result<(), StringValueError> {
-  let bytes = content.as_bytes();
-  let mut copied = 0;
-  // `str::find` with a `char` takes the memchr route; `copied` is always a character boundary, at
-  // the start or just past an escape, which is ASCII to its last byte.
-  while let Some(offset) = content[copied..].find('\\') {
-    let slash = copied + offset;
-    if slash > copied {
-      piece(&content[copied..slash]);
-    }
-    // `+ 1` for the opening quote, so the offset names the backslash in the spelling.
-    let (ch, consumed) =
-      escape(&bytes[slash + 1..]).ok_or(StringValueError::InvalidEscape(slash + 1))?;
-    piece(ch.encode_utf8(&mut [0u8; 4]));
-    copied = slash + 1 + consumed;
-  }
-  if copied < content.len() {
-    piece(&content[copied..]);
-  }
-  Ok(())
-}
-
-/// Reads one escape body — everything after the backslash — as its character and the bytes it
-/// spans.
-fn escape(after: &[u8]) -> Option<(char, usize)> {
-  let simple = match *after.first()? {
-    b'"' => '"',
-    b'\\' => '\\',
-    b'/' => '/',
-    b'b' => '\u{8}',
-    b'f' => '\u{c}',
-    b'n' => '\n',
-    b'r' => '\r',
-    b't' => '\t',
-    b'u' => return unicode(&after[1..]).map(|(ch, consumed)| (ch, consumed + 1)),
-    _ => return None,
-  };
-  Some((simple, 1))
-}
-
-/// Reads a `\u` escape body — everything after the `u` — in either of draft §2.9.1's spellings.
-fn unicode(after: &[u8]) -> Option<(char, usize)> {
-  if let [b'{', braced @ ..] = after {
-    let close = braced.iter().position(|&byte| byte == b'}')?;
-    let digits = &braced[..close];
-    // One to six, the lexer's bound: the braced form names a scalar value, and six hex digits are
-    // already past U+10FFFF.
-    if !(1..=6).contains(&digits.len()) {
-      return None;
-    }
-    // `+ 2` for the braces the offset does not span.
-    return char::from_u32(hex(digits)?).map(|ch| (ch, close + 2));
-  }
-
-  let leading = hex(after.get(..4)?)?;
-  // A leading surrogate is a character only with its trailing half, which the grammar spells as a
-  // second `\u` escape immediately after this one. Anything else is not a character at all.
-  if (0xD800..0xDC00).contains(&leading) {
-    let trailing = match after.get(4..)? {
-      [b'\\', b'u', tail @ ..] => hex(tail.get(..4)?)?,
-      _ => return None,
-    };
-    if !(0xDC00..0xE000).contains(&trailing) {
-      return None;
-    }
-    let combined = 0x1_0000 + ((leading - 0xD800) << 10) + (trailing - 0xDC00);
-    return char::from_u32(combined).map(|ch| (ch, 10));
-  }
-  // A lone trailing surrogate is refused here, by `from_u32`.
-  char::from_u32(leading).map(|ch| (ch, 4))
-}
-
-/// Reads hex digits — draft §2.9.1's `0-9`, `A-F` and `a-f` and nothing else — as a number.
+/// The walk behind every door here: the delimiters come off, the content is checked for UTF-8, and
+/// the inline or the block reading hands the value to `piece`, which can refuse a piece.
 ///
-/// At most six of them reach here, so the value fits.
-fn hex(digits: &[u8]) -> Option<u32> {
-  digits.iter().try_fold(0u32, |value, &digit| {
-    Some(value * 16 + char::from(digit).to_digit(16)?)
-  })
+/// A refused piece stops the walk with [`StringValueError::Sink`].
+fn walk<F>(spelling: &[u8], piece: &mut F) -> Result<(), StringValueError>
+where
+  F: FnMut(&str) -> fmt::Result,
+{
+  let (content, block) = match spelling {
+    [b'"', b'"', b'"', content @ .., b'"', b'"', b'"'] => (content, true),
+    // `"""` opens a block string and nothing else, so a spelling that starts with one and does not
+    // end with one is no string at all rather than an inline one holding quotes.
+    [b'"', b'"', b'"', ..] => return Err(StringValueError::Unquoted),
+    [b'"', content @ .., b'"'] => (content, false),
+    _ => return Err(StringValueError::Unquoted),
+  };
+  let content = core::str::from_utf8(content).map_err(|_| StringValueError::NotUtf8)?;
+  if block {
+    block_value(content, piece).map_err(|fmt::Error| StringValueError::Sink)
+  } else {
+    inline_value(content, Invalid::Refuse, piece)
+  }
+}
+
+/// What the inline walk makes of a backslash that begins no escape draft §2.9.1 defines.
+#[derive(Clone, Copy)]
+pub(crate) enum Invalid {
+  /// The spelling is refused, with [`StringValueError::InvalidEscape`], once the run before the
+  /// backslash is handed out: the decoder's answer, and through [`string_value_pieces`] the JSON
+  /// writer's.
+  Refuse,
+  /// The backslash is content, and the walk reads on from the byte after it: the `Cow`
+  /// conversion's answer. That conversion runs on a literal the lexer already accepted, so it is
+  /// allowed neither a panic nor a refusal. The lexer hands it no such backslash; only a carrier
+  /// built inside this crate, past the lexer, can hold one.
+  CopyThrough,
+}
+
+/// An inline string's content, its escapes applied, handed to `piece` a run or a character at a
+/// time.
+///
+/// `invalid` says what a backslash that begins no escape is. A piece `piece` refuses stops the walk
+/// with [`StringValueError::Sink`], and nothing more is handed to it.
+pub(crate) fn inline_value<F>(
+  content: &str,
+  invalid: Invalid,
+  piece: &mut F,
+) -> Result<(), StringValueError>
+where
+  F: FnMut(&str) -> fmt::Result,
+{
+  let bytes = content.as_bytes();
+  // The run not yet handed out starts at `copied`, and the next backslash is looked for from
+  // `from`. The two part only past a backslash copied through, which stays in the run.
+  let mut copied = 0;
+  let mut from = 0;
+  // `str::find` with a `char` takes the memchr route. Both offsets are always character
+  // boundaries: the start, or just past a backslash or an escape, which are ASCII to their last
+  // byte.
+  while let Some(offset) = content[from..].find('\\') {
+    let slash = from + offset;
+    let read = escape(&bytes[slash + 1..]);
+    if read.is_none() && matches!(invalid, Invalid::CopyThrough) {
+      from = slash + 1;
+      continue;
+    }
+    hand_out(piece, &content[copied..slash])?;
+    // `+ 1` for the opening quote, so the offset names the backslash in the spelling.
+    let Escape { ch, len } = read.ok_or(StringValueError::InvalidEscape(slash + 1))?;
+    hand_out(piece, ch.encode_utf8(&mut [0u8; 4]))?;
+    copied = slash + 1 + len;
+    from = copied;
+  }
+  hand_out(piece, &content[copied..])
+}
+
+/// Hands `text` to `piece` unless it is empty, which no piece is, and answers a refusal as
+/// [`StringValueError::Sink`].
+fn hand_out<F>(piece: &mut F, text: &str) -> Result<(), StringValueError>
+where
+  F: FnMut(&str) -> fmt::Result,
+{
+  if text.is_empty() {
+    return Ok(());
+  }
+  piece(text).map_err(|fmt::Error| StringValueError::Sink)
 }
 
 /// A block string's content, as draft §2.9.4's `BlockStringValue()` reads it.
@@ -197,7 +203,12 @@ fn hex(digits: &[u8]) -> Option<u32> {
 /// lines between them, each but the raw first one dedented, with a line feed between each pair.
 /// Every byte the algorithm removes is a space, a tab or a line terminator, so a cut never lands
 /// inside a character.
-fn block_value<F: FnMut(&str)>(content: &str, piece: &mut F) {
+///
+/// A piece `piece` refuses stops the walk, and nothing more is handed to it.
+pub(crate) fn block_value<F>(content: &str, piece: &mut F) -> fmt::Result
+where
+  F: FnMut(&str) -> fmt::Result,
+{
   let mut common: Option<usize> = None;
   let mut kept: Option<(usize, usize)> = None;
   for (index, line) in Lines::new(content).enumerate() {
@@ -215,12 +226,12 @@ fn block_value<F: FnMut(&str)>(content: &str, piece: &mut F) {
   }
   // Every line blank: steps 5 and 6 remove them all, and the value is empty.
   let Some((first, last)) = kept else {
-    return;
+    return Ok(());
   };
   let common = common.unwrap_or(0);
   for (index, line) in Lines::new(content).enumerate().take(last + 1).skip(first) {
     if index > first {
-      piece("\n");
+      piece("\n")?;
     }
     // Step 4 exempts the first line of the raw split, and that line only: not a blank line, and not
     // the first line steps 5 and 6 leave, which is a different line whenever the block opens with a
@@ -230,8 +241,9 @@ fn block_value<F: FnMut(&str)>(content: &str, piece: &mut F) {
     } else {
       &line[indent(line).min(common)..]
     };
-    unescape_triple_quotes(line, piece);
+    unescape_triple_quotes(line, piece)?;
   }
+  Ok(())
 }
 
 /// The leading spaces and tabs of a line — draft §2.9.4's `WhiteSpace`, both one byte.
@@ -243,18 +255,22 @@ fn indent(line: &str) -> usize {
 }
 
 /// One block line, with §2.9.5's only escape read: `\"""` is `"""`.
-fn unescape_triple_quotes<F: FnMut(&str)>(line: &str, piece: &mut F) {
+fn unescape_triple_quotes<F>(line: &str, piece: &mut F) -> fmt::Result
+where
+  F: FnMut(&str) -> fmt::Result,
+{
   let mut rest = line;
   while let Some(at) = rest.find("\\\"\"\"") {
     if at > 0 {
-      piece(&rest[..at]);
+      piece(&rest[..at])?;
     }
-    piece("\"\"\"");
+    piece("\"\"\"")?;
     rest = &rest[at + 4..];
   }
   if !rest.is_empty() {
-    piece(rest);
+    piece(rest)?;
   }
+  Ok(())
 }
 
 /// A block string's content, split on draft §2.9.4's `LineTerminator`s: `\r\n`, `\n` and `\r`.
