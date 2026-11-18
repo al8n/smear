@@ -495,7 +495,7 @@ pub use execute::{
 };
 #[cfg(any(feature = "std", feature = "alloc"))]
 #[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
-pub use extensions::{Ceiling, Extensions, Full};
+pub use extensions::{Ceiling, Extensions, ExtensionsIter, Full};
 #[cfg(any(feature = "std", feature = "alloc"))]
 #[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
 pub use request::{

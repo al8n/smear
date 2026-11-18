@@ -158,26 +158,28 @@
 //!
 //! | member | bound | readers | dead at | released by | what would strand it |
 //! |---|---|---|---|---|---|
-//! | draft §7.1.7 `extensions` | this result's two extension ceilings, **and** its spine capacity | [`RequestErrorResult::extensions`] | drop | [`take_extensions`](RequestErrorResult::take_extensions); drop | a refusal that dropped the map instead of handing it back; and a map retained with the capacity a *different* [`Limits`] let it grow to |
-//! | the driver's [`RequestError`]s | `max_request_errors × (max_request_error_message_bytes + max_request_error_locations · size_of::<SimpleSpan>() + max_extension_entries + max_extension_key_bytes)`, plus a list spine of at most `max_request_errors` | [`RequestErrorResult::errors`] | drop | drop; a refused one is never retained, and comes back in a [`RefusedEntry`] | a refusal that dropped the entry instead of handing it back, when its map may hold a handle; an entry retained with the message, the spans or the map spine a *different* [`Limits`] let it grow to; and a list spine that `Vec`'s doubling grew past the count |
+//! | draft §7.1.7 `extensions` | this result's two extension ceilings, **and** the map's high-water mark | [`RequestErrorResult::extensions`] | drop | [`take_extensions`](RequestErrorResult::take_extensions); drop | a refusal that dropped the map instead of handing it back; and a map retained with the allocations a *different* [`Limits`] let it grow to |
+//! | the driver's [`RequestError`]s | `max_request_errors × (max_request_error_message_bytes + max_request_error_locations · size_of::<SimpleSpan>() + max_extension_entries + max_extension_key_bytes)`, plus a list spine of at most `max_request_errors` | [`RequestErrorResult::errors`] | drop | drop; a refused one is never retained, and comes back in a [`RefusedEntry`] | a refusal that dropped the entry instead of handing it back, when its map may hold a handle; an entry retained with the message, the spans or the map allocations a *different* [`Limits`] let it grow to; and a list spine that `Vec`'s doubling grew past the count |
 //!
 //! Three factors and not two for the map, because that is the lesson the execution-result side
-//! paid for twice: entries and key bytes bound what a map *reports*, and a `Vec`'s capacity is
-//! derived from neither — [`Extensions::remove`] refunds the budget and returns no slot. So
-//! [`set_extensions`](RequestErrorResult::set_extensions) re-checks both reported quantities
-//! **and** re-derives the spine, exactly as the executor's does. **A ceiling bounds a retained
-//! buffer only if every growth of that buffer passed through it**, and the growth site is
-//! [`Extensions::insert`], charged against whatever ceilings the *map* was created under.
+//! paid for twice: entries and key bytes bound what a map *reports*, and the map's allocations are
+//! derived from neither — [`Extensions::remove`] refunds the budget and returns nothing to the
+//! allocator. So [`set_extensions`](RequestErrorResult::set_extensions) re-checks both reported
+//! quantities **and** re-derives the map's allocations, exactly as the executor's does. **A
+//! ceiling bounds a retained buffer only if every growth of that buffer passed through it**, and
+//! the growth site is [`Extensions::insert`], charged against whatever ceilings the *map* was
+//! created under.
 //!
 //! **The entries take the same rule one level up.** An entry is built under whatever [`Limits`]
 //! the driver handed [`RequestError::new`], and that bounds what the entry *allocates*. The result
 //! that lists it is a second retainer, so [`from_driver`](RequestErrorResult::from_driver) and
 //! [`push`](RequestErrorResult::push) re-check every quantity the entry reports against the
 //! result's own ceilings — its message bytes, its span count, and its map's entries and key bytes
-//! — and re-derive that map's spine exactly as `set_extensions` does. The message and the spans
-//! need no re-derivation: each is boxed at its exact length, so what it reports is what it holds.
-//! The list's own spine grows by doubling clamped to the count ceiling, so `Vec`'s amortisation
-//! never holds a slot the ceiling would refuse.
+//! — and re-derive that map's allocations exactly as `set_extensions` does. The message and the
+//! spans need no re-derivation: the message is frozen text held at no more than the length it was
+//! admitted at, and the spans are boxed at their exact count, so what each reports bounds what it
+//! holds. The list's own spine grows by doubling clamped to the count ceiling, so `Vec`'s
+//! amortisation never holds a slot the ceiling would refuse.
 //!
 //! Which is why this type carries ceilings at all rather than accepting any map or any entry — and
 //! it is worth being exact about what they buy, because the executor's version of this sentence
@@ -214,7 +216,7 @@ use core::fmt;
 use std::boxed::Box;
 
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use smear_schema::diagnostic::Diagnose;
+use smear_schema::{FrozenStr, StrBuf, diagnostic::Diagnose};
 use tokora::SimpleSpan;
 
 use crate::{Ceiling, Extensions, Limits, StartError};
@@ -363,8 +365,9 @@ impl core::error::Error for RequestErrorCeiling {}
 ///
 /// See [`RequestErrorResult`]'s second example, which builds two of these and lists them.
 pub struct RequestError<V> {
-  /// Draft §7.1.6's `message`, boxed at its exact length.
-  message: Box<str>,
+  /// Draft §7.1.6's `message`: frozen text of its exact length, held inline with no allocation at
+  /// all when it is short enough, on a target with pointer-width atomics.
+  message: FrozenStr,
   /// Draft §7.1.6's `locations`, as spans into the requested document, boxed at their exact count.
   locations: Box<[SimpleSpan]>,
   /// Draft §7.1.6's per-error `extensions`, absent until the driver attaches one.
@@ -400,7 +403,7 @@ impl<V> RequestError<V> {
       return Err(RequestErrorCeiling::Locations);
     }
     Ok(Self {
-      message: message.into(),
+      message: FrozenStr::from(message),
       locations: locations.into(),
       extensions: None,
     })
@@ -428,7 +431,8 @@ impl<V> RequestError<V> {
   /// As [`new`](RequestError::new), and with the same order and the same guarantee: the message is
   /// rendered once to measure it and once to keep it, so a message over
   /// [`Limits::max_request_error_message_bytes`] is refused without having been allocated, and an
-  /// accepted one is allocated once, at its exact length.
+  /// accepted one is written into a buffer of its exact length — none at all where it is short
+  /// enough to sit inline — which becomes the message without a copy.
   pub fn from_diagnose<D>(limits: &Limits, diagnostic: &D) -> Result<Self, RequestErrorCeiling>
   where
     D: Diagnose + ?Sized,
@@ -454,13 +458,21 @@ impl<V> RequestError<V> {
     locations.extend(label_spans(diagnostic).take(count - locations.len()));
 
     let mut message = Bounded {
-      text: std::string::String::with_capacity(len),
+      text: StrBuf::with_capacity(len),
       room: len,
     };
     let _ = fmt::write(&mut message, format_args!("{diagnostic}"));
+    // The buffer was sized by the first rendering, and freezing it keeps that size. A second
+    // rendering that came out shorter is copied out at its own length instead, so the entry holds
+    // what it reports rather than the room the first rendering asked for.
+    let message = if message.text.len() == len {
+      message.text.freeze()
+    } else {
+      FrozenStr::from(message.text.as_str())
+    };
 
     Ok(Self {
-      message: message.text.into_boxed_str(),
+      message,
       locations: locations.into_boxed_slice(),
       extensions: None,
     })
@@ -892,12 +904,17 @@ impl Ceilings {
     }
   }
 
-  /// Re-checks every quantity an entry reports, and re-derives its map's spine on acceptance.
+  /// Re-checks every quantity an entry reports, and re-derives its map's allocations on
+  /// acceptance.
   ///
   /// The order is the entry's own construction order — message, then spans — and then the map,
-  /// so the same entry is refused by the same ceiling whichever door it meets. The spine is
+  /// so the same entry is refused by the same ceiling whichever door it meets. The map is
   /// re-derived only after every check has passed, so a refused entry goes back to the driver with
-  /// the allocation it arrived with.
+  /// the allocations it arrived with.
+  #[allow(
+    clippy::result_large_err,
+    reason = "the error hands the refused entry back to the caller"
+  )]
   fn admit<V>(self, mut error: RequestError<V>) -> Result<RequestError<V>, RefusedEntry<V>> {
     let refusal = if error.message.len() as u64 > u64::from(self.message_bytes) {
       Some(RequestErrorCeiling::MessageBytes)
@@ -971,8 +988,12 @@ impl<V> RequestErrorResult<V> {
   /// `limits` passes every one of them. Never [`Errors`](RequestErrorCeiling::Errors):
   /// [`Limits::max_request_errors`] is never below one.
   ///
-  /// On acceptance the entry's map has its spine re-derived, for the reason
+  /// On acceptance the entry's map has its allocations re-derived, for the reason
   /// [`set_extensions`](RequestErrorResult::set_extensions) gives.
+  #[allow(
+    clippy::result_large_err,
+    reason = "the error hands the refused entry back to the caller"
+  )]
   pub fn from_driver(limits: &Limits, first: RequestError<V>) -> Result<Self, RefusedEntry<V>> {
     let ceilings = Ceilings::new(limits);
     let first = ceilings.admit(first)?;
@@ -1042,11 +1063,15 @@ impl<V> RequestErrorResult<V> {
   ///
   /// # On acceptance two allocations are bounded, and neither is a refusal
   ///
-  /// The entry's map has its spine re-derived, for the reason
+  /// The entry's map has its allocations re-derived, for the reason
   /// [`set_extensions`](RequestErrorResult::set_extensions) gives. And the list's own spine grows
   /// by doubling clamped to the count ceiling, so it never holds a slot
   /// [`Limits::max_request_errors`] would refuse — `Vec`'s plain doubling would leave a result
   /// with a ceiling of a hundred holding a hundred and twenty-eight.
+  #[allow(
+    clippy::result_large_err,
+    reason = "the error hands the refused entry back to the caller"
+  )]
   pub fn push(&mut self, error: RequestError<V>) -> Result<(), RefusedEntry<V>> {
     // The head is the `1`: every result has one, whichever kind it is.
     if 1 + self.rest.len() as u64 >= u64::from(self.ceilings.errors) {
@@ -1092,14 +1117,15 @@ impl<V> RequestErrorResult<V> {
   /// the ceilings this result was created under. There is no lifecycle refusal, because a result
   /// has no phases — it is already the response.
   ///
-  /// # On acceptance the allocation is re-derived, and that is not a refusal
+  /// # On acceptance the allocations are re-derived, and that is not a refusal
   ///
   /// The two ceilings bound what the map *reports*; this bounds what it *holds*. A map grown to a
   /// million entries under a lax [`Limits`] and emptied back down reports `len() == 0` and
-  /// `key_bytes() == 0` through both checks above while still holding a million entry slots,
-  /// because [`Extensions::remove`] refunds the budget and returns no slot to the allocator. So an
-  /// accepted map's spine is re-derived from the entries it actually carries whenever it is over
-  /// [`Limits::max_extension_entries`]. Nothing is cloned, nothing is dropped, and no observable
+  /// `key_bytes() == 0` through both checks above while still holding room for a million entries,
+  /// because [`Extensions::remove`] refunds the budget and returns nothing to the allocator. So an
+  /// accepted map's allocations are re-derived from the entries it actually carries whenever it
+  /// has held more than [`Limits::max_extension_entries`]. Nothing is cloned, nothing is dropped,
+  /// and no observable
   /// of [`Extensions`] changes — which is why it is a normalization and not a fourth refusal a
   /// caller could not act on anyway, there being no `shrink` out here to act with.
   ///
@@ -1214,7 +1240,7 @@ impl fmt::Write for Measure {
 /// allocation it was given. A `Display` that renders longer the second time is cut off at that
 /// length rather than trusted.
 struct Bounded {
-  text: std::string::String,
+  text: StrBuf,
   room: usize,
 }
 

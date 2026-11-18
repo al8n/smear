@@ -267,8 +267,8 @@ const DEFAULT_REQUEST_ERROR_LOCATIONS: NonZeroU32 = NonZeroU32::new(64).expect("
 /// | collection work | selections **examined**, name-table entries **compared**, the fragment index's pass, the directives and arguments a request **writes** at a selection, and the bytes of every name it writes there, as one | [`max_selection_visits`](Limits::max_selection_visits) | `walk` per selection; `Interner::intern` and `Fragments::get` per entry compared, before comparing it; `Fragments::build` per definition and fragment; `included` per directive on a selection it **examines** and `condition_is_true` per argument at a `@skip`/`@include` usage it **compares**, each in front of that one comparison rather than over the list, since both scans short-circuit; **`coerce_arguments`** per written argument the scan **examines**, once however many of §6.4.1's `declared` scans reach it, and both readers of a variable **spelling** — `coerce_arguments` and `condition_is_true` — through `metered_variable_key`, a unit at a time as draft §2.1.9's pass examines the bytes; and draft §4's meta walk per schema member a meta list reads and per possible-object word an interface's `possibleTypes` scans, and per pass over the bytes of a `__type` name it decodes and looks up | charging appends instead of visits; charging visits without their lookups, which is a budget on one factor of a product; leaving *any* uncharged way into a name table, which a claim about callers cannot prevent and a signature can; **charging one name where the position reads two**, which is what the argument key's charge did while the variable written for it went to the driver unmeasured; **charging a whole list in front of a scan that short-circuits**, which refuses a valid operation for work the taken branch never performs — a *list* is not the only such scan, and the variable spelling's own admission pass is one, so a charge over its whole length turned an unreadable name into a resource refusal; and §6.4.1's scan, whose *other* factor is the schema's and is bounded at build by [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) rather than here; and a meta list that `includeDeprecated` empties, which creates no position for a ceiling to count while reading the schema's whole width — once per alias the client writes |
 /// | collection depth | — | **removed, not bounded** | `walk` runs on an explicit stack | a recursive walk, which a flat fragment chain drove to `SIGABRT` |
 /// | interned text | bytes | [`max_interned_bytes`](Limits::max_interned_bytes) | `Interner::intern` | driver messages, one per failed position, at any length |
-/// | draft §7.1.7 `extensions`, and §7.1.6's per-error map | entries **and** key bytes, as two ceilings | [`max_extension_entries`](Limits::max_extension_entries), [`max_extension_key_bytes`](Limits::max_extension_key_bytes) | `Extensions::insert`, before the key is boxed; and **each of the three retainers** — [`set_extensions`](Executor::set_extensions), [`RequestErrorResult::set_extensions`](super::RequestErrorResult::set_extensions) and [`handle_field_error_with`](Executor::handle_field_error_with), all of which re-derive an accepted map's spine from its entries | bounding either alone: one ceiling leaves a single gigabyte key, the other leaves unbounded empty-keyed entries, because a zero-length key is a legal key. And bounding both while retaining the caller's allocation: `remove` refunds the budget and returns no slot, so an emptied map reports nothing and holds everything it grew to. And a **second** retainer of the same container that re-checks only the two reported quantities, since §7.1.7 admits the entry in a §7.1.3 result too — and a third, since §7.1.6 admits one on every error |
-/// | draft §7.1.3's driver-supplied request errors | entries, message bytes **and** spans per entry, as three ceilings | [`max_request_errors`](Limits::max_request_errors), [`max_request_error_message_bytes`](Limits::max_request_error_message_bytes), [`max_request_error_locations`](Limits::max_request_error_locations) | [`RequestError::new`](super::RequestError::new) and [`from_diagnose`](super::RequestError::from_diagnose), before the message is boxed or a span is copied; and **the result that lists the entry** — [`RequestErrorResult::from_driver`](super::RequestErrorResult::from_driver) and [`push`](super::RequestErrorResult::push), which re-check every quantity the entry reports against the result's own ceilings, the extension pair included for the entry's own §7.1.6 map, and re-derive that map's spine | bounding the count alone: one message a gigabyte long, or one entry with a million spans. Bounding the lengths alone: an unbounded list of short entries. Trusting the entry's construction: an entry is built under whatever `Limits` the driver passed, so a result that did not re-check would retain what a laxer budget let it grow to. And letting `Vec` double the list's spine: a ceiling of a hundred would hold a hundred and twenty-eight slots |
+/// | draft §7.1.7 `extensions`, and §7.1.6's per-error map | entries **and** key bytes, as two ceilings | [`max_extension_entries`](Limits::max_extension_entries), [`max_extension_key_bytes`](Limits::max_extension_key_bytes) | `Extensions::insert`, before the key is copied; and **each of the three retainers** — [`set_extensions`](Executor::set_extensions), [`RequestErrorResult::set_extensions`](super::RequestErrorResult::set_extensions) and [`handle_field_error_with`](Executor::handle_field_error_with), all of which re-derive an accepted map's allocations from its entries | bounding either alone: one ceiling leaves a single gigabyte key, the other leaves unbounded empty-keyed entries, because a zero-length key is a legal key. And bounding both while retaining the caller's allocation: `remove` refunds the budget and returns no room, so an emptied map reports nothing and holds everything it grew to. And a **second** retainer of the same container that re-checks only the two reported quantities, since §7.1.7 admits the entry in a §7.1.3 result too — and a third, since §7.1.6 admits one on every error |
+/// | draft §7.1.3's driver-supplied request errors | entries, message bytes **and** spans per entry, as three ceilings | [`max_request_errors`](Limits::max_request_errors), [`max_request_error_message_bytes`](Limits::max_request_error_message_bytes), [`max_request_error_locations`](Limits::max_request_error_locations) | [`RequestError::new`](super::RequestError::new) and [`from_diagnose`](super::RequestError::from_diagnose), before the message or a span is copied; and **the result that lists the entry** — [`RequestErrorResult::from_driver`](super::RequestErrorResult::from_driver) and [`push`](super::RequestErrorResult::push), which re-check every quantity the entry reports against the result's own ceilings, the extension pair included for the entry's own §7.1.6 map, and re-derive that map's allocations | bounding the count alone: one message a gigabyte long, or one entry with a million spans. Bounding the lengths alone: an unbounded list of short entries. Trusting the entry's construction: an entry is built under whatever `Limits` the driver passed, so a result that did not re-check would retain what a laxer budget let it grow to. And letting `Vec` double the list's spine: a ceiling of a hundred would hold a hundred and twenty-eight slots |
 /// | error rows | rows | derived: at most one per position | — | a position able to fail twice, or an argument coercion raising more than once |
 /// | list nesting | — | [`MAX_WRAPPERS`](smear_schema::MAX_WRAPPERS) = 15, by the schema | `complete`'s list arm strips one wrapper per level | — |
 ///
@@ -315,7 +315,7 @@ const DEFAULT_REQUEST_ERROR_LOCATIONS: NonZeroU32 = NonZeroU32::new(64).expect("
 /// | slots, metadata, interned text | their ceilings | tree walks, `Response` | next `start`/drop | `reset`; suffix-`restore` only | a creator that bypasses the sole creator |
 /// | error rows | one per position | `Response::errors` | next `start`/drop | `reset` | a position able to fail twice |
 /// | **draft §7.1.6 per-error `extensions`** | at most one map per error row, each within the two extension ceilings and re-derived on acceptance as §7.1.7's is — so `max_response_slots × (max_extension_entries + max_extension_key_bytes)`, every factor a ceiling | `Error::extensions` | next `start`/drop | `reset`, which drops them by name; suffix-`restore` with the rows that index them | a `reset` that empties the rows and forgets the maps they index, which hold `V`s no row reaches any more; a `restore` that truncates the rows over maps it leaves behind; and a map retained with the capacity a *different* `Limits` let it grow to |
-/// | draft §7.1.7 `extensions` | its two ceilings, per the row above — **not** the `Option`, which bounds the number of maps and not a map's size, and **not** the entries alone, which bound what the map reports and not the spine it holds | `Response::extensions` | next `start`/drop | `reset`; `take_extensions` | a `reset` that empties the tables and forgets the held `V`s that are in none of them; and a map retained with the capacity a *different* `Limits` let it grow to |
+/// | draft §7.1.7 `extensions` | its two ceilings, per the row above — **not** the `Option`, which bounds the number of maps and not a map's size, and **not** the entries alone, which bound what the map reports and not the allocations it holds | `Response::extensions` | next `start`/drop | `reset`; `take_extensions` | a `reset` that empties the tables and forgets the held `V`s that are in none of them; and a map retained with the capacity a *different* `Limits` let it grow to |
 /// | in-flight entries | `max_in_flight` | `release` by id | answered, retired, or reset | slab free chain; epoch voids stale ids | an id honoured across epochs |
 /// | visit budget | `max_selection_visits` | `walk` | end of operation | **never** — work done is spent | a refund |
 /// | collection scratch | `max_response_metadata`, charged before each push | `expand`, this call only | cleared at the next collection | cleared, never shrunk — capacity is reused | a staged population charged against a *different* ceiling than the one that refuses it |
@@ -362,7 +362,7 @@ const DEFAULT_REQUEST_ERROR_LOCATIONS: NonZeroU32 = NonZeroU32::new(64).expect("
 /// | `merged`, `locations` | `expand`'s commit, and `fail_at` for a lone span | [`max_response_metadata`](Limits::max_response_metadata) |
 /// | `interner` — arena, spans, chain, buckets | `Interner::insert` | [`max_interned_bytes`](Limits::max_interned_bytes): a GraphQL name is at least one byte, so entries cannot outrun the arena, and the bucket table is a power of two at a load factor of a half |
 /// | `errors` | `fail`, `fail_at` | derived: at most one row per position, so `max_response_slots` |
-/// | `error_extensions` | [`handle_field_error_with`](Executor::handle_field_error_with), one map per error it records with one | derived: at most one map per error row, so `max_response_slots`; each map's own spine is re-derived to [`max_extension_entries`](Limits::max_extension_entries) on the way in, and dropped by the `reset` that clears this |
+/// | `error_extensions` | [`handle_field_error_with`](Executor::handle_field_error_with), one map per error it records with one | derived: at most one map per error row, so `max_response_slots`; each map's own allocations are re-derived to [`max_extension_entries`](Limits::max_extension_entries) on the way in, and dropped by the `reset` that clears this |
 /// | `inflight` | `poll_resolve`, which withholds at the ceiling and reuses freed entries | [`max_in_flight`](Limits::max_in_flight) |
 /// | `scratch.fields`, `scratch.groups` | `walk`, charged **before** each push against the ceiling the staging is *for* — rule 3 | `max_response_metadata` |
 /// | `scratch.keys` | `walk`, grown one entry at a time to reach an interner id | `max_interned_bytes`, since only an admitted insertion mints an id |
@@ -461,8 +461,8 @@ const DEFAULT_REQUEST_ERROR_LOCATIONS: NonZeroU32 = NonZeroU32::new(64).expect("
 ///    still bounded by the ceilings — which is what makes a steady-state response allocate nothing.
 ///    Draft §7.1.7's map was the one member grown somewhere else: `Extensions` carries the ceilings
 ///    a *caller* chose, `Extensions::insert` charges those, and the executor then retained the
-///    result under its own. `set_extensions` re-derives the spine on acceptance, and that is the
-///    whole difference.
+///    result under its own. `set_extensions` re-derives the map's allocations on acceptance, and
+///    that is the whole difference.
 ///
 ///    **The clause "or a fixed input" is a repair, and it was paid for the same way the rest of
 ///    this table was.** The rule shipped saying a growth site not charged by this executor's own
@@ -1009,10 +1009,10 @@ impl Limits {
   /// under a laxer `Limits` is refused rather than trusted, because a ceiling a caller can pick is
   /// advice.
   ///
-  /// It bounds the map's **entry slots** and not only its entries. `Extensions::remove` refunds
-  /// this budget without returning the slot to the allocator, so `set_extensions` re-derives an
-  /// accepted map's spine from its entries whenever it is holding more than this — otherwise a map
-  /// grown under the laxer `Limits` and emptied back down would pass every check here and be
+  /// It bounds the map's **allocations** and not only its entries. `Extensions::remove` refunds
+  /// this budget without returning any room to the allocator, so `set_extensions` re-derives an
+  /// accepted map's allocations from its entries whenever it has held more than this — otherwise a
+  /// map grown under the laxer `Limits` and emptied back down would pass every check here and be
   /// retained at its high-water mark. The entries themselves are untouched; see that method.
   ///
   /// One of a **pair**, and neither half bounds anything alone: see
@@ -1027,9 +1027,9 @@ impl Limits {
   ///
   /// The third is draft §7.1.6's per-error entry:
   /// [`handle_field_error_with`](Executor::handle_field_error_with) re-checks a map against this
-  /// executor's two ceilings and re-derives its spine exactly as `set_extensions` does. It retains
-  /// one map per driver-reported error rather than one per response, so what the pair bounds there
-  /// is a **product** — at most one map per error row and one row per position, so
+  /// executor's two ceilings and re-derives its allocations exactly as `set_extensions` does. It
+  /// retains one map per driver-reported error rather than one per response, so what the pair
+  /// bounds there is a **product** — at most one map per error row and one row per position, so
   /// `max_response_slots × (max_extension_entries + max_extension_key_bytes)` at the very worst.
   /// Every factor is one of this executor's ceilings, which is what makes the product a bound
   /// rather than the shape the [`Limits`] section *A budget on one factor of a product bounds
@@ -1045,8 +1045,11 @@ impl Limits {
   ///
   /// The other half of the pair. Entries alone would leave one key free to be a gigabyte; key bytes
   /// alone would leave an unbounded number of entries under empty keys, since a zero-length key is
-  /// a legal key. Together they also bound the map's linear scan, whose whole-life worst case is
-  /// `max_extension_entries × max_extension_key_bytes` byte comparisons.
+  /// a legal key. Together they also bound what finding a key costs. A lookup compares its key only
+  /// against the entries its hash collides with, and where a client can make every hash collide —
+  /// a build without the standard library hashes at a fixed, public seed — the whole life of a map
+  /// still costs at most `max_extension_entries × max_extension_key_bytes` byte comparisons, which
+  /// is what the linear scan it used before it hashed cost.
   ///
   /// **Not** [`max_interned_bytes`](Limits::max_interned_bytes), and the separation is deliberate:
   /// that arena is a response budget shared with field names and driver error messages, so
@@ -1089,7 +1092,7 @@ impl Limits {
   /// Every factor is a ceiling, which is what makes the product a bound rather than the shape the
   /// [`Limits`] section *A budget on one factor of a product bounds nothing* warns about. At the
   /// defaults it is 1.125 MiB of message, span and key bytes — on a 64-bit target, where a span is
-  /// sixteen bytes — plus 8,192 extension entry slots, and the values in those maps are the
+  /// sixteen bytes — plus room for 8,192 extension entries, and the values in those maps are the
   /// driver's, as below.
   ///
   /// **No executor charges it, or either of the two after it.** They bound what a result retains,
@@ -2157,9 +2160,9 @@ where
   /// is still read and is kept with it. `restore` truncates this with the rows, which a refused
   /// expansion cannot in fact reach, for the reason [`Mark`] gives.
   ///
-  /// Each map arrived re-checked against this executor's two extension ceilings and with its spine
-  /// re-derived, so what this holds is bounded by `max_response_slots` maps of bounded size —
-  /// [`Limits::max_extension_entries`] states the product.
+  /// Each map arrived re-checked against this executor's two extension ceilings and with its
+  /// allocations re-derived, so what this holds is bounded by `max_response_slots` maps of bounded
+  /// size — [`Limits::max_extension_entries`] states the product.
   error_extensions: Vec<Extensions<V::Value>>,
   /// The draft §7.1.7 *Extensions* entry for this operation, or `None` when the response has none.
   ///
@@ -2875,15 +2878,15 @@ where
   /// [`start`](Executor::start) — and an id whose position §6.4.4 has already discarded. There is
   /// no field left to fail, so there is nothing to attach the map to.
   ///
-  /// # On acceptance the allocation is re-derived
+  /// # On acceptance the allocations are re-derived
   ///
   /// As [`set_extensions`](Executor::set_extensions) does, and for its reason: the two ceilings
-  /// bound what a map *reports*, and its spine is a high-water mark of every entry it ever held —
-  /// [`Extensions::remove`] refunds the budget and returns no slot. So an accepted map's spine is
-  /// re-derived from the entries it carries whenever it is over `max_extension_entries`, which
-  /// leaves every observable of the map alone and bounds what this executor retains. A map built
-  /// under this executor's own ceilings can need it too, because a `Vec` grows by doubling past a
-  /// ceiling that is not a power of two.
+  /// bound what a map *reports*, and its allocations follow the most entries it ever held —
+  /// [`Extensions::remove`] refunds the budget and returns no room. So an accepted map's
+  /// allocations are re-derived from the entries it carries whenever it has held more than
+  /// `max_extension_entries`, which leaves every observable of the map alone and bounds what this
+  /// executor retains. A map built under this executor's own ceilings never needs it: it cannot
+  /// have held more than they allow, and what it holds is within a constant multiple of that.
   ///
   /// # Which errors can carry one, and for how long
   ///
@@ -3044,20 +3047,21 @@ where
   /// # On acceptance the allocation is re-derived, and that is not a refusal
   ///
   /// **The ceilings above bound what the map reports; this bounds what it holds.** `len` and
-  /// `key_bytes` are the map's content, and an [`Extensions`]'s spine capacity is derived from
-  /// neither — it is the high-water mark of every entry the map has ever held, and
-  /// [`Extensions::remove`] refunds the key bytes without returning the slot. A map grown to a
-  /// million entries under a lax [`Limits`] and emptied passes both checks above while holding a
-  /// million entry slots, and this executor would then keep that allocation until the next
-  /// [`start`](Executor::start), a [`take_extensions`](Executor::take_extensions), or drop.
+  /// `key_bytes` are the map's content, and an [`Extensions`]'s allocations are derived from
+  /// neither — they follow the most entries the map has ever held, and [`Extensions::remove`]
+  /// refunds the key bytes without returning any room. A map grown to a million entries under a
+  /// lax [`Limits`] and emptied passes both checks above while holding room for a million, and this
+  /// executor would then keep that allocation until the next [`start`](Executor::start), a
+  /// [`take_extensions`](Executor::take_extensions), or drop.
   ///
-  /// So an accepted map's spine is re-derived from the entries it actually carries whenever it is
-  /// over [`max_extension_entries`](Limits::max_extension_entries). The entries, their order, their
-  /// keys and their values are untouched — nothing is cloned, nothing is dropped, and this is
-  /// invisible to every observable the type has. It is deliberately **not** a fourth
-  /// [`SetExtensionsError`]: a grown-and-emptied map is a valid `extensions` map, its capacity is
-  /// not visible through this crate's public API, and a caller handed one back could not shrink it
-  /// even if it were. Refusing it would fail a legal program on a property its author cannot see.
+  /// So an accepted map's allocations are re-derived from the entries it actually carries whenever
+  /// it has held more than [`max_extension_entries`](Limits::max_extension_entries). The entries,
+  /// their order, their keys and their values are untouched — nothing is cloned, nothing is
+  /// dropped, and this is invisible to every observable the type has. It is deliberately **not** a
+  /// fourth [`SetExtensionsError`]: a grown-and-emptied map is a valid `extensions` map, its
+  /// capacity is not visible through this crate's public API, and a caller handed one back could
+  /// not shrink it even if it were. Refusing it would fail a legal program on a property its author
+  /// cannot see.
   ///
   /// The general rule, which is the half worth carrying to the next resource: **a ceiling bounds a
   /// retained buffer only if every growth of that buffer passed through it.** Everything else this
