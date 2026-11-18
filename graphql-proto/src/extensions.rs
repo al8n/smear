@@ -274,6 +274,11 @@ impl<V: fmt::Debug> core::error::Error for Full<V> {}
 /// this map used before it hashed cost on every call: at most
 /// `max_extension_entries × max_extension_key_bytes` byte comparisons over the whole life of a map.
 /// So a forced collision costs what every lookup once did, and no more.
+///
+/// A key longer than all the stored keys together is not looked up at all: none of them can equal
+/// it, so the answer is known without reading a byte of it. A lookup therefore hashes at most
+/// [`key_bytes`](Extensions::key_bytes) bytes, which the key-byte ceiling bounds, whatever key it
+/// is handed.
 pub struct Extensions<V> {
   entries: IndexMap<FrozenStr, V, KeyHasher>,
   key_bytes: u32,
@@ -329,8 +334,13 @@ impl<V> Extensions<V> {
   /// against either ceiling, the entry's position kept, and the displaced value returned.
   /// Replacement rather than duplication because a map has one value per key, and a serialised
   /// duplicate would be a map only by accident.
+  ///
+  /// A key longer than all the stored keys together cannot repeat one, so it is not looked up: it
+  /// goes straight to the ceilings, in the same order, and one they refuse is never hashed.
   pub fn insert(&mut self, key: &str, value: V) -> Result<Option<V>, Full<V>> {
-    if let Some(slot) = self.entries.get_mut(key) {
+    if self.may_contain(key)
+      && let Some(slot) = self.entries.get_mut(key)
+    {
       return Ok(Some(core::mem::replace(slot, value)));
     }
     if self.entries.len() as u64 >= self.max_entries as u64 {
@@ -340,7 +350,7 @@ impl<V> Extensions<V> {
       return Err(Full::new(Ceiling::KeyBytes, value));
     }
     self.key_bytes += key.len() as u32;
-    // A new key, by the lookup above, so this displaces nothing.
+    // A new key, by the lookup above or by its length, so this displaces nothing.
     self.entries.insert(FrozenStr::from(key), value);
     // At most `max_entries`, which is a `u32`, by the first ceiling above.
     self.high_water = self.high_water.max(self.entries.len() as u32);
@@ -361,6 +371,9 @@ impl<V> Extensions<V> {
   /// [`Executor::set_extensions`](crate::Executor::set_extensions) and
   /// [`Executor::handle_field_error_with`](crate::Executor::handle_field_error_with) on the way in.
   pub fn remove(&mut self, key: &str) -> Option<V> {
+    if !self.may_contain(key) {
+      return None;
+    }
     let value = self.entries.shift_remove(key)?;
     // The key removed is equal to `key`, so it is `key.len()` bytes, all of them charged.
     self.key_bytes -= key.len() as u32;
@@ -370,7 +383,19 @@ impl<V> Extensions<V> {
   /// Returns the value at `key`.
   #[inline]
   pub fn get(&self, key: &str) -> Option<&V> {
+    if !self.may_contain(key) {
+      return None;
+    }
     self.entries.get(key)
+  }
+
+  /// Whether `key` is short enough to be one of the stored keys.
+  ///
+  /// Each stored key is at most [`key_bytes`](Extensions::key_bytes) long, all of them together
+  /// being that, so a longer `key` equals none of them and is answered without being hashed.
+  #[inline]
+  const fn may_contain(&self, key: &str) -> bool {
+    key.len() as u64 <= self.key_bytes as u64
   }
 
   /// Returns how many entries the map holds.

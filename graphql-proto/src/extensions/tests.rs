@@ -1,10 +1,11 @@
-//! What the map keeps in order, and what it measures of itself.
+//! What the map keeps in order, what it refuses, and what it measures of itself.
 //!
 //! The retainers' own cases — a map grown under laxer limits, emptied and handed to an executor or
 //! a request error result — live beside the retainers, in `execute/tests.rs` and
 //! `request/error/tests.rs`. These are the container's: the order a serialiser writes, which a
-//! hashed map keeps only because insertion order is what it iterates, and the high-water mark a
-//! clone has to carry.
+//! hashed map keeps only because insertion order is what it iterates; the ceilings a key too long
+//! to be stored meets without being looked up, and the replacements they still let through; and
+//! the high-water mark a clone has to carry.
 
 use core::num::NonZeroU32;
 
@@ -102,6 +103,101 @@ fn a_repeated_key_keeps_its_place_and_hands_the_old_value_back() {
   assert_eq!(map.get("b"), Some(&20));
   assert_eq!(map.len(), 3);
   assert_eq!(map.key_bytes(), bytes, "and nothing was charged");
+}
+
+/// A key longer than all the stored keys together meets the ceilings without being looked up, in
+/// the order it always met them, and its value comes back.
+///
+/// With room for an entry the key-byte ceiling refuses it alone. With the map full it is past both
+/// ceilings, and the entry ceiling answers, because it is asked first.
+#[test]
+fn a_key_longer_than_the_map_holds_meets_the_ceilings_in_order() {
+  let limits = Limits::default()
+    .with_max_extension_entries(NonZeroU32::new(2).expect("not zero"))
+    .with_max_extension_key_bytes(NonZeroU32::new(8).expect("not zero"));
+  let oversized = "k".repeat(64);
+  let mut map: Extensions<Value> = Extensions::new(&limits);
+  map.insert("a", 1).expect("room");
+
+  let refused = map
+    .insert(&oversized, 2)
+    .expect_err("sixty-four bytes of key under a ceiling of eight");
+  assert_eq!(refused.ceiling(), Ceiling::KeyBytes);
+  assert_eq!(refused.into_value(), 2, "and the value comes back");
+
+  map.insert("b", 3).expect("room");
+  let refused = map
+    .insert(&oversized, 4)
+    .expect_err("a third entry, and sixty-four bytes of key");
+  assert_eq!(
+    refused.ceiling(),
+    Ceiling::Entries,
+    "past both ceilings, and the entry ceiling is asked first"
+  );
+  assert_eq!(refused.into_value(), 4, "and the value comes back");
+
+  assert_eq!(keys(&map), ["a", "b"], "nothing was stored");
+  assert_eq!(map.key_bytes(), 2, "or charged");
+  assert_eq!(map.get(&oversized), None, "`get` finds nothing");
+  assert_eq!(map.remove(&oversized), None, "and nor does `remove`");
+  assert_eq!(map.key_bytes(), 2, "which refunds nothing");
+}
+
+/// A map full on both ceilings still replaces the value of a key it holds: a replacement takes no
+/// entry and no key bytes, so neither ceiling is asked.
+#[test]
+fn a_map_full_on_both_ceilings_still_replaces_its_own_keys() {
+  let limits = Limits::default()
+    .with_max_extension_entries(NonZeroU32::new(2).expect("not zero"))
+    .with_max_extension_key_bytes(NonZeroU32::new(3).expect("not zero"));
+  let mut map: Extensions<Value> = Extensions::new(&limits);
+  map.insert("a", 1).expect("room");
+  map.insert("bc", 2).expect("room");
+  assert_eq!(
+    map
+      .insert("d", 3)
+      .expect_err("no room for a third entry")
+      .ceiling(),
+    Ceiling::Entries
+  );
+
+  assert_eq!(
+    map.insert("bc", 20).expect("a replacement needs no room"),
+    Some(2)
+  );
+  assert_eq!(
+    map.insert("a", 10).expect("a replacement needs no room"),
+    Some(1)
+  );
+  assert_eq!(keys(&map), ["a", "bc"], "both kept their places");
+  assert_eq!((map.get("a"), map.get("bc")), (Some(&10), Some(&20)));
+  assert_eq!(map.key_bytes(), 3, "and nothing was charged");
+}
+
+/// A key exactly as long as all the stored keys together is still looked up, and found.
+///
+/// The boundary of the length test. The map holds one key, so that key is as long as every stored
+/// key together, and the map is full on both ceilings, so an insert that skipped the lookup would
+/// be refused rather than replace the value.
+#[test]
+fn a_key_as_long_as_the_map_holds_is_still_found() {
+  let limits = Limits::default()
+    .with_max_extension_entries(NonZeroU32::new(1).expect("not zero"))
+    .with_max_extension_key_bytes(NonZeroU32::new(3).expect("not zero"));
+  let mut map: Extensions<Value> = Extensions::new(&limits);
+  map
+    .insert("abc", 1)
+    .expect("room for one key of three bytes");
+  assert_eq!(map.key_bytes(), 3, "the key is all the map holds");
+
+  assert_eq!(map.get("abc"), Some(&1), "`get` finds it");
+  assert_eq!(
+    map.insert("abc", 2).expect("a replacement, not a refusal"),
+    Some(1)
+  );
+  assert_eq!(map.remove("abc"), Some(2), "and `remove` finds it");
+  assert!(map.is_empty());
+  assert_eq!(map.key_bytes(), 0, "its bytes went back to the ceiling");
 }
 
 /// [`ExtensionsIter`](super::ExtensionsIter) is the same walk as a `for` loop over `&Extensions`,
