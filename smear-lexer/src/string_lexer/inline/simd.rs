@@ -29,7 +29,10 @@ use tokora::{SimpleSpan, utils::Lexeme};
 use crate::error::{LexemeErrors, StringError, StringErrors, UnicodeError};
 
 use super::{
-  super::escape::{ends_escape, fixed_digits},
+  super::{
+    SkipRefusal,
+    escape::{ends_escape, fixed_digits},
+  },
   LitComplexInlineStr, LitInlineStr, LitPlainInlineStr, utf8_len_for_scalar,
 };
 
@@ -77,11 +80,21 @@ fn try_parse_low_surrogate(remainder: &[u8]) -> Option<u32> {
   if is_low_surrogate(cp) { Some(cp) } else { None }
 }
 
+/// How far a `\u` escape's scan went: what [`handle_fixed_unicode`] and [`handle_braced_unicode`]
+/// answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct EscapeScan {
+  /// How many bytes the scan consumed, counted from the byte it started at.
+  consumed: usize,
+  /// How many bytes the escape adds to the literal's value, 0 for one that is refused.
+  capacity: usize,
+}
+
 /// Handle `\uXXXX` (fixed-width) at `src_pos` (first hex char after `u`).
 ///
 /// `abs_backslash` — absolute position of the leading `\`.
 ///
-/// Returns `(bytes_consumed_from_src_pos, capacity_delta)`. Four hex digits are the fixed form.
+/// Returns an [`EscapeScan`]. Four hex digits are the fixed form.
 /// Anything else is the bare `\u` the sub-lexers' callbacks measure, and this measures it the same
 /// way, through `fixed_digits`: up to four characters, stopping before a `"`, `\`, CR or LF, so the
 /// scan goes on at the quote that closes the literal, the next escape, or the end of the line. The
@@ -93,11 +106,14 @@ fn handle_fixed_unicode(
   src_pos: usize,
   abs_backslash: usize,
   errs: &mut LexemeErrors<StringError<u8>>,
-) -> (usize, usize) {
+) -> EscapeScan {
   let Some(cp) = src.get(src_pos..src_pos + 4).and_then(parse_u4) else {
     let digits = fixed_digits(&src[src_pos..]);
     errs.push(digits.byte_error(abs_backslash).into());
-    return (digits.len(), 0);
+    return EscapeScan {
+      consumed: digits.len(),
+      capacity: 0,
+    };
   };
 
   // All 4 hex digits valid — check for surrogate pair.
@@ -105,27 +121,39 @@ fn handle_fixed_unicode(
     if let Some(low_cp) = try_parse_low_surrogate(&src[src_pos + 4..]) {
       let combined = 0x10000 + (((cp - 0xD800) << 10) | (low_cp - 0xDC00));
       // consumed = 4 hex digits + \uXXXX (6 bytes) for low surrogate
-      return (10, utf8_len_for_scalar(combined));
+      return EscapeScan {
+        consumed: 10,
+        capacity: utf8_len_for_scalar(combined),
+      };
     }
     let span = Span::new(abs_backslash, abs_backslash + 6);
     errs.push(UnicodeError::unpaired_high_surrogate(Lexeme::Range(span)).into());
-    return (4, 0);
+    return EscapeScan {
+      consumed: 4,
+      capacity: 0,
+    };
   }
 
   if is_low_surrogate(cp) {
     let span = Span::new(abs_backslash, abs_backslash + 6);
     errs.push(UnicodeError::unpaired_low_surrogate(Lexeme::Range(span)).into());
-    return (4, 0);
+    return EscapeScan {
+      consumed: 4,
+      capacity: 0,
+    };
   }
 
-  (4, utf8_len_for_scalar(cp))
+  EscapeScan {
+    consumed: 4,
+    capacity: utf8_len_for_scalar(cp),
+  }
 }
 
 /// Handle `\u{...}` (braced) at `src_pos` (first content char after `{`).
 ///
 /// `abs_backslash` — absolute position of the leading `\`.
 ///
-/// Returns `(bytes_consumed_from_src_pos, capacity_delta)`. A `"`, `\`, CR or LF before the `}`
+/// Returns an [`EscapeScan`]. A `"`, `\`, CR or LF before the `}`
 /// leaves the escape unclosed and is not consumed, as the sub-lexer's `braced_escape_close`
 /// decides, so the scan never runs past the literal's line, nor past a quote that may end it.
 #[inline]
@@ -134,7 +162,7 @@ fn handle_braced_unicode(
   src_pos: usize,
   abs_backslash: usize,
   errs: &mut LexemeErrors<StringError<u8>>,
-) -> (usize, usize) {
+) -> EscapeScan {
   let rest = &src[src_pos..];
 
   // abs_backslash + 3 == abs position of src[src_pos]  (\ u { content...)
@@ -147,7 +175,10 @@ fn handle_braced_unicode(
     if ends_escape(b) {
       let span = Span::new(abs_backslash, abs_backslash + 3 + i);
       errs.push(UnicodeError::unclosed_braced_unicode_escape(span).into());
-      return (i, 0);
+      return EscapeScan {
+        consumed: i,
+        capacity: 0,
+      };
     }
     if b == b'}' {
       let consumed = i + 1; // content bytes + '}'
@@ -156,26 +187,44 @@ fn handle_braced_unicode(
 
       if hex_count == 0 && all_hex {
         errs.push(UnicodeError::empty_braced_unicode_escape(span).into());
-        return (consumed, 0);
+        return EscapeScan {
+          consumed,
+          capacity: 0,
+        };
       }
       if !all_hex {
         errs.push(UnicodeError::invalid_braced_unicode_escape_sequence(span).into());
-        return (consumed, 0);
+        return EscapeScan {
+          consumed,
+          capacity: 0,
+        };
       }
       if hex_count > 6 {
         errs.push(UnicodeError::too_many_digits_in_braced_unicode_escape(span, hex_count).into());
-        return (consumed, 0);
+        return EscapeScan {
+          consumed,
+          capacity: 0,
+        };
       }
       // Valid 1-6 hex digits
       if cp > 0x10_FFFF {
         errs.push(UnicodeError::overflow_braced_unicode_escape(span, cp).into());
-        return (consumed, 0);
+        return EscapeScan {
+          consumed,
+          capacity: 0,
+        };
       }
       if (0xD800..=0xDFFF).contains(&cp) {
         errs.push(UnicodeError::surrogate_braced_unicode_escape(span, cp).into());
-        return (consumed, 0);
+        return EscapeScan {
+          consumed,
+          capacity: 0,
+        };
       }
-      return (consumed, utf8_len_for_scalar(cp));
+      return EscapeScan {
+        consumed,
+        capacity: utf8_len_for_scalar(cp),
+      };
     }
 
     match hex_val(b) {
@@ -196,7 +245,10 @@ fn handle_braced_unicode(
   let abs_end = abs_backslash + 3 + consumed;
   let span = Span::new(abs_backslash, abs_end);
   errs.push(UnicodeError::unclosed_braced_unicode_escape(span).into());
-  (consumed, 0)
+  EscapeScan {
+    consumed,
+    capacity: 0,
+  }
 }
 
 /// The record a scan built, or an empty one if it found no error.
@@ -223,7 +275,7 @@ fn unterminated(errs: Option<LexemeErrors<StringError<u8>>>) -> StringErrors<u8>
 /// Returns:
 /// - `Ok(LitInlineStr<usize>)` — success. The inner `usize` is the number of
 ///   bytes consumed from `src` **including** the closing `"`.
-/// - `Err((consumed, errors))` — unterminated string or validation errors.
+/// - `Err(SkipRefusal { consumed, errors })` — unterminated string or validation errors.
 ///   Both callers discard the payload and delegate the whole literal to the
 ///   Logos sub-lexer, which builds the errors they report.
 ///
@@ -256,7 +308,7 @@ fn unterminated(errs: Option<LexemeErrors<StringError<u8>>>) -> StringErrors<u8>
 pub(crate) fn skip_inline_str_simd<const CHECK_UTF8: bool>(
   offset: usize,
   src: &[u8],
-) -> Result<LitInlineStr<usize>, (usize, StringErrors<u8>)> {
+) -> Result<LitInlineStr<usize>, SkipRefusal> {
   let mut pos = 0usize;
   let mut capacity = 0usize;
   let mut has_escapes = false;
@@ -284,7 +336,10 @@ pub(crate) fn skip_inline_str_simd<const CHECK_UTF8: bool>(
       Some(n) => pos + n,
       None => {
         // No special byte found — string runs off end of input.
-        return Err((src.len(), unterminated(errs)));
+        return Err(SkipRefusal {
+          consumed: src.len(),
+          errors: unterminated(errs),
+        });
       }
     };
 
@@ -295,7 +350,10 @@ pub(crate) fn skip_inline_str_simd<const CHECK_UTF8: bool>(
       b'"' => {
         pos += 1;
         if let Some(errs) = errs.filter(|e| !e.is_empty()) {
-          return Err((pos, errs.into_string_errors()));
+          return Err(SkipRefusal {
+            consumed: pos,
+            errors: errs.into_string_errors(),
+          });
         }
         return Ok(if has_escapes {
           LitComplexInlineStr::new(pos, capacity).into()
@@ -308,7 +366,10 @@ pub(crate) fn skip_inline_str_simd<const CHECK_UTF8: bool>(
         pos += 1; // consume '\'
 
         if pos >= src.len() {
-          return Err((pos, unterminated(errs)));
+          return Err(SkipRefusal {
+            consumed: pos,
+            errors: unterminated(errs),
+          });
         }
         match src[pos] {
           b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't' => {
@@ -318,7 +379,10 @@ pub(crate) fn skip_inline_str_simd<const CHECK_UTF8: bool>(
           }
           b'u' => {
             pos += 1; // consume 'u'
-            let (consumed, cap_delta) = if pos < src.len() && src[pos] == b'{' {
+            let EscapeScan {
+              consumed,
+              capacity: cap_delta,
+            } = if pos < src.len() && src[pos] == b'{' {
               pos += 1; // consume '{'
               handle_braced_unicode(src, pos, abs_backslash, errs_mut!())
             } else {
@@ -351,7 +415,10 @@ pub(crate) fn skip_inline_str_simd<const CHECK_UTF8: bool>(
       // An inline string ends at its line: the literal stops before the terminator, which the
       // caller lexes as it does anywhere else.
       b'\r' | b'\n' => {
-        return Err((pos, unterminated(errs)));
+        return Err(SkipRefusal {
+          consumed: pos,
+          errors: unterminated(errs),
+        });
       }
       // Guarded by the const, so a text source's scan keeps the arm below as its
       // only fallback: there `skip_until` stops at the four needles and nowhere
@@ -360,7 +427,10 @@ pub(crate) fn skip_inline_str_simd<const CHECK_UTF8: bool>(
         let run = memspan::skip::skip_non_ascii(&src[pos..]);
         if core::str::from_utf8(&src[pos..pos + run]).is_err() {
           // The payload is dead (see the doc above), so nothing is built here.
-          return Err((pos, record(errs)));
+          return Err(SkipRefusal {
+            consumed: pos,
+            errors: record(errs),
+          });
         }
         // Plain content normalizes byte-for-byte, as the ASCII run before it did.
         capacity += run;

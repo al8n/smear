@@ -9,6 +9,17 @@ use super::{
   super::SealedWrapper, BlockLineExtras, LitBlockStr, LitComplexBlockStr, LitPlainBlockStr,
 };
 
+/// Where a block-string body closes, and how many `\"""` escapes came before: what
+/// [`find_block_close_simd`] answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BlockClose {
+  /// The byte offset, within the body, of the start of the closing `"""`, or `None` if the body
+  /// has none.
+  close: Option<usize>,
+  /// How many `\"""` escape sequences the scan passed.
+  escaped: usize,
+}
+
 /// SIMD-accelerated scan over a block-string body to locate the closing
 /// `"""` and count any `\"""` escape sequences along the way.
 ///
@@ -23,12 +34,12 @@ use super::{
 /// is just content. A `"""` is the end iff the immediately preceding
 /// byte is *not* `\`.
 ///
-/// Returns `(end_offset, escaped_count)` where `end_offset` is the byte
-/// offset (within `body`) of the start of the closing `"""`, or `None`
-/// if `body` does not contain a closing triple-quote (caller will emit
-/// `StringError::unterminated_block_string`).
+/// Returns a [`BlockClose`] whose `close` is the byte offset (within `body`)
+/// of the start of the closing `"""`, or `None` if `body` does not contain a
+/// closing triple-quote (caller will emit `StringError::unterminated_block_string`),
+/// and whose `escaped` is the count of `\"""` escapes passed.
 #[inline]
-fn find_block_close_simd(body: &[u8]) -> (Option<usize>, usize) {
+fn find_block_close_simd(body: &[u8]) -> BlockClose {
   let mut pos = 0usize;
   let mut escaped = 0usize;
 
@@ -38,14 +49,22 @@ fn find_block_close_simd(body: &[u8]) -> (Option<usize>, usize) {
     // `vceqq + vorrq + shrn-extract` chain seen in `memspan::skip::*`.
     let q_off = match memspan::skip::skip_until(&body[pos..], b'"') {
       Some(n) => pos + n,
-      None => return (None, escaped),
+      None => {
+        return BlockClose {
+          close: None,
+          escaped,
+        };
+      }
     };
 
     // Need three bytes to form `"""`. If we don't have them, the body
     // ends inside an opening run of fewer than three quotes — that's
     // unterminated.
     if q_off + 3 > body.len() {
-      return (None, escaped);
+      return BlockClose {
+        close: None,
+        escaped,
+      };
     }
 
     // Verify the next two bytes are also `"` (i.e. this `"` starts a
@@ -69,10 +88,16 @@ fn find_block_close_simd(body: &[u8]) -> (Option<usize>, usize) {
       continue;
     }
 
-    return (Some(q_off), escaped);
+    return BlockClose {
+      close: Some(q_off),
+      escaped,
+    };
   }
 
-  (None, escaped)
+  BlockClose {
+    close: None,
+    escaped,
+  }
 }
 
 #[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -125,7 +150,10 @@ where
   let remainder_str = remainder.as_ref();
   let body_bytes = remainder_str.as_bytes();
 
-  let (close_off, escaped_triple_count) = find_block_close_simd(body_bytes);
+  let BlockClose {
+    close: close_off,
+    escaped: escaped_triple_count,
+  } = find_block_close_simd(body_bytes);
 
   match close_off {
     Some(start) => {
@@ -282,9 +310,9 @@ mod tests {
   use super::*;
 
   /// Reference impl: byte-for-byte equivalent to the `BlockStringToken`
-  /// Logos DFA, as a pure `(Option<usize>, usize)` function so we can
+  /// Logos DFA, as a pure function answering a [`BlockClose`] so we can
   /// compare directly to `find_block_close_simd`.
-  fn find_block_close_logos_reference(body: &str) -> (Option<usize>, usize) {
+  fn find_block_close_logos_reference(body: &str) -> BlockClose {
     let mut lexer = BlockStringToken::lexer(body);
     let mut escaped = 0usize;
     while let Some(tok) = lexer.next() {
@@ -292,12 +320,18 @@ mod tests {
         Ok(BlockStringToken::EscapedTripleQuote) => escaped += 1,
         Ok(BlockStringToken::TripleQuote) => {
           // span.start is the offset of the closing """ within `body`.
-          return (Some(lexer.span().start), escaped);
+          return BlockClose {
+            close: Some(lexer.span().start),
+            escaped,
+          };
         }
         Ok(_) | Err(_) => {}
       }
     }
-    (None, escaped)
+    BlockClose {
+      close: None,
+      escaped,
+    }
   }
 
   /// Drive both implementations on every fixture and assert parity.

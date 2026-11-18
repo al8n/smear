@@ -543,6 +543,37 @@ impl<'de: 'a, 'a> TryFrom<&'de [u8]> for LitStr<&'a [u8]> {
 const VALID_STRING_UNREACHABLE: &str =
   "SIMD string fast path emits every valid string literal; only errors reach delegation";
 
+/// What a SIMD scanner, [`skip_inline_str_simd`] or [`skip_block_str_from_bytes`], answers for a
+/// literal it refuses: how many bytes it consumed, and the errors it built.
+///
+/// Both callers discard it and delegate the whole literal to the sub-lexer, which builds the errors
+/// they report, so the scanner builds none on the paths that can avoid it and nothing reads these
+/// fields.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+#[allow(
+  dead_code,
+  reason = "both callers discard the refusal and delegate the literal to the sub-lexer"
+)]
+pub(crate) struct SkipRefusal {
+  /// How many bytes the scanner consumed after the literal's opening delimiter.
+  pub(crate) consumed: usize,
+  /// The errors the scanner built, none on a path that was cut short.
+  pub(crate) errors: StringErrors<u8>,
+}
+
+/// What [`DelegateStringError::delegate_string_error`] answers: a refused literal's errors, and
+/// where lexing stopped.
+///
+/// Kept distinct from [`SkipRefusal`], whose integer counts bytes after the opener, where this one
+/// is an absolute offset.
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+pub(crate) struct DelegatedRefusal<Char> {
+  /// The errors the sub-lexer collected.
+  pub(crate) errors: StringErrors<Char>,
+  /// The absolute byte offset where lexing stopped: the end of the error token.
+  pub(crate) end: usize,
+}
+
 /// Delegate a malformed string literal — whose opener the SIMD fast path could
 /// not resolve — straight to the `string_lexer` sub-lexer, i.e. the very same
 /// `lex_*` code the full grammar reaches through its `#[token("\"")]` /
@@ -593,15 +624,12 @@ pub(crate) trait DelegateStringError {
   type Char;
 
   /// Lex the malformed string literal opening at `token_start`, returning its
-  /// collected errors and the absolute byte offset where lexing stopped.
+  /// collected errors and the absolute byte offset where lexing stopped, as a
+  /// [`DelegatedRefusal`].
   ///
   /// `block` selects the block (`"""`, 3-byte opener) carrier over the inline
   /// (`"`, 1-byte opener) one. See the trait docs for the seek/span contract.
-  fn delegate_string_error(
-    &self,
-    token_start: usize,
-    block: bool,
-  ) -> (StringErrors<Self::Char>, usize);
+  fn delegate_string_error(&self, token_start: usize, block: bool) -> DelegatedRefusal<Self::Char>;
 }
 
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
@@ -611,19 +639,25 @@ impl DelegateStringError for str {
   type Char = char;
 
   #[inline]
-  fn delegate_string_error(&self, token_start: usize, block: bool) -> (StringErrors<char>, usize) {
+  fn delegate_string_error(&self, token_start: usize, block: bool) -> DelegatedRefusal<char> {
     if block {
       let mut lexer = Lexer::<block::BlockStringToken>::new(self);
       lexer.bump(token_start + 3);
       let errs = block::lex_block_str_from_str(SealedWrapper::from_mut(&mut lexer))
         .expect_err(VALID_STRING_UNREACHABLE);
-      (errs, lexer.span().end)
+      DelegatedRefusal {
+        errors: errs,
+        end: lexer.span().end,
+      }
     } else {
       let mut lexer = Lexer::<inline::StringToken>::new(self);
       lexer.bump(token_start + 1);
       let errs = inline::lex_inline_str_from_str(SealedWrapper::from_mut(&mut lexer))
         .expect_err(VALID_STRING_UNREACHABLE);
-      (errs, lexer.span().end)
+      DelegatedRefusal {
+        errors: errs,
+        end: lexer.span().end,
+      }
     }
   }
 }
@@ -635,19 +669,25 @@ impl DelegateStringError for [u8] {
   type Char = u8;
 
   #[inline]
-  fn delegate_string_error(&self, token_start: usize, block: bool) -> (StringErrors<u8>, usize) {
+  fn delegate_string_error(&self, token_start: usize, block: bool) -> DelegatedRefusal<u8> {
     if block {
       let mut lexer = Lexer::<block::BytesBlockStringToken>::new(self);
       lexer.bump(token_start + 3);
       let errs = block::lex_block_str_from_bytes(SealedWrapper::from_mut(&mut lexer))
         .expect_err(VALID_STRING_UNREACHABLE);
-      (errs, lexer.span().end)
+      DelegatedRefusal {
+        errors: errs,
+        end: lexer.span().end,
+      }
     } else {
       let mut lexer = Lexer::<inline::BytesStringToken>::new(self);
       lexer.bump(token_start + 1);
       let errs = inline::lex_inline_str_from_bytes(SealedWrapper::from_mut(&mut lexer))
         .expect_err(VALID_STRING_UNREACHABLE);
-      (errs, lexer.span().end)
+      DelegatedRefusal {
+        errors: errs,
+        end: lexer.span().end,
+      }
     }
   }
 }
@@ -662,7 +702,7 @@ const _: () = {
     type Char = u8;
 
     #[inline]
-    fn delegate_string_error(&self, token_start: usize, block: bool) -> (StringErrors<u8>, usize) {
+    fn delegate_string_error(&self, token_start: usize, block: bool) -> DelegatedRefusal<u8> {
       self.as_ref().delegate_string_error(token_start, block)
     }
   }
@@ -678,7 +718,7 @@ const _: () = {
     type Char = u8;
 
     #[inline]
-    fn delegate_string_error(&self, token_start: usize, block: bool) -> (StringErrors<u8>, usize) {
+    fn delegate_string_error(&self, token_start: usize, block: bool) -> DelegatedRefusal<u8> {
       self.as_ref().delegate_string_error(token_start, block)
     }
   }
@@ -689,11 +729,7 @@ const _: () = {
     type Char = char;
 
     #[inline]
-    fn delegate_string_error(
-      &self,
-      token_start: usize,
-      block: bool,
-    ) -> (StringErrors<char>, usize) {
+    fn delegate_string_error(&self, token_start: usize, block: bool) -> DelegatedRefusal<char> {
       let s: &str = self.as_ref();
       s.delegate_string_error(token_start, block)
     }
@@ -711,7 +747,7 @@ const _: () = {
     type Char = u8;
 
     #[inline]
-    fn delegate_string_error(&self, token_start: usize, block: bool) -> (StringErrors<u8>, usize) {
+    fn delegate_string_error(&self, token_start: usize, block: bool) -> DelegatedRefusal<u8> {
       let s: &[u8] = &self[..];
       s.delegate_string_error(token_start, block)
     }
@@ -723,7 +759,7 @@ const _: () = {
     type Char = u8;
 
     #[inline]
-    fn delegate_string_error(&self, token_start: usize, block: bool) -> (StringErrors<u8>, usize) {
+    fn delegate_string_error(&self, token_start: usize, block: bool) -> DelegatedRefusal<u8> {
       let s: &[u8] = &self[..];
       s.delegate_string_error(token_start, block)
     }
@@ -735,11 +771,7 @@ const _: () = {
     type Char = char;
 
     #[inline]
-    fn delegate_string_error(
-      &self,
-      token_start: usize,
-      block: bool,
-    ) -> (StringErrors<char>, usize) {
+    fn delegate_string_error(&self, token_start: usize, block: bool) -> DelegatedRefusal<char> {
       self.as_str().delegate_string_error(token_start, block)
     }
   }
@@ -750,11 +782,7 @@ const _: () = {
     type Char = char;
 
     #[inline]
-    fn delegate_string_error(
-      &self,
-      token_start: usize,
-      block: bool,
-    ) -> (StringErrors<char>, usize) {
+    fn delegate_string_error(&self, token_start: usize, block: bool) -> DelegatedRefusal<char> {
       self.as_str().delegate_string_error(token_start, block)
     }
   }
@@ -770,7 +798,7 @@ const _: () = {
     type Char = u8;
 
     #[inline]
-    fn delegate_string_error(&self, token_start: usize, block: bool) -> (StringErrors<u8>, usize) {
+    fn delegate_string_error(&self, token_start: usize, block: bool) -> DelegatedRefusal<u8> {
       let s: &[u8] = self.as_ref();
       s.delegate_string_error(token_start, block)
     }

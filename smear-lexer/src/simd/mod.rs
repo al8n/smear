@@ -19,29 +19,48 @@ use crate::limits::SyntacticLimits;
 pub(crate) type LogosSourceOf<'inp, T> =
   <<T as FromLogos<'inp>>::Logos as tokora::logos::Logos<'inp>>::Source;
 
+/// What delegating one token to a Logos lexer lexed: [`Delegated::Token`]'s payload.
+///
+/// What the caller folds back into its own state on a token: the post-lex recursion state is
+/// propagated, which [`LexFailure`] deliberately does not carry.
+pub(crate) struct LexedToken<T> {
+  /// The token the Logos lexer produced.
+  pub(crate) token: T,
+  /// The absolute offset the token ends at.
+  pub(crate) end: usize,
+  /// The recursion state after the token.
+  pub(crate) state: SyntacticLimits,
+}
+
+/// What delegating one token to a Logos lexer refused: [`Delegated::Error`]'s payload.
+///
+/// It has no recursion state, matching the pre-SIMD lexer, which never advances recursion state
+/// across an error.
+pub(crate) struct LexFailure<'inp, T: Token<'inp>> {
+  /// The Logos lexer's own error.
+  pub(crate) error: <T as Token<'inp>>::Error,
+  /// The error token's span, in absolute offsets.
+  pub(crate) span: SimpleSpan,
+}
+
 /// Outcome of delegating one token to a Logos lexer via [`delegate_to_logos`].
 ///
 /// The two variants carry exactly what the caller must fold back into its own
 /// state: on a token, the post-lex recursion state is propagated; on an error,
-/// it deliberately is not (the `Error` variant has no `state` field), matching
+/// it deliberately is not ([`LexFailure`] has no `state` field), matching
 /// the pre-SIMD lexer, which never advances recursion state across an error.
 ///
-/// Bounded by `Token<'inp>` rather than `FromLogos<'inp>`: the `Error` variant
-/// is the only field that constrains `T` (it names `<T as Token<'inp>>::Error`),
+/// Bounded by `Token<'inp>` rather than `FromLogos<'inp>`: [`LexFailure`]
+/// is the only payload that constrains `T` (it names `<T as Token<'inp>>::Error`),
 /// and `FromLogos<'inp>: Token<'inp>` is strictly stronger than this type
 /// itself needs. `delegate_to_logos` — the sole constructor — still requires
 /// `T: FromLogos<'inp>` to build the `LogosLexer`, so every actual caller
 /// satisfies this bound already.
 pub(crate) enum Delegated<'inp, T: Token<'inp>> {
-  Token {
-    token: T,
-    end: usize,
-    state: SyntacticLimits,
-  },
-  Error {
-    error: <T as Token<'inp>>::Error,
-    span: SimpleSpan,
-  },
+  /// The Logos lexer produced a token.
+  Token(LexedToken<T>),
+  /// The Logos lexer refused.
+  Error(LexFailure<'inp, T>),
 }
 
 /// Delegate the token starting at `cursor` to a fresh Logos lexer over
@@ -69,18 +88,18 @@ where
   match logos.lex()? {
     Ok(token) => {
       let end = logos.inner().span().end;
-      Some(Delegated::Token {
+      Some(Delegated::Token(LexedToken {
         token,
         end,
         state: *logos.state(),
-      })
+      }))
     }
     Err(error) => {
       // Carry the delegated lexer's own error-token span (absolute offsets)
       // so the caller's `span()`/`slice()` report the error token exactly like
       // `LogosLexer`.
       let span: SimpleSpan = logos.inner().span().into();
-      Some(Delegated::Error { error, span })
+      Some(Delegated::Error(LexFailure { error, span }))
     }
   }
 }
@@ -152,4 +171,4 @@ pub(crate) fn memchr_newline(input: &[u8]) -> Option<usize> {
 /// and delegate to the per-dialect `NumberToken` grammar.
 pub(crate) mod scan;
 
-pub(crate) use scan::{NumberKind, scan_number};
+pub(crate) use scan::{NumberKind, ScannedNumber, scan_number};

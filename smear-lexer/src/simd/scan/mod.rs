@@ -25,7 +25,7 @@
 //! ```
 //!
 //! [`scan_number`] is wired into the dispatch `match` in each dialect's
-//! `syntactic/mod.rs`: `Some((kind, len))` becomes an inline decimal
+//! `syntactic/mod.rs`: `Some(ScannedNumber { kind, len })` becomes an inline decimal
 //! `LitInt`/`LitFloat` (no Logos involved), and `None` delegates the whole
 //! token to that dialect's focused `NumberToken` Logos grammar via
 //! `SyntacticLexer::delegate_number_to_logos`.
@@ -38,6 +38,15 @@ pub(crate) enum NumberKind {
   /// An [`NumberKind::Int`]-shaped integer part with a fraction and/or
   /// exponent suffix.
   Float,
+}
+
+/// A numeric literal [`scan_number`] recognized: its shape and how many bytes it spans.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ScannedNumber {
+  /// Which of the two literal shapes it is.
+  pub(crate) kind: NumberKind,
+  /// How many bytes the literal spans, a sign included.
+  pub(crate) len: usize,
 }
 
 /// Below this many remaining bytes, a tight scalar loop beats dispatching
@@ -84,7 +93,7 @@ const fn is_legal_terminator(b: u8) -> bool {
 /// integer part, so `.5` stays in the `.` dispatch arm and delegates to
 /// Logos regardless of this scanner).
 ///
-/// Returns `Some((kind, len))` only for a fully valid, unambiguous GraphQL
+/// Returns `Some(ScannedNumber { kind, len })` only for a fully valid, unambiguous GraphQL
 /// `Int`/`Float` literal: `len` bytes were consumed and whatever comes next
 /// (another byte, or end of input) is a legal delimiter. Returns `None` for
 /// any anomaly — a lone `-`, leading zeros, an empty fraction/exponent, or
@@ -92,7 +101,7 @@ const fn is_legal_terminator(b: u8) -> bool {
 /// the caller must delegate the token to Logos, which produces the exact
 /// GraphQL error.
 #[inline(always)]
-pub(crate) fn scan_number(src: &[u8]) -> Option<(NumberKind, usize)> {
+pub(crate) fn scan_number(src: &[u8]) -> Option<ScannedNumber> {
   let mut pos = 0;
 
   // Optional leading `-`. A leading `+` is never valid GraphQL and is not
@@ -150,8 +159,8 @@ pub(crate) fn scan_number(src: &[u8]) -> Option<(NumberKind, usize)> {
   // would desync from Logos, whereas an unnecessary delegation is merely a
   // missed fast path, never a correctness bug.
   match src.get(pos) {
-    None => Some((kind, pos)),
-    Some(&b) if is_legal_terminator(b) => Some((kind, pos)),
+    None => Some(ScannedNumber { kind, len: pos }),
+    Some(&b) if is_legal_terminator(b) => Some(ScannedNumber { kind, len: pos }),
     Some(_) => None,
   }
 }

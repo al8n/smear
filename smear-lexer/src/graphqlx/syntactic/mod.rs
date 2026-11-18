@@ -19,15 +19,15 @@ use crate::{
   error::{BadStateError, UnterminatedSpreadOperatorError},
   graphqlx::error::{LexerError, LexerErrorData, LexerErrors},
   skip_block_str_from_bytes, skip_inline_str_simd,
-  string_lexer::DelegateStringError,
+  string_lexer::{DelegateStringError, DelegatedRefusal},
   utf8::IllFormedUtf8,
 };
 
 use self::number::NumberLexerToken;
 
 use crate::simd::{
-  Delegated, LogosSourceOf, NumberKind, memchr_newline, scan_identifier, scan_number,
-  skip_ws_and_comma,
+  Delegated, LexFailure, LexedToken, LogosSourceOf, NumberKind, ScannedNumber, memchr_newline,
+  scan_identifier, scan_number, skip_ws_and_comma,
 };
 
 // The nesting ceiling and the budget that carries it, surfaced beside the lexer they govern.
@@ -890,7 +890,10 @@ where
           // refuses — radix `0x`/`0b`/`0o`, hex floats, a bare `-` (`Minus`), a
           // `.`-led / empty-integer float, leading zeros, illegal suffixes —
           // returns `None` and delegates, preserving parity for those cases.
-          Some((NumberKind::Int, len)) => {
+          Some(ScannedNumber {
+            kind: NumberKind::Int,
+            len,
+          }) => {
             self.cursor += len;
             self.last_span = SimpleSpan::new(token_start, self.cursor);
             let slice = self.src.slice(&token_start..&(token_start + len))?;
@@ -899,7 +902,10 @@ where
               SyntacticToken::LitInt(LitInt::Decimal(slice))
             ));
           }
-          Some((NumberKind::Float, len)) => {
+          Some(ScannedNumber {
+            kind: NumberKind::Float,
+            len,
+          }) => {
             self.cursor += len;
             self.last_span = SimpleSpan::new(token_start, self.cursor);
             let slice = self.src.slice(&token_start..&(token_start + len))?;
@@ -1218,7 +1224,7 @@ where
       self.cursor,
       self.state,
     )? {
-      Delegated::Token { token, end, state } => {
+      Delegated::Token(LexedToken { token, end, state }) => {
         let number = token.into_number_token();
         let slice = self.src.slice(&token_start..&end)?;
         self.cursor = end;
@@ -1226,7 +1232,7 @@ where
         self.state = state;
         Some(Ok(number.into_syntactic_token(slice)))
       }
-      Delegated::Error { error, span } => {
+      Delegated::Error(LexFailure { error, span }) => {
         self.cursor = span.end();
         self.last_span = span;
         self.last_error_span = Some(span);
@@ -1276,7 +1282,7 @@ where
       LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>,
     >,
   > {
-    let (errors, end) = self.src.delegate_string_error(token_start, block);
+    let DelegatedRefusal { errors, end } = self.src.delegate_string_error(token_start, block);
     let span = SimpleSpan::new(token_start, end);
     self.cursor = end;
     self.last_span = span;
