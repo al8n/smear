@@ -44,10 +44,18 @@ pub struct Duplicates<S> {
 /// How one list finds its duplicates: the narrow path's trail, or the wide path's index.
 enum Repr<S> {
   /// The names written so far and the position that wrote each, scanned in order.
-  Trail(Vec<(S, u32)>),
+  Trail(Vec<Written<S>>),
   /// One entry per position: the position that first wrote that position's name, which is the
   /// position itself when this is the first.
   Index(Vec<u32>),
+}
+
+/// One entry of [`Repr::Trail`]: a name, and the position that wrote it.
+struct Written<S> {
+  /// The name.
+  name: S,
+  /// The first position that wrote it: a later one is answered with this, and never recorded.
+  position: u32,
 }
 
 impl<S: Copy + Ord> Duplicates<S> {
@@ -85,10 +93,13 @@ impl<S: Copy + Ord> Duplicates<S> {
   /// repeatable directive is not recorded, exactly as the trail did not record one.
   pub fn first(&mut self, position: usize, name: S) -> Option<usize> {
     match &mut self.repr {
-      Repr::Trail(trail) => match trail.iter().find(|(written, _)| *written == name) {
-        Some(&(_, at)) => Some(at as usize),
+      Repr::Trail(trail) => match trail.iter().find(|entry| entry.name == name) {
+        Some(entry) => Some(entry.position as usize),
         None => {
-          trail.push((name, position as u32));
+          trail.push(Written {
+            name,
+            position: position as u32,
+          });
           None
         }
       },
