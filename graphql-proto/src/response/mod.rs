@@ -1017,8 +1017,11 @@ fn allocate() {
 }
 
 /// Returns how many allocating events this thread has caused.
+///
+/// Crate-visible, so that a test anywhere in this crate reads this one instrument: the test binary
+/// has one global allocator, and this is it.
 #[cfg(all(test, feature = "std"))]
-fn allocations() -> u64 {
+pub(crate) fn allocations() -> u64 {
   ALLOCATED.with(core::cell::Cell::get)
 }
 

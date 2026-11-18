@@ -5,12 +5,12 @@
 //! `request/error/tests.rs`. These are the container's: the order a serialiser writes, which a
 //! hashed map keeps only because insertion order is what it iterates; the ceilings a key too long
 //! to be stored meets without being looked up, and the replacements they still let through; and
-//! the high-water mark a clone has to carry.
+//! the room a clone holds, which is its own entries' and none of its source's.
 
 use core::num::NonZeroU32;
 
 use super::{Ceiling, Extensions};
-use crate::{Limits, RequestErrorResult, StartError};
+use crate::Limits;
 
 /// The driver value these cases carry. Nothing reads one; §7.1.7 reserves the contents entirely.
 type Value = u32;
@@ -234,58 +234,84 @@ fn the_iterator_agrees_with_iteration_from_both_ends() {
   assert_eq!(entries.next(), None, "and it stays exhausted");
 }
 
-/// The clone of a map grown and emptied is re-derived on its way into a retainer, as its source
-/// would be.
-///
-/// `IndexMap`'s clone keeps the source's hash index at full size and gives the entry vector no
-/// room, so the map's own capacity reads nothing on the clone while its index is as large as it
-/// ever was. The high-water mark is what [`Extensions::shrink_to_ceiling`] reads, and the
-/// hand-written `Clone` copies it; a `Clone` that rebuilt the mark from the clone's length would
-/// let the clone keep the index past every ceiling.
-#[test]
-fn a_clone_of_a_grown_and_emptied_map_is_re_derived_on_the_way_in() {
-  /// Sixteen times the strict ceiling, and small, so the case stays a Miri subject.
-  const GROWN: usize = 64;
+/// How many entries the clone cases grow a map to before emptying it: sixteen times a strict
+/// ceiling of four, and small, so that the cases stay Miri subjects.
+const GROWN: usize = 64;
 
+/// A map grown to [`GROWN`] entries under a ceiling that admits them, then emptied of its first
+/// `removed`.
+fn grown_then_emptied_of(removed: usize) -> Extensions<Value> {
   let lax =
     Limits::default().with_max_extension_entries(NonZeroU32::new(GROWN as u32).expect("not zero"));
-  let strict = Limits::default().with_max_extension_entries(NonZeroU32::new(4).expect("not zero"));
-
-  let mut map: Extensions<Value> = Extensions::new(&lax);
+  let mut map = Extensions::new(&lax);
   for index in 0..GROWN {
     map
       .insert(&std::format!("k{index}"), index as Value)
       .expect("the lax map has room");
   }
-  for index in 0..GROWN {
+  for index in 0..removed {
     map
       .remove(&std::format!("k{index}"))
       .expect("every key was inserted");
   }
+  assert_eq!(
+    map.capacity(),
+    GROWN,
+    "the source marks every entry it held"
+  );
+  map
+}
 
-  let clone = map.clone();
-  assert!(
-    clone.is_empty(),
-    "the clone holds the source's entries, none"
+/// A clone holds room for its own entries and none of its source's.
+///
+/// `IndexMap`'s own clone keeps the hash index at its full size, so the clone of a map grown and
+/// emptied would hold an index for every entry its source ever had. The clone is rebuilt from the
+/// live entries instead, so its high-water mark, which is what [`Extensions::shrink_to_ceiling`]
+/// reads, is its length; and it carries the same entries, in the same order, under the same
+/// ceilings.
+#[test]
+fn a_clone_holds_room_for_its_own_entries_and_none_of_its_sources() {
+  /// What the sparse source keeps of the entries it grew to.
+  const KEPT: usize = 3;
+
+  let sparse = grown_then_emptied_of(GROWN - KEPT);
+  let clone = sparse.clone();
+  assert_eq!(clone, sparse, "the same entries in the same order");
+  assert_eq!(keys(&clone), ["k61", "k62", "k63"]);
+  assert_eq!(clone.key_bytes(), sparse.key_bytes(), "the same key bytes");
+  assert_eq!(
+    (clone.max_entries, clone.max_key_bytes),
+    (sparse.max_entries, sparse.max_key_bytes),
+    "and the same ceilings"
   );
   assert_eq!(
     clone.capacity(),
-    GROWN,
-    "and the source's high-water mark, because it holds the source's hash index"
+    clone.len(),
+    "the clone marks only the entries it holds"
   );
 
-  let mut result: RequestErrorResult<Value> =
-    RequestErrorResult::new(&strict, StartError::AmbiguousOperation);
-  result
-    .set_extensions(clone)
-    .expect("nothing the clone reports is over a ceiling");
-  let retained = result
-    .extensions()
-    .expect("the clone was accepted")
-    .capacity();
+  let emptied = grown_then_emptied_of(GROWN).clone();
   assert!(
-    retained as u64 <= u64::from(strict.max_extension_entries.get()),
-    "the result kept a clone holding room for {retained} entries under a ceiling of {}",
-    strict.max_extension_entries.get()
+    emptied.is_empty(),
+    "the clone holds the source's entries, none"
+  );
+  assert_eq!(emptied.capacity(), 0, "and marks no room at all");
+}
+
+/// Cloning a map grown and emptied allocates nothing, so the clone holds none of the room its
+/// source grew to: `IndexMap`'s own clone would allocate a copy of the source's whole hash index.
+///
+/// Counted by the crate's counting allocator, which only a `std` build of its tests installs.
+#[cfg(feature = "std")]
+#[test]
+fn the_clone_of_an_emptied_map_allocates_nothing() {
+  let emptied = grown_then_emptied_of(GROWN);
+  let before = crate::response::allocations();
+  let clone = emptied.clone();
+  let allocated = crate::response::allocations() - before;
+  assert!(clone.is_empty());
+  assert_eq!(
+    allocated, 0,
+    "the clone of an empty map allocated {allocated} times"
   );
 }

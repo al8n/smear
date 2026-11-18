@@ -431,9 +431,10 @@ impl<V> Extensions<V> {
   /// **Not the map's own capacity, and that is measured rather than argued.** `IndexMap::capacity`
   /// is the smaller of its two allocations, and the hash index's half falls with every removal
   /// that leaves a tombstone — so it reads low on exactly the grown and emptied map this exists to
-  /// catch. A clone is the sharper case: it keeps the source's hash index at full size and gives
-  /// the entry vector no room, so the map's own figure reads nothing at all while the index is
-  /// still as large as it ever was. [`Clone`] copies this mark for that reason.
+  /// catch.
+  ///
+  /// A clone's mark is its length. [`Clone`] rebuilds the map from its live entries, so the clone
+  /// holds room for those alone, whatever its source grew to.
   ///
   /// Crate-visible rather than public because it is not something a caller needs to act on: the
   /// invariant it measures is enforced on the way into an executor rather than reported back for
@@ -510,19 +511,32 @@ impl<'e, V> IntoIterator for &'e Extensions<V> {
 }
 
 impl<V: Clone> Clone for Extensions<V> {
-  /// The entries, the ceilings, and the high-water mark with them.
+  /// The entries in insertion order, with the ceilings they were inserted under, in a map that
+  /// holds room for those entries and no more.
   ///
-  /// The mark is copied rather than reset to the clone's length because the clone holds what the
-  /// source held: `IndexMap`'s clone keeps the source's hash index at its full size. A clone of a
-  /// map grown and emptied is therefore still over the ceiling it was grown past, and still
-  /// re-derived on its way into an executor.
+  /// Rebuilt from the live entries rather than cloned whole. `IndexMap`'s own clone copies the hash
+  /// index at its full size, which follows the most entries the source ever held, so the clone of a
+  /// map grown and emptied would hold that index for nothing, once per copy and for as long as each
+  /// copy lives. Rebuilt, a clone holds room for its own entries alone and its high-water mark is
+  /// its length. Each key is hashed again on the way, which costs at most the bytes the key-byte
+  /// ceiling allows.
   fn clone(&self) -> Self {
+    let mut entries: IndexMap<FrozenStr, V, KeyHasher> =
+      IndexMap::with_capacity_and_hasher(self.entries.len(), key_hasher());
+    // The source's keys are distinct, so each is new here and the reserved room is never outgrown.
+    entries.extend(
+      self
+        .entries
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone())),
+    );
     Self {
-      entries: self.entries.clone(),
+      entries,
       key_bytes: self.key_bytes,
       max_entries: self.max_entries,
       max_key_bytes: self.max_key_bytes,
-      high_water: self.high_water,
+      // At most `max_entries`, which is a `u32`.
+      high_water: self.entries.len() as u32,
     }
   }
 }
