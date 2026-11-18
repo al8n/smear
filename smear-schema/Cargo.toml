@@ -69,6 +69,10 @@ introspection = ["build"]
 # builds for `thumbv6m-none-eabi` with an empty table of its own; that claim is untouched.
 tokora.workspace = true
 
+# The derives of the public enums outside `repr/`, which takes no dependency: `smear-noatomic` includes
+# it with an empty table. Links no `alloc` with the workspace's feature list, so no tier turns it on.
+derive_more.workspace = true
+
 smear-parser = { workspace = true, optional = true }
 smear-semantics = { workspace = true, optional = true }
 

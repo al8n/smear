@@ -30,6 +30,7 @@ std = ["smear-parser/std", "smear-schema/std", "tokora/std"]
 introspection = ["smear-schema/introspection"]
 
 [dependencies]
+derive_more.workspace = true
 tokora.workspace = true
 
 smear-parser = { workspace = true, features = ["graphql"] }

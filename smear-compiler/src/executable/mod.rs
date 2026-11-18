@@ -449,6 +449,7 @@ mod values;
 
 use core::{cmp::Ordering, ops::ControlFlow};
 
+use derive_more::IsVariant;
 use tokora::{SimpleSpan, span::AsSpan};
 
 use smear_parser::graphql::ast::{
@@ -507,7 +508,7 @@ pub struct Invalid {
 /// [`Invalid`]'s [`Display`](core::fmt::Display) — inside the defining crate a `match` on a
 /// `#[non_exhaustive]` enum is still checked, so a new variant is a **compile error** there rather
 /// than a sentence nobody re-read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum Refusal {
   /// A [`Budget`] bound abandoned a pass.

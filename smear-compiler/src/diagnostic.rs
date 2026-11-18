@@ -5,6 +5,7 @@
 //! [`Diagnostic`] itself, where a reader of the published documentation will find them. This
 //! module is private and its header is not published.
 
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use tokora::SimpleSpan;
 
 use super::{
@@ -17,10 +18,14 @@ use smear_schema::diagnostic::{Code, Diagnose, Label, Location, PathSegment, Sev
 ///
 /// Everything here is an integer. Names are [`Sym`]s and type references are [`PackedType`]s, so
 /// the whole value is `Copy` and renders only against the [`Schema`] that issued them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum Context {
   /// The rule's spans and subject say everything.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   None,
   /// A root operation slot the schema does not fill.
   Root(RootOperation),
@@ -104,7 +109,7 @@ impl UsageContext {
 ///
 /// The diagnostic already carries both selections' spans and the response name they collide on;
 /// this says which of `FieldsInSetCanMerge`'s three requirements the pair broke.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum MergeConflict {
   /// The two selections name different fields, so the response key is ambiguous.

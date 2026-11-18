@@ -240,6 +240,7 @@ dependencies = [
 name = "smear-compiler"
 version = "0.0.0"
 dependencies = [
+ "derive_more",
  "smear-parser",
  "smear-schema",
  "tokora",
@@ -285,6 +286,7 @@ dependencies = [
 name = "smear-schema"
 version = "0.0.0"
 dependencies = [
+ "derive_more",
  "smear-parser",
  "smear-semantics",
  "tokora",
