@@ -76,7 +76,7 @@ impl<Name, Span> IntoSpan<Span> for Alias<Name, Span> {
   }
 }
 
-/// [`Alias`] taken apart: every field, in the order it is written.
+/// `Alias` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AliasComponents<Name, Span> {
   /// The span covering the alias and its colon.
@@ -141,7 +141,7 @@ impl<Name, Span> IntoSpan<Span> for TypeCondition<Name, Span> {
   }
 }
 
-/// [`TypeCondition`] taken apart: every field, in the order it is written.
+/// `TypeCondition` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TypeConditionComponents<Name, Span> {
   /// The span covering `on` and the type name.
@@ -221,7 +221,7 @@ impl<FragmentName, Directives, Span> IntoSpan<Span>
   }
 }
 
-/// [`FragmentSpread`] taken apart: every field, in the order it is written.
+/// `FragmentSpread` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FragmentSpreadComponents<FragmentName, Directives, Span> {
   /// The span covering the entire spread.
@@ -321,7 +321,7 @@ impl<TypeCondition, Directives, SelectionSet, Span> IntoSpan<Span>
   }
 }
 
-/// [`InlineFragment`] taken apart: every field, in the order it is written.
+/// `InlineFragment` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InlineFragmentComponents<TypeCondition, Directives, SelectionSet, Span> {
   /// The span covering the entire inline fragment.
@@ -408,7 +408,7 @@ impl<Selection, Span, Container> IntoSpan<Span> for SelectionSet<Selection, Span
   }
 }
 
-/// [`SelectionSet`] taken apart: every field, in the order it is written.
+/// `SelectionSet` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SelectionSetComponents<Span, Container> {
   /// The span including the surrounding braces.
@@ -521,7 +521,7 @@ impl<Alias, Name, Arguments, Directives, SelectionSet, Span> IntoSpan<Span>
   }
 }
 
-/// [`Field`] taken apart: every field, in the order it is written.
+/// `Field` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FieldComponents<Alias, Name, Arguments, Directives, SelectionSet, Span> {
   /// The span covering the entire field.

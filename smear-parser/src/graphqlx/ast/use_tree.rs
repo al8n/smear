@@ -194,7 +194,7 @@ impl<S, Span> IntoSpan<Span> for UseTree<S, Span> {
   }
 }
 
-/// [`UseTree`] taken apart: every field, in the order it is written.
+/// `UseTree` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UseTreeComponents<S, Span> {
   /// The complete tree span, from its prefix's first token to its own last token.
@@ -289,7 +289,7 @@ impl<S, Span> IntoSpan<Span> for UseDefinition<S, Span> {
   }
 }
 
-/// [`UseDefinition`] taken apart: every field, in the order it is written.
+/// `UseDefinition` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UseDefinitionComponents<S, Span> {
   /// The complete item span, from `use` to the tree's last token.

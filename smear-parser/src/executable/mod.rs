@@ -85,7 +85,7 @@ impl<T, Description, Span> IntoSpan<Span> for Described<T, Description, Span> {
   }
 }
 
-/// [`Described`] taken apart: every field, in the order it is written.
+/// `Described` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DescribedComponents<T, Description, Span> {
   /// The span covering the description and node.
@@ -189,7 +189,7 @@ impl<Variable, Type, DefaultValue, Directives, Span> IntoSpan<Span>
   }
 }
 
-/// [`VariableDefinition`] taken apart: every field, in the order it is written.
+/// `VariableDefinition` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VariableDefinitionComponents<Variable, Type, DefaultValue, Directives, Span> {
   /// The span covering the whole definition.
@@ -284,7 +284,7 @@ impl<VariableDefinition, Span, Container> IntoSpan<Span>
   }
 }
 
-/// [`VariablesDefinition`] taken apart: every field, in the order it is written.
+/// `VariablesDefinition` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct VariablesDefinitionComponents<Span, Container> {
   /// The span including surrounding parentheses when present.
@@ -393,7 +393,7 @@ impl<FragmentName, TypeCondition, Directives, SelectionSet, Span> IntoSpan<Span>
   }
 }
 
-/// [`FragmentDefinition`] taken apart: every field, in the order it is written.
+/// `FragmentDefinition` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FragmentDefinitionComponents<FragmentName, TypeCondition, Directives, SelectionSet, Span>
 {
@@ -537,7 +537,7 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet, Span> I
   }
 }
 
-/// [`NamedOperationDefinition`] taken apart: every field, in the order it is written.
+/// `NamedOperationDefinition` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NamedOperationDefinitionComponents<
   Name,
@@ -648,7 +648,7 @@ impl<Definition, Span, Container> IntoSpan<Span> for Document<Definition, Span, 
   }
 }
 
-/// [`Document`] taken apart: every field, in the order it is written.
+/// `Document` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DocumentComponents<Span, Container> {
   /// The complete document span.

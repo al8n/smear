@@ -27,7 +27,7 @@ impl<Name, Span> IntoSpan<Span> for VariableValue<Name, Span> {
   }
 }
 
-/// [`VariableValue`] taken apart: every field, in the order it is written.
+/// `VariableValue` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct VariableValueComponents<Name, Span> {
   /// The span covering the variable.

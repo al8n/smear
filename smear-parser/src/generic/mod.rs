@@ -66,7 +66,7 @@ impl<Name, Type, Span> IntoSpan<Span> for DefinitionTypeParam<Name, Type, Span> 
   }
 }
 
-/// [`DefinitionTypeParam`] taken apart: every field, in the order it is written.
+/// `DefinitionTypeParam` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DefinitionTypeParamComponents<Name, Type, Span> {
   /// The complete parameter span.
@@ -149,7 +149,7 @@ impl<Parameter, Span, Container> IntoSpan<Span>
   }
 }
 
-/// [`DefinitionTypeGenerics`] taken apart: every field, in the order it is written.
+/// `DefinitionTypeGenerics` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DefinitionTypeGenericsComponents<Span, Container> {
   /// The span covering the enclosing angle brackets.
@@ -213,7 +213,7 @@ impl<Name, Span> IntoSpan<Span> for ExtensionTypeParam<Name, Span> {
   }
 }
 
-/// [`ExtensionTypeParam`] taken apart: every field, in the order it is written.
+/// `ExtensionTypeParam` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ExtensionTypeParamComponents<Name, Span> {
   /// The complete argument span.
@@ -293,7 +293,7 @@ impl<Parameter, Span, Container> IntoSpan<Span>
   }
 }
 
-/// [`ExtensionTypeGenerics`] taken apart: every field, in the order it is written.
+/// `ExtensionTypeGenerics` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ExtensionTypeGenericsComponents<Span, Container> {
   /// The span covering the enclosing angle brackets.
@@ -375,7 +375,7 @@ impl<Name, Span, Container> IntoSpan<Span>
   }
 }
 
-/// [`ExecutableDefinitionTypeGenerics`] taken apart: every field, in the order it is written.
+/// `ExecutableDefinitionTypeGenerics` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ExecutableDefinitionTypeGenericsComponents<Span, Container> {
   /// The span covering the enclosing angle brackets.
@@ -450,7 +450,7 @@ impl<Name, Generics, Span> IntoSpan<Span> for DefinitionName<Name, Generics, Spa
   }
 }
 
-/// [`DefinitionName`] taken apart: every field, in the order it is written.
+/// `DefinitionName` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DefinitionNameComponents<Name, Generics, Span> {
   /// The complete name span.
@@ -526,7 +526,7 @@ impl<Path, Generics, Span> IntoSpan<Span> for ExtensionName<Path, Generics, Span
   }
 }
 
-/// [`ExtensionName`] taken apart: every field, in the order it is written.
+/// `ExtensionName` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ExtensionNameComponents<Path, Generics, Span> {
   /// The complete name span.
@@ -602,7 +602,7 @@ impl<Name, Generics, Span> IntoSpan<Span> for ExecutableDefinitionName<Name, Gen
   }
 }
 
-/// [`ExecutableDefinitionName`] taken apart: every field, in the order it is written.
+/// `ExecutableDefinitionName` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ExecutableDefinitionNameComponents<Name, Generics, Span> {
   /// The complete name span.
@@ -688,7 +688,7 @@ impl<ImplementationGenerics, Name, Span> IntoSpan<Span>
   }
 }
 
-/// [`ExecutableDefinitionHeader`] taken apart: every field, in the order it is written.
+/// `ExecutableDefinitionHeader` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ExecutableDefinitionHeaderComponents<ImplementationGenerics, Name, Span> {
   /// The complete header span.
@@ -766,7 +766,7 @@ impl<Path, Generics, Span> IntoSpan<Span> for TypePath<Path, Generics, Span> {
   }
 }
 
-/// [`TypePath`] taken apart: every field, in the order it is written.
+/// `TypePath` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypePathComponents<Path, Generics, Span> {
   /// The complete type-path span.
@@ -851,7 +851,7 @@ impl<TypePath, Span, Container> IntoSpan<Span> for WherePredicate<TypePath, Span
   }
 }
 
-/// [`WherePredicate`] taken apart: every field, in the order it is written.
+/// `WherePredicate` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WherePredicateComponents<TypePath, Span, Container> {
   /// The complete predicate span.
@@ -930,7 +930,7 @@ impl<Predicate, Span, Container> IntoSpan<Span> for WhereClause<Predicate, Span,
   }
 }
 
-/// [`WhereClause`] taken apart: every field, in the order it is written.
+/// `WhereClause` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WhereClauseComponents<Span, Container> {
   /// The complete clause span.
@@ -1003,7 +1003,7 @@ impl<Target, WhereClause, Span> IntoSpan<Span> for Constrained<Target, WhereClau
   }
 }
 
-/// [`Constrained`] taken apart: every field, in the order it is written.
+/// `Constrained` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConstrainedComponents<Target, WhereClause, Span> {
   /// The complete constrained-node span.

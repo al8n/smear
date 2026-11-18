@@ -38,7 +38,7 @@ impl<S, Span, Lang: ?Sized> IntoSpan<Span> for EnumValue<S, Span, Lang> {
   }
 }
 
-/// [`EnumValue`] taken apart: every field, in the order it is written.
+/// `EnumValue` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct EnumValueComponents<S, Span> {
   /// The span covering the enum literal.

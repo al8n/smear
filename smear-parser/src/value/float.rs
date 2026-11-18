@@ -28,7 +28,7 @@ impl<S, Span, Lang: ?Sized> IntoSpan<Span> for FloatValue<S, Span, Lang> {
   }
 }
 
-/// [`FloatValue`] taken apart: every field, in the order it is written.
+/// `FloatValue` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FloatValueComponents<S, Span> {
   /// The span covering the floating-point literal.

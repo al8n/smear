@@ -38,7 +38,7 @@ impl<S, Span, Lang: ?Sized> IntoSpan<Span> for NullValue<S, Span, Lang> {
   }
 }
 
-/// [`NullValue`] taken apart: every field, in the order it is written.
+/// `NullValue` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NullValueComponents<S, Span> {
   /// The span covering the null literal.

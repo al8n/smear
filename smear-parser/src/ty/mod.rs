@@ -47,7 +47,7 @@ impl<Name, Span> IntoSpan<Span> for NamedType<Name, Span> {
   }
 }
 
-/// [`NamedType`] taken apart: every field, in the order it is written.
+/// `NamedType` taken apart: every field, in the order it is written.
 #[cfg(feature = "graphql")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct NamedTypeComponents<Name, Span> {
@@ -130,7 +130,7 @@ impl<Type, Span> IntoSpan<Span> for ListType<Type, Span> {
   }
 }
 
-/// [`ListType`] taken apart: every field, in the order it is written.
+/// `ListType` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ListTypeComponents<Type, Span> {
   /// The span covering the complete type reference.
@@ -245,7 +245,7 @@ impl<Type, Span, Container> IntoSpan<Span> for TypeGenerics<Type, Span, Containe
   }
 }
 
-/// [`TypeGenerics`] taken apart: every field, in the order it is written.
+/// `TypeGenerics` taken apart: every field, in the order it is written.
 #[cfg(feature = "graphqlx")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypeGenericsComponents<Span, Container> {
@@ -353,7 +353,7 @@ impl<Name, Type, Span, PathContainer, TypeContainer> IntoSpan<Span>
   }
 }
 
-/// [`DefinitionTypePath`] taken apart: every field, in the order it is written.
+/// `DefinitionTypePath` taken apart: every field, in the order it is written.
 #[cfg(feature = "graphqlx")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DefinitionTypePathComponents<Name, Type, Span, PathContainer, TypeContainer> {

@@ -38,7 +38,7 @@ impl<S, Span, Lang: ?Sized> IntoSpan<Span> for IntValue<S, Span, Lang> {
   }
 }
 
-/// [`IntValue`] taken apart: every field, in the order it is written.
+/// `IntValue` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct IntValueComponents<S, Span> {
   /// The span covering the integer literal.

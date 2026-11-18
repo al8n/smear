@@ -43,7 +43,7 @@ impl<S, Span, Lang: ?Sized> IntoSpan<Span> for StringValue<S, Span, Lang> {
   }
 }
 
-/// [`StringValue`] taken apart: every field, in the order it is written.
+/// `StringValue` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StringValueComponents<S, Span> {
   /// The span covering the string literal.
@@ -147,7 +147,7 @@ impl<S, Span, Lang: ?Sized> IntoSpan<Span> for InlineStringValue<S, Span, Lang> 
   }
 }
 
-/// [`InlineStringValue`] taken apart: every field, in the order it is written.
+/// `InlineStringValue` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct InlineStringValueComponents<S, Span> {
   /// The span covering the inline string literal.
@@ -263,7 +263,7 @@ impl<S, Span, Lang: ?Sized> IntoSpan<Span> for BlockStringValue<S, Span, Lang> {
   }
 }
 
-/// [`BlockStringValue`] taken apart: every field, in the order it is written.
+/// `BlockStringValue` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BlockStringValueComponents<S, Span> {
   /// The span covering the block string literal.

@@ -283,7 +283,7 @@ impl<D, T> Parsed<D, T> {
   }
 }
 
-/// [`Parsed`] taken apart: every field, in the order it is written.
+/// `Parsed` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedComponents<D, T> {
   /// The items that have an AST image, as the syntactic AST.

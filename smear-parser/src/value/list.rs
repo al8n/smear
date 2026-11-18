@@ -65,7 +65,7 @@ impl<Value, Span, Container> IntoSpan<Span> for List<Value, Span, Container> {
   }
 }
 
-/// [`List`] taken apart: every field, in the order it is written.
+/// `List` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ListComponents<Span, Container> {
   /// The span covering the complete list.

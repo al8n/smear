@@ -238,7 +238,7 @@ impl<S, Span, Ty> IntoSpan<Span> for ModDefinition<S, Span, Ty> {
   }
 }
 
-/// [`ModDefinition`] taken apart: every field, in the order it is written.
+/// `ModDefinition` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModDefinitionComponents<S, Span, Ty> {
   /// The complete module span, from its description or its `mod` to its `}`.

@@ -39,7 +39,7 @@ macro_rules! impl_node_traits {
     }
 
     paste::paste! {
-      #[doc = concat!("[`", stringify!($node), "`] taken apart: every field, in the order it is written.")]
+      #[doc = concat!("`", stringify!($node), "` taken apart: every field, in the order it is written.")]
       #[derive(Debug, Clone, Copy, PartialEq, Eq)]
       pub struct [<$node Components>]<$($used),+> {
         $(

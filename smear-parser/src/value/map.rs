@@ -88,7 +88,7 @@ where
   }
 }
 
-/// [`MapEntry`] taken apart: every field, in the order it is written.
+/// `MapEntry` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MapEntryComponents<Key, Value, Span> {
   /// The span covering this entry.
@@ -170,7 +170,7 @@ impl<Key, Value, Span, Container> IntoSpan<Span> for Map<Key, Value, Span, Conta
   }
 }
 
-/// [`Map`] taken apart: every field, in the order it is written.
+/// `Map` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MapComponents<Span, Container> {
   /// The span covering the complete map.

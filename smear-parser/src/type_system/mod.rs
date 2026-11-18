@@ -44,7 +44,7 @@ macro_rules! impl_node_traits {
     }
 
     paste::paste! {
-      #[doc = concat!("[`", stringify!($node), "`] taken apart: every field, in the order it is written.")]
+      #[doc = concat!("`", stringify!($node), "` taken apart: every field, in the order it is written.")]
       #[derive(Debug, Clone, Copy, PartialEq, Eq)]
       pub struct [<$node Components>]<$($used),+> {
         $(
@@ -923,7 +923,7 @@ impl<Span> IntoSpan<Span> for ExecutableDirectiveLocation<Span> {
   }
 }
 
-/// [`ExecutableDirectiveLocation`] taken apart: the span it was written over and its spelling.
+/// `ExecutableDirectiveLocation` taken apart: the span it was written over and its spelling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ExecutableDirectiveLocationComponents<Span> {
   /// The span the location was written over.
@@ -1118,7 +1118,7 @@ impl<Span> IntoSpan<Span> for TypeSystemDirectiveLocation<Span> {
   }
 }
 
-/// [`TypeSystemDirectiveLocation`] taken apart: the span it was written over and its spelling.
+/// `TypeSystemDirectiveLocation` taken apart: the span it was written over and its spelling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypeSystemDirectiveLocationComponents<Span> {
   /// The span the location was written over.
@@ -1201,7 +1201,7 @@ impl<Span> IntoSpan<Span> for Location<Span> {
   }
 }
 
-/// [`Location`] taken apart: the span it was written over and its spelling.
+/// `Location` taken apart: the span it was written over and its spelling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LocationComponents<Span> {
   /// The span the location was written over.

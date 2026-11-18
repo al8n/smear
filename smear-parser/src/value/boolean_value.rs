@@ -35,7 +35,7 @@ impl<S: ?Sized, Span, Lang: ?Sized> IntoSpan<Span> for BooleanValue<S, Span, Lan
   }
 }
 
-/// [`BooleanValue`] taken apart: every field, in the order it is written.
+/// `BooleanValue` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BooleanValueComponents<Span> {
   /// The span of the boolean value.

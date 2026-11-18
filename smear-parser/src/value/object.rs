@@ -84,7 +84,7 @@ impl<Name, Value: crate::value::Nestable, Span> crate::value::Nestable
   }
 }
 
-/// [`ObjectField`] taken apart: every field, in the order it is written.
+/// `ObjectField` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ObjectFieldComponents<Name, Value, Span> {
   /// The span covering the complete field.
@@ -166,7 +166,7 @@ impl<Name, Value, Span, Container> IntoSpan<Span> for Object<Name, Value, Span, 
   }
 }
 
-/// [`Object`] taken apart: every field, in the order it is written.
+/// `Object` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObjectComponents<Span, Container> {
   /// The span covering the complete object.

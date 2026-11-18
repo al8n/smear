@@ -198,7 +198,7 @@ impl<Name, Span, Container> IntoSpan<Span> for Path<Name, Span, Container> {
   }
 }
 
-/// [`Path`] taken apart: every field, in the order it is written.
+/// `Path` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PathComponents<Span, Container> {
   /// The span covering the complete path, root included.

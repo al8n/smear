@@ -48,7 +48,7 @@ impl<Value, Span> IntoSpan<Span> for DefaultInputValue<Value, Span> {
   }
 }
 
-/// [`DefaultInputValue`] taken apart: every field, in the order it is written.
+/// `DefaultInputValue` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DefaultInputValueComponents<Value, Span> {
   /// The span covering `=` and the value.

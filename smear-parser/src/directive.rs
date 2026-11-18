@@ -40,7 +40,7 @@ impl<Name, Args, Span> IntoSpan<Span> for Directive<Name, Args, Span> {
   }
 }
 
-/// [`Directive`] taken apart: every field, in the order it is written.
+/// `Directive` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DirectiveComponents<Name, Args, Span> {
   /// The span covering the entire directive.
@@ -127,7 +127,7 @@ impl<Directive, Container, Span> IntoSpan<Span> for Directives<Directive, Contai
   }
 }
 
-/// [`Directives`] taken apart: every field, in the order it is written.
+/// `Directives` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DirectivesComponents<Container, Span> {
   /// The collection span.

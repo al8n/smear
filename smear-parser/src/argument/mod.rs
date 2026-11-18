@@ -40,7 +40,7 @@ impl<Name, Value, Span> IntoSpan<Span> for Argument<Name, Value, Span> {
   }
 }
 
-/// [`Argument`] taken apart: every field, in the order it is written.
+/// `Argument` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ArgumentComponents<Name, Value, Span> {
   /// The span from the argument name through its value.
@@ -124,7 +124,7 @@ impl<Arg, Container, Span> IntoSpan<Span> for ArgumentList<Arg, Container, Span>
   }
 }
 
-/// [`ArgumentList`] taken apart: every field, in the order it is written.
+/// `ArgumentList` taken apart: every field, in the order it is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ArgumentListComponents<Container, Span> {
   /// The collection span.
