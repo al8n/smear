@@ -1466,3 +1466,21 @@ fn a_type_a_stopped_rebuild_completed_is_derived_and_judged() {
     ]
   );
 }
+
+/// A default its declaration refuses, a whole `null` no instantiation takes, has that one owner
+/// through a derived instantiation too: `In<T>`'s `a`, written `T!`, defaults to `null`, refused
+/// where it is declared and recorded for none. `Outer<T>`'s `i` defaults to `{}`, which leaves `a`
+/// out, and `Wrap<Int>` derives `Outer<Int>`, whose check copies that `null` against `Int!`: the
+/// copy is the declaration's, makes the `{}` no less fit, and is said nothing of at `Wrap<Int>`.
+/// Refuses a refused `null` reported again through what a written instantiation derives.
+#[test]
+fn a_default_its_declaration_refuses_is_not_reported_through_a_derived_instantiation() {
+  let text = "type Query {\n  f(w: Wrap<Int>): Int\n}\ninput In<T> {\n  a: T! = null\n}\n\
+              input Outer<T> {\n  i: In<T> = {}\n}\ninput Wrap<T> {\n  o: Outer<T>\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(DEFAULT, after(schema, text, "a: T! = ", "null"))]
+  );
+}

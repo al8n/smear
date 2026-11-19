@@ -244,9 +244,12 @@
 //! count and each count beneath it that does not fit; an application that reports its copy of one
 //! owns each count beneath the default's, whether a copy is made or not, the default's own being
 //! its omission alone; and the check of a derived instantiation passes over a row whose value's
-//! count, against the type it takes there, is owned, to its next row. A derived instantiation of a
-//! definition that grows is not checked, nor what only it derives: a value written under such a
-//! type is judged where it is written.
+//! count, against the type it takes there, is owned, to its next row. A default its declaration
+//! refuses, a whole `null` no instantiation takes, is that declaration's alone, as the next section
+//! says: a copy of it reports nothing, and so claims nothing; it makes no copy that holds it not
+//! fit, and so no count beneath a claimed one holds it; and it is recorded for none, so no derived
+//! instantiation judges it. A derived instantiation of a definition that grows is not checked, nor
+//! what only it derives: a value written under such a type is judged where it is written.
 //!
 //! # A `null` no instantiation takes
 //!
