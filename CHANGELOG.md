@@ -350,21 +350,28 @@ All notable changes to Smear are documented in this file.
     each requires, and `Def::is_metadata` whether a definition is compile-time metadata, which
     only type-system directives' types and applications' type arguments reach, and which no
     definition is while an executable directive holds one of its own type parameters in an
-    argument's type, since an operation can fill it with any of them; and the `extent()` of a
-    contribution, a member and an inline module, where it is written. `Analysis` and `Model` are
-    `PartialEq` and `SourceMap` is `Eq`, `Source::is_complete` says whether a file was read whole,
-    and `SourceMap::bind` pairs an analysis with the caller's texts again for a renderer.
+    argument's type, since an operation can fill it with any of them; `Def::grows` whether one
+    of a definition's type parameters reaches itself with a type argument that grows, read off the
+    graph `UnboundedInstantiation` builds; and the `extent()` of a contribution, a member and an
+    inline module, where it is written. `Analysis` and `Model` are `PartialEq` and `SourceMap` is
+    `Eq`, `Source::is_complete` says whether a file was read whole, and `SourceMap::bind` pairs an
+    analysis with the caller's texts again for a renderer.
   - **The phases.** The package set is checked; every file is parsed; each package's module tree
     and declarations are collected, duplicate and reserved names refused; every scope, `use` item
     and path is resolved, with a "did you mean" help; each definition is lowered; every
     occurrence is typed, defaults filled, its count of type arguments and the bounds of every
-    instantiation the program writes judged; every value is coerced to the type expected where
-    it stands, defaults copied and a cycle of them refused, a generic definition's values at each
-    closed instantiation a supplied package writes, and an argument a collection's key or element
-    makes required where it is left out, or written null, once; each scalar is bound to its host
-    types; each definition is checked against the interfaces it implements, transitively and under
-    type arguments, its entries and members told apart as types; and every definition and type gets
-    its tier, the definitions only compile-time metadata reaches marked first.
+    instantiation the program writes judged, and the generic definitions that grow found; every
+    value is coerced to the type expected where it stands, defaults copied and a cycle of them
+    refused, a generic definition's values at each closed instantiation a supplied package writes,
+    and an argument a collection's key or element makes required where it is left out, or written
+    null, once; each scalar is bound to its host types; each definition is checked against the
+    interfaces it implements, transitively and under type arguments, its entries and members told
+    apart as types; and every definition and type gets its tier, the definitions only compile-time
+    metadata reaches marked first. An instantiation a written one derives, through a fill or a
+    substitution, is judged for its definition's values, the arguments it makes required and its
+    entries and members wherever its definition does not grow, each reported at the written
+    occurrence that derives it, labelled at the type that derives it; a derived instantiation of a
+    definition that grows, and what only it derives, is not.
   - **The rules.** 33 rules, each a visitor on the public trait, judge what the supplied packages
     wrote once the phases have written the model: smear's own rules on GraphQLx, under eleven
     `smear::graphqlx` codes, and the type-system rules GraphQLx shares with GraphQL in this

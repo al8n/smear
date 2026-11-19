@@ -120,10 +120,10 @@ and checks a GraphQLx program against smear's own rules and the rules GraphQLx s
 | Declaration | Numbers every module and definition, and checks each module's names | `smear::schema`: 5; `smear::graphqlx`: 1 |
 | Name resolution | Builds every module's scope, resolves its `use` items, and resolves each path where it stands | `smear::schema`: 6; `smear::graphqlx`: 11 |
 | Lowering | Writes what each definition holds: its contributions, type parameters, members, type occurrences and applications, its values as written, and the schema | `smear::schema`: 4; `smear::graphqlx`: 4 |
-| Instantiation | Gives every type occurrence its type and every application its complete type arguments, and judges the bounds of every instantiation the program writes | `smear::graphqlx`: 4 |
-| Coercion | Coerces every value to the type expected where it stands, filling what is left out from its default; a value of a custom scalar that is no collection but `null`, or of a type that still names a type parameter, is kept as written | `smear::schema`: 6; `smear::graphqlx`: 4 |
+| Instantiation | Gives every type occurrence its type and every application its complete type arguments, judges the bounds of every instantiation the program writes, and finds which generic definitions grow | `smear::graphqlx`: 4 |
+| Coercion | Coerces every value to the type expected where it stands, filling what is left out from its default; a value of a custom scalar that is no collection but `null`, or of a type that still names a type parameter, is kept as written, and judged at each instantiation the program writes or derives through the definitions that do not grow | `smear::schema`: 6; `smear::graphqlx`: 4 |
 | Binding | Binds each scalar to its host types | none |
-| Implementation | Checks what each definition says it implements, transitively and field by field, and a union's members | `smear::schema`: 9; `smear::graphqlx`: 1 |
+| Implementation | Checks what each definition says it implements, transitively and field by field, and a union's members, at each instantiation the program writes or derives too | `smear::schema`: 9; `smear::graphqlx`: 1 |
 | Tiers | Marks what only compile-time metadata reaches, and gives every definition and every type the tier it requires | none |
 | smear's rules | 33 rules, each a visitor over the model: smear's own on GraphQLx, and the type-system rules GraphQLx shares with GraphQL | `smear::graphqlx`: 11; `smear::schema`: 39 |
 
@@ -145,7 +145,9 @@ selects, and it reports through the walk's context with codes of its own, which 
 do. Rules compose at compile time, and a consumer's verdict is its own conjunction with
 `Analysis::is_ok`. One rule ships for a backend to compose, and `analyze` never runs it:
 `graphqlx::UnboundedInstantiation` refuses a generic definition that reaches itself with a type
-argument that grows, for a backend that makes one copy per instantiation.
+argument that grows, for a backend that makes one copy per instantiation. `Def::grows` answers
+which definitions its graph finds to grow, whose derived instantiations the analysis does not
+judge.
 
 ### Limits
 
