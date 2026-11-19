@@ -1601,18 +1601,41 @@ fn in_dependency(analysis: &Analysis) -> Vec<(&'static str, Location)> {
 }
 
 /// Asserts that `orphan`, an extension the root package writes of a definition of the dependency
-/// holding `theirs`, beside `ours`, is refused by the orphan rule and changes nothing said in the
-/// dependency's file, under the default limits and with no value step to spend.
+/// holding `theirs`, beside `ours`, changes nothing said in the dependency's file, under the
+/// default limits and with no value step to spend, and that the root package's file says
+/// something of it. Under the default limits that is the orphan rule's refusal. With no step to
+/// spend, a phase may stop inside the extension, at a value whose type it cannot read under the
+/// extension's type arguments, and the orphan rule says nothing of an extension a phase found an
+/// error in: so the root package's file holds a report inside the extension, the orphan rule's or
+/// the phase's.
 fn an_orphan_changes_nothing_in_the_dependency(theirs: &str, ours: &str, orphan: &str) {
   let extended = format!("{ours}{orphan}");
-  for limits in [Limits::new(), Limits::new().with_max_value_steps(0)] {
+  for (limits, ruled) in [
+    (Limits::new(), true),
+    (Limits::new().with_max_value_steps(0), false),
+  ] {
     let without = analyze_beside(ours, theirs, &limits);
     let with = analyze_beside(&extended, theirs, &limits);
-    assert!(
-      !codes_at(&with, ORPHAN).is_empty(),
-      "{:#?}",
-      with.diagnostics()
-    );
+    if ruled {
+      assert!(
+        !codes_at(&with, ORPHAN).is_empty(),
+        "{:#?}",
+        with.diagnostics()
+      );
+    } else {
+      // The extension is written after `ours`, in the root package's file.
+      let file = schema_file(&with).get();
+      assert!(
+        found(&with)
+          .iter()
+          .any(|&(_, at): &(&'static str, Location)| at.source() == file
+            && at
+              .span()
+              .is_some_and(|span: SimpleSpan| span.start() >= ours.len())),
+        "{:#?}",
+        with.diagnostics()
+      );
+    }
     assert_eq!(
       in_dependency(&with),
       in_dependency(&without),
