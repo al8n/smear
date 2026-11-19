@@ -1308,3 +1308,29 @@ fn the_closure_and_the_implementation_check_say_one_depth_stop_once() {
     analysis.diagnostics()
   );
 }
+
+/// The relevance scan reads the first of a definition's own fields of each name, as the
+/// implementation check does, and its lookups across the entries are bounded linearly in the
+/// program: `I` has many fields named `f`, each declaring `a`, and `D<T>`, which implements it, as
+/// many, each taking `a: T`. `D` adds no argument, so it is not relevant, nor is `Outer`, which
+/// holds a `D<T>`, and with no value step to spend `Outer<Int>` says nothing of what it derives.
+/// Refuses a scan that compares each of `D`'s fields of a name with each of `I`'s, whose lookups
+/// outrun the bound and leave `D` relevant.
+#[test]
+fn a_definitions_fields_of_one_name_are_read_once_by_the_relevance_scan() {
+  const N: usize = 200;
+  let declares: String = (0..N).map(|_: usize| "  f(a: Int): Int\n").collect();
+  let takes: String = (0..N).map(|_: usize| "  f(a: T): Int\n").collect();
+  let text = format!(
+    "type Query {{\n  o: Outer<Int>\n}}\ninterface I {{\n{declares}}}\n\
+     type D<T> implements I {{\n{takes}}}\ntype Outer<T> {{\n  d: D<T>\n}}\n"
+  );
+  for limits in [Limits::new().with_max_value_steps(0), Limits::new()] {
+    let analysis = analyze_text(&text, &limits);
+    assert!(
+      codes_at(&analysis, LIMIT).is_empty(),
+      "{:#?}",
+      analysis.diagnostics()
+    );
+  }
+}

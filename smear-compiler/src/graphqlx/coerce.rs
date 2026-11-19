@@ -471,6 +471,7 @@ pub(crate) fn coerce(
     reporter,
     types,
     scopes,
+    sources,
     raw,
     primitives: &declarations.primitives,
     builtins,
@@ -1356,6 +1357,8 @@ struct Coercion<'c, 'p, 'x> {
   types: &'c mut Types,
   /// Every module's scope: what a qualified enum value's prefix names.
   scopes: &'c Scopes<'x>,
+  /// Each source's package: which package wrote a member, and which a definition.
+  sources: &'c SourceMap,
   /// The trees, and each source's text.
   raw: RawValues<'p>,
   /// Each primitive `core` materialises, with its definition: the primitive at index `i` is the

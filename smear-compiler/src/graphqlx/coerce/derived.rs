@@ -53,11 +53,11 @@
 //!   its arguments: linear in the model but for sorting, and charged nothing. Each definition keeps
 //!   its useful positions alone, each distinct type once, and each root the fills, past what any
 //!   occurrence of it writes, that can derive something judged. Whether a field adds an argument
-//!   beside an interface's field is looked up in every interface's fields and arguments, indexed
-//!   once by name: for each interface an object's or an interface's own entries name, the fewer of
-//!   its fields that add such an argument and of the interface's fields is read, and the other side
-//!   looked up, and so for the arguments of each field of one name on both sides, no more than the
-//!   implementation check compares at those entries, and charged nothing either;
+//!   beside an interface's field reads each definition's own fields once, the first of each name,
+//!   as the implementation check does, and looks up every interface's fields and arguments, indexed
+//!   once by name: the lookups across the definitions' entries are four at most for each type
+//!   occurrence and definition the model holds, and a definition asked about past them is relevant,
+//!   read generously, what the closure then reads of it being charged as everything it reads is;
 //! - each position an expansion reads is a rebuild, a step for its root and one for each argument
 //!   or element it looks at, as the check at a written instantiation pays for its own; a position
 //!   whose rebuild the check of its instantiation made already is met by the walk, a step;
@@ -72,9 +72,7 @@
 //!   made by a step its walk paid; each report pass reads each occurrence and application once,
 //!   finding its root by its type's nullable form, found once for each type and kept.
 //!
-//! So the closure does work linear in the model's size and in the steps it pays, but for sorting,
-//! and for the lookups of the arguments fields add, which the implementation check's own
-//! comparisons bound.
+//! So the closure does work linear in the model's size and in the steps it pays, but for sorting.
 //!
 //! A limit that stops an expansion is `resource-limit` at where the root whose expansion was
 //! running is first written, and the closure ends there. As every `resource-limit`, it is said once
@@ -196,17 +194,24 @@ struct Roots {
 
 /// Every interface's fields, and their arguments, by name, for the question whether a field adds
 /// an argument beside the field of its name of an interface its definition implements: built the
-/// first time relevance asks it, so that each answer is a few lookups.
+/// first time relevance asks it, so that each answer is a few lookups, with what the lookups may
+/// read in all.
 #[derive(Default)]
 struct Declared {
-  /// Whether `fields` and `arguments` hold them.
+  /// Whether `fields`, `arguments` and `left` are set.
   built: bool,
   /// Each interface's fields, by the interface, then name, then id.
   fields: Vec<(DefId, Sym, MemberId)>,
   /// Each interface field's arguments' names, by the field, then name.
   arguments: Vec<(MemberId, Sym)>,
-  /// The fields of the definition being asked about that add an argument the implementation check
-  /// may judge, by name, each with its run of `names`.
+  /// The lookups the questions may still make across the definitions' entries: four for each type
+  /// occurrence and definition the model holds. Past them, a definition that adds such an argument
+  /// is relevant, read generously.
+  left: u32,
+  /// The own fields of the definition being asked about, the first of each name, by name.
+  own: Vec<(Sym, MemberId)>,
+  /// Those of them that add an argument the implementation check may judge, by name, each with its
+  /// run of `names`.
   adding: Vec<(Sym, MemberId, PoolRange)>,
   /// The runs `adding` names: the names of the arguments each field adds, sorted.
   names: Vec<Sym>,
@@ -697,11 +702,14 @@ impl Coercion<'_, '_, '_> {
   /// no default, which may be required. An argument of a field that implements no interface's
   /// field, or that the interface's field declares, is the check's never.
   ///
-  /// It reads the definition's fields and entries, and then, for each interface its entries name,
-  /// the fewer of its fields that add such an argument and the interface's fields, looking the
-  /// other side up in `declared`, and for each field of one name on both sides, the fewer of the
-  /// arguments the one adds and the other declares: no more than the implementation check compares
-  /// at the same entries, and nothing for a definition that adds no such argument.
+  /// Of the definition's own fields, the first of each name is read, the one the implementation
+  /// check finds to implement an interface's field of that name. Then, for each interface its
+  /// entries name, the fewer of the fields that add such an argument and of the interface's fields
+  /// is read, and the other side looked up in `declared`, and so for the arguments of each field of
+  /// one name on both sides, each lookup paid from what `declared` has left: so the questions read
+  /// the model's definitions once each, and, across their entries, no more than four lookups for
+  /// each type occurrence and definition the model holds. A definition asked about past them is
+  /// relevant.
   fn judged_when_implemented(&self, def: DefId, declared: &mut Declared) -> bool {
     for &item in self
       .builder
@@ -727,12 +735,26 @@ impl Coercion<'_, '_, '_> {
     {
       return false;
     }
+    // Its own fields, the first of each name, as the implementation check indexes them.
+    let own = self.sources.written_by(self.builder.def_location(def));
+    declared.own.clear();
+    for field in self.builder.def_members(def) {
+      if let (Some(name), Some(at)) = (
+        self.builder.member_name(field),
+        self.builder.member_location(field),
+      ) && own.is_some()
+        && self.sources.written_by(at) == own
+      {
+        declared.own.push((name, field));
+      }
+    }
+    declared.own.sort_unstable();
+    declared
+      .own
+      .dedup_by_key(|&mut (name, _): &mut (Sym, MemberId)| name);
     declared.adding.clear();
     declared.names.clear();
-    for field in self.builder.def_members(def) {
-      let Some(name) = self.builder.member_name(field) else {
-        continue;
-      };
+    for &(name, field) in &declared.own {
       let start = dense(declared.names.len());
       for argument in self.builder.member_arguments(field) {
         if self.bare_param(argument, def)
@@ -769,42 +791,48 @@ impl Coercion<'_, '_, '_> {
     }
     declared.interfaces.sort_unstable();
     declared.interfaces.dedup();
-    declared
-      .adding
-      .sort_unstable_by_key(|&(name, field, _): &(Sym, MemberId, PoolRange)| (name, field));
     self.declare(declared);
     let Declared {
       fields,
       arguments,
+      left,
       adding,
       names,
       interfaces,
       ..
-    } = &*declared;
-    for &interface in interfaces {
+    } = declared;
+    for &interface in interfaces.iter() {
       let from =
         fields.partition_point(|&(owner, _, _): &(DefId, Sym, MemberId)| owner < interface);
       let to = fields.partition_point(|&(owner, _, _): &(DefId, Sym, MemberId)| owner <= interface);
-      let own = fields.get(from..to).unwrap_or(&[]);
+      let theirs = fields.get(from..to).unwrap_or(&[]);
       // The fewer side is read, and the other looked up by name.
-      if adding.len() <= own.len() {
-        for &(name, _, run) in adding {
-          for &(_, _, field) in same_name(own, name, |&(_, written, _): &(DefId, Sym, MemberId)| {
-            written
-          }) {
-            if adds_beside(names, run, arguments, field) {
+      if adding.len() <= theirs.len() {
+        for &(name, _, run) in adding.iter() {
+          if !spend(left, 1) {
+            return true;
+          }
+          for &(_, _, field) in
+            same_name(theirs, name, |&(_, written, _): &(DefId, Sym, MemberId)| {
+              written
+            })
+          {
+            if adds_beside(names.as_slice(), run, arguments.as_slice(), field, left) {
               return true;
             }
           }
         }
       } else {
-        for &(_, name, field) in own {
+        for &(_, name, field) in theirs {
+          if !spend(left, 1) {
+            return true;
+          }
           for &(_, _, run) in same_name(
-            adding,
+            adding.as_slice(),
             name,
             |&(written, _, _): &(Sym, MemberId, PoolRange)| written,
           ) {
-            if adds_beside(names, run, arguments, field) {
+            if adds_beside(names.as_slice(), run, arguments.as_slice(), field, left) {
               return true;
             }
           }
@@ -814,12 +842,18 @@ impl Coercion<'_, '_, '_> {
     false
   }
 
-  /// Fills `declared` with every interface's fields, and each one's arguments, by name: once.
+  /// Fills `declared` with every interface's fields, and each one's arguments, by name, and with
+  /// what its lookups may read: once.
   fn declare(&self, declared: &mut Declared) {
     if declared.built {
       return;
     }
     declared.built = true;
+    declared.left = self
+      .builder
+      .type_expr_count()
+      .saturating_add(self.builder.def_count())
+      .saturating_mul(4);
     for index in 0..self.builder.def_count() {
       let interface = DefId::new(index);
       if self.builder.def_kind(interface) != Some(DefKind::Interface) {
@@ -1382,23 +1416,51 @@ fn same_name<T>(sorted: &[T], name: Sym, name_of: impl Fn(&T) -> Sym) -> &[T] {
 
 /// Whether one of the names of `run` of `names`, the arguments a field adds, sorted, is not the
 /// name of an argument of `field`, an interface's field, as `arguments` lists them: surely when it
-/// adds more than the field declares, and otherwise looked up, the fewer side read.
+/// adds more than the field declares, and otherwise looked up, the fewer side read, each lookup
+/// paid from `left`; and when `left` cannot pay, as read generously.
 fn adds_beside(
   names: &[Sym],
   run: PoolRange,
   arguments: &[(MemberId, Sym)],
   field: MemberId,
+  left: &mut u32,
 ) -> bool {
+  if !spend(left, 1) {
+    return true;
+  }
   let added = names
     .get(run.start as usize..run.end as usize)
     .unwrap_or(&[]);
   let from = arguments.partition_point(|&(owner, _): &(MemberId, Sym)| owner < field);
   let to = arguments.partition_point(|&(owner, _): &(MemberId, Sym)| owner <= field);
   let declared = arguments.get(from..to).unwrap_or(&[]);
-  added.len() > declared.len()
-    || added.iter().any(|&name: &Sym| {
-      declared
-        .binary_search_by(|&(_, written): &(MemberId, Sym)| written.cmp(&name))
-        .is_err()
-    })
+  if added.len() > declared.len() {
+    return true;
+  }
+  for &name in added {
+    if !spend(left, 1) {
+      return true;
+    }
+    if declared
+      .binary_search_by(|&(_, written): &(MemberId, Sym)| written.cmp(&name))
+      .is_err()
+    {
+      return true;
+    }
+  }
+  false
+}
+
+/// Pays `cost` from `left`, when it can.
+fn spend(left: &mut u32, cost: u32) -> bool {
+  match left.checked_sub(cost) {
+    Some(rest) => {
+      *left = rest;
+      true
+    }
+    None => {
+      *left = 0;
+      false
+    }
+  }
 }
