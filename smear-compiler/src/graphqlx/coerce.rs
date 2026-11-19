@@ -408,6 +408,7 @@ use super::{
   },
   raw::{FloatSpelling, Radix, RawArgument, RawKind, RawNode, RawPath, RawTree, RawValues, UNREAD},
   resolve::{ParamName, Position, Request, Resolved, Root, Scopes, Segment, Wanted},
+  rules::Meanings,
   set::ROOT,
   source::SourceMap,
   types::{Counter, Limit, Spent, Stop, Types},
@@ -457,6 +458,8 @@ pub(crate) fn coerce(
   let one_of_directive = binding(declarations, builder, CORE, DIRECTIVE, b"oneOf");
   let set_directive = binding(declarations, builder, CORE, DIRECTIVE, b"set");
   let map_directive = binding(declarations, builder, CORE, DIRECTIVE, b"map");
+  // The model's built-ins answer nothing until it is finished: `core`'s declarations do.
+  let meanings = Meanings::declared(declarations, builder);
   // Every enum's values and every input object's fields, the first of each name: what an enum
   // value's name, and an object literal's field, is looked up by.
   let mut members: BTreeMap<(DefId, Sym), MemberId> = BTreeMap::new();
@@ -500,6 +503,7 @@ pub(crate) fn coerce(
     types,
     scopes,
     sources,
+    meanings,
     raw,
     primitives: &declarations.primitives,
     builtins,
@@ -1393,6 +1397,9 @@ struct Coercion<'c, 'p, 'x> {
   scopes: &'c Scopes<'x>,
   /// Each source's package: which package wrote a member, and which a definition.
   sources: &'c SourceMap,
+  /// The directives the root package's extension of a built-in may not apply, as `core`'s
+  /// declarations bind them: the model's built-ins answer nothing until it is finished.
+  meanings: Meanings,
   /// The trees, and each source's text.
   raw: RawValues<'p>,
   /// Each primitive `core` materialises, with its definition: the primitive at index `i` is the

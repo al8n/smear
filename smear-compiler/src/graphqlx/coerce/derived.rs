@@ -618,7 +618,7 @@ impl Coercion<'_, '_, '_> {
         }
       }
       for &application in part.applications() {
-        if accepts_application(model, judged, application) {
+        if accepts_application(model, self.meanings, judged, application) {
           self.push_application(def, application, into);
         }
       }

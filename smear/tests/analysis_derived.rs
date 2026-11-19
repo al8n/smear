@@ -1725,3 +1725,30 @@ fn the_root_packages_application_on_a_generic_built_in_is_still_expanded() {
     ]
   );
 }
+
+/// The orphan rule's predicate is read before the model is finished, by the growth graph and by
+/// the closure of derived instantiations, when the model's built-ins answer nothing yet: the four
+/// directives it refuses in the root package's extension of a built-in are read off `core`'s
+/// declarations. The root package's extension of `std`'s generic `HashSet<U>` that applies an
+/// ordinary directive is quiet; one that applies `@map` beside it is refused where `@map` is
+/// written, as the orphan rule says, and nothing else. Refuses a phase that asks the unfinished
+/// model for its built-ins, which panics.
+#[test]
+fn an_extension_of_a_generic_built_in_is_judged_before_the_model_is_finished() {
+  let ordinary = "type Query {\n  f(s: HashSet<Int>): Int\n}\n\
+                  directive @tag<X>(value: X) on SCALAR\n\
+                  extend scalar HashSet<U> @tag<U>(value: 1)\n";
+  quiet(&analyze_text(ordinary, &Limits::new()));
+
+  let refused = "type Query {\n  f(s: HashSet<Int>): Int\n}\n\
+                 directive @tag<X>(value: X) on SCALAR\n\
+                 extend scalar HashSet<U> @tag<U>(value: 1) @map\n";
+  let analysis = analyze_text(refused, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(ORPHAN, at(schema, refused, "map", 0))],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}

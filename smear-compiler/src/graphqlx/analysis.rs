@@ -21,7 +21,7 @@ use super::{
   package::Package,
   parse::{self, Documents},
   resolve,
-  rules::Rules,
+  rules::{Meanings, Rules},
   set::{self, PackageView, ROOT},
   source::SourceMap,
   text::SourceText,
@@ -782,7 +782,9 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
     &mut builder,
     &mut reporter,
   );
-  types::grow(&mut builder, &sources);
+  // The model's built-ins answer nothing until it is finished: `core`'s declarations do.
+  let meanings = Meanings::declared(&declarations, &builder);
+  types::grow(&mut builder, &sources, meanings);
   coerce::coerce(
     raw,
     &declarations,

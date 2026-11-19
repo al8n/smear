@@ -47,13 +47,21 @@
 //! package extends is not entered, and has no extension to judge.
 //!
 //! The rule reads the public model and nothing else: the public `SourceMap::written_by`, the
-//! package that wrote a contribution.
+//! package that wrote a contribution. Beside it, `accepted` and `accepts_application` state the
+//! rule for the phases that read a definition's contributions before the model is finished, which
+//! read the four directives off `core`'s declarations, as `Meanings` says.
 
 use std::{format, string::String};
 
 use crate::graphqlx::{
   ApplicationId, Contribution, Cx, DefId, DefKind, Diagnostic, DiagnosticKind, Model, Origin,
-  PackageId, PackageKind, Resolution, SourceMap, Visitor, code::schema, diagnostic::Excerpt,
+  PackageId, PackageKind, Resolution, SourceMap, Visitor,
+  builtin::{CORE, DIRECTIVE},
+  code::schema,
+  declare::Declarations,
+  diagnostic::Excerpt,
+  instantiate::binding,
+  model::ModelBuilder,
 };
 
 use super::{own_contribution, own_in};
@@ -115,30 +123,57 @@ pub(crate) fn accepted(
   }
 }
 
+/// The directives that say what a definition is, which the root package's extension of a built-in
+/// it did not write may not apply: `core`'s `@marker`, `@set`, `@map` and `@extern`, each `None`
+/// when the model holds no such directive.
+///
+/// The model's built-ins are found when it is finished, and answer nothing before: a phase that
+/// reads the predicate, the growth graph and the closure of derived instantiations, reads the four
+/// off `core`'s declarations instead, which bind the same definitions.
+#[derive(Clone, Copy)]
+pub(crate) struct Meanings([Option<DefId>; 4]);
+
+impl Meanings {
+  /// The four of a finished model, as its built-ins answer them.
+  pub(crate) fn of(model: &Model) -> Self {
+    Self(model.builtins().meanings())
+  }
+
+  /// The four as `core`'s declarations bind them: what a phase reads before the model is
+  /// finished.
+  pub(crate) fn declared(declarations: &Declarations<'_, '_>, builder: &ModelBuilder) -> Self {
+    let bound = |name: &[u8]| binding(declarations, builder, CORE, DIRECTIVE, name);
+    Self([
+      bound(b"marker"),
+      bound(b"set"),
+      bound(b"map"),
+      bound(b"extern"),
+    ])
+  }
+
+  /// Whether `directive` is one of them.
+  fn holds(self, directive: DefId) -> bool {
+    self.0.contains(&Some(directive))
+  }
+}
+
 /// Whether the orphan rule accepts `application`, which a contribution it answers `accepted` for
 /// writes: none of a refused one, each of a whole one, and each of the root package's extension of
-/// a built-in but an application of `core`'s `@marker`, `@set`, `@map` or `@extern`.
+/// a built-in but an application of one of `meanings`. It reads the application's directive alone,
+/// which a model holds before it is finished.
 pub(crate) fn accepts_application(
   model: &Model,
+  meanings: Meanings,
   accepted: Accepted,
   application: ApplicationId,
 ) -> bool {
   match accepted {
     Accepted::Refused => false,
     Accepted::Whole => true,
-    Accepted::Directives => {
-      let builtins = model.builtins();
-      let meanings = [
-        builtins.marker(),
-        builtins.set(),
-        builtins.map(),
-        builtins.r#extern(),
-      ];
-      !matches!(
-        model.application(application).directive(),
-        Resolution::Resolved(directive) if meanings.contains(&directive)
-      )
-    }
+    Accepted::Directives => !matches!(
+      model.application(application).directive(),
+      Resolution::Resolved(directive) if meanings.holds(directive)
+    ),
   }
 }
 

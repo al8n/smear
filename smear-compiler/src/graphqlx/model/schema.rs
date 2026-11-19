@@ -248,6 +248,14 @@ impl Builtins<'_> {
       .map(|entry: &(Primitive, DefId)| entry.1)
   }
 
+  /// `@marker`, `@set`, `@map` and `@extern`, in that order, each `None` when the model holds no
+  /// such directive: what the orphan rule's predicate reads, which must not panic on a model the
+  /// builder made without the built-in library.
+  pub(crate) fn meanings(&self) -> [Option<DefId>; 4] {
+    let found = &self.model.builtins.directives;
+    [found[0], found[1], found[2], found[3]]
+  }
+
   /// The built-in directive in `slot` of the model's built-in table.
   fn directive(&self, slot: usize) -> DefId {
     match self.model.builtins.directives[slot] {

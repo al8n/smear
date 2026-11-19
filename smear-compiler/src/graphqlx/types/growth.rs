@@ -52,7 +52,7 @@ use crate::{
   graphqlx::{
     ApplicationId, DefId, MemberId, Model, NamedTy, NamedTypeExpr, SourceMap, Ty, TyId, TyKind,
     TypeExprId, TypeExprKind, TypeParam, TypeParamRef,
-    rules::{Accepted, accepted, accepts_application},
+    rules::{Accepted, Meanings, accepted, accepts_application},
   },
   kernel::scc,
 };
@@ -66,11 +66,17 @@ pub(crate) struct Grown {
   pub(crate) types: Vec<Found>,
 }
 
-/// The graph over `model`, whose files `sources` holds, and what it finds there: the definitions
-/// that grow, and, when `marks`, which types are marked and which hold a marked one. `Err` when the
+/// The graph over `model`, whose files `sources` holds, `meanings` being the directives the root
+/// package's extension of a built-in may not apply, and what it finds there: the definitions that
+/// grow, and, when `marks`, which types are marked and which hold a marked one. `Err` when the
 /// graph cannot be numbered in a `u32`.
-pub(crate) fn grown(model: &Model, sources: &SourceMap, marks: bool) -> Result<Grown, Overflow> {
-  let mut build = Build::new(model, sources)?;
+pub(crate) fn grown(
+  model: &Model,
+  sources: &SourceMap,
+  meanings: Meanings,
+  marks: bool,
+) -> Result<Grown, Overflow> {
+  let mut build = Build::new(model, sources, meanings)?;
   build.roots()?;
   if build.growing.is_empty() {
     // No edge grows, so no definition does, and nothing is marked.
@@ -194,6 +200,9 @@ struct Build<'a> {
   model: &'a Model,
   /// The model's files: which package wrote each contribution, which the orphan rule judges.
   sources: &'a SourceMap,
+  /// The directives the root package's extension of a built-in may not apply, read where the
+  /// model's built-ins may not answer them yet.
+  meanings: Meanings,
   /// The node of each definition's first type parameter, by definition, then one past the last.
   prefix: Vec<u32>,
   /// The node the next type to be named is given, which is also the count of nodes so far.
@@ -216,7 +225,7 @@ impl<'a> Build<'a> {
   /// The build over `model`, its type parameters numbered: one pass over the definitions. The
   /// kernel numbers its discoveries from one in a `u32`, so the count of nodes stays below
   /// `u32::MAX`.
-  fn new(model: &'a Model, sources: &'a SourceMap) -> Result<Self, Overflow> {
+  fn new(model: &'a Model, sources: &'a SourceMap, meanings: Meanings) -> Result<Self, Overflow> {
     let defs = model.defs();
     let mut prefix: Vec<u32> = Vec::with_capacity((defs.len() as usize).saturating_add(1));
     let mut next: u32 = 0;
@@ -232,6 +241,7 @@ impl<'a> Build<'a> {
     Ok(Self {
       model,
       sources,
+      meanings,
       prefix,
       next,
       entries: Vec::new(),
@@ -405,7 +415,7 @@ impl<'a> Build<'a> {
           self.walk(item)?;
         }
         for &application in part.applications() {
-          if accepts_application(model, judged, application) {
+          if accepts_application(model, self.meanings, judged, application) {
             self.applied(application)?;
           }
         }

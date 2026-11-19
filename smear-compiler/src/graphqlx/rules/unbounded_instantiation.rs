@@ -25,6 +25,7 @@ use crate::graphqlx::{
   ApplicationId, Cx, Diagnostic, DiagnosticKind, Model, NamedTy, NamedTypeExpr, Resolution, Site,
   SourceMap, TyKind, TypeExprId, TypeExprKind, Visitor,
   diagnostic::Excerpt,
+  rules::Meanings,
   types::growth::{self, Found, holds},
 };
 
@@ -150,7 +151,7 @@ impl UnboundedInstantiation {
     model: &Model,
     sources: &SourceMap,
   ) -> Result<growth::Grown, growth::Overflow> {
-    growth::grown(model, sources, true)
+    growth::grown(model, sources, Meanings::of(model), true)
   }
 }
 
