@@ -1568,9 +1568,9 @@ impl RawInput {
 mod declared {
   // `Vec` by name, because this module is `mod`-scoped and a prelude is not: the crate root aliases
   // `alloc` to `std` under `no_std`, so the outer file's `use std::vec::Vec` is the only thing that
-  // resolves the name and an inner module does not inherit it. Without this, `smear-schema` with
-  // `build` and without `std` — a cell `cargo hack --each-feature` builds — is three `E0425`s, and
-  // it is what has kept both `build` and both `clippy` jobs red since this module landed.
+  // resolves the name and an inner module does not inherit it. Without this, `smear-compiler` with
+  // `graphql` and without `std` — a cell `cargo hack --each-feature` builds — is three `E0425`s,
+  // and it is what has kept both `build` and both `clippy` jobs red since this module landed.
   use std::vec::Vec;
 
   use super::RawInput;

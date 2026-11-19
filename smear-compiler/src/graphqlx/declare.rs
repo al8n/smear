@@ -27,12 +27,12 @@
 //!
 //! A module names types and directives in two namespaces. Two definitions of one name in one
 //! namespace of one module, in one file or in two, keep their ids, and the first binds the name;
-//! the second is reported with the code GraphQL's rule has in `smear-schema`, with a label at the
-//! first. A supplied package's definition whose name begins with `__`, which introspection
-//! reserves, is reported with `smear-schema`'s code too. A type of the root package's root module
-//! named as one of GraphQL's eight introspection types is the one exception: it redefines a
-//! built-in, and is reported as `smear-schema` reports it, with `redefined-built-in-type`, and not
-//! as a reserved name. A type that a module names as one of its child modules is
+//! the second is reported with the code GraphQL's rule has in the schema builder, with a label at
+//! the first. A supplied package's definition whose name begins with `__`, which introspection
+//! reserves, is reported with the schema builder's code too. A type of the root package's root
+//! module named as one of GraphQL's eight introspection types is the one exception: it redefines a
+//! built-in, and is reported as the schema builder reports it, with `redefined-built-in-type`, and
+//! not as a reserved name. A type that a module names as one of its child modules is
 //! `smear::graphqlx::module-type-collision`.
 
 use std::{collections::BTreeMap, format, string::String, vec, vec::Vec};

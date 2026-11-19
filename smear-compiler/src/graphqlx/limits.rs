@@ -487,8 +487,8 @@ impl Limits {
   /// The default is 2^20. GitLab's schema, the largest of smear's fixtures, with 2,041 types and 188
   /// `implements` entries, takes about 6,500 steps, and every fixture takes fewer than 2^15. A valid
   /// GraphQL document can meet it: checking that `implements` is transitively closed costs up to
-  /// the square of a type's entries, as it does in `smear-schema`, so 468 object types that each
-  /// implement a complete chain of 64 interfaces of one field each, about 200 KB of SDL, take
+  /// the square of a type's entries, as it does in the schema builder, so 468 object types that
+  /// each implement a complete chain of 64 interfaces of one field each, about 200 KB of SDL, take
   /// 1,049,088 steps, and 467 take 1,046,944.
   #[inline]
   pub const fn max_implementation_steps(&self) -> u32 {
@@ -524,8 +524,9 @@ impl Limits {
   /// limits, lends no more than it kept; the errors it found beyond them are counted, and the list
   /// is truncated.
   ///
-  /// The default is 16 384, smear-schema's ceiling on each of its two quadratic lists: more than
-  /// an author reads, and a bound on memory against an input built to be refused many times over.
+  /// The default is 16 384, the schema builder's ceiling on each of its two quadratic lists: more
+  /// than an author reads, and a bound on memory against an input built to be refused many times
+  /// over.
   #[inline]
   pub const fn max_diagnostics(&self) -> u32 {
     self.max_diagnostics

@@ -463,7 +463,7 @@ impl Visits {
   /// restored the unbounded byte pass that the byte charges exist to close.
   ///
   /// So the saturation value is refused whatever the remainder is. That is the convention
-  /// `smear_compiler`'s `Work::take` already keeps, arrived at from the other direction: that
+  /// the validator's `Work::take` already keeps, arrived at from the other direction: that
   /// ledger counts up and poisons its total, this one counts down and refuses the amount, and both
   /// make [`u32::MAX`] a number no charge may rest on. One convention across the two crates, and
   /// not two — the byte charges that made the poison necessary were added to both ledgers, and the
@@ -1065,7 +1065,7 @@ impl Interner {
   /// one or two units the entry costs.
   ///
   /// Two changes, and the second is what makes the first cheap — the same pair
-  /// `smear_compiler`'s merge interner took, for the same reason. Every pass over the key is
+  /// the validator's merge interner took, for the same reason. Every pass over the key is
   /// charged in [`byte_units`] *before* the pass: before hashing it, before comparing it, and
   /// before copying it into the arena. And the whole 64-bit hash is stored beside each entry, so a
   /// chain step tests two integers and reads no bytes — on the bucket collision that is the

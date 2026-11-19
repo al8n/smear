@@ -6,8 +6,9 @@
 //! each extension's, so a member an extension repeats is the same mistake as one the definition
 //! writes twice. Each member whose name an earlier member of its list has is reported at its name,
 //! with a label at the first member of that name, under the code the same rule has in GraphQL:
-//! `smear-schema`'s `duplicate-field-name`, `duplicate-input-field-name`, `duplicate-enum-value`,
-//! `duplicate-directive-argument-name` or `duplicate-argument-name`, with its labels.
+//! the schema builder's `duplicate-field-name`, `duplicate-input-field-name`,
+//! `duplicate-enum-value`, `duplicate-directive-argument-name` or `duplicate-argument-name`, with
+//! its labels.
 //!
 //! Two definitions of one name are two definitions, each with its own members: the declarations
 //! report the second, and its members are not compared with the first's.

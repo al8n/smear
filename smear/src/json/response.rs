@@ -41,7 +41,7 @@
 //!
 //! - **Every location resolved against the document.** [`Locations`] indexes the document once and
 //!   answers each offset in bounded work. Deriving a line and column by walking the prefix is the
-//!   same primitive `smear-schema`'s introspection decoder was repaired for one release earlier,
+//!   same primitive the introspection decoder was repaired for one release earlier,
 //!   met again from the writing side, and the shapes differ in the way that decides the repair:
 //!   there one refusal escapes, so the walk is *staged* and performed once; here every location is
 //!   kept, so there is no single walk to defer and the document is indexed instead.
@@ -650,7 +650,7 @@ where
 //
 // The location property is about *scanning* and about nothing else: deriving a line and column by
 // walking the prefix allocates nothing, so an allocation pin is structurally incapable of seeing
-// it, and a clock sees it along with the machine it ran on. This is `smear-schema`'s introspection
+// it, and a clock sees it along with the machine it ran on. This is the introspection
 // reader's instrument, reached for rather than reinvented — that module's own header carries the
 // argument at length, and it learned it by writing the wrong gate first.
 //
@@ -824,7 +824,7 @@ pub(super) fn allocations() -> u64 {
 mod document {
   //! The document, behind the one accessor that counts what it reads.
   //!
-  //! **A module, and not merely a convention.** `smear-schema`'s reader routes every read through
+  //! **A module, and not merely a convention.** The introspection reader routes every read through
   //! one function and says so in a comment, and that is as strong as the next person to add a
   //! derivation — a snippet, a caret, whatever the next field on an error entry turns out to be.
   //! The measurement is only a measurement of the writer if there is no second way in, so the text
@@ -919,7 +919,7 @@ pub(super) struct LineColumn {
 /// client shapes — a valid flat query selects tens of thousands of uniquely aliased fields, a
 /// degraded resolver fails every one of them, and the offsets increase. The cost lands **precisely
 /// when the dependencies are already failing**, which is the worst moment for a service to also
-/// become quadratic. `smear-schema`'s introspection decoder answers the same primitive by staging
+/// become quadratic. The introspection decoder answers the same primitive by staging
 /// the walk and performing it once, because there exactly one refusal escapes; here every location
 /// is kept, so there is nothing to defer and the document is indexed instead.
 ///

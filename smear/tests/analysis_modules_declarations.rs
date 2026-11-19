@@ -630,10 +630,10 @@ fn a_file_that_holds_only_what_the_lexer_skips_declares_nothing() {
   }
 }
 
-/// The codes the declarations share with GraphQL's rules are `smear-schema`'s own.
+/// The codes the declarations share with GraphQL's rules are the schema builder's own.
 #[cfg(feature = "validator")]
 #[test]
-fn the_shared_codes_are_smear_schemas() {
+fn the_shared_codes_are_the_schema_builders() {
   use smear::validator::SchemaErrorKind;
 
   let text = "scalar X\nscalar X\ndirective @d on FIELD\ndirective @d on FIELD\n\

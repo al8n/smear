@@ -19,7 +19,7 @@
 //! defaults name nothing. A collection's arguments are followed.
 //!
 //! Each directive on a cycle of that graph is reported once, at its name, under the code the same
-//! rule has in GraphQL: `smear-schema`'s `self-referential-directive`, with its label and its
+//! rule has in GraphQL: the schema builder's `self-referential-directive`, with its label and its
 //! help. A directive that applies one on a cycle, and is not reached back, is not on it. The
 //! library alone has no cycle, so one always passes through what a supplied package wrote; a
 //! directive of `core` on it is reported all the same, at its own name, in `core`'s source, as

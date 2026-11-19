@@ -478,10 +478,10 @@ impl DiagnosticKind {
 
 /// The `smear::schema` codes the analysis shares with GraphQL's own validator.
 ///
-/// Each is a rule of GraphQL's own, which the analysis reports under `smear-schema`'s code because
-/// the rule is the same rule in both dialects: a consumer sees one vocabulary across the two. A
-/// consumer waives one by filtering its code out, by name, and each constant here is that name;
-/// [`ALL`](crate::graphqlx::schema::ALL) lists them. The list grows as the analysis does.
+/// Each is a rule of GraphQL's own, which the analysis reports under the schema builder's code
+/// because the rule is the same rule in both dialects: a consumer sees one vocabulary across the
+/// two. A consumer waives one by filtering its code out, by name, and each constant here is that
+/// name; [`ALL`](crate::graphqlx::schema::ALL) lists them. The list grows as the analysis does.
 /// [`DiagnosticKind`] lists the analyzer's own family, `smear::graphqlx`.
 //
 // An outer doc comment of a module resolves its links in the parent module, this one: `ALL` names
@@ -561,306 +561,307 @@ pub mod schema {
     INPUT_OBJECT_DEFAULT_VALUE_CYCLE,
   ];
 
-  /// Two definitions in one module give a type one name: `smear-schema`'s `DuplicateTypeName`.
+  /// Two definitions in one module give a type one name: the schema builder's `DuplicateTypeName`.
   pub const DUPLICATE_TYPE_NAME: Code = Code::new("smear::schema::duplicate-type-name");
 
-  /// Two definitions in one module give a directive one name: `smear-schema`'s
+  /// Two definitions in one module give a directive one name: the schema builder's
   /// `DuplicateDirectiveDefinition`.
   pub const DUPLICATE_DIRECTIVE_DEFINITION: Code =
     Code::new("smear::schema::duplicate-directive-definition");
 
-  /// A supplied package's type name begins with `__`: `smear-schema`'s `ReservedTypeName`.
+  /// A supplied package's type name begins with `__`: the schema builder's `ReservedTypeName`.
   pub const RESERVED_TYPE_NAME: Code = Code::new("smear::schema::reserved-type-name");
 
   /// A type of the root package's root module is named as one of GraphQL's introspection types:
-  /// `smear-schema`'s `RedefinedBuiltInType`.
+  /// the schema builder's `RedefinedBuiltInType`.
   pub const REDEFINED_BUILT_IN_TYPE: Code = Code::new("smear::schema::redefined-built-in-type");
 
-  /// A supplied package's directive name begins with `__`: `smear-schema`'s
+  /// A supplied package's directive name begins with `__`: the schema builder's
   /// `ReservedDirectiveName`.
   pub const RESERVED_DIRECTIVE_NAME: Code = Code::new("smear::schema::reserved-directive-name");
 
-  /// A type position names, with one segment and no root, no type: `smear-schema`'s
+  /// A type position names, with one segment and no root, no type: the schema builder's
   /// `UndefinedType`.
   pub const UNDEFINED_TYPE: Code = Code::new("smear::schema::undefined-type");
 
-  /// A directive application names, with one segment and no root, no directive: `smear-schema`'s
-  /// `UndefinedDirective`.
+  /// A directive application names, with one segment and no root, no directive: the schema
+  /// builder's `UndefinedDirective`.
   pub const UNDEFINED_DIRECTIVE: Code = Code::new("smear::schema::undefined-directive");
 
   /// An extension's target names, with one segment and no root, nothing to extend:
-  /// `smear-schema`'s `UndefinedExtensionTarget`.
+  /// the schema builder's `UndefinedExtensionTarget`.
   pub const UNDEFINED_EXTENSION_TARGET: Code =
     Code::new("smear::schema::undefined-extension-target");
 
-  /// An `implements` entry names, with one segment and no root, no interface: `smear-schema`'s
+  /// An `implements` entry names, with one segment and no root, no interface: the schema builder's
   /// `UndefinedImplementsInterface`.
   pub const UNDEFINED_IMPLEMENTS_INTERFACE: Code =
     Code::new("smear::schema::undefined-implements-interface");
 
-  /// A union member names, with one segment and no root, no type: `smear-schema`'s
+  /// A union member names, with one segment and no root, no type: the schema builder's
   /// `UndefinedUnionMember`.
   pub const UNDEFINED_UNION_MEMBER: Code = Code::new("smear::schema::undefined-union-member");
 
-  /// A root operation names, with one segment and no root, no type: `smear-schema`'s
+  /// A root operation names, with one segment and no root, no type: the schema builder's
   /// `UndefinedRootOperationType`.
   pub const UNDEFINED_ROOT_OPERATION_TYPE: Code =
     Code::new("smear::schema::undefined-root-operation-type");
 
-  /// An extension's keyword is not the kind of the definition its target names: `smear-schema`'s
-  /// `ExtensionKindMismatch`.
+  /// An extension's keyword is not the kind of the definition its target names: the schema
+  /// builder's `ExtensionKindMismatch`.
   pub const EXTENSION_KIND_MISMATCH: Code = Code::new("smear::schema::extension-kind-mismatch");
 
-  /// An application names an argument its directive does not declare: `smear-schema`'s
+  /// An application names an argument its directive does not declare: the schema builder's
   /// `UndefinedDirectiveArgument`.
   pub const UNDEFINED_DIRECTIVE_ARGUMENT: Code =
     Code::new("smear::schema::undefined-directive-argument");
 
-  /// The schema is given a second root for one operation: `smear-schema`'s
+  /// The schema is given a second root for one operation: the schema builder's
   /// `DuplicateRootOperationType`.
   pub const DUPLICATE_ROOT_OPERATION_TYPE: Code =
     Code::new("smear::schema::duplicate-root-operation-type");
 
-  /// The root package writes a second schema definition: `smear-schema`'s
+  /// The root package writes a second schema definition: the schema builder's
   /// `DuplicateSchemaDefinition`.
   pub const DUPLICATE_SCHEMA_DEFINITION: Code =
     Code::new("smear::schema::duplicate-schema-definition");
 
   /// The root package's extension adds more than directives to an introspection type:
-  /// `smear-schema`'s `IntrospectionTypeExtension`.
+  /// the schema builder's `IntrospectionTypeExtension`.
   pub const INTROSPECTION_TYPE_EXTENSION: Code =
     Code::new("smear::schema::introspection-type-extension");
 
-  /// A field's name begins with `__`: `smear-schema`'s `ReservedFieldName`.
+  /// A field's name begins with `__`: the schema builder's `ReservedFieldName`.
   pub const RESERVED_FIELD_NAME: Code = Code::new("smear::schema::reserved-field-name");
 
-  /// A field's argument's name begins with `__`: `smear-schema`'s `ReservedArgumentName`.
+  /// A field's argument's name begins with `__`: the schema builder's `ReservedArgumentName`.
   pub const RESERVED_ARGUMENT_NAME: Code = Code::new("smear::schema::reserved-argument-name");
 
-  /// An enum value's name begins with `__`: `smear-schema`'s `ReservedEnumValueName`.
+  /// An enum value's name begins with `__`: the schema builder's `ReservedEnumValueName`.
   pub const RESERVED_ENUM_VALUE_NAME: Code = Code::new("smear::schema::reserved-enum-value-name");
 
-  /// An input field's name begins with `__`: `smear-schema`'s `ReservedInputFieldName`.
+  /// An input field's name begins with `__`: the schema builder's `ReservedInputFieldName`.
   pub const RESERVED_INPUT_FIELD_NAME: Code = Code::new("smear::schema::reserved-input-field-name");
 
-  /// A directive definition's argument's name begins with `__`: `smear-schema`'s
+  /// A directive definition's argument's name begins with `__`: the schema builder's
   /// `ReservedDirectiveArgumentName`.
   pub const RESERVED_DIRECTIVE_ARGUMENT_NAME: Code =
     Code::new("smear::schema::reserved-directive-argument-name");
 
-  /// An object's or an interface's field has the name of an earlier field: `smear-schema`'s
+  /// An object's or an interface's field has the name of an earlier field: the schema builder's
   /// `DuplicateFieldName`.
   pub const DUPLICATE_FIELD_NAME: Code = Code::new("smear::schema::duplicate-field-name");
 
-  /// A field's argument has the name of an earlier argument: `smear-schema`'s
+  /// A field's argument has the name of an earlier argument: the schema builder's
   /// `DuplicateArgumentName`.
   pub const DUPLICATE_ARGUMENT_NAME: Code = Code::new("smear::schema::duplicate-argument-name");
 
-  /// An enum value has the name of an earlier value: `smear-schema`'s `DuplicateEnumValue`.
+  /// An enum value has the name of an earlier value: the schema builder's `DuplicateEnumValue`.
   pub const DUPLICATE_ENUM_VALUE: Code = Code::new("smear::schema::duplicate-enum-value");
 
-  /// An input object's field has the name of an earlier field: `smear-schema`'s
+  /// An input object's field has the name of an earlier field: the schema builder's
   /// `DuplicateInputFieldName`.
   pub const DUPLICATE_INPUT_FIELD_NAME: Code =
     Code::new("smear::schema::duplicate-input-field-name");
 
-  /// A directive definition's argument has the name of an earlier argument: `smear-schema`'s
+  /// A directive definition's argument has the name of an earlier argument: the schema builder's
   /// `DuplicateDirectiveArgumentName`.
   pub const DUPLICATE_DIRECTIVE_ARGUMENT_NAME: Code =
     Code::new("smear::schema::duplicate-directive-argument-name");
 
-  /// An object, or an interface that is no marker, holds no field: `smear-schema`'s
+  /// An object, or an interface that is no marker, holds no field: the schema builder's
   /// `EmptyFieldsDefinition`.
   pub const EMPTY_FIELDS_DEFINITION: Code = Code::new("smear::schema::empty-fields-definition");
 
-  /// A union holds no member: `smear-schema`'s `EmptyUnionMembers`.
+  /// A union holds no member: the schema builder's `EmptyUnionMembers`.
   pub const EMPTY_UNION_MEMBERS: Code = Code::new("smear::schema::empty-union-members");
 
-  /// An enum holds no value: `smear-schema`'s `EmptyEnumValues`.
+  /// An enum holds no value: the schema builder's `EmptyEnumValues`.
   pub const EMPTY_ENUM_VALUES: Code = Code::new("smear::schema::empty-enum-values");
 
-  /// An input object holds no field: `smear-schema`'s `EmptyInputFields`.
+  /// An input object holds no field: the schema builder's `EmptyInputFields`.
   pub const EMPTY_INPUT_FIELDS: Code = Code::new("smear::schema::empty-input-fields");
 
-  /// A field's type, under its lists, is an input object: `smear-schema`'s
+  /// A field's type, under its lists, is an input object: the schema builder's
   /// `FieldTypeNotOutputType`.
   pub const FIELD_TYPE_NOT_OUTPUT_TYPE: Code =
     Code::new("smear::schema::field-type-not-output-type");
 
   /// A field's argument's type, under its lists, is an object, an interface or a union:
-  /// `smear-schema`'s `ArgumentTypeNotInputType`.
+  /// the schema builder's `ArgumentTypeNotInputType`.
   pub const ARGUMENT_TYPE_NOT_INPUT_TYPE: Code =
     Code::new("smear::schema::argument-type-not-input-type");
 
   /// An input field's type, under its lists, is an object, an interface or a union:
-  /// `smear-schema`'s `InputFieldTypeNotInputType`.
+  /// the schema builder's `InputFieldTypeNotInputType`.
   pub const INPUT_FIELD_TYPE_NOT_INPUT_TYPE: Code =
     Code::new("smear::schema::input-field-type-not-input-type");
 
   /// A directive definition's argument's type, under its lists, is an object, an interface or a
-  /// union: `smear-schema`'s `DirectiveArgumentTypeNotInputType`.
+  /// union: the schema builder's `DirectiveArgumentTypeNotInputType`.
   pub const DIRECTIVE_ARGUMENT_TYPE_NOT_INPUT_TYPE: Code =
     Code::new("smear::schema::directive-argument-type-not-input-type");
 
   /// An object's or an interface's `implements` entry names what is no interface:
-  /// `smear-schema`'s `ImplementsNonInterface`.
+  /// the schema builder's `ImplementsNonInterface`.
   pub const IMPLEMENTS_NON_INTERFACE: Code = Code::new("smear::schema::implements-non-interface");
 
-  /// An interface lies on a cycle of `implements` entries: `smear-schema`'s
+  /// An interface lies on a cycle of `implements` entries: the schema builder's
   /// `SelfImplementingInterface`.
   pub const SELF_IMPLEMENTING_INTERFACE: Code =
     Code::new("smear::schema::self-implementing-interface");
 
-  /// A union's member names what is no object type: `smear-schema`'s `UnionMemberNotObject`.
+  /// A union's member names what is no object type: the schema builder's `UnionMemberNotObject`.
   pub const UNION_MEMBER_NOT_OBJECT: Code = Code::new("smear::schema::union-member-not-object");
 
-  /// A required argument, a field's or a directive's, applies `@deprecated`: `smear-schema`'s
+  /// A required argument, a field's or a directive's, applies `@deprecated`: the schema builder's
   /// `DeprecatedRequiredArgument`.
   pub const DEPRECATED_REQUIRED_ARGUMENT: Code =
     Code::new("smear::schema::deprecated-required-argument");
 
-  /// A required input field applies `@deprecated`: `smear-schema`'s
+  /// A required input field applies `@deprecated`: the schema builder's
   /// `DeprecatedRequiredInputField`.
   pub const DEPRECATED_REQUIRED_INPUT_FIELD: Code =
     Code::new("smear::schema::deprecated-required-input-field");
 
-  /// A OneOf input object's field is written non-null: `smear-schema`'s `OneOfFieldNotNullable`.
+  /// A OneOf input object's field is written non-null: the schema builder's
+  /// `OneOfFieldNotNullable`.
   pub const ONE_OF_FIELD_NOT_NULLABLE: Code = Code::new("smear::schema::one-of-field-not-nullable");
 
-  /// A OneOf input object's field declares a default value: `smear-schema`'s
+  /// A OneOf input object's field declares a default value: the schema builder's
   /// `OneOfFieldHasDefault`.
   pub const ONE_OF_FIELD_HAS_DEFAULT: Code = Code::new("smear::schema::one-of-field-has-default");
 
-  /// An extension of an input object applies `@oneOf`: `smear-schema`'s
+  /// An extension of an input object applies `@oneOf`: the schema builder's
   /// `OneOfOnInputObjectExtension`.
   pub const ONE_OF_ON_INPUT_OBJECT_EXTENSION: Code =
     Code::new("smear::schema::one-of-on-input-object-extension");
 
-  /// A directive is applied at a location its definition does not list: `smear-schema`'s
+  /// A directive is applied at a location its definition does not list: the schema builder's
   /// `UnsupportedDirectiveLocation`.
   pub const UNSUPPORTED_DIRECTIVE_LOCATION: Code =
     Code::new("smear::schema::unsupported-directive-location");
 
-  /// A directive that is not repeatable is applied again where it is applied: `smear-schema`'s
+  /// A directive that is not repeatable is applied again where it is applied: the schema builder's
   /// `DuplicateDirectiveUse`.
   pub const DUPLICATE_DIRECTIVE_USE: Code = Code::new("smear::schema::duplicate-directive-use");
 
-  /// An application writes one of its directive's arguments again: `smear-schema`'s
+  /// An application writes one of its directive's arguments again: the schema builder's
   /// `DuplicateDirectiveArgumentUse`.
   pub const DUPLICATE_DIRECTIVE_ARGUMENT_USE: Code =
     Code::new("smear::schema::duplicate-directive-argument-use");
 
-  /// A directive lies on a cycle of the directives and types it names: `smear-schema`'s
+  /// A directive lies on a cycle of the directives and types it names: the schema builder's
   /// `SelfReferentialDirective`.
   pub const SELF_REFERENTIAL_DIRECTIVE: Code =
     Code::new("smear::schema::self-referential-directive");
 
-  /// `core`'s `@specifiedBy` is applied to a scalar of the built-in library: `smear-schema`'s
+  /// `core`'s `@specifiedBy` is applied to a scalar of the built-in library: the schema builder's
   /// `SpecifiedByOnBuiltInScalar`.
   pub const SPECIFIED_BY_ON_BUILT_IN_SCALAR: Code =
     Code::new("smear::schema::specified-by-on-built-in-scalar");
 
-  /// A written root operation type names a definition that is no object type: `smear-schema`'s
+  /// A written root operation type names a definition that is no object type: the schema builder's
   /// `RootOperationTypeNotObject`.
   pub const ROOT_OPERATION_TYPE_NOT_OBJECT: Code =
     Code::new("smear::schema::root-operation-type-not-object");
 
-  /// Two root operations have one type: `smear-schema`'s `SharedRootOperationType`.
+  /// Two root operations have one type: the schema builder's `SharedRootOperationType`.
   pub const SHARED_ROOT_OPERATION_TYPE: Code =
     Code::new("smear::schema::shared-root-operation-type");
 
-  /// The root package extends the schema, and defines none to extend: `smear-schema`'s
+  /// The root package extends the schema, and defines none to extend: the schema builder's
   /// `SchemaExtensionWithoutSchema`.
   pub const SCHEMA_EXTENSION_WITHOUT_SCHEMA: Code =
     Code::new("smear::schema::schema-extension-without-schema");
 
-  /// The schema has no query root operation type, written or presumed: `smear-schema`'s
+  /// The schema has no query root operation type, written or presumed: the schema builder's
   /// `MissingQueryRootOperationType`.
   pub const MISSING_QUERY_ROOT_OPERATION_TYPE: Code =
     Code::new("smear::schema::missing-query-root-operation-type");
 
-  /// A member's default does not fit the type the member is declared with: `smear-schema`'s
+  /// A member's default does not fit the type the member is declared with: the schema builder's
   /// `InvalidDefaultValue`.
   pub const INVALID_DEFAULT_VALUE: Code = Code::new("smear::schema::invalid-default-value");
 
   /// An application's argument does not fit the type its directive declares for it:
-  /// `smear-schema`'s `InvalidDirectiveArgumentValue`.
+  /// the schema builder's `InvalidDirectiveArgumentValue`.
   pub const INVALID_DIRECTIVE_ARGUMENT_VALUE: Code =
     Code::new("smear::schema::invalid-directive-argument-value");
 
   /// An application leaves out an argument its directive requires, or passes it `null`:
-  /// `smear-schema`'s `MissingRequiredDirectiveArgument`.
+  /// the schema builder's `MissingRequiredDirectiveArgument`.
   pub const MISSING_REQUIRED_DIRECTIVE_ARGUMENT: Code =
     Code::new("smear::schema::missing-required-directive-argument");
 
-  /// An object literal names a field its input object does not declare: `smear-schema`'s
+  /// An object literal names a field its input object does not declare: the schema builder's
   /// `UndefinedInputObjectField`.
   pub const UNDEFINED_INPUT_OBJECT_FIELD: Code =
     Code::new("smear::schema::undefined-input-object-field");
 
   /// An object literal leaves out a field its input object requires, or passes it `null`:
-  /// `smear-schema`'s `MissingRequiredInputObjectField`.
+  /// the schema builder's `MissingRequiredInputObjectField`.
   pub const MISSING_REQUIRED_INPUT_OBJECT_FIELD: Code =
     Code::new("smear::schema::missing-required-input-object-field");
 
   /// A definition's `implements` entry is the type an earlier entry of its is, as written or under
-  /// the type arguments of an instantiation the program writes: `smear-schema`'s
+  /// the type arguments of an instantiation the program writes: the schema builder's
   /// `DuplicateImplementsInterface`.
   pub const DUPLICATE_IMPLEMENTS_INTERFACE: Code =
     Code::new("smear::schema::duplicate-implements-interface");
 
   /// A definition implements an interface whose interfaces it does not all implement, each
-  /// compared as a type under the type arguments that reach it: `smear-schema`'s
+  /// compared as a type under the type arguments that reach it: the schema builder's
   /// `MissingTransitiveInterface`.
   pub const MISSING_TRANSITIVE_INTERFACE: Code =
     Code::new("smear::schema::missing-transitive-interface");
 
   /// A definition declares no field named as a field of an interface it implements:
-  /// `smear-schema`'s `MissingInterfaceField`.
+  /// the schema builder's `MissingInterfaceField`.
   pub const MISSING_INTERFACE_FIELD: Code = Code::new("smear::schema::missing-interface-field");
 
   /// A field's type is no subtype of the type an interface it implements declares for its field,
-  /// under the type arguments of the definition's entry: `smear-schema`'s
+  /// under the type arguments of the definition's entry: the schema builder's
   /// `InvalidInterfaceFieldType`.
   pub const INVALID_INTERFACE_FIELD_TYPE: Code =
     Code::new("smear::schema::invalid-interface-field-type");
 
-  /// A field does not take an argument of the interface's field it implements: `smear-schema`'s
+  /// A field does not take an argument of the interface's field it implements: the schema builder's
   /// `MissingInterfaceFieldArgument`.
   pub const MISSING_INTERFACE_FIELD_ARGUMENT: Code =
     Code::new("smear::schema::missing-interface-field-argument");
 
   /// A field's argument is not of exactly the type the interface's field gives it, under the type
-  /// arguments of the definition's entry: `smear-schema`'s `InvalidInterfaceFieldArgumentType`.
+  /// arguments of the definition's entry: the schema builder's `InvalidInterfaceFieldArgumentType`.
   pub const INVALID_INTERFACE_FIELD_ARGUMENT_TYPE: Code =
     Code::new("smear::schema::invalid-interface-field-argument-type");
 
   /// A field requires an argument the interface's field it implements does not declare:
-  /// `smear-schema`'s `UnexpectedRequiredArgument`.
+  /// the schema builder's `UnexpectedRequiredArgument`.
   pub const UNEXPECTED_REQUIRED_ARGUMENT: Code =
     Code::new("smear::schema::unexpected-required-argument");
 
-  /// A deprecated field implements an interface's field that is not: `smear-schema`'s
+  /// A deprecated field implements an interface's field that is not: the schema builder's
   /// `InterfaceFieldNotDeprecated`.
   pub const INTERFACE_FIELD_NOT_DEPRECATED: Code =
     Code::new("smear::schema::interface-field-not-deprecated");
 
   /// A union's member is the type an earlier member of its is, as written or under the type
-  /// arguments of an instantiation the program writes: `smear-schema`'s `DuplicateUnionMember`.
+  /// arguments of an instantiation the program writes: the schema builder's `DuplicateUnionMember`.
   pub const DUPLICATE_UNION_MEMBER: Code = Code::new("smear::schema::duplicate-union-member");
 
   /// An input object requires a value of itself through fields that are each non-null and no
-  /// list, so no finite value satisfies it: `smear-schema`'s `CircularNonNullInputField`.
+  /// list, so no finite value satisfies it: the schema builder's `CircularNonNullInputField`.
   pub const CIRCULAR_NON_NULL_INPUT_FIELD: Code =
     Code::new("smear::schema::circular-non-null-input-field");
 
   /// An input object requires a value of itself by way of a OneOf input object none of whose
-  /// fields can be given a finite value: `smear-schema`'s `CircularOneOfInputField`.
+  /// fields can be given a finite value: the schema builder's `CircularOneOfInputField`.
   pub const CIRCULAR_ONE_OF_INPUT_FIELD: Code =
     Code::new("smear::schema::circular-one-of-input-field");
 
   /// An input field's default needs a copy of itself, through the fields its object literals leave
-  /// out: `smear-schema`'s `InputObjectDefaultValueCycle`.
+  /// out: the schema builder's `InputObjectDefaultValueCycle`.
   pub const INPUT_OBJECT_DEFAULT_VALUE_CYCLE: Code =
     Code::new("smear::schema::input-object-default-value-cycle");
 }

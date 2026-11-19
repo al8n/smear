@@ -6,7 +6,7 @@
 //! its own; and the schema's, its definition's and every extension's. Each application of a
 //! directive that is not repeatable whose directive an earlier application of its location applies
 //! is reported at its path, with a label at the first application of that directive there, under
-//! the code the same rule has in GraphQL: `smear-schema`'s `duplicate-directive-use`, with its
+//! the code the same rule has in GraphQL: the schema builder's `duplicate-directive-use`, with its
 //! labels and its help.
 //!
 //! The directive is the definition the application resolved to, whatever its type arguments: a

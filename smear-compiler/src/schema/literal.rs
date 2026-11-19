@@ -12,12 +12,11 @@
 //! decision, reduced to what it depends on: the shape of the literal ([`LiteralShape`]), which
 //! built-in scalar it is being offered to ([`BuiltInScalar`]), and — for the two numeric ranges —
 //! the verdict [`fits_i32`] or [`is_finite`] returned where that literal was read. The executable
-//! rules answer the same question in `smear-compiler`'s `executable::values::scalar_accepts`, over
+//! rules answer the same question in the validator's `executable::values::scalar_accepts`, over
 //! the syntactic AST and against interned `Sym`s rather than names, with its own copies of
-//! [`fits_i32`], `fits_id` and [`is_finite`]. Plain prose and not a link: that module is in a
-//! crate ABOVE this one, so rustdoc cannot resolve it from here and a dev-dependency added to make
-//! it resolve would put a cycle in the dev graph to satisfy a comment. Its only caller is
-//! [`SchemaBuilder`](super::builder)'s constant-value check.
+//! [`fits_i32`], `fits_id` and [`is_finite`]. Plain prose and not a link: that module is private
+//! to the validator, and a link to it from a public doc would be a rustdoc warning. Its only
+//! caller is [`SchemaBuilder`](super::builder)'s constant-value check.
 //!
 //! The two doors read the range at different *times* and that is not a divergence: the request
 //! door holds the document while it validates it, so it can read a spelling whenever it likes,

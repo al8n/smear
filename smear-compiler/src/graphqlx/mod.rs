@@ -21,7 +21,7 @@
 //! [`Analysis::is_ok`] is the verdict: whether no error was reported, counted whether the
 //! diagnostic ceiling kept it or not, and no syntax error was counted that a parser did not lend.
 //! On every GraphQL document of smear's corpora, each given as the one file of a `Flat` package,
-//! it is the verdict `smear-schema` gives, but for three capacity ceilings of `smear-schema`'s
+//! it is the verdict the schema builder gives, but for three capacity ceilings of the schema
 //! representation that GraphQLx does not have. A differential test holds that. It counts each of
 //! GraphQL's codes on both sides, and beside the three ceilings lists by document each count it
 //! lets differ, every one on a document both refuse. That is what this release's rules give,
@@ -209,7 +209,7 @@
 //! consumer filters and waives by code, and a message, a label or a help may be reworded in any
 //! release. The analysis reports three families: its own, `smear::graphqlx`, which
 //! [`DiagnosticKind`] lists in [`DiagnosticKind::ALL`]; GraphQL's own, `smear::schema`, for each
-//! rule that is GraphQL's rule too, under `smear-schema`'s code so that a consumer sees one
+//! rule that is GraphQL's rule too, under the schema builder's code so that a consumer sees one
 //! vocabulary across the two dialects, each a constant of [`schema`] and all of them in
 //! [`schema::ALL`]; and the parser's, `smear::syntax`, for a file that does not parse. A code is a
 //! phase's or a rule's, never both. Every code is an error but

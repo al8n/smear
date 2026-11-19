@@ -363,7 +363,7 @@ fn graphqls_transitive_fixture_is_refused_once() {
 
 /// What a missing interface implements is owed too: with `D <- C <- B <- A`, each implementing its
 /// parent alone, `B` omits `D`, and `A` omits `C` and, through it, `D`: three reports, as
-/// `smear-schema` gives. Refuses one hop, which gives two.
+/// the schema builder gives. Refuses one hop, which gives two.
 #[test]
 fn a_missing_interface_is_followed_to_what_it_implements() {
   let text = "type Query {\n  x: Int\n}\ninterface D {\n  id: ID\n}\n\
@@ -485,8 +485,8 @@ fn what_a_rule_refuses_is_passed_by() {
 }
 
 /// A ring of three interfaces: each omits the one its interface implements, and is refused at its
-/// own entry, three reports, as `smear-schema` gives; what each reaches back is itself, and passed
-/// by.
+/// own entry, three reports, as the schema builder gives; what each reaches back is itself, and
+/// passed by.
 #[test]
 fn a_ring_of_three_reports_what_each_omits() {
   let text = "type Query {\n  x: Int\n}\ninterface A implements B {\n  a: Int\n}\n\

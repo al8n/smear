@@ -1997,8 +1997,8 @@ fn titled(kind: DiagnosticKind) -> (Code, &'static str) {
   (kind.code(), kind.title())
 }
 
-/// GraphQL's code, and `smear-schema`'s phrase for it, for a name of one segment with no root that
-/// names nothing at `position`, where GraphQL has such a place.
+/// GraphQL's code, and the schema builder's phrase for it, for a name of one segment with no root
+/// that names nothing at `position`, where GraphQL has such a place.
 fn graphql(position: Position) -> Option<(Code, &'static str)> {
   match position {
     Position::Type => Some((schema::UNDEFINED_TYPE, "undefined type")),

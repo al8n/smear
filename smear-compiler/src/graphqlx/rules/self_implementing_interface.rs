@@ -4,8 +4,8 @@
 //! interfaces hold an interface that declares it. Here every interface on a cycle of `implements`
 //! entries, of any length, is refused: the interfaces of a cycle each implement themselves through
 //! it. Each is reported once, at its name, under the code the same rule has in GraphQL:
-//! `smear-schema`'s `self-implementing-interface`, with its label. An entry an extension writes is
-//! an edge as the definition's own entries are.
+//! the schema builder's `self-implementing-interface`, with its label. An entry an extension writes
+//! is an edge as the definition's own entries are.
 //!
 //! The graph is over definitions: an entry is an edge to the interface it names, whatever its
 //! arguments, so `interface G<X> implements G<Box<X>>` implements itself. An entry that names no

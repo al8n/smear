@@ -7,7 +7,7 @@
 //! language specifies as GraphQL's specification does its five; and a GraphQL scalar the root
 //! package replaces, which keeps its built-in's identity. Each application of `core`'s
 //! `@specifiedBy` on one is reported at its path, under the code the same rule has in GraphQL:
-//! `smear-schema`'s `specified-by-on-built-in-scalar`, with its label and its help, whose words
+//! the schema builder's `specified-by-on-built-in-scalar`, with its label and its help, whose words
 //! for a scalar that is none of GraphQL's five say the language where GraphQL's say its
 //! specification.
 //!

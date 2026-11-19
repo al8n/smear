@@ -10,7 +10,7 @@
 //! - `core` needs no allocator. It holds `NonZero`, `TypeRef`, the marker `MapKey`, `enum Tier`
 //!   and the directives `@marker`, `@set`, `@map`, `@extern`, `@repr` and `@heap`; and GraphQL's
 //!   own: the specified directives `@deprecated`, `@specifiedBy`, `@oneOf`, `@skip` and `@include`,
-//!   with the signatures, locations and descriptions `smear-schema` gives them, and the
+//!   with the signatures, locations and descriptions the schema builder gives them, and the
 //!   introspection meta-types, `__Schema` to `__DirectiveLocation`.
 //! - `alloc` needs an allocator. It holds `string`, `bytes`, `id`, `BTreeMap` and `BTreeSet`.
 //! - `std` needs the standard library. It holds `HashMap` and `HashSet`.
@@ -147,7 +147,7 @@ directive @repr(lang: string!, type: string!, for: TypeRef) repeatable on FIELD_
 "Keeps a position's value on the heap, which makes the position need an allocator."
 directive @heap on FIELD_DEFINITION | ARGUMENT_DEFINITION | INPUT_FIELD_DEFINITION
 
-# GraphQL's specified directives, as smear-schema defines them.
+# GraphQL's specified directives, as the compiler defines them.
 
 "Directs the executor to skip this field or fragment when the `if` argument is true."
 directive @skip("Skipped when true." if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT

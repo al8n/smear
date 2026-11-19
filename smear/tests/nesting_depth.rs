@@ -74,8 +74,8 @@ const DEEPEST_ACCEPTED: usize = MAX_NESTING_DEPTH - 1;
 ///
 /// "Unconfigured" is the whole point of #61's fix. The number does not arrive through an argument
 /// a caller has to remember: it is the `Default` of the lexer's own state type, which is what
-/// `Parser::with_parser(…).parse_str(src)` — the form this workspace's README, `smear-compiler`'s
-/// crate docs and `smear-schema`'s builder all use — seeds a parse with. A ceiling that only
+/// `Parser::with_parser(…).parse_str(src)` — the form this workspace's README, the validator's
+/// docs and the schema builder all use — seeds a parse with. A ceiling that only
 /// applied when asked for would have left the abort exactly where it was.
 #[cfg(feature = "graphql")]
 #[test]

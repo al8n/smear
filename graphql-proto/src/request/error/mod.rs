@@ -45,7 +45,7 @@
 //!
 //! **The driver's, as many as the ceilings admit.** The other three are outside this crate by its
 //! own division of labour: a syntax error is `smear-parser`'s, a validation failure is
-//! `smear-compiler`'s draft §5, and a variable coercion failure is the driver's, per
+//! the validator's draft §5, and a variable coercion failure is the driver's, per
 //! [`Values::variable`](crate::Values::variable)'s contract that values arriving there are already
 //! coerced. None of the three ever reaches an [`Executor`](crate::Executor), so none of them has a
 //! `StartError` to build a result from. Each is a [`RequestError`] instead — the driver's own
@@ -127,10 +127,10 @@
 //! # An entry built from a diagnostic
 //!
 //! [`RequestError::from_diagnose`] turns any [`Diagnose`] into an entry. The seam is the one this
-//! crate already reads through `smear-schema`, and the families that answer it —
-//! `smear-parser`'s syntax `Error`, `smear-compiler`'s `DiagnosticDisplay`, `smear-schema`'s
-//! `SchemaError` and the introspection door's `ResponseError` — need nothing new to reach a
-//! request error result. Three decisions are taken there, and recorded here:
+//! crate already reads through `smear-compiler`'s `schema` module, and the families that answer
+//! it — `smear-parser`'s syntax `Error`, the validator's `DiagnosticDisplay`, the schema
+//! builder's `SchemaError` and the introspection door's `ResponseError` — need nothing new to
+//! reach a request error result. Three decisions are taken there, and recorded here:
 //!
 //! - **The message is the diagnostic's rendering, as it renders.** Nothing is cut out of it or
 //!   added to it. The position travels in `locations`, which is where §7.1.6 puts it and the form a
@@ -413,7 +413,7 @@ impl<V> RequestError<V> {
 
   /// Builds an entry from a diagnostic: its message, and the positions it points at.
   ///
-  /// Draft §5's validation diagnostics are what this is for — pass the view `smear-compiler`'s
+  /// Draft §5's validation diagnostics are what this is for — pass the view the validator's
   /// `Diagnostic::display` returns, which is its [`Diagnose`] implementor — and any other
   /// implementor is read the same way. The spans are taken as positions in the requested document,
   /// so a diagnostic about some other input belongs in an entry only if the caller resolves its

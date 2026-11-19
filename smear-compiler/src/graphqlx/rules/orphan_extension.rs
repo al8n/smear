@@ -22,7 +22,7 @@
 //! materialises has none. One refusal is GraphQL's own: the root package's extension that adds
 //! more than directives to one of GraphQL's introspection types, the eight meta-types whose origin
 //! is `Compat`, keeps GraphQL's code, `smear::schema::introspection-type-extension`, with
-//! `smear-schema`'s label and help, at the same place and with the same label.
+//! the schema builder's label and help, at the same place and with the same label.
 //!
 //! Of the directives the root package may add to a built-in, four may not be among them: `core`'s
 //! `@marker`, `@set` and `@map`, which say what a definition is, and `@extern`, which binds a

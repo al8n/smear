@@ -2,7 +2,7 @@
 //!
 //! A OneOf input object is given exactly one of its fields, and a field with a default would always
 //! be given: GraphQL refuses a field of a `@oneOf` input object that declares a default value. Each
-//! is reported at its name, under the code the same rule has in GraphQL: `smear-schema`'s
+//! is reported at its name, under the code the same rule has in GraphQL: the schema builder's
 //! `one-of-field-has-default`, with its label and its help. What is read is whether a default is
 //! written, and not the default's value.
 //!

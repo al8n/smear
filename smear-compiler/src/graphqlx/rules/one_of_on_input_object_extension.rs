@@ -3,9 +3,9 @@
 //! `@oneOf` changes what every field of an input object means, the fields its definition wrote
 //! among them, so GraphQL refuses it where an input object type extension provides it. Each
 //! application of `core`'s `@oneOf` in an extension of an input object is reported at its path,
-//! under the code the same rule has in GraphQL: `smear-schema`'s
+//! under the code the same rule has in GraphQL: the schema builder's
 //! `one-of-on-input-object-extension`, with its label and its help. The input object is a OneOf
-//! input object all the same when the extension is its own package's, as in `smear-schema`: its
+//! input object all the same when the extension is its own package's, as in the schema builder: its
 //! fields are judged as one's. Another package's extension is an orphan, and its `@oneOf` makes
 //! nothing OneOf.
 //!

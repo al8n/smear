@@ -6,8 +6,8 @@
 //! definition, or when its query root is presumed, which lowering decides before it reads any
 //! extension's roots, as GraphQL decides it. When it is not, each schema extension the root package
 //! writes is reported at its `extend`, under the code the same rule has in GraphQL:
-//! `smear-schema`'s `schema-extension-without-schema`, with its label and its help. The extension
-//! gives the schema what it writes all the same.
+//! the schema builder's `schema-extension-without-schema`, with its label and its help. The
+//! extension gives the schema what it writes all the same.
 //!
 //! A dependency's schema extension is the rule on schema items outside the root package's alone.
 //!

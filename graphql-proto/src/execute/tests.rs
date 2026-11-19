@@ -74,7 +74,7 @@ use crate::{
   UnattachedExtensions, Values,
 };
 
-// Neither this crate's `std` nor `smear-schema`'s is implied by anything, so this module also
+// Neither this crate's `std` nor `smear-compiler`'s is implied by anything, so this module also
 // compiles under `--no-default-features`, where `crate::std` is `alloc` and `ToString` is not in
 // the prelude. The crate's other in-crate test modules that render a value spell it the same way.
 use std::string::{String, ToString};
@@ -579,8 +579,8 @@ fn distinct_response_keys_are_linear_however_they_are_spelled() {
   /// The query for one spelling, and everything its total costs that is **not** a comparison.
   ///
   /// Derived from the row's own names rather than written down, for the reason the collision search
-  /// in `smear_compiler::scratch` gives: a term computed from the fixture moves when the fixture
-  /// does, and a term copied out of a measurement goes stale silently.
+  /// in `smear_compiler::graphql::scratch` gives: a term computed from the fixture moves when the
+  /// fixture does, and a term copied out of a measurement goes stale silently.
   fn row(spell: impl Fn(u32) -> std::string::String) -> (std::string::String, u32) {
     use crate::collect::byte_units;
 

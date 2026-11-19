@@ -23,7 +23,7 @@
 //! smear's to change. The lossless entry points are all smear's own six functions, so a limiter
 //! passed there would reach every one of them. The **syntactic** layer ships productions and no
 //! runner: a consumer drives it with `Parser::with_parser(…).parse_str(src)`, which is what this
-//! workspace's own README, `smear-compiler`'s crate docs and `smear-schema`'s builder all write —
+//! workspace's own README, the validator's docs and the schema builder all write —
 //! and `parse_str` seeds the lexer with `L::State::default()`. The only place smear can name a
 //! number that reaches *that* call is the `Default` of `L::State` itself, and `L::State` was
 //! tokora's type.

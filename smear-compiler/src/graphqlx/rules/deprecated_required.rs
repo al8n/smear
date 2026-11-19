@@ -4,7 +4,7 @@
 //! GraphQL refuses `@deprecated` on a required argument, a field's or a directive's, and on a
 //! required input field: one that is written non-null and has no default, which a caller must
 //! give, and so cannot stop giving. Each is reported at its name, with a label at the first
-//! `@deprecated` it applies, under the code the same rule has in GraphQL: `smear-schema`'s
+//! `@deprecated` it applies, under the code the same rule has in GraphQL: the schema builder's
 //! `deprecated-required-argument` or `deprecated-required-input-field`, with its label and its
 //! help.
 //!

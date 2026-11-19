@@ -1,5 +1,5 @@
 //! The GraphQLx analyzer's implementation phase over smear's corpora: on every GraphQL document it
-//! gives the codes `smear-schema` gives for the nine kinds it owns, but for the classes of
+//! gives the codes the schema builder gives for the nine kinds it owns, but for the classes of
 //! divergence recorded below; and every file of the corpora passes far below the phase's budget.
 //!
 //! # The parity sweep
@@ -8,22 +8,22 @@
 //! each schema that corpus accepts is read by GraphQL's type-system parser, a document it refuses
 //! skipped and counted, then built by `Schema::build` and analyzed as the one file of a `Flat` root
 //! package at tier `Std`. The multiset of the nine codes is compared. A document is skipped, and
-//! counted by reason, when the analyzer's parser refuses it, when `smear-schema`'s list is not
+//! counted by reason, when the analyzer's parser refuses it, when the schema builder's list is not
 //! exhaustive, or when either side reports `duplicate-type-name` or `unresolved-path`, a second
-//! definition of one name that `smear-schema` drops unread, `implements-non-interface` or
+//! definition of one name that the schema builder drops unread, `implements-non-interface` or
 //! `self-implementing-interface`, which the analyzer reports from rules of its own once its phases
-//! have run, or one of the three ceilings of `smear-schema`'s representation. Those two rules
+//! have run, or one of the three ceilings of the schema representation. Those two rules
 //! change none of the nine, and a phase's error, this one's among them, silences them in the
-//! contribution that holds it, where `smear-schema` may still report one: so either side's report
-//! is read. A difference is excused in one direction alone, and each excuse used is printed:
+//! contribution that holds it, where the schema builder may still report one: so either side's
+//! report is read. A difference is excused in one direction alone, and each excuse used is printed:
 //!
-//! - `smear-schema` gives more `invalid-interface-field-type` or
+//! - the schema builder gives more `invalid-interface-field-type` or
 //!   `invalid-interface-field-argument-type` on a document where the analyzer reports
 //!   `undefined-type`: a type that does not resolve is the resolver's alone here, and no subtype of
 //!   anything there;
-//! - `smear-schema` gives more `duplicate-implements-interface` or `duplicate-union-member` where
-//!   the analyzer reports `undefined-implements-interface` or `undefined-union-member`: a name that
-//!   does not resolve is compared with nothing here, and by its spelling there.
+//! - the schema builder gives more `duplicate-implements-interface` or `duplicate-union-member`
+//!   where the analyzer reports `undefined-implements-interface` or `undefined-union-member`: a
+//!   name that does not resolve is compared with nothing here, and by its spelling there.
 //!
 //! No document of the corpora uses either: the nine codes agree on all of them. So an excuse used
 //! is a failure too, since the direction each excuses is the one a too lenient relation errs in.
@@ -50,7 +50,7 @@ use smear::{
 #[path = "support/validator_corpus.rs"]
 mod corpus;
 
-/// The nine codes the implementation phase reports, each `smear-schema`'s for the same rule.
+/// The nine codes the implementation phase reports, each the schema builder's for the same rule.
 const NINE: [&str; 9] = [
   "smear::schema::duplicate-implements-interface",
   "smear::schema::duplicate-union-member",
@@ -77,10 +77,10 @@ const NINE_KINDS: [SchemaErrorKind; 9] = [
 ];
 
 /// Codes that put a document out of the sweep's scope, on either side: a second definition of one
-/// name, which `smear-schema` drops unread; a path that names nothing, the analyzer's alone;
+/// name, which the schema builder drops unread; a path that names nothing, the analyzer's alone;
 /// GraphQL's rules on `implements` entries, which the analyzer runs as rules of its own after its
 /// phases, silent in a contribution a phase refused something in; and the three ceilings of
-/// `smear-schema`'s representation, which GraphQLx does not have.
+/// the schema representation, which GraphQLx does not have.
 const OUT_OF_SCOPE: [&str; 7] = [
   "smear::schema::duplicate-type-name",
   "smear::graphqlx::unresolved-path",
@@ -191,8 +191,8 @@ impl Sweep {
     }
   }
 
-  /// Compares the document `name`, whose text is `sdl`: `smear-schema`'s nine counts against the
-  /// analyzer's, each difference excused in its class's direction or a failure.
+  /// Compares the document `name`, whose text is `sdl`: the schema builder's nine counts against
+  /// the analyzer's, each difference excused in its class's direction or a failure.
   fn compare(&mut self, name: &str, sdl: &str) -> Compared {
     let Some(document) = parse(sdl) else {
       return Compared::Skipped("refused by GraphQL's parser");
@@ -201,7 +201,7 @@ impl Sweep {
       Ok(_) => Vec::new(),
       Err(errors) => {
         if !errors.is_exhaustive() {
-          return Compared::Skipped("smear-schema's list is not exhaustive");
+          return Compared::Skipped("the schema builder's list is not exhaustive");
         }
         errors
           .errors()
@@ -258,7 +258,7 @@ impl Sweep {
           }
           _ => false,
         };
-      let line = format!("{name}: `{code}` smear-schema {theirs}, the analyzer {ours}");
+      let line = format!("{name}: `{code}` the schema builder {theirs}, the analyzer {ours}");
       if excused {
         self.excused.push(line);
       } else {
@@ -293,8 +293,8 @@ impl Sweep {
 }
 
 /// On every GraphQL document of smear's corpora, the analyzer gives the multiset of the nine codes
-/// `smear-schema` gives, but for the classes of divergence the file's header records. At least 200
-/// documents are compared, 80 of them writing an `implements` entry; `perpfutures`, whose
+/// the schema builder gives, but for the classes of divergence the file's header records. At least
+/// 200 documents are compared, 80 of them writing an `implements` entry; `perpfutures`, whose
 /// `Liquidate` omits a field of its `Event`, is compared with one `missing-interface-field` on each
 /// side; and each of the nine rows of `SCHEMA_FIXTURES` this phase owns is compared and agrees.
 #[test]

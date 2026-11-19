@@ -244,7 +244,7 @@ pub struct ResponseError {
 /// A refusal's subject is a copy of the literal it refuses, which is not constant work — but it is
 /// bounded by bytes the reader had already read in order to refuse them, so the subjects of every
 /// occurrence together are bounded by the response. That is linear and not a product, which is the
-/// property that matters; `smear-schema/tests/introspection_allocation.rs` is what measures it.
+/// property that matters; `smear-compiler/tests/introspection_allocation.rs` is what measures it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct Pending {
   /// The artifact that owns the subject, as the offsets its name will be read back from.

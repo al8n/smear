@@ -6,7 +6,7 @@
 //! The carriers above keep their source, and a caller that holds one cooks it with a `Cow`
 //! conversion. That door does not reach a caller that holds the spelling alone, and the callers
 //! that matter do: a parsed `StringValue` publishes its source and nothing the lexer measured,
-//! `smear-schema`'s builder is generic over `S: AsRef<[u8]>`, and an executor answering
+//! the schema builder is generic over `S: AsRef<[u8]>`, and an executor answering
 //! `__type(name:)` meets the literal in a document of any source type. So the public functions
 //! here take the spelling — delimiters included — and apply §2.9.1's escapes or §2.9.4's
 //! `BlockStringValue()` themselves.

@@ -5,8 +5,8 @@ use std::{vec, vec::Vec};
 
 /// The width at or below which a list finds its duplicates by scanning the names before them.
 ///
-/// Sixty-four because that is where `smear-schema` has already measured the scan's quadratic term
-/// to sit below the per-list overhead around it — the widest permitted argument list built in
+/// Sixty-four because that is where the schema builder has already measured the scan's quadratic
+/// term to sit below the per-list overhead around it — the widest permitted argument list built in
 /// 0.060 ms, and one sixty-four-argument list was *cheaper* than sixty-four one-argument lists —
 /// and because it is `MAX_FIELD_ARGUMENTS`, so a declared argument list, which a ceiling already
 /// holds at that width, never builds an index it could not need. al8n/smear#198.
@@ -35,8 +35,9 @@ pub const NARROW_LIST: usize = 64;
 ///
 /// **Not more memory.** The trail it replaces recorded `(Sym, SimpleSpan)`, twenty-four bytes per
 /// name; this is eight bytes per position while the index is built and four while it is read. A
-/// position is a `u32` because everything `smear-schema` addresses is — `Sym` itself, `Range32`,
-/// the flat tables `flatten` builds — so the width is the representation's and not a new one.
+/// position is a `u32` because everything the schema representation addresses is — `Sym` itself,
+/// `Range32`, the flat tables `flatten` builds — so the width is the representation's and not a new
+/// one.
 pub struct Duplicates<S> {
   repr: Repr<S>,
 }

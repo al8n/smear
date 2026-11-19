@@ -36,11 +36,11 @@
 //! `smear::schema::missing-transitive-interface`, at the root's entry, with a label at the entry
 //! that implements it, and what it implements is owed in turn: its definition's entries are read
 //! under its arguments, once for each definition the check of one definition reaches. So
-//! `D <- C <- B <- A`, each implementing its parent alone, is three reports, as in `smear-schema`,
-//! and a ring of definitions that grows its arguments ends at once. An interface the definition is
-//! found to miss is reported once, through whichever root reaches it first; one that is the
-//! definition itself is the self-implementing rule's, and passed by; and a definition that is no
-//! object and no interface owes the markers alone. With `interface Ord<X> implements
+//! `D <- C <- B <- A`, each implementing its parent alone, is three reports, as in the schema
+//! builder, and a ring of definitions that grows its arguments ends at once. An interface the
+//! definition is found to miss is reported once, through whichever root reaches it first; one that
+//! is the definition itself is the self-implementing rule's, and passed by; and a definition that
+//! is no object and no interface owes the markers alone. With `interface Ord<X> implements
 //! Comparable<X>`, `type Lazy implements Ord<Lazy>` must write `Comparable<Lazy>` too.
 //!
 //! Then, when the definition is an object or an interface and the root's interface no marker,
@@ -69,7 +69,7 @@
 //!   here, and each instantiation the program writes is judged for what it makes of it, as the
 //!   section on what an instantiation makes required says.
 //!
-//! Each is judged whatever the others found, in `smear-schema`'s order. A generic definition is
+//! Each is judged whatever the others found, in the schema builder's order. A generic definition is
 //! judged once, where it is written: a type parameter is a subtype of itself and of its bounds
 //! alone.
 //!

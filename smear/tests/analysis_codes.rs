@@ -1,10 +1,10 @@
 //! The `smear::schema` codes the GraphQLx analyzer shares with GraphQL's own validator, the
-//! registry `graphqlx::schema`: each public constant is `smear-schema`'s code of the kind it names,
-//! and `schema::ALL` lists each once, in declaration order, as a kebab-case code of the family;
-//! every shared code an analysis of the schema corpus reports, and every one a rule of smear's
-//! lists, has its constant; and every constant is reported on a fixture of that corpus or listed by
-//! a rule. Together, every shared code the analysis reports is public and in `ALL`, and nothing
-//! else is.
+//! registry `graphqlx::schema`: each public constant is the schema builder's code of the kind it
+//! names, and `schema::ALL` lists each once, in declaration order, as a kebab-case code of the
+//! family; every shared code an analysis of the schema corpus reports, and every one a rule of
+//! smear's lists, has its constant; and every constant is reported on a fixture of that corpus or
+//! listed by a rule. Together, every shared code the analysis reports is public and in `ALL`, and
+//! nothing else is.
 //!
 //! The registry golden holds no row for a constant: each constant IS a `SchemaErrorKind`'s code,
 //! whose row the golden has, and two rows with one code are what `diagnostic_codes.rs` refuses.
@@ -22,7 +22,7 @@ use smear::{
   validator::SchemaErrorKind,
 };
 
-// The draft §3 corpus: an SDL for each kind of `smear-schema`'s that a parsed document reaches.
+// The draft §3 corpus: an SDL for each kind of the schema builder's that a parsed document reaches.
 // The module also carries what this file does not read, which would be a `dead_code` denial under
 // CI's `-Dwarnings`; allowed at the include, as its other readers do.
 #[allow(dead_code)]
@@ -39,7 +39,8 @@ fn analyzed(sdl: &str) -> Analysis {
   analyze(&root, &[], &Limits::new())
 }
 
-/// Each shared code, with the kind of `smear-schema`'s it is, in the module's declaration order.
+/// Each shared code, with the kind of the schema builder's it is, in the module's declaration
+/// order.
 const SHARED: &[(Code, SchemaErrorKind)] = &[
   (
     schema::DUPLICATE_TYPE_NAME,
@@ -309,11 +310,11 @@ const SHARED: &[(Code, SchemaErrorKind)] = &[
   ),
 ];
 
-/// Each constant is the code `smear-schema` reports for the kind it names, and `schema::ALL` holds
-/// them all, in the module's order: a constant whose string drifted, and an `ALL` that leaves one
-/// out or reorders them, each fail here.
+/// Each constant is the code the schema builder reports for the kind it names, and `schema::ALL`
+/// holds them all, in the module's order: a constant whose string drifted, and an `ALL` that leaves
+/// one out or reorders them, each fail here.
 #[test]
-fn each_shared_code_is_smear_schemas() {
+fn each_shared_code_is_the_schema_builders() {
   assert_eq!(
     schema::ALL.len(),
     SHARED.len(),
@@ -329,7 +330,7 @@ fn each_shared_code_is_smear_schemas() {
     assert_eq!(
       *constant,
       kind.code(),
-      "the constant for `{kind:?}` is not `smear-schema`'s code"
+      "the constant for `{kind:?}` is not the schema builder's code"
     );
   }
 }

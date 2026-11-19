@@ -2,7 +2,7 @@
 //!
 //! GraphQL refuses an `implements` entry of an object or an interface that names a type which is
 //! no interface. So each such entry is reported where it is written, under the code the same rule
-//! has in GraphQL: `smear-schema`'s `implements-non-interface`, with its label. A marker is an
+//! has in GraphQL: the schema builder's `implements-non-interface`, with its label. A marker is an
 //! interface, with or without arguments, and an entry that names one is accepted. An entry that
 //! names a type parameter of its definition is refused too, as a type parameter is no interface;
 //! and an entry that names an alias such as `NonZeroU32` names the scalar it spells. An entry that

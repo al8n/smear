@@ -9,10 +9,10 @@
 //! object, and that is non-null, or any field of a OneOf. The input objects that are not finite are
 //! walked in id order, each link field in member order, and the field that closes a cycle is
 //! reported, once for the input object that owns it, under the code the same rule has in GraphQL:
-//! `smear-schema`'s `circular-non-null-input-field` when every link on the cycle is non-null, and
-//! `circular-one-of-input-field` when one is a nullable field of a OneOf, with its label and its
-//! help. On a GraphQL document, which has no type parameter, this is `smear-schema`'s walk, in the
-//! same order, a one-file package numbering its definitions as written.
+//! the schema builder's `circular-non-null-input-field` when every link on the cycle is non-null,
+//! and `circular-one-of-input-field` when one is a nullable field of a OneOf, with its label and
+//! its help. On a GraphQL document, which has no type parameter, this is the schema builder's walk,
+//! in the same order, a one-file package numbering its definitions as written.
 //!
 //! Generics add what an instantiation's arguments must hold. A type parameter of an input object
 //! is *carried* when a value of the input object must hold a value of the parameter's argument

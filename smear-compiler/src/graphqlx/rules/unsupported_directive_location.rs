@@ -6,7 +6,7 @@
 //! An argument is one location whether it is a field's or a directive definition's. Each
 //! application at a location its directive's definition does not list is reported at its path,
 //! with a label at the directive definition's name, under the code the same rule has in GraphQL:
-//! `smear-schema`'s `unsupported-directive-location`, with its label and its help.
+//! the schema builder's `unsupported-directive-location`, with its label and its help.
 //!
 //! The directive is the definition the application resolved to, `core`'s own among them, so
 //! `@marker` on an object and `@deprecated` on a scalar are refused as a program's own directive

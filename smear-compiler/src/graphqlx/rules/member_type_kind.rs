@@ -5,7 +5,7 @@
 //! or an input field whose type is an object, an interface or a union: a field's type is an output
 //! type and the others' an input type. What is judged is the base of the member's type, the named
 //! type under its lists and its `!`. It is reported there, at the named type and not at the list
-//! around it, under the code the same rule has in GraphQL: `smear-schema`'s
+//! around it, under the code the same rule has in GraphQL: the schema builder's
 //! `field-type-not-output-type`, `argument-type-not-input-type`,
 //! `directive-argument-type-not-input-type` or `input-field-type-not-input-type`, with its label
 //! and its help.

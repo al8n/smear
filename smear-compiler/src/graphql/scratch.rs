@@ -902,14 +902,14 @@ struct NameRange {
 ///
 /// al8n/smear#172 found the fold on its own mixing far too little for ordinary names — bit `j` of
 /// `v · K` depends only on bits `0..=j` of `v`, so a name's late bytes decide nothing about where
-/// it lands — and added splitmix64's finalizer to `smear-schema`'s copy. Nothing propagated here,
-/// because this is a private duplicate of that function rather than a call to it. A reader who
-/// assumes the shared dependency carried the repair gets the opposite of what is true.
+/// it lands — and added splitmix64's finalizer to the schema representation's copy. Nothing
+/// propagated here, because this is a private duplicate of that function rather than a call to it.
+/// A reader who assumes the shared dependency carried the repair gets the opposite of what is true.
 ///
-/// This table was the **worse** of the two. `smear-schema` masks the hash's high half through
-/// `crate::schema::bucket`; this one masks the low half, which is the least mixed word in the
-/// product. Measured over 4,096 names of the most ordinary spelling there is — `k0` to `k4095` —
-/// the unfinished hash masked low occupies **ten** buckets of 4,096 and costs 464.27 comparisons
+/// This table was the **worse** of the two. The schema representation masks the hash's high half
+/// through `crate::schema::bucket`; this one masks the low half, which is the least mixed word in
+/// the product. Measured over 4,096 names of the most ordinary spelling there is — `k0` to `k4095`
+/// — the unfinished hash masked low occupies **ten** buckets of 4,096 and costs 464.27 comparisons
 /// per interned name. Through the finalizer the same names cost 0.50 across 2,586 buckets. Hence
 /// the finalizer here too, and hence not simply calling the other crate's: a probe hash is an
 /// internal detail, and importing one would make it a compatibility surface.

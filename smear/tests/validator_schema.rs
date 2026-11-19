@@ -115,16 +115,16 @@ const UNFIREABLE: &[(SchemaErrorKind, &str)] = &[
     SchemaErrorKind::TooManyInternedBytes,
     "the arena addresses its bytes with 32-bit offsets, so the ceiling is four gigabytes of \
      interned spelling — reachable from a 92 KB hand-assembled AST, whose overlapping suffixes \
-     are quadratic, and not from anything a test should allocate. `smear-schema`'s \
+     are quadratic, and not from anything a test should allocate. The schema builder's \
      `builder::tests` fires it through `Interner::intern_within`, which is the same mechanism \
      with the two ceilings as parameters, and pins the accepting side beside it.",
   ),
   (
     SchemaErrorKind::PossibleTypeTableTooLarge,
     "the table addresses its words with a 32-bit offset, so the ceiling is four billion `u64` \
-     words — 34 GB — and below it the refusal is the host's allocator saying no. `smear-schema`'s \
-     `builder::tests` fires it through `possible_table`, which is the same mechanism with the \
-     ceiling as a parameter, and pins the accepting side beside it.",
+     words — 34 GB — and below it the refusal is the host's allocator saying no. The schema \
+     builder's `builder::tests` fires it through `possible_table`, which is the same mechanism \
+     with the ceiling as a parameter, and pins the accepting side beside it.",
   ),
   (
     SchemaErrorKind::ConstantValueTooDeep,

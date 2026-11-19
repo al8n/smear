@@ -282,10 +282,9 @@ MIRI_IGNORE_BUDGET = sum(MIRI_DECLARED_IGNORES.values())
 # `smear-lexer` and `smear-compiler` declare no `rowan` feature at all; `smear-parser` declares one
 # but it is not in its `default` and these scripts pass no `--features`, so the resolve leaves it
 # off; `graphql-proto` declares only `std`. `smear-compiler` takes `smear-parser` with `graphql`
-# and `graphqlx` and without `rowan`. `smear-semantics`, `smear-schema` and `smear-analysis` are
-# not packages here any more: they are modules of `smear-compiler`, and its cell carries their
-# lib unit tests. This file's own feature-set guard prints what actually resolved, so none of that
-# is taken on trust.
+# and `graphqlx` and without `rowan`. The schema, kernel and analyzer crates this tuple once named
+# are modules of `smear-compiler` now, and its cell carries their lib unit tests. This file's own
+# feature-set guard prints what actually resolved, so none of that is taken on trust.
 #
 # `ci/feature_reachability.py` requires every publishable member to be in this tuple or in
 # `MIRI_NOT_SELECTED` below, so the account grows with the workspace instead of being remembered.

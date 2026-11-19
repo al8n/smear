@@ -799,7 +799,7 @@ const EDGE_HEAD: &str = concat!(
 #[test]
 fn an_integer_where_a_float_is_expected_is_refused_past_a_doubles_range() {
   // The greatest integer that rounds to `f64::MAX`, the least that rounds to infinity, 10^308 and
-  // 10^309, as defaults and as a directive's argument: what `smear-schema` and `smear-compiler`
+  // 10^309, as defaults and as a directive's argument: what the schema builder and the validator
   // answer for the same literals.
   let below = format!("{EDGE_HEAD}1");
   let edge = format!("{EDGE_HEAD}2");

@@ -4,7 +4,7 @@
 //! source id and position, is the schema's: it gives the schema its description, its roots and its
 //! applications. Each later one the root package writes gives it nothing, and is reported here, at
 //! its `schema`, with a label at the first, under the code the same rule has in GraphQL:
-//! `smear-schema`'s `duplicate-schema-definition`, with its label and its help.
+//! the schema builder's `duplicate-schema-definition`, with its label and its help.
 //!
 //! A schema definition a dependency writes is not counted here. It is refused once, as a schema
 //! item outside the root package, by the rule of that name, whether or not the root package

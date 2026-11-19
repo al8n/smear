@@ -196,9 +196,9 @@ fn an_inline_literal_is_cooked_before_it_is_escaped() {
 /// A `&str` cannot hold a surrogate, so the only way one reaches this writer is as an *escape* in
 /// a GraphQL literal — and it is refused rather than emitted or replaced, as every escape the lexer
 /// would refuse is. Emitting `\uD800` would produce exactly what this workspace's own introspection
-/// decoder refuses to read (`smear-schema/src/introspection/json.rs`), so the writer would be
-/// writing what its sibling reader rejects; substituting U+FFFD would change the response and say
-/// nothing.
+/// decoder refuses to read (`smear-compiler/src/schema/introspection/json.rs`), so the writer would
+/// be writing what its sibling reader rejects; substituting U+FFFD would change the response and
+/// say nothing.
 ///
 /// Unreachable from a literal this workspace lexed — `smear-lexer` raises `UnpairedSurrogate`
 /// before a `StringValue` exists — so this is an honest answer and not a live path.
@@ -552,7 +552,7 @@ fn the_index_agrees_with_the_prefix_walk_it_replaced() {
 // document bytes looked at — and, for the native stack, the one thing that cannot be misread:
 // whether the walk survives a depth no recursion could, on a stack too small for one.
 //
-// The byte counter is `smear-schema`'s introspection reader's, reached for rather than reinvented
+// The byte counter is the introspection reader's, reached for rather than reinvented
 // — that module carries the argument at length and learned it by writing an allocation gate first
 // and discovering it was structurally blind to the walk it was written for. The shape here is its
 // MARGINAL form for the same reason: a bound on the total would pass a writer that walked the

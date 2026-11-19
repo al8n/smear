@@ -4,8 +4,8 @@
 //! A OneOf input object is given exactly one of its fields, so each field is one of the
 //! alternatives and none may be required: GraphQL refuses a field of a `@oneOf` input object that
 //! is written non-null. Each is reported at its name, under the code the same rule has in GraphQL:
-//! `smear-schema`'s `one-of-field-not-nullable`, with its label and its help. What is read is the
-//! field's own outermost `!`: `[Int!]` is nullable.
+//! the schema builder's `one-of-field-not-nullable`, with its label and its help. What is read is
+//! the field's own outermost `!`: `[Int!]` is nullable.
 //!
 //! The same is met after substitution. A field whose type is its OneOf's own type parameter,
 //! written nullable, is non-null in an instantiation that gives the parameter a non-null type:

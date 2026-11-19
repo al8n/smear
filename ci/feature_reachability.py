@@ -213,8 +213,8 @@ SELECTIONS = ("miri", "census", "cross")
 
 # (selection, member) pairs deliberately outside a selection, each with the argument. An entry that
 # matches nothing — because the member is gone, or is in the selection after all — is a failure,
-# exactly like a stale feature exemption. Empty today: its one entry was `smear-semantics`, which
-# the census read nowhere because `smear` mounted nothing of it, and which is a private module of
+# exactly like a stale feature exemption. Empty today: its one entry was the kernel, which the
+# census read nowhere because `smear` mounted nothing of it, and which is a private module of
 # `smear-compiler` now.
 EXEMPT_SELECTION: dict[tuple[str, str], str] = {}
 

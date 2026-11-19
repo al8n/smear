@@ -10,7 +10,7 @@
 //!
 //! In the order query, mutation, subscription, a root that is one type with an earlier one is
 //! reported once, with a label at the first earlier one, under the code the same rule has in
-//! GraphQL: `smear-schema`'s `shared-root-operation-type`, with its labels and its help. The
+//! GraphQL: the schema builder's `shared-root-operation-type`, with its labels and its help. The
 //! diagnostic stands at a written root, always: at the later one's type when it is written, and
 //! otherwise at the earlier one's, labelled at the presumed root's definition. A root that is no
 //! object type is the rule before's to report, and one that names nothing name resolution's:

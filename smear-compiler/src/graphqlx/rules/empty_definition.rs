@@ -5,7 +5,7 @@
 //! definition holds is everything it holds, its own contribution's and each extension's, whoever
 //! wrote the extension, as GraphQL judges the merged type: a definition whose every member an
 //! extension adds is not empty. An empty one is reported once, at its name, under the code the
-//! same rule has in GraphQL: `smear-schema`'s `empty-fields-definition`, `empty-union-members`,
+//! same rule has in GraphQL: the schema builder's `empty-fields-definition`, `empty-union-members`,
 //! `empty-enum-values` or `empty-input-fields`, with its label and its help.
 //!
 //! GraphQLx differs from GraphQL in one case: an interface that is a marker, which says what a type

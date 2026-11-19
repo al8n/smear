@@ -148,9 +148,9 @@ $CARGO $TOOLCHAIN hack clippy -p smear --each-feature --features parser,alloc --
 
 # Pass 3b — the same lesson for `smear-compiler`, which is one crate where it was four.
 #
-# `smear-analysis`' own `--each-feature` rows were "the analyzer with each feature", because that
-# crate always held the analyzer, and `smear-compiler`'s were "the validator at each tier". In one
-# crate `--each-feature` builds each feature ALONE, so `alloc,bytes_1` compiles no analyzer and
+# The analyzer crate's own `--each-feature` rows were "the analyzer with each feature", because that
+# crate always held the analyzer, and the validator crate's were "the validator at each tier". In
+# one crate `--each-feature` builds each feature ALONE, so `alloc,bytes_1` compiles no analyzer and
 # `std,graphqlx` is a row only if it is asked for. The rows below keep the cells the crate
 # boundaries used to give. Pass 2 builds `alloc,graphql` and `alloc,graphqlx` already, each with
 # `--tests`; this pass adds the two on `std`, which are where the kernel's per-capability

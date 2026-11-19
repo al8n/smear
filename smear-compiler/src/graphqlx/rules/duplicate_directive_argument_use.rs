@@ -4,7 +4,7 @@
 //! the arguments its directive declares in the directive's order, an argument written twice twice
 //! and in written order, so the uses of one argument are neighbours: each after the first of its
 //! run is reported at its name, with a label at the first, under the code the same rule has in
-//! GraphQL: `smear-schema`'s `duplicate-directive-argument-use`, with its labels.
+//! GraphQL: the schema builder's `duplicate-directive-argument-use`, with its labels.
 //!
 //! An argument the directive does not declare is lowering's, which reports each one written and
 //! keeps none, so one written twice is two of lowering's diagnostics and none of this rule's. An

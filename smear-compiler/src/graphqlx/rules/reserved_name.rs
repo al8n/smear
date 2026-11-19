@@ -3,7 +3,7 @@
 //! GraphQL reserves the names that begin with `__` for its introspection system, and the language
 //! keeps the reservation for every member: a field, a field's argument, an enum value, an input
 //! field and a directive's argument. So a member whose name begins with `__` is reported at its
-//! name, under the code the same rule has in GraphQL, by what the member is: `smear-schema`'s
+//! name, under the code the same rule has in GraphQL, by what the member is: the schema builder's
 //! `reserved-field-name`, `reserved-argument-name`, `reserved-enum-value-name`,
 //! `reserved-input-field-name` or `reserved-directive-argument-name`, with its label and its help.
 //!

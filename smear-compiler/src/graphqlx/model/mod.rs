@@ -1,6 +1,6 @@
 //! The model: what the packages declare, resolved, and read through views.
 //!
-//! The model is stored as `smear-schema`'s `repr` stores a schema: dense tables of `Copy` rows,
+//! The model is stored as `schema::repr` stores a schema: dense tables of `Copy` rows,
 //! each child list a run of a sibling pool, one name arena and one text arena, and no allocation
 //! per node (`table`). It is written once, through the crate's builder (`build`), and read through
 //! views: each a `Copy` pair of the model and an id, answering borrows of the model.

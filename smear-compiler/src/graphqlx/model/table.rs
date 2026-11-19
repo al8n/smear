@@ -1,5 +1,5 @@
 //! The model's tables: one `Copy` row per entity, every child list a run of a sibling pool, and
-//! every spelling a run of the model's name or text arena, as `smear-schema`'s `repr` stores a
+//! every spelling a run of the model's name or text arena, as `schema::repr` stores a
 //! schema.
 //!
 //! Nothing here allocates per row. A row holds ids, runs, locations and flags; the views in the

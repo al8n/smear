@@ -26,12 +26,12 @@
 //! - and nothing else holds.
 //!
 //! The interface step is one step, by declaration: what a definition's entries implement is not
-//! followed. `smear-schema` reads the declared list as the closure, and the transitive check makes
-//! the declared list the closure of every program it accepts, so on every such program this is
-//! the recursion through the `implements` chain. A type parameter goes through its bounds and one
-//! step of each bound's interface, as satisfaction reads it. A union admits a member of `sub`'s own
-//! definition alone, so no union recurses into another, and an interface or a union is a subtype
-//! of no union but itself, as in GraphQL.
+//! followed. The schema builder reads the declared list as the closure, and the transitive check
+//! makes the declared list the closure of every program it accepts, so on every such program this
+//! is the recursion through the `implements` chain. A type parameter goes through its bounds and
+//! one step of each bound's interface, as satisfaction reads it. A union admits a member of `sub`'s
+//! own definition alone, so no union recurses into another, and an interface or a union is a
+//! subtype of no union but itself, as in GraphQL.
 //!
 //! # The machine, and why it ends
 //!

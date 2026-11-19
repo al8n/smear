@@ -2,7 +2,7 @@
 //!
 //! GraphQL refuses a union member that is no object type: a union of interfaces, of scalars, of
 //! enums, of input objects or of unions has no concrete member set. So each such member is
-//! reported where it is written, under the code the same rule has in GraphQL: `smear-schema`'s
+//! reported where it is written, under the code the same rule has in GraphQL: the schema builder's
 //! `union-member-not-object`, with its label and its help. An object is a member, with or without
 //! arguments; a member that names an alias such as `NonZeroU32` names the scalar it spells. A
 //! member that is a type parameter of a generic union is not judged, and no rule judges the type an

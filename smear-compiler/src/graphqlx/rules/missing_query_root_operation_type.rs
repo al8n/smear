@@ -6,7 +6,7 @@
 //! package's first schema definition or one of its schema extensions writes, whatever it names, or,
 //! with no schema definition of the root package's, an object type named `Query` that the root
 //! package's root module itself declares, which GraphQL presumes the query root. A schema with none
-//! is reported once, under the code the same rule has in GraphQL: `smear-schema`'s
+//! is reported once, under the code the same rule has in GraphQL: the schema builder's
 //! `missing-query-root-operation-type`, with its label and its help.
 //!
 //! It is reported at the `schema` of the root package's first schema definition, and with none at

@@ -4,9 +4,9 @@
 //! an interface, a marker among them, a union, a scalar, an enum or an input object has no field
 //! set an operation could select from. Each written root whose type names a definition that is no
 //! object type is reported at the type, under the code the same rule has in GraphQL:
-//! `smear-schema`'s `root-operation-type-not-object`, with its label and its help. An alias such
-//! as `NonZeroU32` names `core`'s `NonZero`, a scalar; an instantiation of a generic object type
-//! is an object type.
+//! the schema builder's `root-operation-type-not-object`, with its label and its help. An alias
+//! such as `NonZeroU32` names `core`'s `NonZero`, a scalar; an instantiation of a generic object
+//! type is an object type.
 //!
 //! A presumed root is an object type by how it is presumed, and a root that names nothing is name
 //! resolution's.

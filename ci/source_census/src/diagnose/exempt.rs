@@ -101,12 +101,13 @@ const ERROR_OF_PROJECTION: &str = "An `ErrorOf<…>` projection: the error type 
 /// comment goes stale on the next public type anybody adds, as the pair that used to be here had —
 /// it read thirty-two where the run printed thirty. `crate::exempt`'s misfire group records the
 /// same lesson about the same kind of sentence.
-// SPELL A PATH AT THE CRATE THAT DECLARES THE TYPE, not at a re-export of it. `syn` cannot follow
-// `pub use smear_schema as schema;` from the umbrella into another package, so since the split the
-// canonical path a mounted root produces is the DECLARING member's — `smear::validator::schema::
-// SchemaErrors`, not the `smear::validator::SchemaErrors` that `validator/mod.rs` also publishes.
-// Both are real paths for a consumer; only one is the one this table matches on. The split moved
-// two entries this way and the table said so on the same run, which is what it is for.
+// SPELL A PATH AT THE MODULE THAT DECLARES THE TYPE, not at a re-export of it. `syn` cannot follow
+// `pub use crate::schema;` from the `graphql` root into the schema root, which is mounted on its
+// own, so since the split the canonical path a mounted root produces is the DECLARING module's —
+// `smear::validator::schema::SchemaErrors`, not the `smear::validator::SchemaErrors` that
+// `validator/mod.rs` also publishes. Both are real paths for a consumer; only one is the one this
+// table matches on. The split moved two entries this way and the table said so on the same run,
+// which is what it is for.
 pub const EXEMPTIONS: &[Exemption] = &[
   // ── Aggregates: the elements answer ──────────────────────────────────────────────────────────
   Exemption {
