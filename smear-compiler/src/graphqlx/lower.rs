@@ -118,6 +118,16 @@
 //! interned, with where it is written. No path in it is resolved: coercion, which runs after
 //! instantiation and knows the type expected, makes the model's values of the trees.
 //!
+//! A value a supplied package writes is charged its literals to `Limits::max_values`, all of them,
+//! before any of it is read: they are counted with a stack as deep as the value nests, and no
+//! further than one past what is left, and the budget is the analysis's one, which coercion goes on
+//! spending. One whose literals are more than is left is `resource-limit` once, at the whole of it,
+//! charged nothing, and its tree is one node where the whole value is written: none of its literals
+//! is read, no path in it is interned and no field's name is looked up. A later value that fits is
+//! still read. A literal lowering never reaches costs nothing, one in an application whose
+//! directive names nothing or in an argument its directive does not declare, and no literal of the
+//! built-in library is charged.
+//!
 //! # The schema
 //!
 //! After every definition's contributions come the schema's, appended once the second walk over the
@@ -196,7 +206,8 @@ const KEYWORD: usize = 6;
 /// Lowers what `declarations` holds into `builder`, which holds every package, module and
 /// definition already, resolving each path through `scopes` and reporting into `reporter`;
 /// `sources` numbers the sources of `packages`, and `limits` bounds the shapes a supplied package
-/// writes. Answers every written value, read from the texts of `packages`, for coercion.
+/// writes and the literals lowering reads of it. Answers every written value, read from the texts
+/// of `packages`, for coercion, with what `Limits::max_values` has left.
 pub(crate) fn lower<'p>(
   packages: &[PackageView<'p>],
   declarations: &Declarations<'_, '_>,
@@ -221,7 +232,7 @@ pub(crate) fn lower<'p>(
     scopes,
     limits,
     supplied: sources.package_sources(ROOT).start(),
-    values: RawValues::new(texts),
+    values: RawValues::new(texts, limits.max_values()),
     text: String::new(),
     field_ids: Vec::new(),
     next_field: 0,
@@ -266,9 +277,9 @@ struct Lowering<'l, 'x, 'p> {
   /// type's wrappers.
   limits: &'l Limits,
   /// The first source of a supplied package: every source below it is the built-in library's,
-  /// whose shapes no bound counts.
+  /// whose shapes and literals no bound counts.
   supplied: u32,
-  /// Every value read so far, and each source's text.
+  /// Every value read so far, each source's text, and what `Limits::max_values` has left.
   values: RawValues<'p>,
   /// The description being cooked: one buffer for every description.
   text: String,
@@ -1757,8 +1768,22 @@ impl Lowering<'_, '_, '_> {
   /// records it and as the resolver reads it, its segments, interned, each with where it is
   /// written, and the generic parameter in scope its first segment names when it has no root.
   /// Walked with an explicit stack. Nothing in it is resolved. Answers the tree.
+  ///
+  /// A supplied package's value is charged its literals first, all of them, as [`literals`] counts
+  /// them: one whose literals are more than `Limits::max_values` has left is refused whole, as
+  /// [`refused_value`](Self::refused_value) says, and none of it is read.
   fn value<S: AsRef<[u8]>>(&mut self, site: Site<'_>, value: &ConstInputValue<S>) -> u32 {
     let source = site.source.get();
+    let charged = if source >= self.supplied {
+      let left = self.values.budget.left();
+      let Some(count) = literals(value, left) else {
+        return self.refused_value(site, value, left);
+      };
+      self.values.budget.take(count);
+      Some(count)
+    } else {
+      None
+    };
     let root = dense(self.values.nodes.len());
     let mut pending: Vec<Read<'_, S>> = vec![Read::Enter(value)];
     while let Some(next) = pending.pop() {
@@ -1858,7 +1883,37 @@ impl Lowering<'_, '_, '_> {
         | ConstInputValue::Null(_) => {}
       }
     }
+    if let Some(count) = charged {
+      debug_assert_eq!(
+        dense(self.values.nodes.len()).saturating_sub(root),
+        count,
+        "a value reads exactly the literals it was charged for"
+      );
+    }
     self.values.push_tree(root, source, site.module)
+  }
+
+  /// The tree of `value`, written where `site` says, whose literals are more than the `left` that
+  /// `Limits::max_values` has left: `resource-limit` once, at the whole of it, and one node of
+  /// `RawKind::Refused` there, which coercion makes one unresolved row. Nothing is charged, and
+  /// nothing of it is read: no path in it is interned, and no field's name looked up.
+  fn refused_value<S>(&mut self, site: Site<'_>, value: &ConstInputValue<S>, left: u32) -> u32 {
+    let source = site.source.get();
+    let span = *value.as_span();
+    let max = self.values.budget.max();
+    let kind = DiagnosticKind::ResourceLimit;
+    self.reporter.report(
+      Diagnostic::builder(kind.code(), Location::new(source, span))
+        .severity(kind.severity())
+        .message(format!(
+          "this value writes more literals than the {left} left of `Limits::max_values`, {max}, \
+           the values the analysis may read and make, so none of it is read"
+        ))
+        .primary_label(kind.title())
+        .help("raise the limit with `Limits::with_max_values`, or write smaller values")
+        .build(),
+    );
+    self.values.push_refused(span, source, site.module)
   }
 
   /// The id of the next direct member of the definition the second walk is in.
@@ -2641,6 +2696,63 @@ fn wrappers<S>(ty: &Type<S>) -> u32 {
       }
       Type::Path(_) => return count,
     }
+  }
+}
+
+/// How many literals `value` writes, itself and each value nested in it, as `Lowering::value`
+/// reads them, a map's entry being its key and its value: `None` when they are more than `cap`.
+/// It walks no further than past `cap` literals, counting in `u64` so that `cap = u32::MAX` cannot
+/// overflow, with an explicit stack of the values it is inside, each with its place among what it
+/// holds, so it holds no more than the nesting the parser admitted.
+fn literals<S>(value: &ConstInputValue<S>, cap: u32) -> Option<u32> {
+  if cap == 0 {
+    return None;
+  }
+  let cap = u64::from(cap);
+  let mut count: u64 = 1;
+  let mut inside: Vec<(&ConstInputValue<S>, usize)> = vec![(value, 0)];
+  while let Some(&(holder, next)) = inside.last() {
+    let Some(child) = held(holder, next) else {
+      inside.pop();
+      continue;
+    };
+    if let Some(frame) = inside.last_mut() {
+      frame.1 = next.saturating_add(1);
+    }
+    count = count.saturating_add(1);
+    if count > cap {
+      return None;
+    }
+    inside.push((child, 0));
+  }
+  u32::try_from(count).ok()
+}
+
+/// The value at `index` among those `value` holds, in the order `Lowering::value` reads them: a
+/// list's and a set's elements, a map's entries each its key and then its value, and an object's
+/// fields' values, each in written order. `None` past the last, and for a value that holds none.
+fn held<S>(value: &ConstInputValue<S>, index: usize) -> Option<&ConstInputValue<S>> {
+  match value {
+    ConstInputValue::List(list) => list.values().get(index),
+    ConstInputValue::Set(set) => set.values().get(index),
+    ConstInputValue::Map(map) => {
+      let entry = map.entries().get(index / 2)?;
+      Some(if index % 2 == 1 {
+        entry.value()
+      } else {
+        entry.key()
+      })
+    }
+    ConstInputValue::Object(object) => {
+      let field = object.fields().get(index)?;
+      Some(field.value())
+    }
+    ConstInputValue::Boolean(_)
+    | ConstInputValue::String(_)
+    | ConstInputValue::Float(_)
+    | ConstInputValue::Int(_)
+    | ConstInputValue::Enum(_)
+    | ConstInputValue::Null(_) => None,
   }
 }
 

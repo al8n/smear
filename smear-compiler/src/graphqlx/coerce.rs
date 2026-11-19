@@ -295,12 +295,13 @@
 //! counted.
 //!
 //! Who asks for a count does what it says, once it has paid for reading a count made already:
-//! exact, the count is charged, all of it or none, and the copy is made; past the budget, the
-//! asker is starved; poisoned, one step is charged, and nothing is made: the argument, or the
-//! field, is absent, and the cycle was reported where its count met itself, while what its count
-//! reached is
-//! judged as a copy is. A read the budget cannot pay for starves the asker too. A copy is whole or
-//! absent, and the rows a copy makes are its count's, which the phase asserts when it ends.
+//! exact, the count is charged, all of it or none, as steps of `Limits::max_value_steps` and as
+//! values of `Limits::max_values` alike, the steps asked first, and the copy is made, or, when
+//! either cannot pay, the asker is starved; past the budget, the asker is starved; poisoned, one
+//! step is charged, and nothing is made: the argument, or the field, is absent, and the cycle was
+//! reported where its count met itself, while what its count reached is judged as a copy is. A read
+//! the budget cannot pay for starves the asker too. A copy is whole or absent, and the rows a copy
+//! makes are its count's, which the phase asserts when it ends.
 //!
 //! # A cycle of defaults
 //!
@@ -349,6 +350,18 @@
 //! charged nothing, and neither is a copy made for an application it writes, whose count reads
 //! nothing and is never stopped at the budget; a copy of one of its defaults made for an
 //! application a supplied package writes is charged.
+//!
+//! `Limits::max_values` bounds the rows themselves, one budget over the whole analysis. Lowering
+//! charged each literal a supplied package writes to it before any of its value was read, and a
+//! value it could not pay for is one row here, unresolved whatever its type, none of its literals
+//! read. Two kinds of row no literal writes are charged to it here, besides their steps: each list
+//! a written lone value stands for, one value each, and each row of a copy, its whole count at
+//! once. Each is charged to both budgets, all of it or none, the steps asked first, and a report
+//! names the budget that could not pay; the work stops as it stops past the steps, a lone value's
+//! level its one unresolved row, an application filled no further and an object literal given no
+//! more of its defaults. Nothing else this phase spends a step on makes a row, so the rows it makes
+//! are at most the built-in library's own, those `Limits::max_values` paid for, and one for each
+//! value lowering refused.
 //!
 //! # The arenas
 //!
@@ -859,6 +872,8 @@ enum Asked {
   Absent(AbsentRows),
   /// The budget cannot pay: the asker is past it.
   Starved,
+  /// `Limits::max_values` cannot pay for the copy's values: the asker is past it.
+  Full,
   /// A type its count reads under type arguments passes this limit: the asker is past it.
   Unbuilt(Limit),
 }
@@ -877,6 +892,26 @@ struct CopiedRows {
 struct AbsentRows {
   /// Whether each node its count reached takes its type as a written one would.
   fits: bool,
+}
+
+/// One of the two budgets a row that no literal writes is charged to: what a report of one that
+/// could not pay names.
+#[derive(Clone, Copy)]
+enum Budget {
+  /// `Limits::max_value_steps`.
+  Steps,
+  /// `Limits::max_values`.
+  Values,
+}
+
+/// What leaves out the defaults whose copies `Limits::max_values` could not pay for: what the
+/// report names.
+#[derive(Clone, Copy)]
+enum Asker {
+  /// An application, of its arguments.
+  Application,
+  /// An object literal, of its fields.
+  Literal,
 }
 
 /// Where a merge of an object literal's fields with its input object's defaults has got to: the
@@ -1009,6 +1044,8 @@ enum Class {
   Map(MapTypes),
   /// Any other node against a named type: one row, its kind told by what the type takes.
   Leaf(Base),
+  /// A value lowering did not read: one unresolved row, and nothing said.
+  Refused,
 }
 
 /// An input object a literal is made against: [`Class::Object`]'s payload.
@@ -1389,7 +1426,8 @@ struct Coercion<'c, 'p, 'x> {
   types: &'c mut Types,
   /// Every module's scope: what a qualified enum value's prefix names.
   scopes: &'c Scopes<'x>,
-  /// The trees, and each source's text.
+  /// The trees, each source's text, and what lowering left of `Limits::max_values`: what each list
+  /// a lone value stands for and each value of a copy is charged to, besides its step.
   raw: RawValues<'p>,
   /// Each primitive `core` materialises, with its definition: the primitive at index `i` is the
   /// definition `i`.
@@ -2127,8 +2165,8 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// that is a whole `null` no instantiation takes does not fit them, and is recorded for none. A
   /// copy of a default its declaration refuses, such a `null`, is judged and charged as any other,
   /// but that declaration owns its report, and it is recorded for none. Answers `false`, and
-  /// reports the application once, when the budget cannot pay, or when a type the argument takes
-  /// cannot be built under the arguments.
+  /// reports the application once, when the budget, or `Limits::max_values` for a copy's values,
+  /// cannot pay, or when a type the argument takes cannot be built under the arguments.
   fn left_out(&mut self, applying: Applying, left: Listed, reported: &mut bool) -> bool {
     let Applying {
       application,
@@ -2198,6 +2236,10 @@ impl<'p> Coercion<'_, 'p, '_> {
       Asked::Absent(AbsentRows { fits }) => (None, fits),
       Asked::Starved => {
         self.starved(at, Stop::Steps);
+        return false;
+      }
+      Asked::Full => {
+        self.full(at, Asker::Application);
         return false;
       }
       Asked::Unbuilt(limit) => {
@@ -2367,8 +2409,10 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// does, the asker the built-in library's when `library`: its count is asked for, and charged
   /// unless `library`. A count made already is read first, a step, as a count's own reads are,
   /// paid before the count is used and apart from the rows a copy then pays; one that cannot be
-  /// paid starves the asker. Exact, its rows are charged, all or none, and a copy is made; past
-  /// the budget, the asker is starved; a default that needs itself costs one step and is absent.
+  /// paid starves the asker. Exact, its rows are charged, all or none, as steps and as values of
+  /// `Limits::max_values` alike, the steps asked first, and a copy is made: steps that cannot be
+  /// paid starve the asker, and values that cannot leave it full. Past the budget, the asker is
+  /// starved; a default that needs itself costs one step and is absent, and makes no value.
   /// Steps its count's reads paid stay spent whatever the copy. `judged` when `ty` is not the type
   /// the default is written against: the count then judges whether the copy fits it, and whether
   /// what an absent one's count reached fits it.
@@ -2378,8 +2422,11 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
     match self.count(tree, ty, !library, judged) {
       Count::Rows(rows) => {
-        if !library && !self.charge(rows) {
-          return Asked::Starved;
+        if !library && let Err(budget) = self.charge_rows(rows) {
+          return match budget {
+            Budget::Steps => Asked::Starved,
+            Budget::Values => Asked::Full,
+          };
         }
         self.paid = self.paid.saturating_add(u64::from(rows));
         Asked::Copy(CopiedRows {
@@ -2743,7 +2790,8 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
     self.add_rows(1, charged)?;
     match self.classify(raw.kind, ty) {
-      Class::NoValue | Class::Null => {}
+      // A value lowering refused is one row of its copy, and fits whatever the type.
+      Class::NoValue | Class::Null | Class::Refused => {}
       Class::NotNull => self.misfit(),
       Class::Leaf(base) => {
         if judged {
@@ -3653,9 +3701,16 @@ impl<'p> Coercion<'_, 'p, '_> {
       ),
       Class::Map(types) => self.open_items(id, making, Held::Map, types),
       Class::Lone(element) => {
-        if mode.written() && source >= self.supplied && !self.charge(1) {
+        // A level is a step and a value, where a supplied package writes it; a copy's levels are
+        // among the rows its count charged.
+        let paid = if mode.written() && source >= self.supplied {
+          self.charge_rows(1)
+        } else {
+          Ok(())
+        };
+        if let Err(budget) = paid {
           self.path(id, raw.kind);
-          self.lone_limit(at);
+          self.lone_limit(at, budget);
         } else {
           let from = self.items.len();
           self.stack.push(Task::Close(CloseTask {
@@ -3681,6 +3736,8 @@ impl<'p> Coercion<'_, 'p, '_> {
           Err(refused) => self.refuse(refused, source, ty, mode),
         }
       }
+      // Lowering refused it, and said why: the row stays unresolved, and holds nothing.
+      Class::Refused => {}
     }
   }
 
@@ -3906,11 +3963,11 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// object's order, then the task that closes it: each field it sets, and each default it leaves
   /// out, a copy. Where it is written, its unknown fields are reported, a OneOf input object's
   /// count of fields, and the required fields it leaves out, before any default is filled; a
-  /// default is asked for as [`ask`](Self::ask) says, one left absent judged as a copy is, and
-  /// once the budget cannot pay, the literal is reported once and its written fields alone are
-  /// read on. In a copy each default it leaves out is copied with nothing asked and no count read:
-  /// the count the copy was charged for read each of their counts and found it exact, so their
-  /// rows are among those it paid for.
+  /// default is asked for as [`ask`](Self::ask) says, one left absent judged as a copy is, and once
+  /// the budget, or `Limits::max_values` for a copy's values, cannot pay, the literal is reported
+  /// once and its written fields alone are read on. In a copy each default it leaves out is copied
+  /// with nothing asked and no count read: the count the copy was charged for read each of their
+  /// counts and found it exact, so their rows are among those it paid for.
   fn object(&mut self, id: ValueId, making: Making, def: DefId, first: u32) {
     let Making {
       node, tree, mode, ..
@@ -3995,6 +4052,11 @@ impl<'p> Coercion<'_, 'p, '_> {
           Asked::Absent(AbsentRows { fits }) => (fits, false),
           Asked::Starved => {
             self.object_starved(at, Stop::Steps);
+            merge.default = merge.default_end;
+            continue;
+          }
+          Asked::Full => {
+            self.full(at, Asker::Literal);
             merge.default = merge.default_end;
             continue;
           }
@@ -4323,6 +4385,27 @@ impl<'p> Coercion<'_, 'p, '_> {
     self.limit(at, message);
   }
 
+  /// Reports that `Limits::max_values` cannot pay for the copies of the defaults `asker`, at `at`,
+  /// leaves out, which are not filled: an application's arguments, at its path, or an object
+  /// literal's fields, at the literal.
+  fn full(&mut self, at: Location, asker: Asker) {
+    let (left, what) = match asker {
+      Asker::Application => ("arguments", "application"),
+      Asker::Literal => ("fields", "literal"),
+    };
+    let message = Message {
+      text: format!(
+        "the {left} this {what} leaves out pass `Limits::max_values`, {}, the values the \
+         analysis may read and make, and are not filled",
+        self.raw.budget.max()
+      ),
+      help: Cow::Owned(format!(
+        "raise the limit with `Limits::with_max_values`, or write the {left}"
+      )),
+    };
+    self.limit(at, message);
+  }
+
   /// Makes the row of `making`'s node one unresolved row, typed with its type, with the path the
   /// node is written as when it is one, and reports why, `why`, where it is written: it holds
   /// nothing.
@@ -4382,6 +4465,11 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// What `kind` is made against `ty`, told by the two and, for a type that names type parameters,
   /// by the walk's definition: no literal is read.
   fn classify(&self, kind: RawKind, ty: Option<TyId>) -> Class {
+    // Asked before the type, so that no type that keeps a literal as written keeps the text of a
+    // value lowering refused.
+    if matches!(kind, RawKind::Refused) {
+      return Class::Refused;
+    }
     let Some(ty) = ty else {
       return Class::NoValue;
     };
@@ -5037,7 +5125,12 @@ impl<'p> Coercion<'_, 'p, '_> {
     let row = match self.read(slot).literal {
       Some(row) => row,
       None => {
-        let kind = match self.kind(node) {
+        let kind = self.kind(node);
+        debug_assert!(
+          !matches!(kind, RawKind::Refused),
+          "no literal is read of a value lowering refused: `classify` answers it first"
+        );
+        let kind = match kind {
           RawKind::Null => LiteralKind::Null,
           RawKind::Boolean(_) => LiteralKind::Boolean,
           RawKind::Int(_) => LiteralKind::Int,
@@ -5048,6 +5141,7 @@ impl<'p> Coercion<'_, 'p, '_> {
           RawKind::Set => LiteralKind::Set,
           RawKind::Map => LiteralKind::Map,
           RawKind::Object(_) => LiteralKind::Object,
+          RawKind::Refused => return,
         };
         let text = self.text(node, tree);
         let row = self.builder.push_literal(kind, text);
@@ -5254,6 +5348,20 @@ impl<'p> Coercion<'_, 'p, '_> {
     self.values.charge(steps)
   }
 
+  /// Spends `rows` steps of `Limits::max_value_steps` and `rows` values of `Limits::max_values`,
+  /// for as many rows that no literal writes: all of both or none, the steps asked first. `Err`
+  /// with the budget that cannot pay, nothing spent.
+  fn charge_rows(&mut self, rows: u32) -> Result<(), Budget> {
+    if rows > self.values.left() {
+      return Err(Budget::Steps);
+    }
+    if !self.raw.budget.charge(rows) {
+      return Err(Budget::Values);
+    }
+    self.values.take(rows);
+    Ok(())
+  }
+
   /// Reports `refused`, a node written in the source `source`, that does not fit, the value it
   /// stands in being expected of `ty`, when `mode` is written; a copy says nothing and searches for
   /// no near miss. A path whose root lowering does not know says nothing either: lowering reported
@@ -5450,21 +5558,29 @@ impl<'p> Coercion<'_, 'p, '_> {
     self.reporter.report(report.build());
   }
 
-  /// Reports that the lists a value written at `at` stands for are past the budget.
-  fn lone_limit(&mut self, at: Location) {
-    let kind = DiagnosticKind::ResourceLimit;
-    let max = self.values.max();
-    self.reporter.report(
-      Diagnostic::builder(kind.code(), at)
-        .severity(kind.severity())
-        .message(format!(
+  /// Reports that the lists a value written at `at` stands for are past `budget`.
+  fn lone_limit(&mut self, at: Location, budget: Budget) {
+    let message = match budget {
+      Budget::Steps => Message {
+        text: format!(
           "the lists this value stands for, written where a list is expected, pass \
-           `Limits::max_value_steps`, {max}, the steps the analysis may take to complete values"
-        ))
-        .primary_label(kind.title())
-        .help("raise the limit with `Limits::with_max_value_steps`, or write the lists")
-        .build(),
-    );
+           `Limits::max_value_steps`, {}, the steps the analysis may take to complete values",
+          self.values.max()
+        ),
+        help: Cow::Borrowed(
+          "raise the limit with `Limits::with_max_value_steps`, or write the lists",
+        ),
+      },
+      Budget::Values => Message {
+        text: format!(
+          "the lists this value stands for, written where a list is expected, pass \
+           `Limits::max_values`, {}, the values the analysis may read and make",
+          self.raw.budget.max()
+        ),
+        help: Cow::Borrowed("raise the limit with `Limits::with_max_values`, or write the lists"),
+      },
+    };
+    self.limit(at, message);
   }
 }
 

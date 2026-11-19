@@ -30,6 +30,8 @@ const DEFAULT_SUBSTITUTIONS: u32 = 1 << 20;
 const DEFAULT_BOUND_STEPS: u32 = 1 << 20;
 /// See [`Limits::max_value_steps`].
 const DEFAULT_VALUE_STEPS: u32 = 1 << 20;
+/// See [`Limits::max_values`].
+const DEFAULT_VALUES: u32 = 1 << 20;
 /// See [`Limits::max_implementation_steps`].
 const DEFAULT_IMPLEMENTATION_STEPS: u32 = 1 << 20;
 /// See [`Limits::max_source_bytes`].
@@ -58,14 +60,15 @@ const _: () = assert!(
 /// rounds the glob fixpoint runs, how many modules one module's globs name, how many arguments a
 /// field and a directive declare, how many list and non-null wrappers a written type has, how many
 /// instantiations of generic definitions it interns, how many steps of substitution it takes, how
-/// many steps judging bounds takes, how many steps completing values takes, how many steps checking
-/// implementations takes, and how many bytes the supplied texts hold. A bound that is passed stops
-/// that work, is reported as `smear::graphqlx::resource-limit`, and the analysis goes on. Two
-/// bounds are not refusals: the diagnostic ceiling and the near-miss budget limit what the analysis
-/// says, not what it accepts. Three refuse a shape and stop no work: how many arguments a field and
-/// a directive declare, and how many list and non-null wrappers a written type has. They cost the
-/// analysis no more than their text, and a consumer sets them for a representation of its own: at
-/// 64, 64 and 15 they refuse each document GraphQL's schema builder refuses for a ceiling.
+/// many steps judging bounds takes, how many steps completing values takes, how many values it
+/// reads and makes, beyond the one each default and each argument written keeps, how many steps
+/// checking implementations takes, and how many bytes the supplied texts hold. A bound that is
+/// passed stops that work, is reported as `smear::graphqlx::resource-limit`, and the analysis goes
+/// on. Two bounds are not refusals: the diagnostic ceiling and the near-miss budget limit what the
+/// analysis says, not what it accepts. Three refuse a shape and stop no work: how many arguments a
+/// field and a directive declare, and how many list and non-null wrappers a written type has. They
+/// cost the analysis no more than their text, and a consumer sets them for a representation of its
+/// own: at 64, 64 and 15 they refuse each document GraphQL's schema builder refuses for a ceiling.
 ///
 /// Before any bound applies, the diagnostic ceiling aside, the analysis reads what the caller
 /// supplied, to number and order it. It sorts each package's files by path, and orders two files
@@ -89,13 +92,13 @@ const _: () = assert!(
 /// types are built whatever the generic depth, instantiation and substitution bounds are, its
 /// fields' and directives' arguments and its types' wrappers are counted by none of the three
 /// shape bounds, its bounds cost nothing to judge, since it writes no instantiation of a
-/// definition with a bound, its own values cost nothing to complete, where it writes them and in a
-/// copy made for an application it writes, and its implementations cost nothing to check, since it
-/// writes no `implements` entry and no union: see
+/// definition with a bound, its own values cost nothing to read or complete, where it writes them
+/// and in a copy made for an application it writes, and its implementations cost nothing to check,
+/// since it writes no `implements` entry and no union: see
 /// [`Limits::max_definitions`], [`Limits::max_modules`], [`Limits::max_field_arguments`],
 /// [`Limits::max_directive_arguments`], [`Limits::max_type_wrappers`],
 /// [`Limits::max_generic_depth`], [`Limits::max_instantiations`], [`Limits::max_substitutions`],
-/// [`Limits::max_bound_steps`], [`Limits::max_value_steps`] and
+/// [`Limits::max_bound_steps`], [`Limits::max_value_steps`], [`Limits::max_values`] and
 /// [`Limits::max_implementation_steps`].
 ///
 /// # Building one
@@ -129,6 +132,7 @@ pub struct Limits {
   max_substitutions: u32,
   max_bound_steps: u32,
   max_value_steps: u32,
+  max_values: u32,
   max_implementation_steps: u32,
   max_source_bytes: u32,
   max_diagnostics: u32,
@@ -164,6 +168,7 @@ impl Limits {
       max_substitutions: DEFAULT_SUBSTITUTIONS,
       max_bound_steps: DEFAULT_BOUND_STEPS,
       max_value_steps: DEFAULT_VALUE_STEPS,
+      max_values: DEFAULT_VALUES,
       max_implementation_steps: DEFAULT_IMPLEMENTATION_STEPS,
       max_source_bytes: DEFAULT_SOURCE_BYTES,
       max_diagnostics: DEFAULT_DIAGNOSTICS,
@@ -543,6 +548,45 @@ impl Limits {
     self.max_value_steps
   }
 
+  /// How many values the analysis may read and make, over the whole analysis: each literal a
+  /// supplied package writes in a default or in an application's argument, a list's, a set's, a
+  /// map's and an object's included, counted where lowering reads it, whatever coercion makes of
+  /// it; each list a value stands for where a list is expected, one for each level; and each value
+  /// of a copy of a default, which fills an argument an application leaves out or a field an object
+  /// literal leaves out. A literal lowering never reads costs nothing: one in an application whose
+  /// directive names nothing, or in an argument its directive does not declare. The built-in
+  /// library's own values cost nothing, and neither does a copy made for an application it writes;
+  /// a copy of one of its defaults made for an application a supplied package writes, a bare
+  /// `@deprecated`'s reason among them, is charged.
+  ///
+  /// The written values are charged first, each before any of it is read, all of it or none, in the
+  /// order the model's walk reaches them. One whose literals are more than is left is
+  /// `resource-limit` where it is written, and is one unresolved value, charged nothing, none of
+  /// its literals read; a later value that fits is still read. Then the lists and the copies are
+  /// charged as they are made, so an application early in the walk can be starved by a default
+  /// written after it. A list a value stands for that cannot be paid for is `resource-limit` where
+  /// the value is written, and is its one unresolved value, under the levels that were, as
+  /// [`max_value_steps`](Self::max_value_steps) says of one it cannot pay for. A copy is charged
+  /// its values before its first is made, all of them or none, as that bound charges its steps: an
+  /// application whose next copy cannot be paid for is `resource-limit` at its path, once, and is
+  /// filled no further, and an object literal likewise, at the literal.
+  ///
+  /// So it holds the literals nested in a value, the lists, and the copies. It does not hold the
+  /// one value each default and each argument a supplied package writes keeps, read or refused: the
+  /// model holds at most this many values beyond the built-in library's own and one for each
+  /// default and argument written past it. Those are bounded by
+  /// [`max_source_bytes`](Self::max_source_bytes) alone, an argument written again being kept
+  /// again, so `@d(a: 0, a: 0, …)` makes one every four bytes. Nor does it bound the documents the
+  /// values are read from, which `max_source_bytes` and the parser's own limits bound. At `0`, no
+  /// value a supplied package writes is read, each is one unresolved value, and nothing a supplied
+  /// package leaves out is filled from a default.
+  ///
+  /// The default is 2^20. GitLab's schema, the largest of smear's fixtures, makes {N}.
+  #[inline]
+  pub const fn max_values(&self) -> u32 {
+    self.max_values
+  }
+
   /// How many steps the analysis may take to check implementations, over the whole analysis:
   /// that each definition implements the interfaces its own package's `implements` entries name,
   /// markers alone where it is no object and no interface, under the type arguments each entry
@@ -755,6 +799,14 @@ impl Limits {
   #[must_use]
   pub const fn with_max_value_steps(mut self, max: u32) -> Self {
     self.max_value_steps = max;
+    self
+  }
+
+  /// The same limits with `max` as their [`max_values`](Self::max_values) bound.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_values(mut self, max: u32) -> Self {
+    self.max_values = max;
     self
   }
 

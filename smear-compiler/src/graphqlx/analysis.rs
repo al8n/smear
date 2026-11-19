@@ -208,7 +208,10 @@ impl Analysis {
 ///   [`Limits::max_field_arguments`], or [`Limits::max_directive_arguments`], admits is
 ///   `resource-limit` once, at its name, labelled at the first argument past it; and so is a
 ///   written type of more list and non-null wrappers than [`Limits::max_type_wrappers`] admits, at
-///   the whole of it. Each keeps what it writes. Then the schema's
+///   the whole of it. Each keeps what it writes. A value a supplied package writes is charged its
+///   literals to [`Limits::max_values`] before any of it is read: one whose literals are more than
+///   the bound has left is `resource-limit` once, at the whole of it, and is one unresolved value,
+///   none of it read. Then the schema's
 ///   contributions: every package's schema definitions, then its schema extensions, each by source
 ///   and position and each marked as what it is. The root package's first schema definition gives
 ///   the schema its description, its roots and its applications, and each schema extension the
@@ -269,8 +272,9 @@ impl Analysis {
 ///   member's type for its default and an argument's for its value, with its `!`: `null` where it
 ///   is nullable; a list's elements each against its element, and any other value where a list is
 ///   expected the one-element list that holds it, a list for each level, each list a step of
-///   [`Limits::max_value_steps`]; a boolean; an integer in its width's range, read at any length, a
-///   decimal one of more than 38 significant digits converted within the same budget; a float, or
+///   [`Limits::max_value_steps`] and a value of [`Limits::max_values`]; a boolean; an integer in
+///   its width's range, read at any length, a decimal one of more than 38 significant digits
+///   converted within the step budget; a float, or
 ///   an integer, rounded once to `f32` or `f64` and finite there; a string, cooked; for `id` a
 ///   string or an integer in `i32`'s range; for `bytes` a string's UTF-8 encoding or a list of
 ///   integers from 0 to 255; for `NonZero` an integer that is not zero; for an enum one of its
@@ -356,7 +360,10 @@ impl Analysis {
 ///   and the type they are read against, is a step of [`Limits::max_value_steps`]: past it the
 ///   application is `resource-limit`
 ///   once, at its path, and filled no further, an object literal likewise at the literal, and an
-///   integer whose conversion it cannot pay for is `resource-limit` where it is written. Last,
+///   integer whose conversion it cannot pay for is `resource-limit` where it is written. Each row
+///   of a copy is a value of [`Limits::max_values`] as well, a copy's values charged with its
+///   steps, all or none and the steps asked first: past that bound the application, or the object
+///   literal, is starved as past the steps, the report naming the bound. Last,
 ///   names and texts
 ///   past what the model's `u32` offsets address, which only a [`Limits::max_source_bytes`] far
 ///   above its default admits, are reported at the root package's package source.

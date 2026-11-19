@@ -400,15 +400,17 @@ All notable changes to Smear are documented in this file.
     at compile time: a tuple of up to twelve, an `Option` of one, a `&mut` or a `Box` of one, and
     `()`. `SourceMap::written_by` answers the package that wrote a location, and
     `TypeExpr::written_args` the arguments written on an occurrence of any shape.
-  - **Limits.** Nineteen bounds, each a `u32` count with its getter and its `with_*` setter, and
+  - **Limits.** Twenty bounds, each a `u32` count with its getter and its `with_*` setter, and
     one passed is `smear::graphqlx::resource-limit`, never a panic: definitions 2^20, modules
     2^16, module depth 64, path segments 64, `use` depth 32, glob iterations 2^10, globs 64,
     field arguments 2^10, directive arguments 2^10, type wrappers 64, generic depth 64,
-    instantiations 2^16, substitutions 2^20, bound steps 2^20, value steps 2^20, implementation
-    steps 2^20, source bytes 2^26, diagnostics 16 384, and near-miss comparisons 2^20, the last
-    two limiting what the analysis says and not what it accepts. The arguments of a field and of
-    a directive, and a written type's wrappers, refuse a shape and stop no work: at 64, 64 and 15
-    they refuse each document GraphQL's builder refuses for a ceiling.
+    instantiations 2^16, substitutions 2^20, bound steps 2^20, value steps 2^20, values 2^20,
+    implementation steps 2^20, source bytes 2^26, diagnostics 16 384, and near-miss comparisons
+    2^20, the last two limiting what the analysis says and not what it accepts. The arguments of a
+    field and of a directive, and a written type's wrappers, refuse a shape and stop no work: at 64,
+    64 and 15 they refuse each document GraphQL's builder refuses for a ceiling. `max_values` counts
+    each literal nested in a value, each list a value stands for, and each value of a copy; the one
+    value each default and each argument written keeps is bounded by the source alone.
   - **Options.** `Options` holds the switches that relax or tighten what the language accepts, each
     off by default and the analysis's whole, built as `Limits` is.
     `extern_collections_as_written` lets an extern collection, a set or a map its own package

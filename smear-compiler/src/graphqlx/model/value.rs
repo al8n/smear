@@ -134,8 +134,9 @@ pub enum ValueKind<'a> {
   /// the input object declares, one written twice twice, in written order, and each one it leaves
   /// out that has a default, a copy of the default; no absent one. A field left out is absent when
   /// its default's copy would hold a copy of itself, or when
-  /// [`Limits::max_value_steps`](crate::graphqlx::Limits::max_value_steps) could not pay for the
-  /// copy. A OneOf input object's fields left out are never filled.
+  /// [`Limits::max_value_steps`](crate::graphqlx::Limits::max_value_steps) or
+  /// [`Limits::max_values`](crate::graphqlx::Limits::max_values) could not pay for it. A OneOf
+  /// input object's fields left out are never filled.
   Object(&'a [ObjectEntry]),
   /// A value kept as written: of a custom scalar that is no collection, but `null`, and, under the
   /// switch
@@ -144,10 +145,12 @@ pub enum ValueKind<'a> {
   /// still names a type parameter, but a whole `null` no instantiation takes, which is
   /// [`ValueKind::Unresolved`]; or of a type that can take no value.
   Literal(Literal<'a>),
-  /// A value that did not coerce or resolve. Only an analysis that is not ok has one. It lies
-  /// within the extent of the error that says why, but for a copy of a default: its error is where
-  /// the default is written, or at the application, the literal or the instantiation's occurrence
-  /// whose type arguments it does not fit, which may stand in another definition.
+  /// A value that did not coerce or resolve, or that
+  /// [`Limits::max_values`](crate::graphqlx::Limits::max_values) kept from being read. Only an
+  /// analysis that is not ok has one. It lies within the extent of the error that says why, but
+  /// for a copy of a default: its error is where the default is written, or at the application,
+  /// the literal or the instantiation's occurrence whose type arguments it does not fit, which may
+  /// stand in another definition.
   #[unwrap(ignore)]
   #[try_unwrap(ignore)]
   Unresolved,

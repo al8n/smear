@@ -1,21 +1,30 @@
-//! The GraphQLx analyzer's bounds on the shapes a program writes: how many arguments a field and a
-//! directive declare, and how many list and non-null wrappers a written type has, each at its
-//! default, tightened and relaxed.
+//! The GraphQLx analyzer's bounds on the shapes a program writes, how many arguments a field and a
+//! directive declare and how many list and non-null wrappers a written type has, and on the values
+//! an analysis reads and makes, each at its default, tightened and relaxed.
 //!
-//! The three refuse a shape and stop no work: a refused field, directive or type keeps everything
-//! it writes, so nothing downstream sees less than the program says. At 64, 64 and 15 they refuse
-//! each document GraphQL's schema builder refuses for a capacity ceiling, which
+//! The three shape bounds refuse a shape and stop no work: a refused field, directive or type keeps
+//! everything it writes, so nothing downstream sees less than the program says. At 64, 64 and 15
+//! they refuse each document GraphQL's schema builder refuses for a capacity ceiling, which
 //! `analysis_differential.rs` holds over the corpus.
 //!
-//! Each test builds the shapes it needs from counts, as a fixture of `support/validator_corpus.rs`
-//! writes a field of sixty-five arguments out, so the number a test uses is readable beside the
-//! number it tests.
+//! `Limits::max_values` charges each literal a supplied package writes where lowering reads it, and
+//! each list a lone value stands for and each value of a copy where coercion makes it. A written
+//! value it cannot pay for is one unresolved value, read no further, so the model holds at most the
+//! bound's values beyond the built-in library's own and one for each value refused, which
+//! `the_model_holds_what_it_says` measures.
+//!
+//! Each test builds the shapes and the values it needs from counts, as a fixture of
+//! `support/validator_corpus.rs` writes a field of sixty-five arguments out, so the number a test
+//! uses is readable beside the number it tests.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
+
+use std::io::Write as _;
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, DefId, Layout, Limits, MemberId, Model, Namespace, Options, Package, PackageId,
-    SourceFile, SourceId, Tier, TyId, TyKind, ValueKind, analyze, analyze_with,
+    Analysis, ApplicationArgument, DefId, Layout, Limits, MemberId, Model, Namespace, ObjectEntry,
+    Options, Package, PackageId, SourceFile, SourceId, Tier, TyId, TyKind, ValueId, ValueKind,
+    analyze, analyze_with, test_support,
   },
   diagnostic::{Diagnose, Location},
   lexer::{limits::SyntacticLimits, tokora::SimpleSpan},
@@ -24,6 +33,12 @@ use smear::{
 
 /// A bound of the limits passed.
 const LIMIT: &str = "smear::graphqlx::resource-limit";
+
+/// What every report of `Limits::max_values` quotes.
+const VALUES: &str = "`Limits::max_values`";
+
+/// What a report of a written value `Limits::max_values` refused says, and no other report.
+const UNREAD: &str = "so none of it is read";
 
 /// GraphQL's code for a schema with no query root, which a library analyzed as the root package
 /// has.
@@ -196,6 +211,155 @@ fn field_shown(model: &Model, owner: &str, field: &str) -> String {
     .unwrap_or_else(|| panic!("`{owner}.{field}` has no type"));
   shown(model, model.type_expr(written).ty())
 }
+
+/// Where `literal` is written right after `before`, the first time, in `text`, the file `source`.
+fn after(source: SourceId, text: &str, before: &str, literal: &str) -> Location {
+  let written = format!("{before}{literal}");
+  let start = text
+    .find(written.as_str())
+    .unwrap_or_else(|| panic!("`{written}` is not written"))
+    + before.len();
+  Location::new(source.get(), SimpleSpan::new(start, start + literal.len()))
+}
+
+/// The value `id`, written out: a coerced value as its kind's name and its text, `Int 1` and
+/// `List [Int 1]`; a byte string as `Bytes` and its bytes; an input object's entries, each its
+/// field's name, `:` after one its literal writes and `=` after a copy of a default, and its
+/// value; a literal kept as written as `Literal(List) [1]`; and an unresolved value as `?`.
+fn valued(model: &Model, id: ValueId) -> String {
+  let value = model.value(id);
+  match value.kind() {
+    ValueKind::Null => String::from("Null null"),
+    ValueKind::Int(int) => format!("Int {}", int.text()),
+    ValueKind::String(text) => format!("String {text:?}"),
+    ValueKind::Bytes(bytes) => format!("Bytes {bytes:?}"),
+    ValueKind::List(items) => {
+      let items: Vec<String> = items
+        .iter()
+        .map(|item: &ValueId| valued(model, *item))
+        .collect();
+      format!("List [{}]", items.join(", "))
+    }
+    ValueKind::Object(entries) => {
+      let entries: Vec<String> = entries
+        .iter()
+        .map(|entry: &ObjectEntry| {
+          let mark = if entry.name().is_some() { ":" } else { "=" };
+          format!(
+            "{}{mark} {}",
+            model.member(entry.field()).name(),
+            valued(model, entry.value())
+          )
+        })
+        .collect();
+      format!("Object {{{}}}", entries.join(", "))
+    }
+    ValueKind::Literal(literal) => format!("Literal({:?}) {}", literal.kind(), literal.text()),
+    ValueKind::Unresolved => String::from("?"),
+    other => format!("{other:?}"),
+  }
+}
+
+/// The default of the input field `name` of the root package's input object `owner`.
+fn input_default(model: &Model, owner: &str, name: &str) -> ValueId {
+  let field = model
+    .def(type_def(model, owner))
+    .input_fields()
+    .into_iter()
+    .find(|id: &MemberId| model.member(*id).name() == name)
+    .unwrap_or_else(|| panic!("no input field `{owner}.{name}`"));
+  model
+    .member(field)
+    .default()
+    .unwrap_or_else(|| panic!("`{owner}.{name}` has no default"))
+}
+
+/// The default of the argument `name` of the field `field` of the root package's type `owner`,
+/// written out.
+fn argument_default(model: &Model, owner: &str, field: &str, name: &str) -> String {
+  let argument = model
+    .member(field_of(model, owner, field))
+    .arguments()
+    .into_iter()
+    .find(|id: &MemberId| model.member(*id).name() == name)
+    .unwrap_or_else(|| panic!("no argument `{name}` of `{owner}.{field}`"));
+  let default = model
+    .member(argument)
+    .default()
+    .unwrap_or_else(|| panic!("`{name}` of `{owner}.{field}` has no default"));
+  valued(model, default)
+}
+
+/// Each argument of the first application on the field `field` of the root package's type
+/// `owner`: its name, `:` after one written and `=` after a copy of a default, and its value.
+fn applied(model: &Model, owner: &str, field: &str) -> Vec<String> {
+  let application = model.member(field_of(model, owner, field)).applications()[0];
+  model
+    .application(application)
+    .arguments()
+    .iter()
+    .map(|argument: &ApplicationArgument| {
+      let mark = if argument.written() { ":" } else { "=" };
+      format!(
+        "{}{mark} {}",
+        model.member(argument.argument()).name(),
+        valued(model, argument.value())
+      )
+    })
+    .collect()
+}
+
+/// How many values `model` holds.
+fn values_held(model: &Model) -> u32 {
+  let test_support::Counts { values, .. } = test_support::counts(model);
+  values
+}
+
+/// How many values the built-in library's own are: what an empty root package's model holds.
+fn library_values() -> u32 {
+  let empty: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
+  values_held(analyze(&empty, &[], &Limits::new(), &Options::new()).model())
+}
+
+/// How many values `analysis`'s model holds beyond the built-in library's own, `library`.
+fn made(analysis: &Analysis, library: u32) -> u32 {
+  values_held(analysis.model())
+    .checked_sub(library)
+    .expect("every model holds the built-in library's values")
+}
+
+/// How many of `analysis`'s reports are of a written value `Limits::max_values` refused.
+fn unread(analysis: &Analysis) -> u32 {
+  let refused = messages(analysis, LIMIT)
+    .iter()
+    .filter(|message: &&String| message.contains(UNREAD))
+    .count();
+  u32::try_from(refused).expect("a count of reports fits a `u32`")
+}
+
+/// The help of each diagnostic whose code is `code`, in the list's order.
+fn helps(analysis: &Analysis, code: &str) -> Vec<String> {
+  analysis
+    .diagnostics()
+    .iter()
+    .filter(|diagnostic| diagnostic.code().as_str() == code)
+    .map(|diagnostic| diagnostic.help().map(String::from).unwrap_or_default())
+    .collect()
+}
+
+/// Three defaults: `a`'s three literals, `b`'s one, and `c`'s one, which stands for two lists that
+/// coercion makes. Seven values in all.
+const DEFAULTS: &str = "input In {\n  a: [Int] = [1, 2]\n  b: Int = 7\n  c: [[Int]] = 5\n}\n";
+
+/// A default of three values that three applications leave out: the default's own three, and
+/// three for each copy. Twelve in all.
+const COPIED: &str = "directive @d(a: [Int] = [1, 2]) on FIELD_DEFINITION\n\
+                      type Query {\n  x: Int @d\n  y: Int @d\n  z: Int @d\n}\n";
+
+/// An object literal that leaves out both fields of its input object, each defaulted to one value:
+/// three written values, and two copied. Five in all.
+const FILLED: &str =
+  "input In {\n  a: Int = 1\n  b: Int = 2\n}\ntype Query {\n  f(x: In = {}): Int\n}\n";
 
 /// The three shapes GraphQL's schema builder refuses for a capacity ceiling, which GraphQLx
 /// accepts by default: a field and a directive of sixty-five arguments, and a type of sixteen
@@ -544,9 +708,10 @@ fn a_replaced_directive_is_counted() {
   );
 }
 
-/// The built-in library is counted by none of the three: an empty root package under the three
+/// The built-in library is counted by none of the four: an empty root package under the four
 /// bounds at `0` is clean, though `core`'s `@extern` has three arguments, `__Type.fields` one and
-/// `__Schema.types` is `[__Type!]!`; and beside it a root package that writes a field with an
+/// `__Schema.types` is `[__Type!]!`, and `@deprecated`'s `reason` keeps its default, a value the
+/// library writes and reads for nothing; and beside it a root package that writes a field with an
 /// argument, a directive with an argument and a type `Int!` is refused once for each. Refuses a
 /// library counted as a supplied package is.
 #[test]
@@ -554,11 +719,24 @@ fn the_built_in_library_is_counted_by_none_of_the_four() {
   let none = Limits::new()
     .with_max_field_arguments(0)
     .with_max_directive_arguments(0)
-    .with_max_type_wrappers(0);
+    .with_max_type_wrappers(0)
+    .with_max_values(0);
   let empty: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
   let analysis = analyze(&empty, &[], &none, &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   assert!(found(&analysis, LIMIT).is_empty());
+  let model = analysis.model();
+  let reason = model
+    .def(model.builtins().deprecated())
+    .arguments()
+    .into_iter()
+    .next()
+    .expect("`reason`");
+  let default = model.member(reason).default().expect("a default");
+  assert_eq!(
+    model.value(default).kind(),
+    ValueKind::String("No longer supported")
+  );
 
   let text = "type Query {\n  wide(a: Int): Int\n  g: Int!\n}\n\
               directive @mark(b: Int) on FIELD_DEFINITION\n";
@@ -579,5 +757,477 @@ fn the_built_in_library_is_counted_by_none_of_the_four() {
     ],
     "{:#?}",
     analysis.diagnostics()
+  );
+}
+
+/// A written value is charged its literals where lowering reads it, and the lists a lone value
+/// stands for where coercion makes them: `In`'s defaults write five literals, and `c`'s `5` stands
+/// for two lists. At 7 all is made. At 6 `c`'s inner list cannot be paid for: `c` is `List [?]`,
+/// reported at `5`. At 4 lowering reads `a` and `b`, which spend all four, and refuses `c`, which
+/// is `?`. At 2 lowering refuses `a`, charging nothing, and reads `b` and `c`, which spend both,
+/// so coercion cannot pay for `c`'s first list. Refuses a lone value's lists left uncharged, and a
+/// refused value that spends what is left.
+#[test]
+fn a_written_value_is_charged_its_literals() {
+  let text = DEFAULTS;
+  let defaults = |analysis: &Analysis| -> [String; 3] {
+    let model = analysis.model();
+    ["a", "b", "c"].map(|name: &str| valued(model, input_default(model, "In", name)))
+  };
+
+  let analysis = analyze_text(text, &Limits::new().with_max_values(7), &Options::new());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
+  assert_eq!(
+    defaults(&analysis),
+    ["List [Int 1, Int 2]", "Int 7", "List [List [Int 5]]"]
+  );
+
+  let analysis = analyze_text(text, &Limits::new().with_max_values(6), &Options::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(found(&analysis, LIMIT), [(at(schema, text, "5", 0), None)]);
+  let message = only(messages(&analysis, LIMIT));
+  assert!(
+    message.contains("the lists this value stands for"),
+    "{message}"
+  );
+  assert!(message.contains(&format!("{VALUES}, 6")), "{message}");
+  assert_eq!(
+    defaults(&analysis),
+    ["List [Int 1, Int 2]", "Int 7", "List [?]"]
+  );
+
+  let analysis = analyze_text(text, &Limits::new().with_max_values(4), &Options::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(found(&analysis, LIMIT), [(at(schema, text, "5", 0), None)]);
+  let message = only(messages(&analysis, LIMIT));
+  assert!(message.contains(UNREAD), "{message}");
+  assert!(
+    message.contains(&format!("the 0 left of {VALUES}, 4")),
+    "{message}"
+  );
+  assert_eq!(defaults(&analysis), ["List [Int 1, Int 2]", "Int 7", "?"]);
+
+  let analysis = analyze_text(text, &Limits::new().with_max_values(2), &Options::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis, LIMIT),
+    [
+      (at(schema, text, "[1, 2]", 0), None),
+      (at(schema, text, "5", 0), None),
+    ]
+  );
+  let reports = messages(&analysis, LIMIT);
+  assert!(
+    reports[0].contains(&format!("the 2 left of {VALUES}, 2")),
+    "{reports:#?}"
+  );
+  assert!(
+    reports[1].contains("the lists this value stands for"),
+    "{reports:#?}"
+  );
+  assert_eq!(defaults(&analysis), ["?", "Int 7", "?"]);
+}
+
+/// A value kept as written costs every literal lowering reads of it, though the model keeps it as
+/// one value: `[0, 0, 0]` of a custom scalar is four literals, refused at 3 and one `Literal` at 4,
+/// and so is `[1, 2, 3]` of `bytes`, one `Bytes` value at 4. Refuses a value charged by the rows it
+/// makes rather than by what is read of it.
+#[test]
+fn a_value_kept_as_written_costs_its_literals() {
+  for (text, written, kept) in [
+    (
+      "scalar Any\ninput H {\n  a: Any = [0, 0, 0]\n}\n",
+      "[0, 0, 0]",
+      "Literal(List) [0, 0, 0]",
+    ),
+    (
+      "input H {\n  a: bytes = [1, 2, 3]\n}\n",
+      "[1, 2, 3]",
+      "Bytes [1, 2, 3]",
+    ),
+  ] {
+    let analysis = analyze_text(text, &Limits::new().with_max_values(3), &Options::new());
+    let schema = schema_file(&analysis);
+    assert_eq!(
+      found(&analysis, LIMIT),
+      [(at(schema, text, written, 0), None)]
+    );
+    let model = analysis.model();
+    assert_eq!(valued(model, input_default(model, "H", "a")), "?");
+
+    let analysis = analyze_text(text, &Limits::new().with_max_values(4), &Options::new());
+    assert!(clean(&analysis), "{text}: {:#?}", analysis.diagnostics());
+    let model = analysis.model();
+    assert_eq!(valued(model, input_default(model, "H", "a")), kept);
+  }
+}
+
+/// A value of more literals than are left is refused alone, and charges nothing: under a bound of
+/// four, `[1, 2, 3, 4]`, five literals, is refused, and the next default's one literal is still
+/// read. Refuses a refusal that spends the bound, or that stops the reading of what follows.
+#[test]
+fn a_later_value_that_fits_is_read() {
+  let text = "input In {\n  a: [Int] = [1, 2, 3, 4]\n  b: Int = 1\n}\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_values(4), &Options::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis, LIMIT),
+    [(at(schema, text, "[1, 2, 3, 4]", 0), None)]
+  );
+  let message = only(messages(&analysis, LIMIT));
+  assert!(
+    message.contains(&format!("the 4 left of {VALUES}, 4")),
+    "{message}"
+  );
+  let model = analysis.model();
+  assert_eq!(valued(model, input_default(model, "In", "a")), "?");
+  assert_eq!(valued(model, input_default(model, "In", "b")), "Int 1");
+}
+
+/// A lone value's lists cost a value a level, as they cost a step: `a: [[Int]] = 1` is one literal
+/// and two lists. At 3 it is made; at 2 its inner list is not, so it is `List [?]`, reported at `1`
+/// with `Limits::with_max_values` in its help; at 1 neither list is, and it is `?`; and at 0
+/// lowering refuses its literal. Refuses a level charged to the steps alone.
+#[test]
+fn a_lone_value_costs_a_value_a_level() {
+  let text = "input I {\n  a: [[Int]] = 1\n}\n";
+  let default = |analysis: &Analysis| -> String {
+    let model = analysis.model();
+    valued(model, input_default(model, "I", "a"))
+  };
+
+  let analysis = analyze_text(text, &Limits::new().with_max_values(3), &Options::new());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
+  assert_eq!(default(&analysis), "List [List [Int 1]]");
+
+  let analysis = analyze_text(text, &Limits::new().with_max_values(2), &Options::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(found(&analysis, LIMIT), [(at(schema, text, "1", 0), None)]);
+  assert_eq!(default(&analysis), "List [?]");
+  let help = only(helps(&analysis, LIMIT));
+  assert!(help.contains("Limits::with_max_values"), "{help}");
+
+  let analysis = analyze_text(text, &Limits::new().with_max_values(1), &Options::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(found(&analysis, LIMIT), [(at(schema, text, "1", 0), None)]);
+  assert_eq!(default(&analysis), "?");
+  let message = only(messages(&analysis, LIMIT));
+  assert!(
+    message.contains("the lists this value stands for"),
+    "{message}"
+  );
+
+  let analysis = analyze_text(text, &Limits::new().with_max_values(0), &Options::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(found(&analysis, LIMIT), [(at(schema, text, "1", 0), None)]);
+  assert_eq!(default(&analysis), "?");
+  let message = only(messages(&analysis, LIMIT));
+  assert!(message.contains(UNREAD), "{message}");
+}
+
+/// A copy is charged its values whole, before its first is made: `@d`'s default is three values,
+/// and each copy three more. At 12 the three applications are filled; at 9 the third, `z`'s, is
+/// `resource-limit` at its path, naming the bound, and holds no argument. Refuses a copy charged
+/// by the row, or made in part.
+#[test]
+fn copies_are_charged_whole() {
+  let text = COPIED;
+  let analysis = analyze_text(text, &Limits::new().with_max_values(12), &Options::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  for field in ["x", "y", "z"] {
+    assert_eq!(
+      applied(analysis.model(), "Query", field),
+      ["a= List [Int 1, Int 2]"]
+    );
+  }
+
+  let analysis = analyze_text(text, &Limits::new().with_max_values(9), &Options::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis, LIMIT),
+    [(after(schema, text, "z: Int @", "d"), None)]
+  );
+  let message = only(messages(&analysis, LIMIT));
+  assert!(
+    message.contains("the arguments this application leaves out"),
+    "{message}"
+  );
+  assert!(message.contains(&format!("{VALUES}, 9")), "{message}");
+  let model = analysis.model();
+  for field in ["x", "y"] {
+    assert_eq!(applied(model, "Query", field), ["a= List [Int 1, Int 2]"]);
+  }
+  assert!(applied(model, "Query", "z").is_empty());
+}
+
+/// An object literal's copies are charged as an application's are: `{}` leaves out `a` and `b`,
+/// each defaulted to one value, so the program's values are its three written ones and the two
+/// copies. At 5 the literal holds both; at 4 its second copy cannot be paid for, so the literal is
+/// `resource-limit`, naming the bound, and holds `a` and not `b`. Refuses an object literal's
+/// copies left uncharged.
+#[test]
+fn an_object_literals_copies_are_charged_whole() {
+  let text = FILLED;
+  let analysis = analyze_text(text, &Limits::new().with_max_values(5), &Options::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert_eq!(
+    argument_default(analysis.model(), "Query", "f", "x"),
+    "Object {a= Int 1, b= Int 2}"
+  );
+
+  let analysis = analyze_text(text, &Limits::new().with_max_values(4), &Options::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(found(&analysis, LIMIT), [(at(schema, text, "{}", 0), None)]);
+  let message = only(messages(&analysis, LIMIT));
+  assert!(
+    message.contains("the fields this literal leaves out"),
+    "{message}"
+  );
+  assert!(message.contains(&format!("{VALUES}, 4")), "{message}");
+  assert_eq!(
+    argument_default(analysis.model(), "Query", "f", "x"),
+    "Object {a= Int 1}"
+  );
+}
+
+/// A default lowering refused is one unresolved value, and so is each copy of it, charged one
+/// value: under a bound of two, `@d`'s `[1, 2]` is refused, charging nothing; `x`'s and `y`'s
+/// copies are one value each, not written and located at the default; and `z`'s cannot be paid
+/// for. The reports are at `[1, 2]` and at `z`'s `@d`. Refuses a refused default copied as more
+/// than one value, or as none.
+#[test]
+fn a_refused_default_is_one_value_wherever_it_is_copied() {
+  let text = COPIED;
+  let analysis = analyze_text(text, &Limits::new().with_max_values(2), &Options::new());
+  let schema = schema_file(&analysis);
+  let default = at(schema, text, "[1, 2]", 0);
+  assert_eq!(
+    found(&analysis, LIMIT),
+    [
+      (default, None),
+      (after(schema, text, "z: Int @", "d"), None)
+    ]
+  );
+  let model = analysis.model();
+  let d = model
+    .lookup(Namespace::Directive, "@^::app::d")
+    .expect("`@d`");
+  let own = model
+    .member(model.def(d).arguments().into_iter().next().expect("`a`"))
+    .default()
+    .expect("a default");
+  assert_eq!(valued(model, own), "?");
+  for field in ["x", "y"] {
+    let application = model.member(field_of(model, "Query", field)).applications()[0];
+    let [argument] = model.application(application).arguments() else {
+      panic!("`{field}`'s `@d` has one argument");
+    };
+    assert!(!argument.written());
+    let copy = model.value(argument.value());
+    assert_eq!(copy.kind(), ValueKind::Unresolved);
+    assert!(!copy.written());
+    assert_eq!(copy.location(), default);
+  }
+  assert!(applied(model, "Query", "z").is_empty());
+}
+
+/// A value lowering refused fits wherever it is read: `Box`'s default `[1, 2, 3]`, four literals
+/// under a bound of three, is refused, and the check of `Box<[Int]>` reads its one unresolved value
+/// and says nothing. One report, at `[1, 2, 3]`. Refuses a refused value judged by its kind at an
+/// instantiation.
+#[test]
+fn a_refused_value_says_nothing_at_an_instantiation() {
+  let text = "type Box<T> {\n  f(a: T = [1, 2, 3]): Int\n}\ntype Query {\n  b: Box<[Int]>\n}\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_values(3), &Options::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis, LIMIT),
+    [(at(schema, text, "[1, 2, 3]", 0), None)]
+  );
+  assert_eq!(
+    analysis.diagnostics().len(),
+    1,
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(argument_default(analysis.model(), "Box", "f", "a"), "?");
+}
+
+/// The model holds at most the bound's values beyond the built-in library's own and one for each
+/// written value refused: measured for the programs above at each bound they run at, the values a
+/// program's model holds beyond an empty root package's, against the bound and the reports that
+/// say a value was not read. And the term the bound does not hold: `@d(a: 0, a: 0, …)` of
+/// sixty-four arguments under a bound of four is sixty-four values, each argument keeping its own,
+/// the first four read and the other sixty refused from the fifth `0` on. Refuses a refused value
+/// that holds more than its one value, and a bound said to hold what it does not.
+#[test]
+fn the_model_holds_what_it_says() {
+  let library = library_values();
+  for (text, bounds) in [
+    (DEFAULTS, &[7, 6, 4, 2][..]),
+    (COPIED, &[12, 9, 2][..]),
+    (FILLED, &[5, 4][..]),
+  ] {
+    for &bound in bounds {
+      let analysis = analyze_text(text, &Limits::new().with_max_values(bound), &Options::new());
+      let (held, refused) = (made(&analysis, library), unread(&analysis));
+      assert!(
+        held <= bound + refused,
+        "{text}at {bound}: {held} values, {refused} refused"
+      );
+    }
+  }
+
+  let arguments = ["a: 0"; 64].join(", ");
+  let text = format!(
+    "directive @d(a: Int) on FIELD_DEFINITION\ntype Query {{\n  x: Int @d({arguments})\n}}\n"
+  );
+  let analysis = analyze_text(&text, &Limits::new().with_max_values(4), &Options::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(made(&analysis, library), 64);
+  assert_eq!(unread(&analysis), 60);
+  assert_eq!(
+    found(&analysis, LIMIT)[0],
+    (at(schema, &text, "0", 4), None)
+  );
+  assert_eq!(applied(analysis.model(), "Query", "x").len(), 64);
+}
+
+/// At 0 nothing a supplied package writes is read and nothing it leaves out is filled: `f`'s
+/// default `1` is refused, and is `?`; the bare `@deprecated` is `resource-limit` at its path, and
+/// holds no `reason`; and `core`'s `@deprecated` keeps its own default, which the built-in library
+/// reads for nothing. Refuses a bound the library's own values are charged to.
+#[test]
+fn at_zero_nothing_is_read_or_filled() {
+  let text = "type Query {\n  f(a: Int = 1): Int @deprecated\n}\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_values(0), &Options::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis, LIMIT),
+    [
+      (at(schema, text, "1", 0), None),
+      (at(schema, text, "deprecated", 0), None),
+    ]
+  );
+  let reports = messages(&analysis, LIMIT);
+  assert!(reports[0].contains(UNREAD), "{reports:#?}");
+  assert!(
+    reports[1].contains("the arguments this application leaves out"),
+    "{reports:#?}"
+  );
+  let model = analysis.model();
+  assert_eq!(argument_default(model, "Query", "f", "a"), "?");
+  assert!(applied(model, "Query", "f").is_empty());
+  let reason = model
+    .def(model.builtins().deprecated())
+    .arguments()
+    .into_iter()
+    .next()
+    .expect("`reason`");
+  let default = model.member(reason).default().expect("a default");
+  assert_eq!(
+    model.value(default).kind(),
+    ValueKind::String("No longer supported")
+  );
+}
+
+/// The default bound is 2^20, and a value is read up to it: `[0 0 … 0]` of 2^20 - 1 zeros is 2^20
+/// literals, read under `Limits::new()`; one zero more is refused there, whole, and read under a
+/// bound one higher. Refuses a default that is another number.
+#[test]
+fn the_default_bound_and_one_past_it() {
+  let zeros = |count: usize| -> String {
+    format!("input In {{\n  a: [Int] = [{}]\n}}\n", "0 ".repeat(count))
+  };
+  let elements = |analysis: &Analysis| -> Option<usize> {
+    let model = analysis.model();
+    match model.value(input_default(model, "In", "a")).kind() {
+      ValueKind::List(items) => Some(items.len()),
+      _ => None,
+    }
+  };
+  let all: usize = 1 << 20;
+
+  let text = zeros(all - 1);
+  let analysis = analyze_text(&text, &Limits::new(), &Options::new());
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
+  assert_eq!(elements(&analysis), Some(all - 1));
+
+  let text = zeros(all);
+  let analysis = analyze_text(&text, &Limits::new(), &Options::new());
+  let schema = schema_file(&analysis);
+  let start = text.find("= [").expect("the default") + 2;
+  let end = text.rfind(']').expect("the default's end") + 1;
+  assert_eq!(
+    found(&analysis, LIMIT),
+    [(
+      Location::new(schema.get(), SimpleSpan::new(start, end)),
+      None
+    )]
+  );
+  let message = only(messages(&analysis, LIMIT));
+  assert!(message.contains(UNREAD), "{message}");
+  assert!(message.contains(&format!("{VALUES}, 1048576")), "{message}");
+  assert_eq!(elements(&analysis), None);
+
+  let analysis = analyze_text(
+    &text,
+    &Limits::new().with_max_values((1 << 20) + 1),
+    &Options::new(),
+  );
+  assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
+  assert_eq!(elements(&analysis), Some(all));
+}
+
+/// The written values are charged first, so a copy early in the walk can be starved by a default
+/// written after it: under a bound of six, `@d`'s `[1]` and `In.b`'s `[1, 2, 3]` spend all six
+/// where lowering reads them, and `x`'s `@d`, which the walk reaches before `In.b`, cannot pay for
+/// its copy: it is reported at its path, and `In.b`'s default is read. At eight the copy is made.
+/// Refuses written values charged where the walk makes them, beside the copies.
+#[test]
+fn an_earlier_copy_is_starved_by_a_later_default() {
+  let text = "directive @d(a: [Int] = [1]) on FIELD_DEFINITION\n\
+              type Query {\n  x(i: In): Int @d\n}\ninput In {\n  b: [Int] = [1, 2, 3]\n}\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_values(6), &Options::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis, LIMIT),
+    [(after(schema, text, "x(i: In): Int @", "d"), None)]
+  );
+  let model = analysis.model();
+  assert!(applied(model, "Query", "x").is_empty());
+  assert_eq!(
+    valued(model, input_default(model, "In", "b")),
+    "List [Int 1, Int 2, Int 3]"
+  );
+
+  let analysis = analyze_text(text, &Limits::new().with_max_values(8), &Options::new());
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  assert_eq!(applied(analysis.model(), "Query", "x"), ["a= List [Int 1]"]);
+}
+
+/// GitLab's schema, the largest of smear's fixtures, makes fewer values than the default bound: no
+/// report names `Limits::max_values`, and the values its model holds beyond the built-in library's
+/// own are fewer than 2^20.
+#[test]
+fn gitlabs_schema_makes_fewer_values_than_the_default() {
+  let gitlab = include_str!("fixtures/schemas/gitlab_schema.graphql");
+  let analysis = analyze_text(
+    gitlab,
+    &Limits::new().with_max_diagnostics(1 << 20),
+    &Options::new(),
+  );
+  let reports: Vec<String> = messages(&analysis, LIMIT)
+    .into_iter()
+    .filter(|message: &String| message.contains(VALUES))
+    .collect();
+  assert!(reports.is_empty(), "{reports:#?}");
+  let count = made(&analysis, library_values());
+  // The count `Limits::max_values`' documentation states, read from CI's log until it is pinned
+  // there: written past the test harness's capture, which shows no output of a test that passes.
+  let _ = writeln!(std::io::stderr(), "GitLab's schema makes {count} values");
+  assert!(
+    (1..Limits::new().max_values()).contains(&count),
+    "GitLab's schema makes {count} values"
   );
 }
