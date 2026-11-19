@@ -85,8 +85,8 @@
 //! occurrence is judged too: `Pair<X, X>` inside a definition of `X` has two entries of one type
 //! whatever `X` stands for. A written duplicate was reported where it is written, and is not
 //! again. Each type is judged once, its two nullnesses sharing one verdict, and a verdict a limit
-//! stopped is `resource-limit` at each occurrence of it, but at an entry a definition's check
-//! stopped at, which said so.
+//! stopped is `resource-limit` at each occurrence of it, but where the same kind of limit was said
+//! already, at an entry a definition's check stopped at for that limit among them.
 //!
 //! # What an instantiation makes required
 //!
@@ -219,7 +219,6 @@ pub(crate) fn implement(
     frontier: Vec::new(),
     fields: Vec::new(),
     indexed: false,
-    stopped_roots: BTreeSet::new(),
     listings: BTreeMap::new(),
     distinct: Vec::new(),
     under: Vec::new(),
@@ -396,9 +395,6 @@ struct Implementing<'p> {
   fields: Vec<(Sym, MemberId)>,
   /// Whether `fields` holds them: built at its first root whose fields are compared.
   indexed: bool,
-  /// The entries a definition's check stopped at, and reported: an occurrence that is one says
-  /// nothing more of a stop.
-  stopped_roots: BTreeSet<TypeExprId>,
   /// Each definition an occurrence asked about, by the definition: listed when one of its own
   /// entries or members names its type parameters, `None` otherwise.
   listings: BTreeMap<DefId, Option<Listed>>,
@@ -512,7 +508,6 @@ impl Implementing<'_> {
       };
       if let Err(stop) = self.root(root, wide) {
         self.report_stopped(root, stop);
-        self.stopped_roots.insert(root.entry);
         return;
       }
     }
@@ -948,11 +943,8 @@ impl Implementing<'_> {
           self.report_meeting(at, def, List::Members, first, later);
         }
       }
-      Verdict::Stopped(stop) => {
-        if !self.stopped_roots.contains(&id) {
-          self.report_uncompared(at, def, stop);
-        }
-      }
+      // Said once for each kind at the entry, whichever check of it stopped there first.
+      Verdict::Stopped(stop) => self.report_uncompared(at, def, stop),
     }
   }
 

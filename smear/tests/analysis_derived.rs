@@ -1334,3 +1334,135 @@ fn a_definitions_fields_of_one_name_are_read_once_by_the_relevance_scan() {
     );
   }
 }
+
+/// The `resource-limit`s a diagnostic list holds at `at`, each as it reads.
+fn limits_at(analysis: &Analysis, at: Location) -> Vec<String> {
+  analysis
+    .diagnostics()
+    .iter()
+    .filter(|diagnostic: &&Diagnostic| {
+      diagnostic.code().as_str() == LIMIT && diagnostic.primary() == at
+    })
+    .map(|diagnostic: &Diagnostic| diagnostic.to_string())
+    .collect()
+}
+
+/// Whether `analysis` says a `resource-limit` that names `limit`.
+fn says_limit(analysis: &Analysis, limit: &str) -> bool {
+  analysis
+    .diagnostics()
+    .iter()
+    .any(|diagnostic: &Diagnostic| {
+      diagnostic.code().as_str() == LIMIT && diagnostic.to_string().contains(limit)
+    })
+}
+
+/// Each occurrence of a root decides by its own place, and by the kind of each stop, whether that
+/// stop was said: at depth 2, `Outer<[i32]>`, written twice, derives `Bad<[i32]>`, whose `[]` takes
+/// a `[[[i32]]]`, one level too deep, so its check stops on depth. Under one value step less than
+/// the closure needs, the walk below `Bad<[i32]>` then stops on steps. The first `Outer<[i32]>`
+/// says both, the closure's steps and the check's depth, and the second says the depth it reaches
+/// too. Refuses a closure's stop taken for a stop of another kind, and a stop dropped at a repeated
+/// occurrence of its root.
+#[test]
+fn each_occurrence_of_a_root_says_each_kind_of_stop_it_reaches() {
+  let text = "type Query {\n  f(a: Outer<[i32]>): Int\n  g(a: Outer<[i32]>): Int\n}\n\
+              input Bad<U> {\n  v: [[U]] = []\n}\ninput Outer<T> {\n  b: Bad<T>\n}\n";
+  quiet(&analyze_text(text, &Limits::new()));
+  let depth = Limits::new().with_max_generic_depth(2);
+  let least = (0..256_u32)
+    .find(|&steps: &u32| {
+      let analysis = analyze_text(text, &depth.with_max_value_steps(steps));
+      !says_limit(&analysis, "`Limits::max_value_steps`")
+    })
+    .expect("a budget the closure is not stopped at");
+  assert!(least > 0);
+  let short = analyze_text(text, &depth.with_max_value_steps(least - 1));
+  let schema = schema_file(&short);
+  let first = at(schema, text, "Outer<[i32]>", 0);
+  let second = at(schema, text, "Outer<[i32]>", 1);
+  assert_eq!(
+    found(&short),
+    [(LIMIT, first), (LIMIT, first), (LIMIT, second)]
+  );
+  let said = limits_at(&short, first);
+  for limit in [
+    "`Limits::max_value_steps`",
+    "`Limits::max_generic_depth`, 2",
+  ] {
+    assert!(
+      said.iter().any(|message: &String| message.contains(limit)),
+      "{said:#?}"
+    );
+  }
+  let said = limits_at(&short, second);
+  assert!(
+    said[0].contains("`Limits::max_generic_depth`, 2"),
+    "{said:#?}"
+  );
+}
+
+/// An entry says each kind of stop its checks meet there, once each: at depth 2, `O`'s check of
+/// `I<[i32]>` cannot build `[[[i32]]]`, `I`'s `g` under it, and says so at the entry. Under one
+/// implementation step less than the program needs, the comparison of `I<[i32]>`'s entries, made
+/// after it, stops on steps at the same entry, and says so too. Refuses an entry whose stop hides a
+/// stop of another kind there.
+#[test]
+fn an_entry_says_each_kind_of_stop_its_checks_meet() {
+  let text = "type Query {\n  x: Int\n}\ninterface J<V> {\n  f: Int\n}\n\
+              interface I<T> implements J<T> {\n  f: Int\n  g: [[T]]\n}\n\
+              type O implements I<[i32]> & J<[i32]> {\n  f: Int\n  g: Int\n}\n";
+  let depth = Limits::new().with_max_generic_depth(2);
+  let least = (0..256_u32)
+    .find(|&steps: &u32| {
+      let analysis = analyze_text(text, &depth.with_max_implementation_steps(steps));
+      !says_limit(&analysis, "`Limits::max_implementation_steps`")
+    })
+    .expect("a budget the implementation check is not stopped at");
+  assert!(least > 0);
+  let short = analyze_text(text, &depth.with_max_implementation_steps(least - 1));
+  let schema = schema_file(&short);
+  let entry = at(schema, text, "I<[i32]>", 0);
+  assert_eq!(found(&short), [(LIMIT, entry), (LIMIT, entry)]);
+  let said = limits_at(&short, entry);
+  for limit in [
+    "`Limits::max_generic_depth`, 2",
+    "`Limits::max_implementation_steps`",
+  ] {
+    assert!(
+      said.iter().any(|message: &String| message.contains(limit)),
+      "{said:#?}"
+    );
+  }
+}
+
+/// What a rebuild a limit on types stops completed below the type it could not build is derived
+/// all the same: at depth 2, `Outer<[i32]>` reads `Envelope<Bad<T>>`, whose `Bad<[i32]>` is built
+/// and whose `Envelope<Bad<[i32]>>` is one level too deep. The closure says the depth at
+/// `Outer<[i32]>`, and derives `Bad<[i32]>` at that position all the same, whose `"text"` does not
+/// fit, reported there too. Refuses a completed child lost with the type above it.
+#[test]
+fn a_type_a_stopped_rebuild_completed_is_derived_and_judged() {
+  let text = "type Query {\n  f(a: Outer<[i32]>): Int\n}\ninput Bad<U> {\n  v: U = \"text\"\n}\n\
+              input Envelope<E> {\n  e: E\n}\ninput Outer<T> {\n  x: Envelope<Bad<T>>\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let outer = at(schema, text, "Outer<[i32]>", 0);
+  assert_eq!(found(&analysis), [(DEFAULT, outer)]);
+  let short = analyze_text(text, &Limits::new().with_max_generic_depth(2));
+  assert_eq!(found(&short), [(LIMIT, outer), (DEFAULT, outer)]);
+  assert!(
+    the(&short, LIMIT, outer)
+      .to_string()
+      .contains("`Limits::max_generic_depth`, 2"),
+    "{:#?}",
+    short.diagnostics()
+  );
+  assert_eq!(
+    labels(the(&short, DEFAULT, outer)),
+    [
+      (after(schema, text, "x: ", "Envelope<Bad<T>>"), DERIVES),
+      (after(schema, text, "v: U = ", "\"text\""), "this value"),
+    ]
+  );
+}
