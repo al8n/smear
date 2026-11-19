@@ -36,9 +36,10 @@
 //!
 //! It holds 15 rows, its final ones, which `the_allow_list_holds_its_final_rows` holds it to:
 //!
-//! - three for every document, which stay for good: the capacity ceilings the schema
-//!   representation has and GraphQLx has not, `type-reference-too-deep`, `too-many-field-arguments`
-//!   and `too-many-directive-arguments` (`[Z6]`);
+//! - three for every document, which stay for good: GraphQL's builder's capacity ceilings,
+//!   `type-reference-too-deep`, `too-many-field-arguments` and `too-many-directive-arguments`,
+//!   which GraphQLx has only as `Limits` a consumer tightens to them;
+//!   `the_parity_limits_refuse_what_the_ceilings_refuse` holds that (`[Z6]`);
 //! - one for one document both dialects refuse, where the schema builder drops a second
 //!   definition of a name unread and the analyzer reads both (`[Z40]`);
 //! - eleven for one document each, both dialects refusing it, where the mistake lies in a
@@ -88,7 +89,10 @@ use smear::{
     error::GraphqlErrors,
     syntactic::{GraphqlLexer, type_system_document},
   },
-  validator::{Schema, SchemaError, SchemaErrorKind},
+  validator::{
+    Schema, SchemaError, SchemaErrorKind,
+    schema::{MAX_DIRECTIVE_ARGUMENTS, MAX_FIELD_ARGUMENTS, MAX_WRAPPERS},
+  },
 };
 
 #[allow(dead_code)]
@@ -137,11 +141,14 @@ const BESIDE_A_PHASE: &str = "[Z31]: the contribution that holds the mistake als
 
 /// Why a row of the capacity ceilings exists.
 const CEILING: &str =
-  "[Z6]: a capacity ceiling of the schema representation, which GraphQLx does not have";
+  "[Z6]: a capacity ceiling of GraphQL's builder, which GraphQLx has only at the parity limits";
 
 /// Why the row of `[Z40]`'s class exists.
 const UNREAD: &str = "[Z40]: the document defines `Type1` twice, and the schema builder drops the \
                       second definition unread where the analyzer reads both";
+
+/// A bound of the limits passed.
+const RESOURCE_LIMIT: &str = "smear::graphqlx::resource-limit";
 
 /// The codes of the capacity ceilings, each a row for every document, in the list's order.
 const CEILINGS: [&str; 3] = [
@@ -343,6 +350,21 @@ struct Run<'r> {
   accepted_by_both: usize,
   /// Each code found, in some document, with the same count above zero on both sides.
   equal: BTreeSet<&'static str>,
+  /// Each document the schema builder refuses with a capacity ceiling or builds, which the parity
+  /// run analyzes again under the ceilings as `Limits`.
+  recorded: Vec<Recorded>,
+}
+
+/// A document the parity run analyzes again, and what the schema builder said of it.
+struct Recorded {
+  /// Its name.
+  name: String,
+  /// Its text.
+  text: String,
+  /// How many of the builder's errors are one of the three capacity ceilings.
+  ceilings: usize,
+  /// Whether the builder built it.
+  built: bool,
 }
 
 impl<'r> Run<'r> {
@@ -357,6 +379,7 @@ impl<'r> Run<'r> {
       refused_by_both: 0,
       accepted_by_both: 0,
       equal: BTreeSet::new(),
+      recorded: Vec::new(),
     }
   }
 
@@ -418,6 +441,19 @@ impl<'r> Run<'r> {
         "{name}: GraphQLx's parser refuses what GraphQL's reads: {syntax:?}"
       ));
       return None;
+    }
+
+    let ceilings: usize = CEILINGS
+      .iter()
+      .map(|code: &&str| graphql_codes.get(*code).copied().unwrap_or(0))
+      .sum();
+    if ceilings > 0 || built.is_ok() {
+      self.recorded.push(Recorded {
+        name: name.to_owned(),
+        text: graphqlx.to_owned(),
+        ceilings,
+        built: built.is_ok(),
+      });
     }
 
     let mut codes: BTreeSet<&'static str> = graphql_codes.keys().copied().collect();
@@ -749,6 +785,66 @@ fn the_allow_list_holds_its_final_rows() {
     include_str!("analysis_differential.rs").contains(&said),
     "the header does not say `{said}`"
   );
+}
+
+/// GraphQL's builder's three capacity ceilings, as `Limits` a consumer that lowers to it sets,
+/// under the diagnostic ceiling the corpus runs under.
+const PARITY: Limits = Limits::new()
+  .with_max_diagnostics(1 << 20)
+  .with_max_field_arguments(MAX_FIELD_ARGUMENTS)
+  .with_max_directive_arguments(MAX_DIRECTIVE_ARGUMENTS)
+  .with_max_type_wrappers(MAX_WRAPPERS);
+
+/// Under the parity limits the analyzer refuses each document of the corpus GraphQL's builder
+/// refuses with a capacity ceiling, with one `resource-limit` for each ceiling it reports, and
+/// refuses nothing the builder builds. Refuses a bound that counts other than the builder: an
+/// argument, or a wrapper, one too many or one too few.
+///
+/// The counts would differ in two corners the corpus does not hold: the types inside an over-wide
+/// field's arguments, which the builder drops unread, and a second definition of a name (`[Z40]`).
+/// Both documents are refused on both sides.
+#[test]
+fn the_parity_limits_refuse_what_the_ceilings_refuse() {
+  let recorded = &whole_corpus().run.recorded;
+  let mut failures: Vec<String> = Vec::new();
+  let (mut refused, mut built) = (0_usize, 0_usize);
+  for document in recorded {
+    let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+      .with_files([SourceFile::new("schema.graphqlx", document.text.as_str())]);
+    let analysis = analyze(&root, &[], &PARITY, &Options::new());
+    let limited = analysis
+      .diagnostics()
+      .iter()
+      .filter(|diagnostic| diagnostic.code().as_str() == RESOURCE_LIMIT)
+      .count();
+    if document.ceilings > 0 {
+      refused += 1;
+    }
+    if limited != document.ceilings {
+      failures.push(format!(
+        "{}: the schema builder reports {} capacity ceilings and the analyzer, under the parity \
+         limits, {limited} `resource-limit`s",
+        document.name, document.ceilings
+      ));
+    }
+    if document.built {
+      built += 1;
+      if analysis.diagnostics().has_errors() {
+        failures.push(format!(
+          "{}: the schema builder builds it, and the analyzer refuses it under the parity limits: \
+           {:?}",
+          document.name,
+          analysis.diagnostics()
+        ));
+      }
+    }
+  }
+  assert!(failures.is_empty(), "{:#?}", failures);
+  assert!(
+    refused >= 3,
+    "{refused} documents the builder refuses with a ceiling"
+  );
+  assert!(built >= 5, "{built} documents the builder builds");
 }
 
 /// W's test 10: a root package that replaces a built-in scalar and applies `@specifiedBy` to it, and

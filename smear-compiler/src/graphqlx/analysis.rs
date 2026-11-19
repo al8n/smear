@@ -204,7 +204,11 @@ impl Analysis {
 ///   arguments and the arguments its directive declares, in the directive's order, an argument
 ///   written twice twice; one it does not declare is `undefined-directive-argument`, with the
 ///   nearest name it does declare in its help. Each value written is read as it is written, for
-///   coercion. Then the schema's
+///   coercion. A field, or a directive, that declares more arguments than
+///   [`Limits::max_field_arguments`], or [`Limits::max_directive_arguments`], admits is
+///   `resource-limit` once, at its name, labelled at the first argument past it; and so is a
+///   written type of more list and non-null wrappers than [`Limits::max_type_wrappers`] admits, at
+///   the whole of it. Each keeps what it writes. Then the schema's
 ///   contributions: every package's schema definitions, then its schema extensions, each by source
 ///   and position and each marked as what it is. The root package's first schema definition gives
 ///   the schema its description, its roots and its applications, and each schema extension the
@@ -790,6 +794,7 @@ fn finish<'a>(
     &sources,
     &mut builder,
     &mut reporter,
+    limits,
   );
   let mut types = Types::new(*limits, *options);
   instantiate::instantiate(

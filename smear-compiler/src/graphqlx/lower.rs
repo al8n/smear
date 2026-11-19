@@ -49,6 +49,13 @@
 //! every one is of text. A directive definition's arguments are also kept by their directive and
 //! their names, the first of each name, for the applications that name them.
 //!
+//! A field a supplied package writes that declares more arguments than
+//! `Limits::max_field_arguments` admits, in its definition or in an extension of it, and a
+//! directive definition it writes that declares more than `Limits::max_directive_arguments`, are
+//! `resource-limit` once, at the field's or the directive's name, labelled at the first argument
+//! past the bound. Each keeps every argument it declares, so nothing downstream sees fewer than are
+//! written, and no argument of the built-in library is counted.
+//!
 //! A kind of definition this lowering does not know, which only a parser newer than the analyzer
 //! makes, is reported as `unknown-item`, once per file, and nothing of it is lowered.
 //!
@@ -77,6 +84,13 @@
 //! some, as a `NonZero` a `use` item renames does too; the primitive the alias spells is noted
 //! beside the row, whatever is written with it, for instantiation, which alone tells the two apart
 //! and refuses an alias's arguments. No type is interned: an occurrence's type is instantiation's.
+//!
+//! A written type a supplied package writes is the root of a chain: itself and the elements of its
+//! lists, down to the first that is no list. Each type argument is the root of a chain of its own.
+//! A chain with more list and non-null wrappers than `Limits::max_type_wrappers` admits, one for
+//! each list and one for each `!` it writes, is `resource-limit` once, at its root, the whole of
+//! the type; the type is lowered as written all the same. No type of the built-in library is
+//! counted.
 //!
 //! A bound is its definition's own: a `where` predicate whose left side is one of the definition's
 //! type parameters, written with no argument, gives each interface it names as a bound of that
@@ -166,6 +180,7 @@ use super::{
   declare::{Binding, Declaration, Declarations, Entry, Item},
   diagnostic::{Diagnostic, Excerpt, Reporter},
   id::{ApplicationId, DefId, IdRange, MemberId, ModuleId, SourceId, Sym, TypeExprId, dense},
+  limits::Limits,
   model::{
     DefKind, DirectiveLocation, MemberKind, ModelBuilder, PathRoot, Root, RootOperation, Written,
   },
@@ -180,8 +195,8 @@ const KEYWORD: usize = 6;
 
 /// Lowers what `declarations` holds into `builder`, which holds every package, module and
 /// definition already, resolving each path through `scopes` and reporting into `reporter`;
-/// `sources` numbers the sources of `packages`. Answers every written value, read from the texts
-/// of `packages`, for coercion.
+/// `sources` numbers the sources of `packages`, and `limits` bounds the shapes a supplied package
+/// writes. Answers every written value, read from the texts of `packages`, for coercion.
 pub(crate) fn lower<'p>(
   packages: &[PackageView<'p>],
   declarations: &Declarations<'_, '_>,
@@ -189,6 +204,7 @@ pub(crate) fn lower<'p>(
   sources: &SourceMap,
   builder: &mut ModelBuilder,
   reporter: &mut Reporter,
+  limits: &Limits,
 ) -> RawValues<'p> {
   // Each source's text, by `SourceId`, numbered as `sources` numbers them: a package source has
   // none.
@@ -203,6 +219,8 @@ pub(crate) fn lower<'p>(
     builder,
     reporter,
     scopes,
+    limits,
+    supplied: sources.package_sources(ROOT).start(),
     values: RawValues::new(texts),
     text: String::new(),
     field_ids: Vec::new(),
@@ -244,6 +262,12 @@ struct Lowering<'l, 'x, 'p> {
   reporter: &'l mut Reporter,
   /// Every module's scope: what a path means where it is written.
   scopes: &'l Scopes<'x>,
+  /// The analysis's limits: the bounds on a field's and a directive's arguments and on a written
+  /// type's wrappers.
+  limits: &'l Limits,
+  /// The first source of a supplied package: every source below it is the built-in library's,
+  /// whose shapes no bound counts.
+  supplied: u32,
   /// Every value read so far, and each source's text.
   values: RawValues<'p>,
   /// The description being cooked: one buffer for every description.
@@ -279,6 +303,15 @@ struct Lowering<'l, 'x, 'p> {
 struct Firsts {
   direct: u32,
   argument: u32,
+}
+
+/// What declares the arguments a bound counts.
+#[derive(Clone, Copy)]
+enum Declared {
+  /// A field, in its definition or in an extension of it: `Limits::max_field_arguments`.
+  Field,
+  /// A directive definition: `Limits::max_directive_arguments`.
+  Directive,
 }
 
 /// Where the members being lowered are written: the definition they belong to, the contribution
@@ -806,11 +839,14 @@ impl Lowering<'_, '_, '_> {
           self.builder.set_repeatable(at.def);
         }
         if let Some(arguments) = directive.arguments_definition() {
-          self.input_values(
-            at,
-            MemberKind::Argument,
-            arguments.input_value_definitions(),
+          let values = arguments.input_value_definitions();
+          self.past_arguments(
+            Declared::Directive,
+            directive.name().name(),
+            values,
+            at.source,
           );
+          self.input_values(at, MemberKind::Argument, values);
         }
       }
       // A schema definition declares no definition.
@@ -913,7 +949,9 @@ impl Lowering<'_, '_, '_> {
       let Some(arguments) = field.arguments_definition() else {
         continue;
       };
-      for argument in arguments.input_value_definitions() {
+      let values = arguments.input_value_definitions();
+      self.past_arguments(Declared::Field, field.name(), values, at.source);
+      for argument in values {
         let name = argument.name();
         let sym = self.intern(name);
         let member = self.builder.push_argument(
@@ -1841,12 +1879,18 @@ impl Lowering<'_, '_, '_> {
   /// each type written, each before what it nests, its arguments in order and each with everything
   /// it nests before the next. Answers the outermost.
   fn ty<S: AsRef<[u8]>>(&mut self, site: Site<'_>, ty: &Type<S>, position: Position) -> TypeExprId {
+    self.past_wrappers(site, ty);
     let root = self.occurrence(site, ty, position);
     let mut pending: Vec<Pending<'_, S>> = Vec::new();
     nested(ty, root, self.type_args.len(), &mut pending);
     while let Some(next) = pending.pop() {
       match next {
         Pending::Type(PendingType { ty, list }) => {
+          // A type argument starts a chain of its own, counted where it is written; a list's
+          // element is part of its list's chain.
+          if list.is_none() {
+            self.past_wrappers(site, ty);
+          }
           let id = self.occurrence(site, ty, Position::Type);
           match list {
             Some(list) => self.builder.set_type_expr_list(list, id),
@@ -1863,6 +1907,89 @@ impl Lowering<'_, '_, '_> {
       }
     }
     root
+  }
+
+  /// Reports, once, the field or directive `name`, whose `arguments` the source `source` writes,
+  /// when a supplied package writes more than `declared`'s bound admits, at its name, with a label
+  /// at the first argument past the bound. Nothing is dropped: the caller appends every argument.
+  fn past_arguments<S: AsRef<[u8]>>(
+    &mut self,
+    declared: Declared,
+    name: &Name<S>,
+    arguments: &[InputValueDefinition<S>],
+    source: u32,
+  ) {
+    if source < self.supplied {
+      return;
+    }
+    let (what, sigil, bound, max) = match declared {
+      Declared::Field => (
+        "field",
+        "",
+        "max_field_arguments",
+        self.limits.max_field_arguments(),
+      ),
+      Declared::Directive => (
+        "directive",
+        "@",
+        "max_directive_arguments",
+        self.limits.max_directive_arguments(),
+      ),
+    };
+    let Some(first) = arguments.get(max as usize) else {
+      return;
+    };
+    let count = arguments.len();
+    let noun = if count == 1 { "argument" } else { "arguments" };
+    let spelling: &[u8] = name.source().as_ref();
+    let kind = DiagnosticKind::ResourceLimit;
+    self.reporter.report(
+      Diagnostic::builder(kind.code(), Location::new(source, *name.as_span()))
+        .severity(kind.severity())
+        .message(format!(
+          "the {what} `{sigil}{}` declares {count} {noun}, more than `Limits::{bound}`, {max}, \
+           admits",
+          Excerpt(spelling)
+        ))
+        .primary_label(kind.title())
+        .help(format!(
+          "raise the bound with `Limits::with_{bound}`, or gather the arguments into one argument \
+           of an input object type"
+        ))
+        .label(
+          Location::new(source, *first.name().as_span()),
+          "the first argument past the bound",
+        )
+        .build(),
+    );
+  }
+
+  /// Reports, once, the written type `ty`, the root of a chain of lists, when a supplied package
+  /// writes it with more list and non-null wrappers than `Limits::max_type_wrappers` admits, at the
+  /// whole of it. The type is lowered as written all the same.
+  fn past_wrappers<S>(&mut self, site: Site<'_>, ty: &Type<S>) {
+    let source = site.source.get();
+    if source < self.supplied {
+      return;
+    }
+    let max = self.limits.max_type_wrappers();
+    let count = wrappers(ty);
+    if count <= max {
+      return;
+    }
+    let noun = if count == 1 { "wrapper" } else { "wrappers" };
+    let kind = DiagnosticKind::ResourceLimit;
+    self.reporter.report(
+      Diagnostic::builder(kind.code(), Location::new(source, *ty.span()))
+        .severity(kind.severity())
+        .message(format!(
+          "this type has {count} list and non-null {noun}, more than `Limits::max_type_wrappers`, \
+           {max}, admits"
+        ))
+        .primary_label(kind.title())
+        .help("raise the bound with `Limits::with_max_type_wrappers`, or wrap the type less deeply")
+        .build(),
+    );
   }
 
   /// Appends the occurrence `ty`, standing at `position` where `site` says, and resolves its path:
@@ -2496,6 +2623,24 @@ fn shape_of<'d, S>(
     fields: &[],
     input_values: &[],
     enum_values: &[],
+  }
+}
+
+/// How many list and non-null wrappers `ty` writes around what it names: one for each list, and
+/// one for each `!`, its own, each list's, and that of the path at its core. A path's type
+/// arguments are types of their own. Saturating; one step for each list of the chain.
+fn wrappers<S>(ty: &Type<S>) -> u32 {
+  let mut count: u32 = 0;
+  let mut at = ty;
+  loop {
+    count = count.saturating_add(u32::from(at.required()));
+    match at {
+      Type::List(list) => {
+        count = count.saturating_add(1);
+        at = list.ty();
+      }
+      Type::Path(_) => return count,
+    }
   }
 }
 

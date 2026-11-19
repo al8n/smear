@@ -14,6 +14,12 @@ const DEFAULT_USE_DEPTH: u32 = 32;
 const DEFAULT_GLOB_ITERATIONS: u32 = 1 << 10;
 /// See [`Limits::max_globs`].
 const DEFAULT_GLOBS: u32 = 64;
+/// See [`Limits::max_field_arguments`].
+const DEFAULT_FIELD_ARGUMENTS: u32 = 1 << 10;
+/// See [`Limits::max_directive_arguments`].
+const DEFAULT_DIRECTIVE_ARGUMENTS: u32 = 1 << 10;
+/// See [`Limits::max_type_wrappers`].
+const DEFAULT_TYPE_WRAPPERS: u32 = 64;
 /// See [`Limits::max_generic_depth`].
 const DEFAULT_GENERIC_DEPTH: u32 = 64;
 /// See [`Limits::max_instantiations`].
@@ -49,13 +55,17 @@ const _: () = assert!(
 /// A package set is untrusted input, and these bounds hold what the analysis builds and spends
 /// once it has numbered the package set: the number of definitions and of modules, how deep
 /// modules, `use` trees and types nest, how many segments a path a scope resolves has, how many
-/// rounds the glob fixpoint runs, how many modules one module's globs name, how many instantiations
-/// of generic definitions it interns, how many steps of substitution it takes, how many steps
-/// judging bounds takes, how many steps completing values takes, how many steps checking
+/// rounds the glob fixpoint runs, how many modules one module's globs name, how many arguments a
+/// field and a directive declare, how many list and non-null wrappers a written type has, how many
+/// instantiations of generic definitions it interns, how many steps of substitution it takes, how
+/// many steps judging bounds takes, how many steps completing values takes, how many steps checking
 /// implementations takes, and how many bytes the supplied texts hold. A bound that is passed stops
 /// that work, is reported as `smear::graphqlx::resource-limit`, and the analysis goes on. Two
 /// bounds are not refusals: the diagnostic ceiling and the near-miss budget limit what the analysis
-/// says, not what it accepts.
+/// says, not what it accepts. Three refuse a shape and stop no work: how many arguments a field and
+/// a directive declare, and how many list and non-null wrappers a written type has. They cost the
+/// analysis no more than their text, and a consumer sets them for a representation of its own: at
+/// 64, 64 and 15 they refuse each document GraphQL's schema builder refuses for a ceiling.
 ///
 /// Before any bound applies, the diagnostic ceiling aside, the analysis reads what the caller
 /// supplied, to number and order it. It sorts each package's files by path, and orders two files
@@ -77,13 +87,16 @@ const _: () = assert!(
 /// Every bound is a count, and `0` admits none of what it counts, except that the built-in library
 /// is always declared whole and every package has its root module, and that the built-in library's
 /// types are built whatever the generic depth, instantiation and substitution bounds are, its
-/// bounds cost nothing to judge, since it writes no instantiation of a definition with a bound,
-/// its own values cost nothing to complete, where it writes them and in a copy made for an
-/// application it writes, and its implementations cost nothing to check, since it writes no
-/// `implements` entry and no union: see
-/// [`Limits::max_definitions`], [`Limits::max_modules`], [`Limits::max_generic_depth`],
-/// [`Limits::max_instantiations`], [`Limits::max_substitutions`], [`Limits::max_bound_steps`],
-/// [`Limits::max_value_steps`] and [`Limits::max_implementation_steps`].
+/// fields' and directives' arguments and its types' wrappers are counted by none of the three
+/// shape bounds, its bounds cost nothing to judge, since it writes no instantiation of a
+/// definition with a bound, its own values cost nothing to complete, where it writes them and in a
+/// copy made for an application it writes, and its implementations cost nothing to check, since it
+/// writes no `implements` entry and no union: see
+/// [`Limits::max_definitions`], [`Limits::max_modules`], [`Limits::max_field_arguments`],
+/// [`Limits::max_directive_arguments`], [`Limits::max_type_wrappers`],
+/// [`Limits::max_generic_depth`], [`Limits::max_instantiations`], [`Limits::max_substitutions`],
+/// [`Limits::max_bound_steps`], [`Limits::max_value_steps`] and
+/// [`Limits::max_implementation_steps`].
 ///
 /// # Building one
 ///
@@ -108,6 +121,9 @@ pub struct Limits {
   max_use_depth: u32,
   max_glob_iterations: u32,
   max_globs: u32,
+  max_field_arguments: u32,
+  max_directive_arguments: u32,
+  max_type_wrappers: u32,
   max_generic_depth: u32,
   max_instantiations: u32,
   max_substitutions: u32,
@@ -140,6 +156,9 @@ impl Limits {
       max_use_depth: DEFAULT_USE_DEPTH,
       max_glob_iterations: DEFAULT_GLOB_ITERATIONS,
       max_globs: DEFAULT_GLOBS,
+      max_field_arguments: DEFAULT_FIELD_ARGUMENTS,
+      max_directive_arguments: DEFAULT_DIRECTIVE_ARGUMENTS,
+      max_type_wrappers: DEFAULT_TYPE_WRAPPERS,
       max_generic_depth: DEFAULT_GENERIC_DEPTH,
       max_instantiations: DEFAULT_INSTANTIATIONS,
       max_substitutions: DEFAULT_SUBSTITUTIONS,
@@ -266,6 +285,77 @@ impl Limits {
   #[inline]
   pub const fn max_globs(&self) -> u32 {
     self.max_globs
+  }
+
+  /// How many arguments one field may declare: those written between its parentheses, of an
+  /// object's or an interface's field, in its type's definition or in an extension of it. A field
+  /// of the built-in library is not counted, and a directive's arguments are counted by
+  /// [`max_directive_arguments`](Self::max_directive_arguments).
+  ///
+  /// Past it, the field is `resource-limit` once, where its name is written, labelled at the first
+  /// argument past the bound, and it keeps every argument it declares. Nothing the analysis spends
+  /// on a field grows with its arguments beyond what their text pays for, or what a budget of
+  /// these limits charges, so the bound stops no work: it refuses a shape a consumer may not take.
+  /// A GraphQL executor coerces a field's arguments at each place a response holds the field, and
+  /// GraphQL's schema builder refuses a field of more than
+  /// [`MAX_FIELD_ARGUMENTS`](crate::schema::MAX_FIELD_ARGUMENTS) for that. At `0`, no field a
+  /// supplied package writes declares an argument.
+  ///
+  /// The default is 2^10: sixteen times that ceiling, and a hundred times the widest field of the
+  /// public schemas it was measured against, ten arguments. So GraphQLx accepts the wider fields
+  /// GraphQL's builder refuses, and refuses only a field no person writes. A consumer that lowers
+  /// to GraphQL sets it to `MAX_FIELD_ARGUMENTS`.
+  #[inline]
+  pub const fn max_field_arguments(&self) -> u32 {
+    self.max_field_arguments
+  }
+
+  /// How many arguments one directive definition may declare, between its parentheses. A
+  /// directive of the built-in library is not counted, and one the root package writes to replace
+  /// a GraphQL built-in is. An extension of a directive declares none.
+  ///
+  /// Past it, the directive is `resource-limit` once, where its name is written, labelled at the
+  /// first argument past the bound, and it keeps every argument it declares: the bound stops no
+  /// work, as [`max_field_arguments`](Self::max_field_arguments) says of a field. An application
+  /// pays for what it leaves out within [`max_value_steps`](Self::max_value_steps), and an
+  /// argument that is neither written, required nor defaulted costs it nothing. GraphQL's schema
+  /// builder refuses a directive of more than
+  /// [`MAX_DIRECTIVE_ARGUMENTS`](crate::schema::MAX_DIRECTIVE_ARGUMENTS), which a document
+  /// validator reads at each of its uses. At `0`, no directive a supplied package writes declares
+  /// an argument.
+  ///
+  /// The default is 2^10, sixteen times that ceiling, which the widest directive of the registries
+  /// it was measured against, four arguments, is far within.
+  #[inline]
+  pub const fn max_directive_arguments(&self) -> u32 {
+    self.max_directive_arguments
+  }
+
+  /// How many list and non-null wrappers one written type may have around what it names: each
+  /// `[…]`, and each `!`, its own, each list's and that of the named type or the type parameter at
+  /// its core. `[[Int!]!]!` has five: two lists and three `!`. A named type's type arguments are
+  /// types of their own, each counted where it is written, so `Page<[Int!]!>!` has one and its
+  /// argument three; and a type parameter counts as it is written, whatever a use puts in its
+  /// place. Every type a supplied package writes is counted, wherever it stands: a member's type, a
+  /// type argument, a type parameter's default, a bound, a directive's argument and an
+  /// application's type argument. The built-in library's are not.
+  ///
+  /// Past it, the type is `resource-limit` once, at the whole of it, and keeps its type: each
+  /// wrapper is a bracket or a `!` its text writes, so the bound stops no work. A type that
+  /// substitution builds can wrap more than any written one, `[[T]]` with `T` a list of lists; it
+  /// is not counted here, and [`max_generic_depth`](Self::max_generic_depth) bounds how deeply it
+  /// nests. A consumer that lowers instantiations to GraphQL counts the types it builds itself.
+  /// GraphQL's schema builder packs a type reference's wrappers into one word and refuses more
+  /// than [`MAX_WRAPPERS`](crate::schema::MAX_WRAPPERS). At `0`, no type a supplied package writes
+  /// is a list or non-null.
+  ///
+  /// The default is 64. At the parser's default bracket ceiling, 24, a written type has at most 49
+  /// wrappers, so the bound decides only for a parser value given a deeper ceiling, or one a
+  /// consumer tightens: at `MAX_WRAPPERS` it refuses each type GraphQL's builder refuses for its
+  /// wrappers.
+  #[inline]
+  pub const fn max_type_wrappers(&self) -> u32 {
+    self.max_type_wrappers
   }
 
   /// How deeply one type may nest once substitution has filled it: a type argument and a list's
@@ -600,6 +690,31 @@ impl Limits {
   #[must_use]
   pub const fn with_max_globs(mut self, max: u32) -> Self {
     self.max_globs = max;
+    self
+  }
+
+  /// The same limits with `max` as their [`max_field_arguments`](Self::max_field_arguments) bound.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_field_arguments(mut self, max: u32) -> Self {
+    self.max_field_arguments = max;
+    self
+  }
+
+  /// The same limits with `max` as their
+  /// [`max_directive_arguments`](Self::max_directive_arguments) bound.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_directive_arguments(mut self, max: u32) -> Self {
+    self.max_directive_arguments = max;
+    self
+  }
+
+  /// The same limits with `max` as their [`max_type_wrappers`](Self::max_type_wrappers) bound.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_type_wrappers(mut self, max: u32) -> Self {
+    self.max_type_wrappers = max;
     self
   }
 

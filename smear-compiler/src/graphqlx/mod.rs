@@ -22,8 +22,11 @@
 //! [`Analysis::is_ok`] is the verdict: whether no error was reported, counted whether the
 //! diagnostic ceiling kept it or not, and no syntax error was counted that a parser did not lend.
 //! On every GraphQL document of smear's corpora, each given as the one file of a `Flat` package,
-//! it is the verdict the schema builder gives, but for three capacity ceilings of the schema
-//! representation that GraphQLx does not have. A differential test holds that. It counts each of
+//! it is the verdict the schema builder gives, but for three capacity ceilings of GraphQL's
+//! builder, which GraphQLx has only as bounds a consumer tightens: at 64, 64 and 15,
+//! [`Limits::max_field_arguments`], [`Limits::max_directive_arguments`] and
+//! [`Limits::max_type_wrappers`] refuse each document the builder refuses for a ceiling, as
+//! `smear::graphqlx::resource-limit`. A differential test holds that. It counts each of
 //! GraphQL's codes on both sides, and beside the three ceilings lists by document each count it
 //! lets differ, every one on a document both refuse. That is what this release's rules give,
 //! and no promise: GraphQLx is not bound to GraphQL's rules, and a GraphQL document whose one
@@ -59,7 +62,7 @@
 //! | Collection | Each package's module tree, from its directories and its inline `mod`s, and every item each module declares | `smear::graphqlx`: `invalid-directory-name`, `module-defined-twice`, `unknown-item`, `resource-limit` |
 //! | Declaration | Every module and every definition, numbered, the built-in library's and the primitives the program writes included; a GraphQL built-in the root package's root module defines again, replaced; each module's names | `smear::schema`: `duplicate-type-name`, `duplicate-directive-definition`, `reserved-type-name`, `reserved-directive-name`, `redefined-built-in-type`; `smear::graphqlx`: `module-type-collision` |
 //! | Name resolution | Every module's scope, its `use` items resolved to a fixpoint; and each path, resolved where it stands for the phases after it | `smear::schema`: `undefined-type`, `undefined-directive`, `undefined-extension-target`, `undefined-implements-interface`, `undefined-union-member`, `undefined-root-operation-type`; `smear::graphqlx`: `unknown-package`, `unresolved-path`, `ambiguous-glob`, `url-unsupported`, `file-path-use`, `use-resolution-changed`, `use-declaration-collision`, `use-name-collision`, `shadowed-primitive`, `unknown-item`, `resource-limit` |
-//! | Lowering | What each definition holds beyond its identity: its contributions, its type parameters and bounds, a directive's locations, and its members; every type occurrence and application, its path resolved where it is written; every value, as written; and the schema's contributions and roots | `smear::schema`: `extension-kind-mismatch`, `undefined-extension-target`, `undefined-directive-argument`, `duplicate-root-operation-type`; `smear::graphqlx`: `generic-arity`, `invalid-bound`, `unresolved-path`, `unknown-item` |
+//! | Lowering | What each definition holds beyond its identity: its contributions, its type parameters and bounds, a directive's locations, and its members; every type occurrence and application, its path resolved where it is written; every value, as written; and the schema's contributions and roots | `smear::schema`: `extension-kind-mismatch`, `undefined-extension-target`, `undefined-directive-argument`, `duplicate-root-operation-type`; `smear::graphqlx`: `generic-arity`, `invalid-bound`, `unresolved-path`, `unknown-item`, `resource-limit` |
 //! | Instantiation | Each definition's built-in meaning and its defaults; every occurrence's type, each type interned once; each application's complete type arguments; and the bounds of every instantiation the program writes | `smear::graphqlx`: `generic-arity`, `generic-default`, `unsatisfied-bound`, `resource-limit` |
 //! | Coercion | Every value, by the type expected where it stands, an argument or a field left out filled from its default; and a generic definition's values, at each closed instantiation of it a supplied package writes | `smear::schema`: `invalid-default-value`, `invalid-directive-argument-value`, `missing-required-directive-argument`, `undefined-input-object-field`, `missing-required-input-object-field`, `input-object-default-value-cycle`; `smear::graphqlx`: `width-overflow`, `nonzero-zero`, `collection-literal`, `resource-limit` |
 //! | Binding | Each scalar's host types, from the `@extern`s its own package writes on it | none |
@@ -270,7 +273,8 @@
 //! [`Limits`] bounds what the analysis builds and spends once it has numbered what it was given: a
 //! bound passed stops that work, is reported as `smear::graphqlx::resource-limit`, and the
 //! analysis goes on, but for the diagnostic ceiling and the near-miss budget, which limit what the
-//! analysis says and not what it accepts.
+//! analysis says and not what it accepts, and the three bounds on a field's and a directive's
+//! arguments and a written type's wrappers, which refuse a shape and stop no work.
 //!
 //! Before any bound applies, the diagnostic ceiling aside, the analysis reads what the caller
 //! supplied, to number and order it. It sorts each package's files by path, and orders two files
@@ -285,8 +289,9 @@
 //!
 //! Each bound is a `u32` count, and `0` admits none of what it counts, but that every package has
 //! its root module and the built-in library is always declared whole, its types built whatever the
-//! generic depth, instantiation and substitution bounds, and its bounds, its own values and its
-//! implementations costing nothing to judge, complete or check.
+//! generic depth, instantiation and substitution bounds, its fields' and directives' arguments and
+//! its types' wrappers counted by none of the three shape bounds, and its bounds, its own values
+//! and its implementations costing nothing to judge, complete or check.
 //!
 //! | Bound | Default | What it counts | At `0` |
 //! |---|---|---|---|
@@ -297,6 +302,9 @@
 //! | [`max_use_depth`](Limits::max_use_depth) | 32 | How deeply one `use` tree nests its braces | No braced group in a `use` item |
 //! | [`max_glob_iterations`](Limits::max_glob_iterations) | 2^10 | The rounds the glob fixpoint of one module's `use` items runs | No round |
 //! | [`max_globs`](Limits::max_globs) | 64 | The modules the glob `use` items of one module name | No glob |
+//! | [`max_field_arguments`](Limits::max_field_arguments) | 2^10 | The arguments one field declares | No field a supplied package writes declares an argument |
+//! | [`max_directive_arguments`](Limits::max_directive_arguments) | 2^10 | The arguments one directive definition declares | No directive a supplied package writes declares an argument |
+//! | [`max_type_wrappers`](Limits::max_type_wrappers) | 64 | The list and non-null wrappers one written type has around what it names | No type a supplied package writes is a list or non-null |
 //! | [`max_generic_depth`](Limits::max_generic_depth) | 64 | How deeply one type nests once substitution has filled it | No list, and no type with an argument, that a supplied package writes |
 //! | [`max_instantiations`](Limits::max_instantiations) | 2^16 | The distinct instantiations of generic definitions the analysis interns | No instantiation a supplied package needs |
 //! | [`max_substitutions`](Limits::max_substitutions) | 2^20 | The steps of filling the type arguments a use leaves out, the first time each definition's set of written arguments is filled: one for each argument left out, and one for each node of a default the filling walks | No type argument a supplied package leaves out is filled |
