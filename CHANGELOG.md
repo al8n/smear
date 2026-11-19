@@ -405,6 +405,11 @@ All notable changes to Smear are documented in this file.
     generic depth 64, instantiations 2^16, substitutions 2^20, bound steps 2^20, value steps 2^20,
     implementation steps 2^20, source bytes 2^26, diagnostics 16 384, and near-miss comparisons
     2^20, the last two limiting what the analysis says and not what it accepts.
+  - **Options.** `Options` holds the switches that relax or tighten what the language accepts, each
+    off by default and the analysis's whole, built as `Limits` is.
+    `extern_collections_as_written` lets an extern collection, a set or a map its own package
+    binds with `@extern`, keep a literal that is no collection literal as written, as an extern
+    scalar keeps its value.
   - **Stability.** The `graphqlx` module makes no semver promise yet: a release may change any
     path, signature or answer of it, and which programs it accepts.
   - **Tests.** A `test-support` feature, which `smear/test-support` forwards, compiles a hidden

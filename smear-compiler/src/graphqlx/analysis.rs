@@ -282,8 +282,11 @@ impl Analysis {
 ///   takes a copy of it, as an argument does, but a OneOf input object's. A set takes a set literal
 ///   and a map a map literal, each element, key and value coerced against the collection's types,
 ///   a key or an element never `null`; any other literal there, and a set or a map literal where no
-///   collection of its shape is expected, is `collection-literal`, and so is an element or a key
-///   written twice, told by its coerced value, at the later occurrence. `TypeRef` takes a path,
+///   collection of its shape is expected, is `collection-literal`, except that under
+///   [`Options::extern_collections_as_written`] an extern collection, one its own package binds
+///   with `@extern`, keeps any literal that is no collection literal and not `null` as written; an
+///   element or a key written twice is `collection-literal` too, told by its coerced value, at the
+///   later occurrence. `TypeRef` takes a path,
 ///   resolved as a type where it is written, that names a definition of any kind. Any other scalar
 ///   takes any literal, kept as written, and so does a type that still names a type parameter or
 ///   can take no value, with nothing said. A prefix, or a type value's path, that names nothing is the
@@ -783,7 +786,7 @@ fn finish<'a>(
     &mut builder,
     &mut reporter,
   );
-  let mut types = Types::new(*limits);
+  let mut types = Types::new(*limits, *options);
   instantiate::instantiate(
     &declarations,
     &sources,

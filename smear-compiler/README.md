@@ -123,7 +123,7 @@ and checks a GraphQLx program against smear's own rules and the rules GraphQLx s
 | Name resolution | Builds every module's scope, resolves its `use` items, and resolves each path where it stands | `smear::schema`: 6; `smear::graphqlx`: 11 |
 | Lowering | Writes what each definition holds: its contributions, type parameters, members, type occurrences and applications, its values as written, and the schema | `smear::schema`: 4; `smear::graphqlx`: 4 |
 | Instantiation | Gives every type occurrence its type and every application its complete type arguments, and judges the bounds of every instantiation the program writes | `smear::graphqlx`: 4 |
-| Coercion | Coerces every value to the type expected where it stands, filling what is left out from its default; a value of a custom scalar that is no collection but `null`, or of a type that still names a type parameter, is kept as written | `smear::schema`: 6; `smear::graphqlx`: 4 |
+| Coercion | Coerces every value to the type expected where it stands, filling what is left out from its default; a value of a custom scalar that is no collection but `null`, or of a type that still names a type parameter, is kept as written, and so is an extern collection's other literal under `Options::extern_collections_as_written` | `smear::schema`: 6; `smear::graphqlx`: 4 |
 | Binding | Binds each scalar to its host types | none |
 | Implementation | Checks what each definition says it implements, transitively and field by field, and a union's members | `smear::schema`: 9; `smear::graphqlx`: 1 |
 | Tiers | Marks what only compile-time metadata reaches, and gives every definition and every type the tier it requires | none |

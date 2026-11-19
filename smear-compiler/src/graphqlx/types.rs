@@ -12,6 +12,9 @@
 //! use leaves out, and `Limits::max_bound_steps` the judging of bounds. The rebuild, which puts an
 //! instantiation's arguments in place of its definition's type parameters in a type that names
 //! them, charges the budget its caller passes, so each phase pays for its rebuilds from its own.
+//!
+//! They also carry the analysis's limits and options for the phases after lowering, which read
+//! them through `Types::limits` and `Types::options` and keep no copy of their own.
 
 use std::{collections::BTreeMap, vec::Vec};
 
@@ -19,6 +22,7 @@ use crate::graphqlx::{
   id::{DefId, TyId},
   limits::Limits,
   model::{ModelBuilder, Shape, TypeParamRef},
+  options::Options,
 };
 
 /// A type being walked, with the index of the next of its children to look at: a walk's stack
@@ -101,6 +105,8 @@ pub(crate) enum Stop {
 pub(crate) struct Types {
   /// The analysis's limits.
   limits: Limits,
+  /// The analysis's options, which coercion reads.
+  options: Options,
   /// `Limits::max_substitutions`: the filling of the type arguments a use leaves out.
   pub(crate) substitutions: Counter,
   /// `Limits::max_bound_steps`: the judging of bounds.
@@ -110,10 +116,12 @@ pub(crate) struct Types {
 }
 
 impl Types {
-  /// The services of an analysis run within `limits`, with nothing spent and nothing derived.
-  pub(crate) fn new(limits: Limits) -> Self {
+  /// The services of an analysis run within `limits` and under `options`, with nothing spent and
+  /// nothing derived.
+  pub(crate) fn new(limits: Limits, options: Options) -> Self {
     Self {
       limits,
+      options,
       substitutions: Counter::new(limits.max_substitutions()),
       bound_steps: Counter::new(limits.max_bound_steps()),
       derived: Derived {
@@ -132,6 +140,11 @@ impl Types {
   /// The analysis's limits.
   pub(crate) const fn limits(&self) -> &Limits {
     &self.limits
+  }
+
+  /// The analysis's options, which coercion reads.
+  pub(crate) const fn options(&self) -> &Options {
+    &self.options
   }
 }
 

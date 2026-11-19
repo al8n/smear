@@ -116,9 +116,10 @@
 //! object's fields are found by name, a set's elements and a map's entries are each coerced against
 //! their collection's types, a `TypeRef` value is the definition its path names, and a value of a
 //! custom scalar that is no collection but `null`, of a type that still names a type parameter, or
-//! of a type that can take none is kept as written, a [`ValueKind::Literal`], but a whole `null` at
-//! a type that still names a type parameter and that no instantiation takes, which is refused and
-//! [`ValueKind::Unresolved`].
+//! of a type that can take none is kept as written, a [`ValueKind::Literal`], and, under
+//! [`Options::extern_collections_as_written`], so is an extern collection's literal that is not its
+//! own, but a whole `null` at a type that still names a type parameter and that no instantiation
+//! takes, which is refused and [`ValueKind::Unresolved`].
 //!
 //! [`Model::application`] answers each directive application, an [`Application`]: its directive,
 //! its type arguments and its path as written, its location, and its arguments in its directive's
@@ -316,6 +317,10 @@
 //! that relaxes accepts more, to the same model, and one that tightens refuses more. The switches
 //! are the analysis's, not a package's: one setting holds for every package analyzed together, and
 //! [`Analysis::options`] answers what an analysis ran under.
+//!
+//! | Switch | Kind | What it does when on |
+//! |---|---|---|
+//! | [`extern_collections_as_written`](Options::extern_collections_as_written) | relaxes | An extern collection, a set or a map its own package binds with `@extern`, keeps a literal that is neither `set!{…}`, `map!{…}` nor `null` as written, as an extern scalar keeps its value |
 //!
 //! # Rules
 //!

@@ -48,7 +48,9 @@
 //!    each read as below. Any other scalar takes any literal, kept as written, a set or a map
 //!    literal among them. A collection given any other literal but `null`, and a set or a map
 //!    literal given to what is no collection of its shape, does not fit, with
-//!    `collection-literal`.
+//!    `collection-literal`, but for an extern collection, one its own package binds with `core`'s
+//!    `@extern`, under `Options::extern_collections_as_written`: it keeps any literal that is no
+//!    collection literal and not `null` as written, a `Literal`.
 //!
 //! A set literal that holds one element twice, and a map literal that holds one key twice, is
 //! `collection-literal`, where it is written, at the later occurrence, with a label at the first;
@@ -435,6 +437,13 @@ pub(crate) fn coerce(
   let one_of_directive = binding(declarations, builder, CORE, DIRECTIVE, b"oneOf");
   let set_directive = binding(declarations, builder, CORE, DIRECTIVE, b"set");
   let map_directive = binding(declarations, builder, CORE, DIRECTIVE, b"map");
+  // `core`'s `@extern`, found only when the switch is on: with it off, no application is read for
+  // an extern collection.
+  let extern_directive = if types.options().extern_collections_as_written() {
+    binding(declarations, builder, CORE, DIRECTIVE, b"extern")
+  } else {
+    None
+  };
   // Every enum's values and every input object's fields, the first of each name: what an enum
   // value's name, and an object literal's field, is looked up by.
   let mut members: BTreeMap<(DefId, Sym), MemberId> = BTreeMap::new();
@@ -443,6 +452,10 @@ pub(crate) fn coerce(
   // The collections their own package applies both `@set` and `@map` to, in id order, by the test
   // instantiation and the collection arity rule read: each takes no value.
   let mut both: Vec<DefId> = Vec::new();
+  // The extern collections, in id order, listed only under the switch
+  // `Options::extern_collections_as_written`: the collections their own package applies `@extern`
+  // to, but for one that applies both.
+  let mut as_written: Vec<DefId> = Vec::new();
   for index in 0..builder.def_count() {
     let def = DefId::new(index);
     let kind = builder.def_kind(def);
@@ -454,6 +467,15 @@ pub(crate) fn coerce(
       && applies(builder, sources, own, def, map)
     {
       both.push(def);
+    }
+    if let Some(directive) = extern_directive
+      && kind == Some(DefKind::Scalar)
+      && builder.def_collection(def).is_some()
+      && both.last() != Some(&def)
+      && let Some(own) = own_package(declarations, def)
+      && applies(builder, sources, own, def, directive)
+    {
+      as_written.push(def);
     }
     if !matches!(kind, Some(DefKind::Enum | DefKind::InputObject)) {
       continue;
@@ -483,6 +505,7 @@ pub(crate) fn coerce(
     members,
     one_of,
     both,
+    as_written,
     defaulted: Vec::new(),
     required: Vec::new(),
     inputs: Vec::new(),
@@ -939,7 +962,9 @@ enum Base {
   Map(MapTypes),
   /// `core`'s `TypeRef`: a path that names a definition.
   TypeRef,
-  /// Any literal, kept as written: a custom scalar that is no collection.
+  /// Any literal, kept as written: a custom scalar that is no collection, and, under
+  /// `Options::extern_collections_as_written`, an extern collection for a literal that is no
+  /// collection literal.
   Kept,
 }
 
@@ -1378,6 +1403,11 @@ struct Coercion<'c, 'p, 'x> {
   /// The collections their own package applies both `core`'s `@set` and its `@map` to, in id
   /// order: each takes no value.
   both: Vec<DefId>,
+  /// The extern collections, in id order: the collections their own package applies `core`'s
+  /// `@extern` to, but for one that applies both. Empty unless the analysis runs under
+  /// `Options::extern_collections_as_written`, which keeps their literals that are no collection
+  /// literal as written.
+  as_written: Vec<DefId>,
   /// Each input object's defaulted fields, each with its default's tree, one run each, in member
   /// order.
   defaulted: Vec<DefaultedField>,
@@ -4381,6 +4411,16 @@ impl<'p> Coercion<'_, 'p, '_> {
         }
         (Some(Base::Set(element)), RawKind::Set) => Class::Set(element),
         (Some(Base::Map(types)), RawKind::Map) => Class::Map(types),
+        // An extern collection under the switch keeps any literal but a collection literal as
+        // written: `null` is told below, as for every class, and the other collection's literal
+        // falls to the next arm and stays refused. It follows the two arms that take a
+        // collection's own literal, so that those are never kept as written.
+        (Some(Base::Set(_) | Base::Map(_)), _)
+          if !matches!(kind, RawKind::Set | RawKind::Map)
+            && self.as_written.binary_search(&def).is_ok() =>
+        {
+          Class::Leaf(Base::Kept)
+        }
         (Some(base), _) => Class::Leaf(base),
         (None, _) => return Class::NoValue,
       },

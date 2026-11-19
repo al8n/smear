@@ -10,10 +10,12 @@ use smear::{
   analysis::graphqlx::{
     Analysis, ApplicationArgument, Cx, DefId, Diagnostic, Layout, Limits, MemberId, Model,
     Namespace, ObjectEntry, Options, Package, PackageId, Packages, Path, PathRoot, SourceFile,
-    SourceId, Sym, Tier, TyKind, ValueId, ValueKind, Visitor, analyze, test_support, visit,
+    SourceId, Sym, Tier, TyKind, ValueId, ValueKind, Visitor, analyze, analyze_with, test_support,
+    visit,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
+  parser::graphqlx::Syntactic,
 };
 
 /// GraphQL's code for a default that does not fit.
@@ -28,6 +30,10 @@ const REQUIRED: &str = "smear::schema::missing-required-input-object-field";
 const LIMIT: &str = "smear::graphqlx::resource-limit";
 /// A collection literal out of its place.
 const COLLECTION: &str = "smear::graphqlx::collection-literal";
+/// An extension of another package's definition.
+const ORPHAN: &str = "smear::graphqlx::orphan-extension";
+/// A collection of the wrong count of type arguments, or one that is both a set and a map.
+const ARITY: &str = "smear::graphqlx::collection-arity";
 
 /// The codes this phase reports values with. A program refused besides, a cycle of defaults, which
 /// this phase reports under `CYCLE`, or a OneOf field with a default, which a rule refuses, among
@@ -44,6 +50,17 @@ fn analyze_text(text: &str, limits: &Limits) -> Analysis {
     .with_files([SourceFile::new("schema.graphqlx", text)]);
   analyze(&root, &[], limits, &Options::new())
 }
+
+/// An analysis of the root package `app`, `Flat`, holding the one file `schema.graphqlx`, within
+/// the default limits and under `options`.
+fn analyze_under(text: &str, options: &Options) -> Analysis {
+  let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+    .with_files([SourceFile::new("schema.graphqlx", text)]);
+  analyze(&root, &[], &Limits::new(), options)
+}
+
+/// The options with `extern_collections_as_written` on, and no other switch.
+const AS_WRITTEN: Options = Options::new().with_extern_collections_as_written(true);
 
 /// The root package's one file, `schema.graphqlx`.
 fn schema_file(analysis: &Analysis) -> SourceId {
@@ -157,6 +174,33 @@ fn argument_default(model: &Model, owner: &str, field: &str, argument: &str) -> 
 fn arguments_of(model: &Model, owner: &str) -> Vec<ApplicationArgument> {
   let application = model.def(type_def(model, owner)).applications()[0];
   model.application(application).arguments().to_vec()
+}
+
+/// The arguments of the first application on the field `field` of the root package's type `owner`.
+fn field_arguments(model: &Model, owner: &str, field: &str) -> Vec<ApplicationArgument> {
+  let field = model
+    .def(type_def(model, owner))
+    .fields()
+    .into_iter()
+    .find(|id: &MemberId| model.member(*id).name() == field)
+    .unwrap_or_else(|| panic!("no field `{owner}.{field}`"));
+  let application = model.member(field).applications()[0];
+  model.application(application).arguments().to_vec()
+}
+
+/// Where each label of the diagnostic with the code `code` at `at` is, in order.
+fn labelled(analysis: &Analysis, code: &str, at: Location) -> Vec<Location> {
+  let report = analysis
+    .diagnostics()
+    .iter()
+    .find(|diagnostic: &&Diagnostic| {
+      diagnostic.code().as_str() == code && diagnostic.primary() == at
+    })
+    .unwrap_or_else(|| panic!("no `{code}` at {at:?}: {:#?}", analysis.diagnostics()));
+  (0..report.labels())
+    .filter_map(|index: usize| report.label(index))
+    .map(|label| label.location())
+    .collect()
 }
 
 /// `path` as written: its root and its segments.
@@ -1469,6 +1513,268 @@ fn an_extern_collection_takes_its_literal_too() {
     [(COLLECTION, at(schema, text, "[1]", 0))]
   );
   assert_eq!(shown_default(analysis.model(), "H", "s"), "Set {Int 1}");
+}
+
+/// The program of the first test below: an extern set, and the three literals it is given.
+const KEPT: &str = "type Query {\n  x: Int\n}\n\
+                    scalar IndexSet<T> @set @extern(lang: \"rust\", type: \"indexmap::IndexSet\")\n\
+                    input H {\n  a: IndexSet<Int> = set!{1, 2}\n  b: IndexSet<Int> = [1, 2]\n  \
+                    c: IndexSet<Int> = \"1,2\"\n}\n";
+
+/// With `extern_collections_as_written` on, an extern collection keeps a literal that is neither
+/// its own nor `null` as written, a `Literal` with nothing coerced and nothing said, and still
+/// takes its own literal as before; with it off the same two literals are `collection-literal`.
+/// Refuses a literal read as a collection's value, and a set literal kept as written.
+#[test]
+fn an_extern_collection_keeps_another_literal_under_the_switch() {
+  let analysis = analyze_under(KEPT, &AS_WRITTEN);
+  assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
+  let model = analysis.model();
+  assert_eq!(shown_default(model, "H", "a"), "Set {Int 1, Int 2}");
+  assert_eq!(shown_default(model, "H", "b"), "Literal(List) [1, 2]");
+  assert_eq!(shown_default(model, "H", "c"), "Literal(String) \"1,2\"");
+
+  let off = analyze_under(KEPT, &Options::new());
+  let schema = schema_file(&off);
+  assert_eq!(
+    sorted(found_of(&off, &PHASE)),
+    sorted(vec![
+      (COLLECTION, at(schema, KEPT, "[1, 2]", 0)),
+      (COLLECTION, at(schema, KEPT, "\"1,2\"", 0)),
+    ])
+  );
+  let model = off.model();
+  assert_eq!(shown_default(model, "H", "a"), "Set {Int 1, Int 2}");
+  assert_eq!(shown_default(model, "H", "b"), "?");
+  assert_eq!(shown_default(model, "H", "c"), "?");
+}
+
+/// The switch keeps no collection literal's meaning away from it: an element written twice is
+/// `collection-literal` at the later one, a map literal for a set is `collection-literal`, and
+/// `null` for a non-null extern set is `invalid-default-value`, with the switch off and on alike.
+/// Refuses a set literal kept as written, and a `null` kept.
+#[test]
+fn the_switch_keeps_a_collection_literals_meaning() {
+  let text = "type Query {\n  x: Int\n}\n\
+              scalar IndexSet<T> @set @extern(lang: \"rust\", type: \"indexmap::IndexSet\")\n\
+              input H {\n  d: IndexSet<Int> = set!{1, 1}\n  e: IndexSet<Int> = map!{1 => 2}\n  \
+              f: IndexSet<Int>! = null\n}\n";
+  for options in [Options::new(), AS_WRITTEN] {
+    let analysis = analyze_under(text, &options);
+    let schema = schema_file(&analysis);
+    assert_eq!(
+      sorted(found_of(&analysis, &PHASE)),
+      sorted(vec![
+        (COLLECTION, after(schema, text, "set!{1, ", "1")),
+        (COLLECTION, at(schema, text, "map!{1 => 2}", 0)),
+        (DEFAULT, after(schema, text, "f: IndexSet<Int>! = ", "null")),
+      ]),
+      "{options:?}"
+    );
+    let model = analysis.model();
+    assert_eq!(shown_default(model, "H", "e"), "?", "{options:?}");
+    assert_eq!(shown_default(model, "H", "f"), "?", "{options:?}");
+  }
+}
+
+/// A collection that is not extern stays strict whatever the switch: one its own package makes a
+/// set and applies no `@extern` to, the built-in `HashSet`, and another package's set that the
+/// root package extends with an `@extern`, which is `orphan-extension` and binds nothing. Refuses
+/// a collection kept as written because some `@extern` is applied to it.
+#[test]
+fn the_switch_leaves_every_other_collection_strict() {
+  let text = "type Query {\n  x: Int\n}\nscalar Tags<T> @set\n\
+              extend scalar ^::geo::Bag @extern(lang: \"rust\", type: \"bag::Bag\")\n\
+              input H {\n  g: Tags<Int> = [1]\n  h: HashSet<Int> = [1]\n  \
+              o: ^::geo::Bag<Int> = [1]\n}\n";
+  let geo: Package<&str> = Package::new("geo", Layout::Flat, Tier::Std)
+    .with_files([SourceFile::new("geo.graphqlx", "scalar Bag<T> @set\n")]);
+  let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+    .with_dependencies(["geo"])
+    .with_files([SourceFile::new("schema.graphqlx", text)]);
+  let analysis = analyze(&root, &[geo], &Limits::new(), &AS_WRITTEN);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    sorted(found_of(&analysis, &PHASE)),
+    sorted(vec![
+      (COLLECTION, after(schema, text, "g: Tags<Int> = ", "[1]")),
+      (COLLECTION, after(schema, text, "h: HashSet<Int> = ", "[1]")),
+      (
+        COLLECTION,
+        after(schema, text, "o: ^::geo::Bag<Int> = ", "[1]")
+      ),
+    ])
+  );
+  assert!(
+    found(&analysis)
+      .iter()
+      .any(|&(code, _): &(&str, Location)| code == ORPHAN),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+/// A literal an extern collection keeps is judged at each instantiation as it is where it is
+/// written: `G<Int>`'s `IndexSet<Int>` refuses `[1]` with the switch off, once, at the occurrence,
+/// labelled at the literal, and takes it with the switch on. Refuses a literal kept where it is
+/// written and refused again at the instantiation.
+#[test]
+fn the_switch_is_judged_at_each_instantiation() {
+  let text = "type Query {\n  f(g: G<Int>): Int\n}\n\
+              scalar IndexSet<T> @set @extern(lang: \"rust\", type: \"indexmap::IndexSet\")\n\
+              input G<T> {\n  s: IndexSet<T> = [1]\n}\n";
+  let off = analyze_under(text, &Options::new());
+  let schema = schema_file(&off);
+  let occurrence = at(schema, text, "G<Int>", 0);
+  assert_eq!(found_of(&off, &PHASE), [(DEFAULT, occurrence)]);
+  assert_eq!(
+    labelled(&off, DEFAULT, occurrence),
+    [at(schema, text, "[1]", 0)]
+  );
+
+  let on = analyze_under(text, &AS_WRITTEN);
+  assert!(on.is_ok(), "{:#?}", on.diagnostics());
+  assert_eq!(shown_default(on.model(), "G", "s"), "Literal(List) [1]");
+}
+
+/// A copy of a default an extern collection keeps as written is that literal, not written, located
+/// at the default; with the switch off the default is refused where it is written and the copy is
+/// unresolved and says nothing. Refuses a copy located at the application, and a second report.
+#[test]
+fn a_copy_keeps_its_default_as_written() {
+  let text = "type Query {\n  x: Int @d\n}\n\
+              scalar IndexSet<T> @set @extern(lang: \"rust\", type: \"indexmap::IndexSet\")\n\
+              directive @d(s: IndexSet<Int> = [1]) on FIELD_DEFINITION\n";
+  let on = analyze_under(text, &AS_WRITTEN);
+  assert!(on.is_ok(), "{:#?}", on.diagnostics());
+  let model = on.model();
+  let schema = schema_file(&on);
+  let arguments = field_arguments(model, "Query", "x");
+  assert_eq!(arguments.len(), 1);
+  assert!(!arguments[0].written());
+  let copy = model.value(arguments[0].value());
+  assert_eq!(shown(model, copy.id()), "Literal(List) [1]");
+  assert!(!copy.written());
+  assert_eq!(copy.location(), at(schema, text, "[1]", 0));
+
+  let off = analyze_under(text, &Options::new());
+  let schema = schema_file(&off);
+  assert_eq!(
+    found_of(&off, &PHASE),
+    [(COLLECTION, at(schema, text, "[1]", 0))]
+  );
+  let model = off.model();
+  assert_eq!(
+    shown(model, field_arguments(model, "Query", "x")[0].value()),
+    "?"
+  );
+}
+
+/// Both entrances take the options: `analyze_with` over the syntactic layer, under the switch,
+/// answers the analysis `analyze` answers, options and all. Refuses an entrance that drops them.
+#[test]
+fn both_entrances_take_the_options() {
+  let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
+    .with_files([SourceFile::new("schema.graphqlx", KEPT)]);
+  let direct = analyze(&root, &[], &Limits::new(), &AS_WRITTEN);
+  let (layered, _trees) = analyze_with(&Syntactic::new(), &root, &[], &Limits::new(), &AS_WRITTEN);
+  assert!(layered.is_ok(), "{:#?}", layered.diagnostics());
+  assert_eq!(layered.options(), &AS_WRITTEN);
+  assert_eq!(
+    shown_default(layered.model(), "H", "b"),
+    "Literal(List) [1, 2]"
+  );
+  assert_eq!(layered, direct);
+
+  let off = analyze(&root, &[], &Limits::new(), &Options::new());
+  let (layered, _trees) = analyze_with(
+    &Syntactic::new(),
+    &root,
+    &[],
+    &Limits::new(),
+    &Options::new(),
+  );
+  assert!(!layered.is_ok());
+  assert_eq!(layered, off);
+  assert_ne!(layered, direct);
+}
+
+/// An extern map keeps a literal that is neither a map literal nor `null` as written, an object
+/// literal among them, and a set literal for it is still `collection-literal`, the switch on or
+/// off. Refuses a set literal kept for a map.
+#[test]
+fn an_extern_map_keeps_another_literal_too() {
+  let text = "type Query {\n  x: Int\n}\n\
+              scalar IndexMap<K, V> @map @extern(lang: \"rust\", type: \"indexmap::IndexMap\")\n\
+              input H {\n  j: IndexMap<string, Int> = {a: 1}\n  \
+              k: IndexMap<string, Int> = set!{1}\n}\n";
+  let on = analyze_under(text, &AS_WRITTEN);
+  let schema = schema_file(&on);
+  assert_eq!(
+    found_of(&on, &PHASE),
+    [(COLLECTION, at(schema, text, "set!{1}", 0))]
+  );
+  assert_eq!(
+    shown_default(on.model(), "H", "j"),
+    "Literal(Object) {a: 1}"
+  );
+  assert_eq!(shown_default(on.model(), "H", "k"), "?");
+
+  let off = analyze_under(text, &Options::new());
+  let schema = schema_file(&off);
+  assert_eq!(
+    sorted(found_of(&off, &PHASE)),
+    sorted(vec![
+      (COLLECTION, at(schema, text, "{a: 1}", 0)),
+      (COLLECTION, at(schema, text, "set!{1}", 0)),
+    ])
+  );
+  assert_eq!(shown_default(off.model(), "H", "j"), "?");
+}
+
+/// `null` for a nullable extern set is `null`, with the switch off and on: the switch takes no
+/// `null`. Refuses a `null` kept as written, a `Literal`.
+#[test]
+fn null_for_a_nullable_extern_set_is_null() {
+  let text = "type Query {\n  x: Int\n}\n\
+              scalar IndexSet<T> @set @extern(lang: \"rust\", type: \"indexmap::IndexSet\")\n\
+              input H {\n  i: IndexSet<Int> = null\n}\n";
+  for options in [Options::new(), AS_WRITTEN] {
+    let analysis = analyze_under(text, &options);
+    assert!(
+      analysis.is_ok(),
+      "{options:?}: {:#?}",
+      analysis.diagnostics()
+    );
+    assert_eq!(
+      shown_default(analysis.model(), "H", "i"),
+      "Null null",
+      "{options:?}"
+    );
+  }
+}
+
+/// A collection its own package makes both a set and a map takes no value, extern or not: its
+/// literal is kept as written either way, and its one diagnostic is `collection-arity`. Refuses a
+/// second diagnostic for the definition's mistake, and a literal refused.
+#[test]
+fn a_collection_both_ways_keeps_its_literal_either_way() {
+  let text = "type Query {\n  x: Int\n}\n\
+              scalar Both<T> @set @map @extern(lang: \"rust\", type: \"b\")\n\
+              input H {\n  l: Both<Int> = [1]\n}\n";
+  for options in [Options::new(), AS_WRITTEN] {
+    let analysis = analyze_under(text, &options);
+    let codes: Vec<&str> = found(&analysis)
+      .iter()
+      .map(|&(code, _): &(&'static str, Location)| code)
+      .collect();
+    assert_eq!(codes, [ARITY], "{options:?}");
+    assert_eq!(
+      shown_default(analysis.model(), "H", "l"),
+      "Literal(List) [1]",
+      "{options:?}"
+    );
+  }
 }
 
 /// A collection whose type has another count of arguments than its collection, and one its own
