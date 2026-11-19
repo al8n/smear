@@ -16,6 +16,10 @@
 //! There is no `#[test]` here and there should not be. The property is "a consumer who did not
 //! enable the feature cannot reach this", and `cargo build`'s exit code answers it exactly.
 
+#[cfg(feature = "uses-compiler-graphql")]
+pub mod compiler_graphql;
+#[cfg(feature = "uses-compiler-graphqlx")]
+pub mod compiler_graphqlx;
 #[cfg(feature = "uses-compiler-introspection")]
 pub mod compiler_introspection;
 #[cfg(feature = "uses-lexer-bytes")]
@@ -32,8 +36,6 @@ pub mod parser_graphqlx;
 pub mod parser_rowan;
 #[cfg(feature = "uses-parser-test-support")]
 pub mod parser_test_support;
-#[cfg(feature = "uses-schema-build")]
-pub mod schema_build;
 #[cfg(feature = "uses-schema-introspection")]
 pub mod schema_introspection;
 

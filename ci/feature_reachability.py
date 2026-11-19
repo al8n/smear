@@ -239,7 +239,7 @@ PLANTS = {
 #
 # Derived from the table, not listed. An alias is a feature whose whole list is one other feature
 # of the same member, spelled as its own name plus a version suffix. The suffix is what keeps
-# `smear-schema`'s `introspection = ["build"]` and `smear-parser`'s
+# `smear-compiler`'s `introspection = ["graphql"]` and `smear-parser`'s
 # `lossless-coverage = ["rowan_0_17"]` out of it: each is a single forward and each is a
 # capability with a witness of its own. `ci/downstream_pairs.py` applies the same rule and
 # `audit_equivalence` checks that the two suffixes agree.

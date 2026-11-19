@@ -118,12 +118,9 @@ after = pathlib.Path(sys.argv[2]).read_text(encoding="utf-8").splitlines(keepend
 expected = {
   "graphql-proto",
   "smear",
-  "smear-analysis",
   "smear-compiler",
   "smear-lexer",
   "smear-parser",
-  "smear-schema",
-  "smear-semantics",
 }
 
 if len(before) != len(after):

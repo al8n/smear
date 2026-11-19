@@ -776,11 +776,25 @@ jobs:
         cargo hack build -p smear --each-feature --features parser,alloc \
           --exclude-features rowan,rowan_0_17,lossless-coverage,validator,introspection,proto,analysis,default,std,bytes,bstr,hipstr,smol-bytes \
           --exclude-no-default-features --exclude-all-features
+        # Pass 3b — the same lesson for `smear-compiler`, which is one crate where it was four, as
+        # `ci/hack.sh` has it and for its reasons. A single-crate `--each-feature` builds each
+        # feature ALONE, so these keep the cells the crate boundaries used to give: `graphqlx`
+        # with `graphql`, with `test-support` and with each source feature, on `alloc`; `graphqlx`
+        # alone and with each source feature, on `std`; and `graphql` and `introspection`, on `std`.
+        cargo hack build -p smear-compiler --each-feature --features alloc,graphqlx \
+          --exclude-features std,default,introspection,bytes,bstr,hipstr,smol-bytes \
+          --exclude-no-default-features --exclude-all-features
+        cargo hack build -p smear-compiler --each-feature --features std,graphqlx \
+          --exclude-features alloc,default,graphql,introspection,test-support,bytes,bstr,hipstr,smol-bytes \
+          --exclude-all-features
+        cargo hack build -p smear-compiler --each-feature --features std \
+          --include-features graphql,introspection \
+          --exclude-no-default-features --exclude-all-features
         # Pass 4 — the std tier, without alloc: `std,alloc` and every dependency feature on `std`,
         # as `ci/hack.sh` has it and for its reasons. `rowan_0_17` and `lossless-coverage` are NOT
         # excluded: theirs are the rows that build the tower on its own, with only the tier it needs.
         cargo hack build --each-feature --features std --ignore-unknown-features \
-          --exclude-features default,bytes,bstr,hipstr,smol-bytes,rowan,graphql,graphqlx,parser,validator,proto,introspection,analysis,materialized-numbers,test-support,build \
+          --exclude-features default,bytes,bstr,hipstr,smol-bytes,rowan,graphql,graphqlx,parser,validator,proto,introspection,analysis,materialized-numbers,test-support \
           --exclude-no-default-features --exclude-all-features
         # Pass 5 — the six criterion benches, which NOTHING ELSE IN CI COMPILES.
         #
@@ -1550,34 +1564,40 @@ jobs:
         # already runs the default set (lib unit tests + `tests/*`) in addition to doc tests,
         # which is the full equivalent of the old lib+tests+doctests selection.
         #
-        # `std`, `graphqlx`, `rowan` and `materialized-numbers` are named for the reason the
-        # `parser` paragraph gives, and NOT because the leg would otherwise resolve without them.
-        # `--workspace` selects `smear-smoke`, whose `smear` dependency names every declared
-        # feature, and cargo unifies that across the selected packages, so the unit graph is
-        # identical with these names and without them. What changes is who decided. Until they were
-        # written, the resolve this job leans on was another member's dependency edge — the shape
-        # the paragraph above refuses for `parser`.
+        # `std`, `graphqlx`, `validator`, `analysis`, `rowan` and `materialized-numbers` are named
+        # for the reason the `parser` paragraph gives, and NOT because the leg would otherwise
+        # resolve without them. `--workspace` selects `smear-smoke`, whose `smear` dependency names
+        # every declared feature, and cargo unifies that across the selected packages, so the unit
+        # graph is identical with these names and without them. What changes is who decided. Until
+        # they were written, the resolve this job leans on was another member's dependency edge —
+        # the shape the paragraph above refuses for `parser`.
+        #
+        # `validator` and `analysis` are named because a bare `graphql` or `graphqlx` reaches every
+        # selected package that declares it, and `smear-compiler` is one: its `graphql` and
+        # `graphqlx` are the two compilers, which `smear` turns on through `validator` and
+        # `analysis`, and the fence in `smear` refuses a graph where the one is on and the other is
+        # not. The bare names alone would leave that agreement to `smear-smoke`'s edge.
         #
         # It is this leg the decision rests on, because this is the repository's ONLY nightly
         # `cargo test --doc`. A `compile_fail,EXXXX` fence has its ERROR CODE checked only by a
         # nightly rustdoc; on stable a snippet that fails with some other code satisfies the fence
         # and the run is green. So every coded fence in the workspace — 51 today, across
-        # `smear-lexer` (18), `smear-parser` (30), `graphql-proto` (2) and `smear-analysis` (1) — is
+        # `smear-lexer` (18), `smear-parser` (30), `graphql-proto` (2) and `smear-compiler` (1) — is
         # enforced here or nowhere, and this is the one leg that enforces all of them. There is no
         # second nightly doctest step because none is needed: the audit of al8n/smear#173 found no
         # coded fence whose item needs a feature this feature set lacks, and none whose point is
         # that a feature is OFF. The gates, by what the fence's item needs; the heap is on through
         # `std`, named here, and every item but `keyword!` needs it:
         #   - no capability: `graphql-proto` (2); `smear-lexer`'s `keyword!` (1), the string
-        #     carriers under `string_lexer` (11); `smear-analysis`'s `Primitive` (1)
+        #     carriers under `string_lexer` (11)
         #   - `graphql`: `smear-lexer`'s `LosslessLexer` accessors (3); `smear-parser`'s
         #     `graphql::ast` hash-key fences (4: `OperationType` and the three `type_system`
         #     locations), `value::nesting`'s `Leaf` fences under a `cfg_attr(graphql, doc)` (5),
         #     and `layer::__pins`' fence on the seal of GraphQL's syntactic layer (1)
-        #   - `graphqlx`: `smear-lexer`'s `LosslessLexer` accessors (3); `smear-parser`'s
-        #     `graphqlx::ast::OperationType` (1), `value::nesting`'s `cfg_attr(graphqlx, doc)`
-        #     fences (3), and `layer::__pins`' fences over the syntactic layer and a sink (5) and
-        #     on the seal of a syntactic layer (2)
+        #   - `graphqlx`: `smear-lexer`'s `LosslessLexer` accessors (3); `smear-compiler`'s
+        #     `graphqlx::Primitive` (1); `smear-parser`'s `graphqlx::ast::OperationType` (1),
+        #     `value::nesting`'s `cfg_attr(graphqlx, doc)` fences (3), and `layer::__pins`' fences
+        #     over the syntactic layer and a sink (5) and on the seal of a syntactic layer (2)
         #   - `graphql`, `rowan` and `std`: the crate-root cross-dialect cast fence (1), a
         #     `cfg_attr(all(graphql, rowan, std), doc)`
         #   - `graphqlx`, `rowan` and `std`: `layer::__pins`' fences over the lossless layer (2)
@@ -1592,7 +1612,7 @@ jobs:
         # smoke member's edge to carry it.
         run: |
           cargo llvm-cov --no-default-features \
-            --features std,graphql,graphqlx,rowan_0_17,parser,materialized-numbers,bytes_1 \
+            --features std,graphql,graphqlx,validator,analysis,rowan_0_17,parser,materialized-numbers,bytes_1 \
             --doctests --workspace \
             --cobertura --output-path cobertura.xml
       - name: Upload to codecov.io
