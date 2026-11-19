@@ -163,14 +163,14 @@
 //! writes, is judged for its entries and members, for the arguments it makes required and for its
 //! definition's values under it, where its definition does not grow: each such instantiation a
 //! written one derives, through what a copy of it needs, is judged once, and what fails is reported
-//! at each occurrence of the written one, labelled at the type that derives it, unless an object
-//! literal of the derived instantiation, written or in the copy of a default an application
-//! reported, has its report own that value already. Its bounds are
-//! not judged, each default's being judged where it is written, and holding at the instantiation
-//! by what the implementation check holds. What stays unjudged is a derived instantiation of a
-//! definition that [grows](Def::grows), and what only such an instantiation derives:
-//! `Nest<[i32]>` of `type Nest<T> { v: Box<T>, deeper: Nest<[T]> }`, where the `Box<i32>` that a
-//! written `Nest<i32>` derives is judged. The rules on the kinds a type parameter takes, on
+//! at each occurrence of the written one, labelled at the type that derives it, unless a report
+//! owns that value already: a written object literal's report of its copy of a default, or an
+//! application's of its copy of one, owns each value that copy counts that does not fit. Its bounds
+//! are not judged, each default's being judged where it is written, and holding at the
+//! instantiation by what the implementation check holds. What stays unjudged is a derived
+//! instantiation of a definition that [grows](Def::grows), and what only such an instantiation
+//! derives: `Nest<[i32]>` of `type Nest<T> { v: Box<T>, deeper: Nest<[T]> }`, where the `Box<i32>`
+//! that a written `Nest<i32>` derives is judged. The rules on the kinds a type parameter takes, on
 //! `TypeRef`, on a OneOf's fields and on deprecated members judge what a fill derives, at the
 //! occurrence that leaves the slot out, but for a default such a rule refuses as written, which it
 //! reports where it is written and at no use; and a code generator that monomorphises judges what

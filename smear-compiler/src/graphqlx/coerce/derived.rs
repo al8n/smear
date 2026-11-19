@@ -18,8 +18,9 @@
 //! instantiation rebuilds a member's type, through the same remembered rebuild. Each instantiation
 //! of a generic definition the rebuilt types hold, at any depth, is derived, with the type or the
 //! application that derives it; a written one is no child, being judged where it is written and
-//! expanded as a root, and what it holds is its own. A root's expansion reads its arguments too,
-//! each one a type parameter's default may fill: what a default fills is derived by that default.
+//! expanded as a root, and what it holds is its own. A root's expansion reads the arguments its
+//! type parameters' defaults fill too, past the most any occurrence of it writes: what a default
+//! fills is derived by that default.
 //!
 //! The expansion reads only toward what can be judged. What an instantiation is judged for is a
 //! value recorded under its definition, here, and in the implementation check an `implements` entry
@@ -43,10 +44,11 @@
 //! and depth-checked against `Limits::max_generic_depth` as every rebuild is. Each turn of each of
 //! its loops is a step of `Limits::max_value_steps`, or is bounded by the model's size:
 //!
-//! - finding the roots, what is relevant, and which positions an expansion reads, reads the types
-//!   instantiation built, each distinct type below a position once, with its arguments: linear in
-//!   the model but for sorting, and charged nothing. Each definition keeps its useful positions
-//!   alone, each distinct type once;
+//! - finding the roots, what is relevant, and which positions and fills an expansion reads, reads
+//!   the types instantiation built, each distinct type below a position or a root's fill once, with
+//!   its arguments: linear in the model but for sorting, and charged nothing. Each definition keeps
+//!   its useful positions alone, each distinct type once, and each root the fills, past what any
+//!   occurrence of it writes, that can derive something judged;
 //! - each position an expansion reads is a rebuild, a step for its root and one for each argument
 //!   or element it looks at, as the check at a written instantiation pays for its own; a position
 //!   whose rebuild the check of its instantiation made already is put on the walk's stack, a step;
@@ -63,18 +65,22 @@
 //! So the closure does work linear in the model's size and in the steps it pays, but for sorting.
 //!
 //! A limit that stops an expansion is `resource-limit`, once, at where the root whose expansion was
-//! running is first written, and the closure ends there. What it derived is still judged, each
-//! instantiation having been judged as it was derived; a check a limit stopped then says nothing
-//! more, that one `resource-limit` standing for it. What the closure did not reach is not judged.
+//! running is first written, and the closure ends there. The stopped expansion keeps what it
+//! derived before the stop, and what the closure derived is judged, each instantiation as it was
+//! derived: a failing one the stopped root reaches is reported as well. A check a limit stopped
+//! while that root's expansion was running says nothing more, the one `resource-limit` standing for
+//! it; one a limit stopped while an earlier root's expansion was running is reported at that root's
+//! occurrences. What the closure did not reach is not judged.
 //!
 //! # The check, and its report
 //!
 //! Each instantiation the closure derives whose definition does not grow and records rows is judged
 //! as a written instantiation is, by the same verdict, made once and shared by both nullnesses, a
 //! step for each pair of the instantiation and a row. Each mistake has one owner (W:979): a row
-//! whose value a written object literal of that very instantiation already reported, as its own
-//! copy that does not fit, is the literal's, and one an object literal of it leaves out in the copy
-//! of a default an application reported is that report's; the check passes over it to the next row.
+//! whose value's count, against the type it takes there, a report already owns is that report's,
+//! and the check passes over it to the next row. A written object literal that reports its copy of
+//! a default, and an application that reports its copy of one, each own that copy's count, and
+//! each count beneath it that does not fit, as the count kept it, whether a copy is made or not.
 //! Each occurrence of a root, and each application of one, in id order, whose own verdict holds,
 //! reports the failing instantiation of least index its expansion reaches, as `Closure::blame`
 //! finds it: with the code the same failure has at a written instantiation, labelled at the type or
@@ -92,7 +98,7 @@ use std::{
 
 use tokora::diagnostic::Location;
 
-use super::{Checked, Coercion, OmittedArgument, Owed, OwedValue, Recorded};
+use super::{Checked, Coercion, CountKey, OmittedArgument, Owed, OwedValue, Recorded};
 use crate::graphqlx::{
   code::schema,
   diagnostic::{Diagnostic, Excerpt, Message},
@@ -132,6 +138,11 @@ struct Building {
   runs: Vec<PoolRange>,
   /// Whether each definition is relevant, by `DefId`.
   relevant: Vec<bool>,
+  /// The arguments the roots' defaults fill that can derive something judged, each with the
+  /// default that fills it, a run for each root.
+  fills: Vec<(TyId, TypeExprId)>,
+  /// Each root's run of `fills`, by its node.
+  filled: BTreeMap<u32, PoolRange>,
   /// Each type a walk met, with its run of `children`: its distinct arguments, or its element,
   /// that are generic named types or lists, in order, read the first time a walk meets it.
   kept: BTreeMap<TyId, PoolRange>,
@@ -148,24 +159,59 @@ struct Building {
   /// The instantiations still to expand from the root being expanded, in order, and those already
   /// expanded before them.
   queue: Vec<u32>,
+  /// The root whose expansion is running.
+  root: u32,
+  /// Each derived instantiation whose check a limit stopped, by the root whose expansion judged it.
+  stalled: BTreeMap<u32, u32>,
+}
+
+/// The roots of the closure, as the type occurrences and the applications are read.
+#[derive(Default)]
+struct Roots {
+  /// Each root, with where it is first written and its definition, in the order first written.
+  list: Vec<(u32, Location, DefId)>,
+  /// The most type arguments any occurrence or application of each root writes, by its node: the
+  /// arguments past them are filled, by their defaults, wherever it is written.
+  spelled: BTreeMap<u32, u32>,
+}
+
+/// The closure, with what stopped it.
+struct Derivation {
+  /// The closure.
+  closure: Closure,
+  /// The root whose expansion a limit stopped, whose `resource-limit` is reported; `None` when no
+  /// limit stopped one.
+  stopped: Option<u32>,
+  /// Each derived instantiation whose check a limit stopped, by the root whose expansion judged it.
+  stalled: BTreeMap<u32, u32>,
+}
+
+impl Derivation {
+  /// Whether the check of the derived instantiation `at`, which a limit stopped, is one the
+  /// closure's `resource-limit` stands for: it was judged while the expansion that report names was
+  /// running.
+  fn covers(&self, at: u32) -> bool {
+    self
+      .stopped
+      .is_some_and(|root: u32| self.stalled.get(&at) == Some(&root))
+  }
 }
 
 impl Coercion<'_, '_, '_> {
   /// Builds the closure of derived instantiations, judges what it derives, and keeps it in the type
   /// services for the implementation check.
   pub(super) fn derived(&mut self) {
-    let (closure, stopped) = self.derive_closure();
-    self.judge_derived(&closure, stopped);
-    self.types.closure = closure;
+    let derivation = self.derive_closure();
+    self.judge_derived(&derivation);
+    self.types.closure = derivation.closure;
   }
 
   /// The closure: every root, and what each derives through the definitions that do not grow, as
-  /// the module says, and whether a limit stopped it. A limit that stops an expansion is reported
-  /// once, and ends it.
-  fn derive_closure(&mut self) -> (Closure, bool) {
+  /// the module says, with what stopped it. A limit that stops an expansion is reported once, and
+  /// ends it.
+  fn derive_closure(&mut self) -> Derivation {
     let mut closure = Closure::default();
-    // The roots, each with where it is first written.
-    let mut roots: Vec<(u32, Location, DefId)> = Vec::new();
+    let mut roots = Roots::default();
     for index in 0..self.builder.type_expr_count() {
       let Some(occurrence) = self.builder.occurrence(TypeExprId::new(index)) else {
         continue;
@@ -174,15 +220,16 @@ impl Coercion<'_, '_, '_> {
         continue;
       };
       let at = occurrence.location;
-      self.root(&mut closure, &mut roots, at, def, ty);
+      let written = dense(occurrence.args.len());
+      self.root(&mut closure, &mut roots, at, def, ty, written);
     }
     for index in 0..self.builder.application_count() {
       let application = ApplicationId::new(index);
       let (
         Some(Applied {
           directive: Resolution::Resolved(def),
+          written,
           at,
-          ..
         }),
         Some(ty),
       ) = (
@@ -192,16 +239,22 @@ impl Coercion<'_, '_, '_> {
       else {
         continue;
       };
-      self.root(&mut closure, &mut roots, at, def, ty);
+      self.root(&mut closure, &mut roots, at, def, ty, written);
     }
-    if roots.is_empty() {
-      return (closure, false);
+    if roots.list.is_empty() {
+      return Derivation {
+        closure,
+        stopped: None,
+        stalled: BTreeMap::new(),
+      };
     }
     let mut building = Building {
       closure,
       positions: Vec::new(),
       runs: Vec::new(),
       relevant: Vec::new(),
+      fills: Vec::new(),
+      filled: BTreeMap::new(),
       kept: BTreeMap::new(),
       children: Vec::new(),
       distinct: BTreeSet::new(),
@@ -209,35 +262,47 @@ impl Coercion<'_, '_, '_> {
       derived: BTreeSet::new(),
       stack: Vec::new(),
       queue: Vec::new(),
+      root: 0,
+      stalled: BTreeMap::new(),
     };
-    self.relevance(&mut building);
-    if !building.relevant.iter().any(|relevant: &bool| *relevant) {
-      return (building.closure, false);
-    }
-    for &(root, at, def) in &roots {
-      building.queue.clear();
-      building.queue.push(root);
-      let mut next: usize = 0;
-      while let Some(&expanding) = building.queue.get(next) {
-        next += 1;
-        if let Err(stop) = self.expand(&mut building, expanding) {
-          self.report_unexpanded(at, def, stop);
-          return (building.closure, true);
+    self.relevance(&mut building, &roots);
+    if building.relevant.iter().any(|relevant: &bool| *relevant) {
+      for &(root, at, def) in &roots.list {
+        building.root = root;
+        building.queue.clear();
+        building.queue.push(root);
+        let mut next: usize = 0;
+        while let Some(&expanding) = building.queue.get(next) {
+          next += 1;
+          if let Err(stop) = self.expand(&mut building, expanding) {
+            self.report_unexpanded(at, def, stop);
+            return Derivation {
+              closure: building.closure,
+              stopped: Some(root),
+              stalled: building.stalled,
+            };
+          }
         }
       }
     }
-    (building.closure, false)
+    Derivation {
+      closure: building.closure,
+      stopped: None,
+      stalled: building.stalled,
+    }
   }
 
-  /// Joins `ty`, written at `at`, to `closure` as a root, and to `roots` when it is new: when a
-  /// supplied package writes it and it is a closed named type of `def`, a generic definition.
+  /// Joins `ty`, written at `at` with `written` type arguments, to `closure` as a root, and to
+  /// `roots` when it is new: when a supplied package writes it and it is a closed named type of
+  /// `def`, a generic definition.
   fn root(
     &mut self,
     closure: &mut Closure,
-    roots: &mut Vec<(u32, Location, DefId)>,
+    roots: &mut Roots,
     at: Location,
     def: DefId,
     ty: TyId,
+    written: u32,
   ) {
     if at.source() < self.supplied
       || self.builder.type_param_count(def) == 0
@@ -250,8 +315,10 @@ impl Coercion<'_, '_, '_> {
     let grows = self.builder.def_grows(def);
     let (node, new) = closure.join(nullable, def, true, grows);
     if new {
-      roots.push((node, at, def));
+      roots.list.push((node, at, def));
     }
+    let most = roots.spelled.entry(node).or_insert(0);
+    *most = (*most).max(written);
   }
 
   /// Finds every generic definition's open positions, which definitions are relevant and which
@@ -270,9 +337,11 @@ impl Coercion<'_, '_, '_> {
   /// the walk, or was met already: by the walk that derived that instantiation, or by a root's walk
   /// of the arguments its defaults fill.
   ///
-  /// Then each definition's run of positions keeps its useful ones alone, each distinct type once,
-  /// at its first place, so that an expansion reads nothing it cannot use.
-  fn relevance(&mut self, building: &mut Building) {
+  /// The arguments a root's defaults fill are read by the same walk, those past the most any
+  /// occurrence of the root writes: a root's expansion walks the ones that reach alone. Then each
+  /// definition's run of positions keeps its useful ones alone, each distinct type once, at its
+  /// first place, so that an expansion reads nothing it cannot use.
+  fn relevance(&mut self, building: &mut Building, roots: &Roots) {
     let count = self.builder.def_count();
     building.runs = vec![PoolRange { start: 0, end: 0 }; count as usize];
     building.relevant = vec![false; count as usize];
@@ -315,14 +384,48 @@ impl Coercion<'_, '_, '_> {
         };
       }
     }
-    // Every distinct type below a position, once, by its index: each generic named type no
-    // supplied package writes, and each list. A written instantiation ends the walk, as it ends an
-    // expansion's, and a type of no type parameter holds nothing.
+    // Each argument a root's default fills, which no occurrence of the root writes, with the
+    // default, each root's a run.
+    let mut candidates: Vec<(TyId, TypeExprId)> = Vec::new();
+    let mut runs: Vec<(u32, PoolRange)> = Vec::new();
+    for &(root, _, def) in &roots.list {
+      let Some(node) = building.closure.node(root) else {
+        continue;
+      };
+      let start = dense(candidates.len());
+      let written = roots.spelled.get(&root).copied().unwrap_or(0);
+      let count = dense(self.builder.ty_args(node.ty).len());
+      for slot in written..count {
+        let Some(&argument) = self.builder.ty_args(node.ty).get(slot as usize) else {
+          break;
+        };
+        if let Some(default) = self
+          .builder
+          .type_param(def, slot)
+          .and_then(|param: WrittenParam| param.default)
+        {
+          candidates.push((argument, default));
+        }
+      }
+      runs.push((
+        root,
+        PoolRange {
+          start,
+          end: dense(candidates.len()),
+        },
+      ));
+    }
+    // Every distinct type below a position or a filled argument, once, by its index: each generic
+    // named type no supplied package writes, and each list. A written instantiation ends the walk,
+    // as it ends an expansion's, and a type of no type parameter holds nothing.
     let mut index: BTreeMap<TyId, u32> = BTreeMap::new();
     let mut types: Vec<TyId> = Vec::new();
     building.stack.clear();
     for position in &building.positions {
       building.stack.push(position.ty);
+    }
+    for &(argument, _) in &candidates {
+      building.stack.push(argument);
     }
     while let Some(ty) = building.stack.pop() {
       if index.contains_key(&ty) {
@@ -430,6 +533,29 @@ impl Coercion<'_, '_, '_> {
             defs.push(owner);
           }
         }
+      }
+    }
+    // Each root's filled arguments that reach, in order.
+    let reaches = |ty: TyId| -> bool {
+      index
+        .get(&ty)
+        .and_then(|at: &u32| reaching.get(*at as usize))
+        .copied()
+        .unwrap_or(false)
+    };
+    for &(root, run) in &runs {
+      let start = dense(building.fills.len());
+      for &(argument, default) in candidates
+        .get(run.start as usize..run.end as usize)
+        .unwrap_or_default()
+      {
+        if reaches(argument) {
+          building.fills.push((argument, default));
+        }
+      }
+      let end = dense(building.fills.len());
+      if end > start {
+        building.filled.insert(root, PoolRange { start, end });
       }
     }
     // Each definition's useful positions alone, each distinct type once, at its first place.
@@ -563,22 +689,30 @@ impl Coercion<'_, '_, '_> {
   }
 
   /// Expands the node `at` of the closure: each useful position of its definition, rebuilt under
-  /// its type, and, for a root, each argument a type parameter's default may fill, each walked for
-  /// the instantiations it derives. `Err` when a limit stops a rebuild, or the budget a type the
-  /// walk meets.
+  /// its type, and, for a root, each argument its defaults fill that can derive something judged,
+  /// each walked for the instantiations it derives. `Err` when a limit stops a rebuild, or the
+  /// budget a type the walk meets. Whatever stops it, the node keeps the children it derived before
+  /// the stop, so that what it reached is blamed on it.
   fn expand(&mut self, building: &mut Building, at: u32) -> Result<(), Stop> {
-    let Some(node) = building.closure.node(at) else {
-      return Ok(());
-    };
     let from = building.closure.next_edge();
     building.seen.clear();
     building.derived.clear();
-    // Its definition's useful positions, each distinct type once: none when it is not relevant.
+    let read = self.derive_from(building, at);
+    building.closure.expanded(at, from);
+    read
+  }
+
+  /// What `expand` reads of the node `at`.
+  fn derive_from(&mut self, building: &mut Building, at: u32) -> Result<(), Stop> {
+    let Some(node) = building.closure.node(at) else {
+      return Ok(());
+    };
+    let none = PoolRange { start: 0, end: 0 };
     let run = building
       .runs
       .get(node.def.get() as usize)
       .copied()
-      .unwrap_or(PoolRange { start: 0, end: 0 });
+      .unwrap_or(none);
     for index in run.start..run.end {
       let Some(&Position { place, ty, .. }) = building.positions.get(index as usize) else {
         break;
@@ -588,23 +722,15 @@ impl Coercion<'_, '_, '_> {
       }
     }
     if node.written {
-      // A root's arguments: what a type parameter's default fills is derived by that default.
-      let count = self.builder.ty_args(node.ty).len();
-      for index in 0..count {
-        let Some(&argument) = self.builder.ty_args(node.ty).get(index) else {
+      // What a type parameter's default fills is derived by that default.
+      let run = building.filled.get(&at).copied().unwrap_or(none);
+      for index in run.start..run.end {
+        let Some(&(argument, default)) = building.fills.get(index as usize) else {
           break;
-        };
-        let Some(default) = self
-          .builder
-          .type_param(node.def, dense(index))
-          .and_then(|param: WrittenParam| param.default)
-        else {
-          continue;
         };
         self.collect(building, argument, Place::Type(default))?;
       }
     }
-    building.closure.expanded(at, from);
     Ok(())
   }
 
@@ -651,7 +777,9 @@ impl Coercion<'_, '_, '_> {
           if building.derived.insert(child) {
             building.closure.derive(child, place);
             if new && !grows {
-              self.derived_verdict(def, nullable);
+              if matches!(self.derived_verdict(def, nullable), Checked::Stopped(_)) {
+                building.stalled.insert(child, building.root);
+              }
               building.queue.push(child);
             }
           }
@@ -713,13 +841,14 @@ impl Coercion<'_, '_, '_> {
   }
 
   /// Reports, at each occurrence and each application of a root whose own verdict holds, the
-  /// failing instantiation its expansion reaches first, of those `closure` derives whose definition
-  /// does not grow, each judged when it was derived. When a limit `stopped` the closure, a check a
-  /// limit stopped says nothing more: the closure's one `resource-limit` stands for it.
-  fn judge_derived(&mut self, closure: &Closure, stopped: bool) {
+  /// failing instantiation its expansion reaches first, of those the closure derives whose
+  /// definition does not grow, each judged when it was derived. A check a limit stopped that the
+  /// closure's one `resource-limit` stands for says nothing more.
+  fn judge_derived(&mut self, derivation: &Derivation) {
     if self.recorded.is_empty() {
       return;
     }
+    let closure = &derivation.closure;
     let mut failing: Vec<u32> = Vec::new();
     for at in 0..closure.len() {
       let Some(node) = closure.node(at) else {
@@ -730,7 +859,7 @@ impl Coercion<'_, '_, '_> {
       }
       match self.derived_verdict(node.def, node.ty) {
         Checked::Fits => {}
-        Checked::Stopped(_) if stopped => {}
+        Checked::Stopped(_) if derivation.covers(at) => {}
         Checked::Unfit(_) | Checked::Stopped(_) => failing.push(at),
       }
     }
@@ -746,7 +875,7 @@ impl Coercion<'_, '_, '_> {
         continue;
       };
       let at = occurrence.location;
-      self.report_derived(closure, &blamed, at, def, ty);
+      self.report_derived(derivation, &blamed, at, def, ty);
     }
     for index in 0..self.builder.application_count() {
       let application = ApplicationId::new(index);
@@ -764,15 +893,15 @@ impl Coercion<'_, '_, '_> {
       else {
         continue;
       };
-      self.report_derived(closure, &blamed, at, def, ty);
+      self.report_derived(derivation, &blamed, at, def, ty);
     }
   }
 
   /// The verdict of `ty`, the nullable form of an instantiation of `def` the closure derives: made
   /// the first time it is asked, as a written instantiation's is, and kept; `Fits` when `def`
-  /// records nothing. A row whose value a report owns already, a written object literal's of `ty`
-  /// or an application's whose copied default holds one of `ty`, is that report's mistake: the
-  /// check passes over it to the next row, so each row is still checked once.
+  /// records nothing. A row whose value's count, against the type it takes under `ty`, a report
+  /// owns already is that report's mistake (W:979): the check passes over it to the next row, so
+  /// each row is still checked once.
   fn derived_verdict(&mut self, def: DefId, ty: TyId) -> Checked {
     let start = self
       .recorded
@@ -788,35 +917,48 @@ impl Coercion<'_, '_, '_> {
     }
     let mut from = start;
     let verdict = loop {
-      match self.check(def, ty, from, end) {
-        Checked::Unfit(row) if self.owned_row(ty, row) => {
-          from = (row as usize).saturating_add(1);
-        }
-        verdict => break verdict,
+      let verdict = self.check(def, ty, from, end);
+      let Checked::Unfit(row) = verdict else {
+        break verdict;
+      };
+      if !self.owned_row(def, ty, row) {
+        break verdict;
       }
+      from = (row as usize).saturating_add(1);
     };
     self.checked.insert(ty, verdict);
     verdict
   }
 
-  /// Whether the row recorded at `row` is a value a report owns already, as `Coercion::owned` keeps
-  /// it for an object literal of `ty`.
-  fn owned_row(&self, ty: TyId, row: u32) -> bool {
-    match self.recorded.get(row as usize) {
-      Some(Recorded {
-        owed: Owed::Value(OwedValue { tree, .. }),
-        ..
-      }) => self.owned.contains(&(ty, *tree)),
-      Some(_) | None => false,
+  /// Whether the row recorded at `row`, of `def`, is a value whose count against the type it takes
+  /// under `ty` a report owns already. That type was rebuilt, and kept, when the row was checked,
+  /// and is read again for nothing.
+  fn owned_row(&mut self, def: DefId, ty: TyId, row: u32) -> bool {
+    let Some(Recorded {
+      ty: written,
+      owed: Owed::Value(OwedValue { tree, .. }),
+      ..
+    }) = self.recorded.get(row as usize).copied()
+    else {
+      return false;
+    };
+    match self.rebuilt(written, ty, def, false) {
+      Ok(Some(under)) => self.owned.contains(&CountKey {
+        tree,
+        ty: Some(under),
+      }),
+      Ok(None) | Err(_) => false,
     }
   }
 
   /// Reports at `at`, an occurrence or an application of `ty`, an instantiation of `user`, the
   /// failing instantiation its expansion reaches first, as `blamed` keeps it, when a supplied
-  /// package writes it there, `ty` is a root, and its own verdict holds.
+  /// package writes it there, `ty` is a root, and its own verdict holds. A check a limit stopped
+  /// is not reported again at the root whose expansion that limit stopped: its `resource-limit`
+  /// stands for what it reaches.
   fn report_derived(
     &mut self,
-    closure: &Closure,
+    derivation: &Derivation,
     blamed: &[Option<Blame>],
     at: Location,
     user: DefId,
@@ -838,17 +980,18 @@ impl Coercion<'_, '_, '_> {
     {
       return;
     }
-    let Some(root) = closure.find(nullable) else {
+    let Some(root) = derivation.closure.find(nullable) else {
       return;
     };
     let Some(&Some(Blame { node, place })) = blamed.get(root as usize) else {
       return;
     };
-    let Some(failed) = closure.node(node) else {
+    let Some(failed) = derivation.closure.node(node) else {
       return;
     };
     match self.checked.get(&failed.ty).copied() {
       Some(Checked::Unfit(row)) => self.report_derived_unfit(at, user, failed.def, row, place),
+      Some(Checked::Stopped(_)) if derivation.stopped == Some(root) => {}
       Some(Checked::Stopped(stop)) => self.report_derived_unchecked(at, user, failed.def, stop),
       Some(Checked::Fits) | None => {}
     }

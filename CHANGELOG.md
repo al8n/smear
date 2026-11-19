@@ -370,9 +370,9 @@ All notable changes to Smear are documented in this file.
     metadata reaches marked first. An instantiation a written one derives, through a fill or a
     substitution, is judged for its definition's values, the arguments it makes required and its
     entries and members wherever its definition does not grow, each reported at the written
-    occurrence that derives it, labelled at the type that derives it, unless an object literal of
-    it reported that value already; a derived instantiation of a definition that grows, and what
-    only it derives, is not.
+    occurrence that derives it, labelled at the type that derives it, unless the report of a copy
+    that holds that value owns it already; a derived instantiation of a definition that grows, and
+    what only it derives, is not.
   - **The rules.** 33 rules, each a visitor on the public trait, judge what the supplied packages
     wrote once the phases have written the model: smear's own rules on GraphQLx, under eleven
     `smear::graphqlx` codes, and the type-system rules GraphQLx shares with GraphQL in this

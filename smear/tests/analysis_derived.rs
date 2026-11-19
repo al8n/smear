@@ -28,6 +28,8 @@ const UNEXPECTED: &str = "smear::schema::unexpected-required-argument";
 const ARGUMENT: &str = "smear::schema::invalid-directive-argument-value";
 /// GraphQL's code for a required directive argument left out, or given `null`.
 const MISSING: &str = "smear::schema::missing-required-directive-argument";
+/// GraphQL's code for a default that needs a copy of itself.
+const CYCLE: &str = "smear::schema::input-object-default-value-cycle";
 /// The label at the type that derives the instantiation a report names.
 const DERIVES: &str = "this derives that instantiation";
 
@@ -775,6 +777,144 @@ fn a_default_an_application_reported_owns_what_fails_inside_it() {
   assert_eq!(
     labels(report),
     [(after(schema, text, "Box<T> = ", "{}"), "this default")]
+  );
+}
+
+/// A stop inside a root's own expansion leaves what that expansion derived before it blamed on the
+/// root: under the least depth the program says no limit at, less one, `A1<[Int]>`'s first
+/// position derives `Bad<[Int]>`, whose `"s"` does not fit, and its second, `Deep<[[T]]>`, cannot
+/// be rebuilt. One `resource-limit` at the first `A1<[Int]>`, and the failure at both. Refuses an
+/// interrupted expansion that loses the children it judged.
+#[test]
+fn a_stopped_expansion_keeps_what_it_derived_before_the_stop() {
+  let text = "type Query {\n  f(a: A1<[Int]>): Int\n  g(a: A1<[Int]>): Int\n}\n\
+              input Bad<T> {\n  v: T = \"s\"\n}\ninput A1<T> {\n  b: Bad<T>\n  n: Deep<[[T]]>\n}\n\
+              input Deep<T> {\n  b: Bad<T>\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let first = at(schema, text, "A1<[Int]>", 0);
+  let second = at(schema, text, "A1<[Int]>", 1);
+  assert_eq!(found(&analysis), [(DEFAULT, first), (DEFAULT, second)]);
+  let least = (0..64_u32)
+    .find(|&depth: &u32| {
+      let analysis = analyze_text(text, &Limits::new().with_max_generic_depth(depth));
+      codes_at(&analysis, LIMIT).is_empty()
+    })
+    .expect("a depth the program says no limit at");
+  assert!(least > 0);
+  let short = analyze_text(text, &Limits::new().with_max_generic_depth(least - 1));
+  assert_eq!(codes_at(&short, LIMIT), [first]);
+  assert_eq!(codes_at(&short, DEFAULT), [first, second]);
+  assert_eq!(short.diagnostics().len(), 3);
+  assert!(
+    the(&short, LIMIT, first)
+      .to_string()
+      .contains("a type it derives nests deeper than `Limits::max_generic_depth`"),
+    "{:#?}",
+    short.diagnostics()
+  );
+  assert_eq!(
+    labels(the(&short, DEFAULT, first)),
+    [
+      (after(schema, text, "b: ", "Bad<T>"), DERIVES),
+      (after(schema, text, "v: T = ", "\"s\""), "this value"),
+    ]
+  );
+}
+
+/// A check a limit stops while one root's expansion is running is that root's, reported at its
+/// occurrence, and the root whose expansion the limit stops next says so once: under one step less
+/// than `R1<Int>` needs to judge the `Bad<Int>` it derives, that check stops, `R1<Int>` needs
+/// nothing more, and `R2<Int>`'s first rebuild cannot be paid for. One `resource-limit` at each.
+/// Refuses a later root that takes the blame for an earlier root's spent budget.
+#[test]
+fn a_spent_budget_is_reported_at_the_root_whose_check_it_stopped() {
+  let text = "type Query {\n  f(a: R1<Int>): Int\n  g(b: R2<Int>): Int\n}\n\
+              input Bad<T> {\n  v: T = \"s\"\n}\ninput R1<T> {\n  b: Bad<T>\n}\n\
+              input R2<T> {\n  b: Bad<[T]>\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let one = at(schema, text, "R1<Int>", 0);
+  let two = at(schema, text, "R2<Int>", 0);
+  assert_eq!(found(&analysis), [(DEFAULT, one), (DEFAULT, two)]);
+  let least = (0..256_u32)
+    .find(|&steps: &u32| {
+      let analysis = analyze_text(text, &Limits::new().with_max_value_steps(steps));
+      codes_at(&analysis, DEFAULT).contains(&one)
+    })
+    .expect("a budget that judges `Bad<Int>`");
+  assert!(least > 0);
+  let short = analyze_text(text, &Limits::new().with_max_value_steps(least - 1));
+  assert_eq!(found(&short), [(LIMIT, one), (LIMIT, two)]);
+  assert!(
+    the(&short, LIMIT, one)
+      .to_string()
+      .starts_with("the values an instantiation of `Bad` that `R1` derives here holds could not"),
+    "{:#?}",
+    short.diagnostics()
+  );
+  assert!(
+    the(&short, LIMIT, two)
+      .to_string()
+      .starts_with("what `R2` derives under the type arguments it is instantiated with here"),
+    "{:#?}",
+    short.diagnostics()
+  );
+}
+
+/// An argument an occurrence writes is no fill, though its parameter has a default: `Wrap<[i32]>`
+/// writes `T`, so its `[i32]` is not walked, and costs nothing, even with no step to spend while
+/// another definition records a value. Refuses a written argument charged as a fill.
+#[test]
+fn an_argument_written_where_a_default_could_fill_it_is_not_walked() {
+  let text = "type Query {\n  f(w: Wrap<[i32]>): Int\n}\ninput Wrap<T = i32> {\n  t: T\n}\n\
+              input Unused<U> {\n  u: U = 1\n}\n";
+  quiet(&analyze_text(text, &Limits::new().with_max_value_steps(0)));
+}
+
+/// A report of a copy owns each copy beneath it that does not fit (W:979): `@w<String>(a: {})`
+/// leaves out `Mid`'s `leaf`, whose default `{}` leaves out `Leaf`'s `bad`, whose `1` does not fit
+/// `String`. The literal reports `leaf`'s default, once, and the `Mid<String>` and `Leaf<String>`
+/// that `@w<String>` derives pass over what it owns. Refuses a nested mistake reported twice.
+#[test]
+fn a_reported_copy_owns_the_copies_beneath_it() {
+  let text = "type Query @w<String>(a: {}) {\n  x: Int\n}\ninput Leaf<T> {\n  bad: T = 1\n}\n\
+              input Mid<T> {\n  leaf: Leaf<T> = {}\n}\ndirective @w<T>(a: Mid<T>) on OBJECT\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let literal = after(schema, text, "(a: ", "{}");
+  assert_eq!(found(&analysis), [(DEFAULT, literal)]);
+  let report = the(&analysis, DEFAULT, literal);
+  assert_eq!(
+    report.to_string(),
+    "this literal leaves out `leaf`, whose default `{}` does not fit the type `leaf` takes under \
+     these type arguments"
+  );
+  assert_eq!(
+    labels(report),
+    [(after(schema, text, "Leaf<T> = ", "{}"), "this default")]
+  );
+}
+
+/// An application's report of a default it leaves out owns what its count found beneath it, though
+/// no copy is made: `@d<Int>` leaves out `a`, whose default holds a copy of itself through `next`,
+/// and whose `"bad"`, and `next`'s `"x"`, do not fit `Int`. The cycle is reported at `next`, the
+/// default at the path, and the `Rec<Int>` that `@d<Int>` derives passes over `next`'s default.
+/// Refuses a default whose copy, never made, owns nothing.
+#[test]
+fn a_reported_default_owns_what_its_count_found_though_no_copy_is_made() {
+  let text = "type Query @d<Int> {\n  x: Int\n}\n\
+              directive @d<T>(a: Rec<T> = { value: \"bad\" }) on OBJECT\n\
+              input Rec<T> {\n  value: T\n  next: Rec<T> = { value: \"x\" }\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let path = named(schema, text, "@", "d", 0);
+  let next = after(schema, text, "value: T\n  ", "next");
+  assert_eq!(found(&analysis), [(DEFAULT, path), (CYCLE, next)]);
+  assert_eq!(
+    the(&analysis, DEFAULT, path).to_string(),
+    "under this application's type arguments, the default `{ value: \"bad\" }` of `a` does not \
+     fit the type `a` takes"
   );
 }
 

@@ -241,12 +241,12 @@
 //! instantiation reaches among them. Each occurrence, or application, of a written instantiation
 //! whose own verdict holds reports the first that fails, with the code the same failure has at a
 //! written instantiation, labelled at the type or the application that derives it. Each mistake has
-//! one owner (W:979): a value a written object literal of that very instantiation already reported,
-//! as its own copy that does not fit, is the literal's, and one an object literal of it leaves out
-//! in the copy of a default an application reported is that report's; the check of the derived
-//! instantiation passes over it to its next row. A derived instantiation of a definition that grows
-//! is not checked, nor what only it derives: a value written under such a type is judged where it
-//! is written.
+//! one owner (W:979): a written object literal that reports its copy of a default, and an
+//! application that reports its copy of one, each own that copy's count and each count beneath it
+//! that does not fit, whether a copy is made or not; and the check of a derived instantiation
+//! passes over a row whose value's count, against the type it takes there, is owned, to its next
+//! row. A derived instantiation of a definition that grows is not checked, nor what only it
+//! derives: a value written under such a type is judged where it is written.
 //!
 //! # The count of a copy
 //!
@@ -353,6 +353,7 @@ use std::{
   collections::{BTreeMap, BTreeSet},
   format,
   string::String,
+  vec,
   vec::Vec,
 };
 
@@ -518,7 +519,7 @@ pub(crate) fn coerce(
     checked: BTreeMap::new(),
     written: BTreeSet::new(),
     owned: BTreeSet::new(),
-    owning: false,
+    beneath: BTreeMap::new(),
     paid: 0,
     copied: 0,
     levels: BTreeMap::new(),
@@ -1482,15 +1483,14 @@ struct Coercion<'c, 'p, 'x> {
   /// where it is written. A written object literal of one of them leaves a copy that does not fit
   /// to that check; of any other type it reports the copy itself.
   written: BTreeSet<TyId>,
-  /// Each default whose copy does not fit that a report already owns (W:979), by the nullable form
-  /// of the type of the object literal that leaves it out and the default's tree: the first such
-  /// default a written object literal of a type no occurrence writes leaves out, which it reports,
-  /// and the first such default each object literal leaves out in the copy of a default an
-  /// application reported. The check of a derived instantiation passes over it.
-  owned: BTreeSet<(TyId, u32)>,
-  /// Whether the copy being made is of a default an application reported as not fitting, whose
-  /// report owns what its object literals leave out that does not fit.
-  owning: bool,
+  /// Each count that does not fit that a report already owns (W:979): the copy a written object
+  /// literal reports, or an application's default that one reports, and each count beneath it
+  /// that does not fit, as [`claim`](Self::claim) finds them. The check of a derived instantiation
+  /// passes over a row whose value, counted against the type it takes there, is one of them.
+  owned: BTreeSet<CountKey>,
+  /// Each judged count that does not fit because a count it reads does not, with each such count:
+  /// what a report that owns the first owns too.
+  beneath: BTreeMap<CountKey, Vec<CountKey>>,
   /// The rows of every count a copy was made of, charged or not.
   paid: u64,
   /// The rows made of copies: what `paid` is when the phase ends, since a copy and its count are
@@ -2160,20 +2160,18 @@ impl<'p> Coercion<'_, 'p, '_> {
         return false;
       }
     };
-    let reports = !fits && !*reported;
-    if reports {
+    if !fits && !*reported {
       *reported = true;
       self.unfit_default(at, left.argument, tree);
+      // The report owns the default's count, and each one beneath it that does not fit, whether
+      // or not a copy is made (W:979).
+      self.claim(CountKey { tree, ty });
     }
     let Some(rows) = rows else {
       return true;
     };
     let before = self.builder.value_count();
-    // The report owns what the copy's object literals leave out that does not fit (W:979).
-    self.owning = reports;
-    let made = self.value(tree, ty, Mode::Copied);
-    self.owning = false;
-    if let Some(value) = made {
+    if let Some(value) = self.value(tree, ty, Mode::Copied) {
       debug_assert_eq!(
         self.builder.value_count().saturating_sub(before),
         rows,
@@ -2429,7 +2427,10 @@ impl<'p> Coercion<'_, 'p, '_> {
         }
         // A copy that holds one that does not fit does not fit.
         if !frame.fits {
-          self.misfit();
+          self.misfit_by(CountKey {
+            tree: frame.tree,
+            ty: frame.ty,
+          });
         }
         // One that holds a copy of itself is poisoned.
         if frame.poisoned {
@@ -2458,7 +2459,7 @@ impl<'p> Coercion<'_, 'p, '_> {
           match self.counts.get(&CountKey { tree, ty }).copied() {
             Some(Count::Rows(rows)) => {
               if self.unfit.contains(&CountKey { tree, ty }) {
-                self.misfit();
+                self.misfit_by(CountKey { tree, ty });
               }
               self.add_rows(rows, charged)
             }
@@ -2474,7 +2475,7 @@ impl<'p> Coercion<'_, 'p, '_> {
             }
             Some(Count::Poisoned) => {
               if self.unfit.contains(&CountKey { tree, ty }) {
-                self.misfit();
+                self.misfit_by(CountKey { tree, ty });
               }
               self.poison();
               Ok(())
@@ -2562,6 +2563,40 @@ impl<'p> Coercion<'_, 'p, '_> {
       && frame.judged
     {
       frame.fits = false;
+    }
+  }
+
+  /// The copy of the default counted on top does not fit because the one `child` counts does not,
+  /// when it is judged: as [`misfit`](Self::misfit), and `child` kept beneath it, so that a report
+  /// that owns the top one owns `child` too. Each read is kept once: a count is made once.
+  fn misfit_by(&mut self, child: CountKey) {
+    let Some(frame) = self.frames.last_mut() else {
+      return;
+    };
+    if !frame.judged {
+      return;
+    }
+    frame.fits = false;
+    let parent = CountKey {
+      tree: frame.tree,
+      ty: frame.ty,
+    };
+    self.beneath.entry(parent).or_default().push(child);
+  }
+
+  /// Claims for the report just made the count `key` and each count beneath it that does not fit,
+  /// as [`misfit_by`](Self::misfit_by) kept them: each mistake has one owner (W:979), and the check
+  /// of a derived instantiation passes over a row whose count is claimed. A count claimed already
+  /// is not walked again, so all the claims together walk each kept read once.
+  fn claim(&mut self, key: CountKey) {
+    let mut stack: Vec<CountKey> = vec![key];
+    while let Some(key) = stack.pop() {
+      if !self.owned.insert(key) {
+        continue;
+      }
+      if let Some(below) = self.beneath.get(&key) {
+        stack.extend_from_slice(below);
+      }
     }
   }
 
@@ -3897,20 +3932,6 @@ impl<'p> Coercion<'_, 'p, '_> {
         }
       };
       let ty = expected.ty;
-      // In the copy of a default an application reported, the first default the object leaves out
-      // that does not fit is that report's: a derived instantiation passes over it (W:979). Its
-      // count was judged and kept when the copy's count read it.
-      if !mode.written()
-        && self.owning
-        && !met
-        && self.unfit.contains(&CountKey { tree: default, ty })
-      {
-        met = true;
-        if let Some(of) = making.ty {
-          let nullable = self.nullable(of, def);
-          self.owned.insert((nullable, default));
-        }
-      }
       // In a copy nothing is asked and no count is read: the count the copy was charged for read
       // this default's count, through this same reading of the literal, and it was exact, or no
       // copy would be made. So its rows are among those already paid for.
@@ -3938,11 +3959,9 @@ impl<'p> Coercion<'_, 'p, '_> {
           met = true;
           if !self.checked_where_written(making.ty, def) {
             self.unfit_field(at, field, default);
-            // The literal owns this mistake: a derived instantiation of its type passes over it.
-            if let Some(ty) = making.ty {
-              let nullable = self.nullable(ty, def);
-              self.owned.insert((nullable, default));
-            }
+            // The literal owns the default's count, and each one beneath it that does not fit
+            // (W:979).
+            self.claim(CountKey { tree: default, ty });
           }
         }
         if !made {
