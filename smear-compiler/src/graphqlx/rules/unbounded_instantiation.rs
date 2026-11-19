@@ -56,7 +56,9 @@ const HELD: &str = "this default holds a type argument that wraps a type paramet
 /// a cycle test on the graph of generic definitions: a type parameter that receives, through the
 /// definitions' bodies, a type that wraps it. `deeper: Nest<T>`, the same instantiation again, and
 /// `Swap<U, T>` inside `type Swap<T, U>`, which passes the parameters along, are no growth. Each
-/// definition is judged whatever the program instantiates.
+/// definition is judged whatever the program instantiates. A contribution the orphan rule refuses
+/// grows nothing, so a growth only it writes is not reported here; the orphan rule reports the
+/// extension.
 ///
 /// [`analyze`](crate::graphqlx::analyze) never runs it, so
 /// [`Analysis::is_ok`](crate::graphqlx::Analysis::is_ok) means what it meant. A backend composes it
@@ -92,7 +94,9 @@ const HELD: &str = "this default holds a type argument that wraps a type paramet
 /// each followed by its type arguments as written and by its complete type arguments, defaults
 /// filled ([`Application::ty`](crate::graphqlx::Application::ty)). It does not follow a bound, a
 /// type parameter's default as it is written, a root or a value. A default is followed where it
-/// fills, since an occurrence's type, and an application's, holds what it filled.
+/// fills, since an occurrence's type, and an application's, holds what it filled. It reads none of
+/// these from a contribution the orphan rule refuses: that contribution grows nothing, so a growth
+/// only it writes is not reported here, and the orphan rule reports the extension.
 ///
 /// It does not follow an interface's instantiation into the types that implement it, so a backend
 /// that emits the implementors of each interface instantiation checks for growth through them

@@ -151,7 +151,8 @@ impl Closure {
   /// breadth first, and a node is given its answer the first time it is reached and never again:
   /// what a node reaches is reached by every node that derives it, so a node already answered is
   /// one whose own derivers are answered no worse. Each node and each edge is read once: linear in
-  /// the closure, and charged nothing, its edges having been paid for when they were derived.
+  /// the closure but for sorting, and charged nothing, its edges having been paid for when they
+  /// were derived.
   pub(crate) fn blame(&self, failing: &[u32]) -> Vec<Option<Blame>> {
     let mut blamed: Vec<Option<Blame>> = vec![None; self.nodes.len()];
     if failing.is_empty() {

@@ -591,7 +591,9 @@ impl<'a> Def<'a> {
   /// cycle grows, where the rule reports the occurrence that writes the growing argument:
   /// with `type A<T> { b: B<[T]> }` and `type B<U> { a: A<U> }` both grow, and the rule reports
   /// `B<[T]>`. Passing a type parameter on as it is, `Swap<U, T>` inside `type Swap<T, U>`, is no
-  /// growth, and a definition with no type parameter never grows.
+  /// growth, and a definition with no type parameter never grows. A contribution the orphan rule
+  /// refuses grows nothing, so a growth only it writes is not counted here and the rule does not
+  /// report it; the orphan rule reports the extension.
   ///
   /// It is what a derived instantiation of the definition is not judged for. The analysis judges a
   /// generic definition's values, the arguments it makes required, and its entries and members, at
