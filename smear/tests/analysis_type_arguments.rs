@@ -2350,45 +2350,37 @@ fn a_generic_directives_null_default_no_instantiation_takes_is_refused_where_dec
   }
 }
 
-/// A field an object literal read at the top leaves out is read for a `null` no instantiation
-/// takes, its default copied under the literal's type: `I<U>`'s `tail` defaults to `null`, and the
-/// literal's type `I<T>` gives `tail` the set's element `T`. Written, `@d<T>(v: {})` is
-/// `invalid-default-value` at the literal, labelled at the default; copied, `@e<T>` leaving out
-/// `v`, whose default is `{}`, is `invalid-default-value` at the application, labelled at `{}`;
-/// and neither is recorded, so `Tags<Int>` adds nothing. Refuses a left-out field's `null` judged
-/// only at each instantiation.
+/// A field an object literal leaves out is not read for a `null` no instantiation takes: its
+/// default's copy keeps its check at each instantiation, a boundary of this version. `I<U>`'s
+/// `tail` defaults to `null`, and the literal's type `I<T>` gives `tail` the set's element `T`.
+/// Written, `@d<T>(v: {})` says nothing at the literal, and `Tags<Int>` refuses the value at that
+/// use, with the argument's code, labelled at the literal; copied, `@e<T>` leaving out `v`, whose
+/// default is `{}`, says nothing at the application, and `Tags<Int>` refuses the copy at that use,
+/// with the default's code. Refuses a report at the literal or at the application, which the
+/// boundary leaves to the instantiation, and a check that drops the value.
 #[test]
-fn a_field_an_object_literal_leaves_out_is_read_for_a_null_no_instantiation_takes() {
+fn a_field_an_object_literal_leaves_out_keeps_its_check_at_each_instantiation() {
   let input = "type Query {\n  a: Tags<Int>\n}\ninput I<U> {\n  tail: U = null\n}\n";
   let written =
     format!("{input}directive @d<X>(v: I<X>) on SCALAR\nscalar Tags<T> @set @d<T>(v: {{}})\n");
   let analysis = analyze_text(&written, &Limits::new());
   let schema = schema_file(&analysis);
-  let literal = after(schema, &written, "@d<T>(v: ", "{}");
-  assert_eq!(found(&analysis), [(DEFAULT, literal)]);
-  let report = the(&analysis, DEFAULT, literal);
+  let occurrence = at(schema, &written, "Tags<Int>", 0);
+  assert_eq!(found(&analysis), [(ARGUMENT, occurrence)]);
   assert_eq!(
-    report.to_string(),
-    "this literal leaves out `tail`, whose default `null` does not fit the type `tail` takes \
-     under these type arguments"
-  );
-  assert_eq!(
-    labels(report),
-    [(
-      after(schema, &written, "tail: U = ", "null"),
-      "this default"
-    )]
+    labels(the(&analysis, ARGUMENT, occurrence)),
+    [(after(schema, &written, "@d<T>(v: ", "{}"), "this value")]
   );
 
   let copied =
     format!("{input}directive @e<X>(v: I<X> = {{}}) on SCALAR\nscalar Tags<T> @set @e<T>\n");
   let analysis = analyze_text(&copied, &Limits::new());
   let schema = schema_file(&analysis);
-  let path = named(schema, &copied, "@", "e", 1);
-  assert_eq!(found(&analysis), [(DEFAULT, path)]);
+  let occurrence = at(schema, &copied, "Tags<Int>", 0);
+  assert_eq!(found(&analysis), [(DEFAULT, occurrence)]);
   assert_eq!(
-    labels(the(&analysis, DEFAULT, path)),
-    [(after(schema, &copied, "v: I<X> = ", "{}"), "this default")]
+    labels(the(&analysis, DEFAULT, occurrence)),
+    [(after(schema, &copied, "v: I<X> = ", "{}"), "this value")]
   );
 }
 
