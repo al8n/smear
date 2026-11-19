@@ -160,9 +160,10 @@ and not what it accepts. A third kind refuses a shape and stops no work: how man
 and a directive declare, and how many list and non-null wrappers a written type has. They cost the
 analysis no more than their text, and a consumer sets them for a representation of its own: at 64,
 64 and 15 they refuse each document GraphQL's schema builder refuses for a ceiling. `max_values`
-bounds the values the analysis reads and makes, each literal a value writes, each list a lone value
-stands for and each value of a copy, but not the one value each default and each argument written
-keeps, which only the source bounds. Numbering and
+bounds the values the analysis reads and makes, each literal a value writes, its own included, each
+list a lone value stands for and each value of a copy: the model holds at most that many plus the
+built-in library's own, plus one unresolved value for each written default or argument refused past
+it. Numbering and
 ordering the packages comes first, under no bound but the
 diagnostic ceiling: each package's files are sorted by path, two files that share a path are
 ordered by their texts, two packages that share a name by everything they hold, and every name and

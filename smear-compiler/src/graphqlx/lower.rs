@@ -128,6 +128,12 @@
 //! directive names nothing or in an argument its directive does not declare, and no literal of the
 //! built-in library is charged.
 //!
+//! Primitive discovery, the pass before lowering that finds the primitives a program writes, has
+//! read every written value's paths whatever `Limits::max_values` says, a refused value's among
+//! them: a primitive only a refused value spells is still declared, one definition per primitive at
+//! most, counted by `Limits::max_definitions`, and that walk costs what the parsed document already
+//! holds.
+//!
 //! # The schema
 //!
 //! After every definition's contributions come the schema's, appended once the second walk over the

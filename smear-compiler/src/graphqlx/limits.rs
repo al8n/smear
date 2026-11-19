@@ -61,14 +61,14 @@ const _: () = assert!(
 /// field and a directive declare, how many list and non-null wrappers a written type has, how many
 /// instantiations of generic definitions it interns, how many steps of substitution it takes, how
 /// many steps judging bounds takes, how many steps completing values takes, how many values it
-/// reads and makes, beyond the one each default and each argument written keeps, how many steps
-/// checking implementations takes, and how many bytes the supplied texts hold. A bound that is
-/// passed stops that work, is reported as `smear::graphqlx::resource-limit`, and the analysis goes
-/// on. Two bounds are not refusals: the diagnostic ceiling and the near-miss budget limit what the
-/// analysis says, not what it accepts. Three refuse a shape and stop no work: how many arguments a
-/// field and a directive declare, and how many list and non-null wrappers a written type has. They
-/// cost the analysis no more than their text, and a consumer sets them for a representation of its
-/// own: at 64, 64 and 15 they refuse each document GraphQL's schema builder refuses for a ceiling.
+/// reads and makes, how many steps checking implementations takes, and how many bytes the supplied
+/// texts hold. A bound that is passed stops that work, is reported as
+/// `smear::graphqlx::resource-limit`, and the analysis goes on. Two bounds are not refusals: the
+/// diagnostic ceiling and the near-miss budget limit what the analysis says, not what it accepts.
+/// Three refuse a shape and stop no work: how many arguments a field and a directive declare, and
+/// how many list and non-null wrappers a written type has. They cost the analysis no more than
+/// their text, and a consumer sets them for a representation of its own: at 64, 64 and 15 they
+/// refuse each document GraphQL's schema builder refuses for a ceiling.
 ///
 /// Before any bound applies, the diagnostic ceiling aside, the analysis reads what the caller
 /// supplied, to number and order it. It sorts each package's files by path, and orders two files
@@ -571,15 +571,18 @@ impl Limits {
   /// application whose next copy cannot be paid for is `resource-limit` at its path, once, and is
   /// filled no further, and an object literal likewise, at the literal.
   ///
-  /// So it holds the literals nested in a value, the lists, and the copies. It does not hold the
-  /// one value each default and each argument a supplied package writes keeps, read or refused: the
-  /// model holds at most this many values beyond the built-in library's own and one for each
-  /// default and argument written past it. Those are bounded by
-  /// [`max_source_bytes`](Self::max_source_bytes) alone, an argument written again being kept
-  /// again, so `@d(a: 0, a: 0, …)` makes one every four bytes. Nor does it bound the documents the
-  /// values are read from, which `max_source_bytes` and the parser's own limits bound. At `0`, no
-  /// value a supplied package writes is read, each is one unresolved value, and nothing a supplied
-  /// package leaves out is filled from a default.
+  /// So it holds every literal a value writes, the value's own included, the lists, and the copies.
+  /// The model holds at most this many values plus the built-in library's own, plus one unresolved
+  /// value for each written default or argument refused past it. Those refused values are bounded
+  /// by [`max_source_bytes`](Self::max_source_bytes) alone, an argument written again being kept
+  /// again, so `@d(a: 0, a: 0, …)` past the bound makes one every four bytes. Nor does it bound the
+  /// documents the values are read from, which `max_source_bytes` and the parser's own limits
+  /// bound. Primitive discovery, the pass before lowering that finds the primitives a program
+  /// writes, reads every written value's paths whatever this bound says: a primitive only a refused
+  /// value spells is still declared, one definition per primitive at most, counted by
+  /// [`max_definitions`](Self::max_definitions), and its walk costs what the parsed document
+  /// already holds. At `0`, no value a supplied package writes is read, each is one unresolved
+  /// value, and nothing a supplied package leaves out is filled from a default.
   ///
   /// The default is 2^20. GitLab's schema, the largest of smear's fixtures, makes {N}.
   #[inline]

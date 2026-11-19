@@ -409,8 +409,9 @@ All notable changes to Smear are documented in this file.
     2^20, the last two limiting what the analysis says and not what it accepts. The arguments of a
     field and of a directive, and a written type's wrappers, refuse a shape and stop no work: at 64,
     64 and 15 they refuse each document GraphQL's builder refuses for a ceiling. `max_values` counts
-    each literal nested in a value, each list a value stands for, and each value of a copy; the one
-    value each default and each argument written keeps is bounded by the source alone.
+    each literal a value writes, its own included, each list a value stands for, and each value of a
+    copy; the model holds at most that many values plus the built-in library's own, plus one
+    unresolved value for each written default or argument refused past it.
   - **Options.** `Options` holds the switches that relax or tighten what the language accepts, each
     off by default and the analysis's whole, built as `Limits` is.
     `extern_collections_as_written` lets an extern collection, a set or a map its own package
