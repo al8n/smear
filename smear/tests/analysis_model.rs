@@ -497,6 +497,7 @@ fn fixture() -> Model {
   b.set_marker(MAP_KEY);
   b.set_collection(TAGS, Collection::Set);
   b.set_def_tier(PHOTO, Tier::Alloc);
+  b.set_metadata(FILTER);
   b.push_extern(PHOTO, "rust", "image::Photo", Tier::Std);
   b.set_def_description(QUERY, "The root.", at(APP_SCHEMA, 200, 210));
   b.push_directive_location(DEPRECATED, DirectiveLocation::FieldDefinition);
@@ -1399,6 +1400,7 @@ fn a_definition_answers_every_accessor() {
   assert!(!query.is_repeatable());
   assert_eq!(query.applications(), &[QUERY_CACHE]);
   assert_eq!(query.tier(), Tier::Core);
+  assert!(!query.is_metadata());
   assert_eq!(query.intrinsic(), None);
   assert!(!query.is_marker());
   assert_eq!(query.collection(), None);
@@ -1441,6 +1443,7 @@ fn a_definition_answers_every_accessor() {
     ids(model.def(FILTER).input_fields()),
     vec![FILTER_TAGS, FILTER_COLOR]
   );
+  assert!(model.def(FILTER).is_metadata());
   assert_eq!(
     model.def(SEARCH).union_members(),
     &[SEARCH_QUERY, SEARCH_PAGE]

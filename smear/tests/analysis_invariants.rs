@@ -10,7 +10,8 @@
 //!   named occurrence writes no more than that;
 //! - every application's arguments are its directive's, in its order, and where the directive
 //!   takes no type parameter a required one is present and each is coerced to its type;
-//! - every definition's tier is at most its package's, a meta-type aside.
+//! - every definition's tier is at most its package's, a meta-type and a definition only
+//!   compile-time metadata reaches aside.
 //!
 //! An analysis is checked when its diagnostics were not truncated and its every error is GraphQL's
 //! missing query root. Most corpus files are parts of a schema and write none, and the query root
@@ -273,7 +274,8 @@ impl Visitor for Invariants<'_> {
         model.member(field).arguments(),
       );
     }
-    if matches!(definition.origin(), Origin::Compat) {
+    // A meta-type keeps its tag, and the tier rule judges nothing within metadata.
+    if matches!(definition.origin(), Origin::Compat) || definition.is_metadata() {
       return;
     }
     let package = model.package(model.module(definition.module()).package());
@@ -424,8 +426,9 @@ fn one_file(origin: &'static str, tier: Tier, text: &'static str) -> Program {
 /// together they write generic definitions with defaults and their instantiations, a generic
 /// directive applied with written and filled type arguments and with defaulted arguments, object
 /// literals and their copies, enum values, collections and lone values in values, `@extern`, the
-/// implementation of interfaces, and packages at `core` and `alloc`, where the tier invariant
-/// says something that a corpus file, every one at `std`, does not.
+/// implementation of interfaces, definitions only compile-time metadata reaches, and packages at
+/// `core` and `alloc`, where the tier invariant says something that a corpus file, every one at
+/// `std`, does not.
 fn programs() -> Vec<Program> {
   let x8 = package(
     "app",
@@ -545,6 +548,18 @@ fn programs() -> Vec<Program> {
     // `analysis_tiers.rs`, `what_counts_nowhere_is_not_judged`: `[X8]`'s program, whose directive
     // metadata stands above its package's tier while every definition's tier is within it.
     ("what_counts_nowhere_is_not_judged", x8, vec![dep]),
+    // `analysis_tiers.rs`, `what_directive_arguments_reach_transitively_is_metadata`: six
+    // definitions only a directive's argument reaches, four of them above the package's tier.
+    one_file(
+      "what_directive_arguments_reach_transitively_is_metadata",
+      Tier::Core,
+      "type Query {\n  x: Int\n}\n\
+       input Outer {\n  inner: Inner\n  kind: Kind\n  url: Url\n  tags: Dict<i32, Tag>\n}\n\
+       input Inner {\n  notes: [string!]\n  big: i64 @heap\n}\nenum Kind {\n  A\n  B\n}\n\
+       scalar Url @extern(lang: \"rust\", type: \"url::Url\", tier: ALLOC)\n\
+       scalar Dict<K, V> @map\ninput Tag {\n  name: string!\n}\n\
+       directive @meta(o: Outer) on OBJECT\n",
+    ),
   ]
 }
 

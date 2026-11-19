@@ -188,6 +188,8 @@ pub(super) struct DefRow {
   pub(super) repeatable: bool,
   /// The tier it requires: `Core` until the tier phase computes it.
   pub(super) tier: Tier,
+  /// Whether only compile-time metadata reaches it: `false` until the tier phase computes it.
+  pub(super) metadata: bool,
   pub(super) intrinsic: Option<Primitive>,
   pub(super) marker: bool,
   pub(super) collection: Option<Collection>,

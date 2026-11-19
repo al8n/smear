@@ -347,9 +347,11 @@ All notable changes to Smear are documented in this file.
     what a type satisfies. `Application::ty` and `Application::ty_args` answer an application's
     type and complete type arguments, defaults filled; `Def::externs` a scalar's host types and
     `Extern::application` the `@extern` each is bound from; `Def::tier` and `Ty::tier` the tier
-    each requires; and the `extent()` of a contribution, a member and an inline module, where it
-    is written. `Analysis` and `Model` are `PartialEq` and `SourceMap` is `Eq`, and
-    `SourceMap::bind` pairs an analysis with the caller's texts again for a renderer.
+    each requires, and `Def::is_metadata` whether a definition is compile-time metadata, which
+    only type-system directives' types and applications' type arguments reach; and the `extent()`
+    of a contribution, a member and an inline module, where it is written. `Analysis` and `Model`
+    are `PartialEq` and `SourceMap` is `Eq`, and `SourceMap::bind` pairs an analysis with the
+    caller's texts again for a renderer.
   - **The phases.** The package set is checked; every file is parsed; each package's module tree
     and declarations are collected, duplicate and reserved names refused; every scope, `use` item
     and path is resolved, with a "did you mean" help; each definition is lowered; every
@@ -359,7 +361,7 @@ All notable changes to Smear are documented in this file.
     closed instantiation a supplied package writes; each scalar is bound to its host types; each
     definition is checked against the interfaces it implements, transitively and under type
     arguments, its entries and members told apart as types; and every definition and type gets its
-    tier.
+    tier, the definitions only compile-time metadata reaches marked first.
   - **The rules.** 33 rules, each a visitor on the public trait, judge what the supplied packages
     wrote once the phases have written the model: smear's own rules on GraphQLx, under eleven
     `smear::graphqlx` codes, and the type-system rules GraphQLx shares with GraphQL in this

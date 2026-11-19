@@ -29,7 +29,8 @@
 //! their types, interning each type where it first needs it, and adds instantiations; coercion
 //! appends the values and gives applications their arguments; binding appends each scalar's
 //! externs, definition by definition, in id order, over the texts coercion kept; the tier phase
-//! gives definitions and types their tiers.
+//! marks the definitions only compile-time metadata reaches, and gives definitions and types their
+//! tiers.
 //! What none of them wrote keeps the neutral value its row was appended with, which the accessors
 //! document. What a type satisfies is no row: it is read off the rows, by the finished model and
 //! by a phase alike.
@@ -337,6 +338,7 @@ impl ModelBuilder {
       locations: Run::default(),
       repeatable: false,
       tier: Tier::Core,
+      metadata: false,
       intrinsic: None,
       marker: false,
       collection: None,
@@ -456,6 +458,11 @@ impl ModelBuilder {
   /// Gives `def` the tier it requires.
   pub fn set_def_tier(&mut self, def: DefId, tier: Tier) {
     self.model.defs[def.get() as usize].tier = tier;
+  }
+
+  /// Makes `def` compile-time metadata: a definition only compile-time metadata reaches.
+  pub fn set_metadata(&mut self, def: DefId) {
+    self.model.defs[def.get() as usize].metadata = true;
   }
 
   /// Gives `ty` the tier it requires.

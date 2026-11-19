@@ -258,8 +258,11 @@ pub enum DiagnosticKind {
   /// field in a `core` package, at its path; and an extern whose `tier` is above the tier of the
   /// package that declares its scalar, at that `tier`. A use of a definition of the package's own
   /// is not reported: what raises that definition is, where the package wrote it. What a directive
-  /// definition writes and an application's type arguments are compile-time metadata, and are not
-  /// judged, an input object a directive's argument names being judged where it is written.
+  /// definition writes and an application's type arguments are compile-time metadata, and so is
+  /// what a definition holds that only the types of a directive no operation can apply, and
+  /// application type arguments, reach, [`Def::is_metadata`](crate::graphqlx::Def::is_metadata):
+  /// none of it is judged. A definition a type outside metadata names too, such as the argument
+  /// type of a directive an operation can apply, is judged where it is written.
   Tier,
 
   // -- The rule a backend composes ---------------------------------------------------------------

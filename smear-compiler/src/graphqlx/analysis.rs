@@ -388,7 +388,8 @@ impl Analysis {
 ///   `alloc` at least; a named type its definition's and its arguments', a list `alloc` at least
 ///   and its element's, and a type parameter `core`. Definitions and types that hold one another
 ///   share the greatest tier any of them reaches, found by one worklist, each rising at most
-///   twice.
+///   twice. It first marks the definitions only compile-time metadata reaches, which no tier
+///   reads.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
 ///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
 ///   Each schema definition the root package writes after its first is
@@ -441,10 +442,15 @@ impl Analysis {
 ///   extern's `tier` above its package's, at that `tier`. A use of a definition of the package's
 ///   own is not reported, what raises it being reported where it is written. Compile-time metadata
 ///   counts nowhere and is not judged: every type occurrence under a directive definition, its
-///   arguments' types and its type parameters' defaults and bounds, and every type argument of an
-///   application of any directive, the written ones and those its directive's defaults fill. The
-///   exemption is shallow: an input object a directive's argument names is a definition like any
-///   other, and its fields are judged where they are written. GraphQL's own rules judge what a
+///   arguments' types and its type parameters' defaults and bounds; every type argument of an
+///   application of any directive, the written ones and those its directive's defaults fill; and
+///   everything within a definition only compile-time metadata reaches,
+///   [`Def::is_metadata`](super::Def::is_metadata): a scalar, an enum or an input object that the
+///   types of a directive with no executable location, or an application's type arguments, name,
+///   through lists and every type argument, or that such a definition's own types name in turn,
+///   and that no type written anywhere else names, every package's together. A definition both
+///   reach is judged where it is written, and so is what the argument types of a directive an
+///   operation can apply name, whose values arrive at run time. GraphQL's own rules judge what a
 ///   definition a supplied package wrote holds, a GraphQL built-in the root package replaces among
 ///   them, with GraphQL's codes: a member whose name begins with `__` is `reserved-field-name`,
 ///   `reserved-argument-name`, `reserved-enum-value-name`, `reserved-input-field-name` or

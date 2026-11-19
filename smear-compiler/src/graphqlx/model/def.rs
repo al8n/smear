@@ -496,11 +496,65 @@ impl<'a> Def<'a> {
   /// hold one another share the greatest tier any of them reaches.
   ///
   /// In an analysis that [`is_ok`](crate::graphqlx::Analysis::is_ok), it is at most its package's
-  /// [`tier`](crate::graphqlx::PackageInfo::tier), a meta-type aside: a use above a package's
-  /// tier is [`Tier`](crate::graphqlx::DiagnosticKind::Tier).
+  /// [`tier`](crate::graphqlx::PackageInfo::tier), a meta-type and a
+  /// [metadata](Self::is_metadata) definition aside: a use above a package's tier is
+  /// [`Tier`](crate::graphqlx::DiagnosticKind::Tier).
   #[inline]
   pub fn tier(&self) -> Tier {
     self.row().tier
+  }
+
+  /// Whether it is compile-time metadata: a scalar, an enum or an input object a supplied package
+  /// defines that compile-time metadata reaches and that nothing outside it reaches.
+  ///
+  /// Compile-time metadata is every type a type-system directive writes, its arguments' types and
+  /// its type parameters' defaults and bounds, a type-system directive being one that lists no
+  /// executable location such as `FIELD` or `QUERY`; and every type argument of a directive
+  /// application, written or filled from its directive's defaults. It reaches each definition such
+  /// a type names, through lists and every type argument, and what each metadata definition's own
+  /// types name in turn, every package's together. A type written anywhere else that names a
+  /// definition, through any type argument and in whatever package, makes it no metadata:
+  /// `f(b: Binding)`, `Ref<Binding>` and `[Binding]` each do, and so does the argument type of a
+  /// directive an operation can apply, whose values arrive at run time. An object, an interface, a
+  /// union and a directive are never metadata, nor is a definition of `core`, `alloc` or `std`.
+  /// This is not the GraphQL meta-types, whose origin is [`Compat`](Origin::Compat).
+  ///
+  /// The answer is the analyzed program's. A package analyzed alone can answer `true` for a
+  /// definition that a dependant's field makes runtime, and `false` for one only a dependant's
+  /// directive takes, so a backend that compiles a package apart from its dependants cannot leave a
+  /// definition out on this answer. A type that names a metadata definition is written only in
+  /// metadata, though [`Model::instantiations`] lists it under its definition, which need not be
+  /// metadata: `Pair<Note>` under `Pair`. A backend that leaves metadata out leaves such an
+  /// instantiation out too. In an analysis that is not ok, an occurrence a phase refused names
+  /// nothing, so a definition only such an occurrence names can answer `true`.
+  ///
+  /// The tier rule judges nothing a metadata definition holds, so in an analysis that is ok its
+  /// [`tier`](Self::tier) may be above its package's. A backend that emits only what runs leaves it
+  /// out, and one that emits it for a compiler reads its tier. It is computed whatever the verdict.
+  ///
+  /// # Examples
+  ///
+  /// An input object only a directive's argument takes is metadata, and a `core` package may hold
+  /// it though it needs `alloc`:
+  ///
+  /// ```
+  /// use smear_compiler::graphqlx::{Layout, Limits, Namespace, Package, SourceFile, Tier, analyze};
+  ///
+  /// let text = "type Query { ok: Int }\n\
+  ///             input Binding { lang: string! }\n\
+  ///             directive @bind(b: Binding) on OBJECT\n";
+  /// let root = Package::new("app", Layout::Flat, Tier::Core)
+  ///   .with_files([SourceFile::new("schema.graphqlx", text)]);
+  /// let analysis = analyze(&root, &[], &Limits::new());
+  /// assert!(analysis.is_ok());
+  /// let model = analysis.model();
+  /// let binding = model.lookup(Namespace::Type, "^::app::Binding").expect("defined");
+  /// assert!(model.def(binding).is_metadata());
+  /// assert_eq!(model.def(binding).tier(), Tier::Alloc);
+  /// ```
+  #[inline]
+  pub fn is_metadata(&self) -> bool {
+    self.row().metadata
   }
 
   /// The intrinsic primitive it is, or `None` for every definition but `core`'s primitives.
