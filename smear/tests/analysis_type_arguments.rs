@@ -2180,9 +2180,9 @@ fn null_for_a_collections_key_or_element_with_a_default_is_refused_once() {
   );
 }
 
-/// A copy of a directive's default that holds a `null` no instantiation takes does not fit, and is
-/// the application's to report, once, whatever uses its definition has: `@d<T>` on the set `Tags`
-/// leaves out `v`, whose default `null` fills `T`, the set's element, non-null in every
+/// A copy of a directive's default that is a whole `null` no instantiation takes does not fit, and
+/// is the application's to report, once, whatever uses its definition has: `@d<T>` on the set
+/// `Tags` leaves out `v`, whose default `null` fills `T`, the set's element, non-null in every
 /// instantiation. It is `invalid-default-value` at the application, labelled at the default, and
 /// recorded for no instantiation: `Tags<Int>` reached only through `Box<Int>`, which no check
 /// reads, and a direct `Tags<Int>` beside it add nothing. Refuses the copy recorded and judged only
@@ -2307,8 +2307,8 @@ fn a_generic_input_fields_whole_null_default_is_refused_where_declared() {
   assert_eq!(
     found(&analysis),
     [
-      (DEFAULT, after(schema, &used, "a: T! = ", "null")),
       (DEFAULT, occurrence),
+      (DEFAULT, after(schema, &used, "a: T! = ", "null")),
     ]
   );
   assert_eq!(
@@ -2451,11 +2451,11 @@ fn a_copy_of_a_default_its_declaration_refuses_reports_nothing_again() {
   );
 }
 
-/// A generic directive's own default that holds a `null` no instantiation takes is refused where
-/// it is declared, once, whether or not anything applies the directive: `@d`'s `v`, written `X!`,
-/// defaults to `null`. An application that leaves `v` out, under closed type arguments or under a
-/// generic definition's own, adds nothing: the declaration owns the copy. Refuses the default
-/// judged only where an application leaves it out, and its copy reported again at each.
+/// A generic directive's own default that is a whole `null` no instantiation takes is refused
+/// where it is declared, once, whether or not anything applies the directive: `@d`'s `v`, written
+/// `X!`, defaults to `null`. An application that leaves `v` out, under closed type arguments or
+/// under a generic definition's own, adds nothing: the declaration owns the copy. Refuses the
+/// default judged only where an application leaves it out, and its copy reported again at each.
 #[test]
 fn a_generic_directives_null_default_no_instantiation_takes_is_refused_where_declared() {
   let directive = "directive @d<X>(v: X! = null) on OBJECT\n";

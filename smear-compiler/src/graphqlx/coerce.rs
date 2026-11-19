@@ -959,7 +959,8 @@ struct MapTypes {
   value: TyId,
 }
 
-/// What a node is made against a type, told by the node's syntactic kind and the type alone.
+/// What a node is made against a type, told by the node's syntactic kind and the type, and by the
+/// walk's definition for a type that names type parameters.
 #[derive(Clone, Copy)]
 enum Class {
   /// The type can take no value, or there is none: one `Literal` row.
@@ -4348,7 +4349,8 @@ impl<'p> Coercion<'_, 'p, '_> {
     self.entries.truncate(entries);
   }
 
-  /// What `kind` is made against `ty`, told by the two alone: no literal is read.
+  /// What `kind` is made against `ty`, told by the two and, for a type that names type parameters,
+  /// by the walk's definition: no literal is read.
   fn classify(&self, kind: RawKind, ty: Option<TyId>) -> Class {
     let Some(ty) = ty else {
       return Class::NoValue;
@@ -4358,6 +4360,13 @@ impl<'p> Coercion<'_, 'p, '_> {
       // Only an instantiation can judge a value of a type that names type parameters, but a whole
       // `null` fits none where every one of them makes the type non-null, as `never_null` says:
       // written or copied, it is one unresolved row, refused where it is written.
+      //
+      // `never_null` reads the walk's definition, `self.owner`, through `forced`, so a class here
+      // is told by the kind, the type and that definition. The counts and verdicts kept by tree
+      // and type alone hold all the same under the current scoping: a type that names a
+      // definition's parameter is met only while the walk is in that definition; the check at
+      // each instantiation reads closed types alone; and no member is written with a
+      // collection's parameter, a scalar having no member.
       let never = matches!(kind, RawKind::Null) && self.never_null(ty);
       return if never {
         Class::NotNull
