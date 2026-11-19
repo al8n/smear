@@ -1565,3 +1565,31 @@ fn an_argument_name_written_twice_is_one_name_to_the_relevance_scan() {
     );
   }
 }
+
+/// What another package writes into a definition derives nothing: the dependency `dep` writes
+/// `Box<Boolean>`, and the root package's extension, an orphan, adds `implements I<T>` to `Box`,
+/// where `I<X>`'s `f` defaults `arg` to `0`, which `Boolean` does not take, and which makes `I`
+/// relevant on its own. The implementation check reads no such entry, and the closure follows none:
+/// `dep`'s `Box<Boolean>` derives no `I<Boolean>`, and nothing is said of it, under the default
+/// limits or with no value step to spend. Refuses a foreign entry the closure expands.
+#[test]
+fn a_foreign_implements_entry_derives_nothing() {
+  let theirs = "type Box<T> {\n  v: T\n}\ntype Holder {\n  b: Box<Boolean>\n}\n";
+  let ours = "type Query {\n  x: Int\n}\ninterface I<X> {\n  f(arg: X = 0): Int\n}\n\
+              extend type ^::dep::Box<T> implements I<T>\n";
+  let root = Package::new("app", Layout::Flat, Tier::Std)
+    .with_files([SourceFile::new("schema.graphqlx", ours)])
+    .with_dependencies(["dep"]);
+  let dependencies = [Package::new("dep", Layout::Flat, Tier::Std)
+    .with_files([SourceFile::new("dep.graphqlx", theirs)])];
+  for limits in [Limits::new(), Limits::new().with_max_value_steps(0)] {
+    let analysis = analyze(&root, &dependencies, &limits);
+    for code in [DEFAULT, LIMIT] {
+      assert!(
+        codes_at(&analysis, code).is_empty(),
+        "{:#?}",
+        analysis.diagnostics()
+      );
+    }
+  }
+}

@@ -13,14 +13,14 @@
 //! is expanded once.
 //!
 //! An instantiation's expansion reads what a copy of it needs under its arguments: each of its
-//! definition's members' types, `implements` entries and union members, and the complete type of
-//! each application on the definition or on one of its members, rebuilt as the check at a written
-//! instantiation rebuilds a member's type, through the same remembered rebuild. Each instantiation
-//! of a generic definition the rebuilt types hold, at any depth, is derived, with the type or the
-//! application that derives it; a written one is no child, being judged where it is written and
-//! expanded as a root, and what it holds is its own. A root's expansion reads the arguments its
-//! type parameters' defaults fill too, past the most any occurrence of it writes: what a default
-//! fills is derived by that default.
+//! definition's members' types, its `implements` entries and union members its own package writes,
+//! as the implementation check reads them, and the complete type of each application on the
+//! definition or on one of its members, rebuilt as the check at a written instantiation rebuilds a
+//! member's type, through the same remembered rebuild. Each instantiation of a generic definition
+//! the rebuilt types hold, at any depth, is derived, with the type or the application that derives
+//! it; a written one is no child, being judged where it is written and expanded as a root, and what
+//! it holds is its own. A root's expansion reads the arguments its type parameters' defaults fill
+//! too, past the most any occurrence of it writes: what a default fills is derived by that default.
 //!
 //! The expansion reads only toward what can be judged. What an instantiation is judged for is a
 //! value recorded under its definition, here, and in the implementation check an `implements` entry
@@ -595,17 +595,23 @@ impl Coercion<'_, '_, '_> {
     building.positions = compact;
   }
 
-  /// Appends to `into` each open position of `def`: its `implements` entries, its union members,
-  /// the complete types of its applications, and each member's type and its applications' complete
-  /// types, a field's arguments' too.
+  /// Appends to `into` each open position of `def`: its `implements` entries and, for a union, its
+  /// members, those the implementation check reads alone, as [`own_item`](Self::own_item) finds
+  /// them; the complete types of its applications; and each member's type and its applications'
+  /// complete types, a field's arguments' too. An entry another package writes into `def` is that
+  /// package's mistake, and derives nothing.
   fn push_positions(&self, def: DefId, into: &mut Vec<Position>) {
-    for &entry in self
-      .builder
-      .def_implements(def)
-      .iter()
-      .chain(self.builder.def_union_members(def))
-    {
-      self.push_type(def, entry, into);
+    if let Some(own) = self.sources.written_by(self.builder.def_location(def)) {
+      let members: &[TypeExprId] = if self.builder.def_kind(def) == Some(DefKind::Union) {
+        self.builder.def_union_members(def)
+      } else {
+        &[]
+      };
+      for &item in self.builder.def_implements(def).iter().chain(members) {
+        if self.own_item(item, own).is_some() {
+          self.push_type(def, item, into);
+        }
+      }
     }
     for &application in self.builder.def_applications(def) {
       self.push_application(def, application, into);
