@@ -273,8 +273,7 @@ a stack whose upper layers are separate crates:
 
 - `smear-lexer` — lexical analysis (this crate)
 - `smear-parser` — parser combinators, ASTs and the lossless CST tower
-- `smear-schema` — the built-once schema representation and its builder
-- `smear-compiler` — draft §5 validation and diagnostics
+- `smear-compiler` — the built-once schema, its §3 builder, §5 validation and the GraphQLx analyzer
 - `graphql-proto` — the Sans-I/O protocol machine
 - `smear` — the umbrella that re-exports all of them, each behind a feature
 

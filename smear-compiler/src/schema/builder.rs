@@ -63,7 +63,7 @@ use super::{
 };
 
 // The canonical text of a default value, and the string escaping the introspection door shares.
-// No outer doc comment, for the reason `lib.rs` records on `diagnostic`: the file's own header is
+// No outer doc comment, for the reason `mod.rs` records on `diagnostic`: the file's own header is
 // the one fragment, so its links resolve where it is written.
 pub(crate) mod print;
 

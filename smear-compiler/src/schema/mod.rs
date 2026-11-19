@@ -6,19 +6,21 @@
 //!
 //! # The `graphql` feature, and what the default tier is for
 //!
-//! Three consumers, and they do not want the same thing. `smear-compiler` BUILDS a schema, so it
-//! needs the parser underneath it; `graphql-proto` READS one at execution time and `smear-derive`
-//! will generate from one, and neither has any use for a front end. So the builder and the
-//! introspection door sit behind `graphql`, which is what pulls `smear-parser` — and a consumer who
-//! only reads a schema depends on this crate with `default-features = false` and `alloc`, and gets
-//! `core` + `alloc` with `tokora` as its dependency, and smol-bytes beside it on a target with
-//! pointer-width atomics, for the owned text this crate shares with `graphql-proto`.
+//! This module is the crate's runtime layer, and every build compiles it. Three consumers read it,
+//! and they do not want the same thing. The validator, the crate's `graphql` module, works on a
+//! schema the builder BUILDS, so it needs the parser underneath it; `graphql-proto` READS one at
+//! execution time and `smear-derive` will generate from one, and neither has any use for a front
+//! end. So the builder and the introspection door sit behind the crate's `graphql` feature, which is
+//! what pulls `smear-parser` — and a consumer who only reads a schema depends on `smear-compiler`
+//! with `default-features = false` and a tier, and gets `core` + `alloc` with `tokora` as its
+//! dependency, and smol-bytes beside it on a target with pointer-width atomics, for the owned text
+//! this module shares with `graphql-proto`.
 //!
-//! That is a FEATURE boundary and not a crate boundary, and the distinction is the whole reason
-//! this crate is shaped this way: [`Schema::build`] and `Schema::from_introspection` are
-//! **inherent** `impl Schema` blocks, and an inherent impl cannot cross a crate boundary. Splitting
-//! them out would have cost an extension trait per body and a `use` line at every call site, for a
-//! tier the feature buys outright.
+//! That is a FEATURE boundary and not a crate boundary, and the distinction is the whole reason the
+//! builder is a feature of this crate and not a crate of its own: `Schema::build` and
+//! `Schema::from_introspection` are **inherent** `impl Schema` blocks, and an inherent impl cannot
+//! cross a crate boundary. Splitting them out would have cost an extension trait per body and a
+//! `use` line at every call site, for a tier the feature buys outright.
 //!
 #![cfg_attr(
   all(any(feature = "std", feature = "alloc"), feature = "graphql"),
@@ -56,17 +58,15 @@ assert!(schema.type_by_name(b\"__Schema\").is_some());
 // The diagnostic vocabulary: tokora's `diagnostic` module, re-exported item by item under the
 // path smear has always published it at.
 //
-// `error.rs` and `introspection/error.rs` implement `Diagnose`, so the re-export has to sit at or
-// BELOW this crate — and the design's §2 puts the vocabulary in `smear-compiler`, which is above.
-// It ships here because this is the lowest crate that needs it, and it is ungated because
+// It sits in this module, the layer every build compiles, and it is ungated because
 // `smear::diagnostic` is ungated and moving it behind a feature would be an API change. That is
-// also why `smear` depends on this crate unconditionally rather than behind `validator`.
+// also why `smear` depends on `smear-compiler` unconditionally rather than behind `validator`.
 //
 // The contract used to be declared here, written to be lifted into `tokora` unchanged; it has
-// been, and this crate now carries only the re-export. The declaration still carries no outer doc
+// been, and this module now carries only the re-export. The declaration still carries no outer doc
 // comment: rustdoc resolves the MERGED fragments of a module's documentation in the scope of
 // whichever attribute came from outside, so an outer comment here would reinterpret every link in
-// the module's own header as one rooted in this crate, where the re-exported names are not.
+// the module's own header as one rooted in this module, where the re-exported names are not.
 pub mod diagnostic;
 
 pub mod builtin;
@@ -90,12 +90,10 @@ mod repr;
 #[cfg(any(feature = "std", feature = "alloc"))]
 mod text;
 
-/// The literal-shape coercion table, shared with the executable rules.
+/// The literal-shape coercion table, which the builder alone reads.
 ///
-/// Crate-private on purpose: it is a seam between two callers inside this crate, not a promise to
-/// anyone outside it, and `repr` — the part of this crate that is published widest — stays free of
-/// it. It followed the builder down from `smear-compiler` because the builder is its only caller;
-/// re-confirmed on this tree by restricting its visibility and rebuilding.
+/// Crate-private on purpose: it is a seam inside the builder, not a promise to anyone outside the
+/// crate, and `repr` — the part of this module that is published widest — stays free of it.
 #[cfg(all(any(feature = "std", feature = "alloc"), feature = "graphql"))]
 pub(crate) mod literal;
 

@@ -244,7 +244,8 @@ pub mod analysis {
   pub use smear_compiler::graphqlx;
 }
 
-// THE ONE MODULE THIS CRATE OWNS, and it is here rather than one layer down for a stated reason.
+// THE ONE MODULE OF THIS CRATE'S OWN CODE (`analysis` above only holds a re-export), and it is
+// here rather than one layer down for a stated reason.
 //
 // `graphql-proto` refuses to write a response out because writing one means writing the driver's
 // `V`, and `Values` asks eight structural questions of which none is "write this". The

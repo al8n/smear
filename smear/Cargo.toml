@@ -247,7 +247,8 @@ test-support = ["smear-parser?/test-support", "smear-compiler/test-support"]
 # targets name it; the three source backings stay because `tests/` constructs a source of each
 # type. `derive_more`, `paste`, `rowan`, `serde` and `serde_json` left with the modules that used
 # them: the first two are `smear-parser`'s and `smear-lexer`'s, `rowan` is `smear-parser`'s and is
-# separately a dev-dependency here, and the serde pair is `smear-schema`'s `introspection`.
+# separately a dev-dependency here, and the serde pair left with the introspection door, which has
+# named neither since #166.
 [dependencies]
 tokora.workspace = true
 
@@ -282,8 +283,8 @@ graphql-proto = { workspace = true, optional = true }
 # is the one part of a JSON writer that is genuinely hard to beat and is already solved twice over,
 # and these two are checkable facts rather than reputation:
 #
-#   * `itoa` is ALREADY IN THIS WORKSPACE'S GRAPH — `serde_json` pulls it for
-#     `smear-schema/introspection` — so it is a new edge and not a new crate in the tree.
+#   * `itoa` is ALREADY IN THIS WORKSPACE'S GRAPH — `serde_json`, the JSON writer's oracle among
+#     the dev-dependencies below, pulls it — so it is a new edge and not a new crate in the tree.
 #   * `zmij` is the same author's Schubfach + yy double-to-string, and is the only new crate.
 #
 # Both are `#![no_std]` with ZERO dependencies, which is what makes them coherent with the point of
@@ -380,12 +381,11 @@ sha2 = { version = "0.11", default-features = false }
 # a line of code with it — and `serde_json` is a reader this workspace already carries, written by
 # someone else, that has never seen this module.
 #
-# A DEV-DEPENDENCY IS NOT THE DEPENDENCY THE SERDE WORK IS REMOVING. That one is
-# `smear-schema`'s `introspection` feature naming `serde` and `serde_json` in `[dependencies]`,
-# where it reaches a consumer's graph and pins two `std`-only crates into a stack with a no-std
-# tier. Cargo drops dev-dependencies when packaging and keeps them out of `cargo tree -p smear`,
-# so this edge changes neither of those facts. When the removal commit lands, `cargo tree` is what
-# says whether the claim is true, and this entry is not in what it reads.
+# A DEV-DEPENDENCY IS NOT THE DEPENDENCY THE SERDE WORK REMOVED. That one was the introspection
+# door's `serde` and `serde_json` in `[dependencies]`, which reached a consumer's graph and pinned
+# two `std`-only crates into a stack with a no-std tier, and #166 removed it. Cargo drops
+# dev-dependencies when packaging and keeps them out of `cargo tree -p smear`, so this edge brings
+# neither back, and `cargo tree` is what says so: this entry is not in what it reads.
 #
 # `float_roundtrip` IS LOAD-BEARING AND WAS ADDED AFTER A FAILURE, not by precaution. serde_json's
 # default float parsing is best-effort by design — its own feature list says the exact path "comes

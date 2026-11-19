@@ -30,6 +30,14 @@ members = [
 # those members directly, each at its own default — which is a wider build, not a wider resolve
 # of `smear`.
 #
+# ONE NAME, TWO FEATURES, and a bare `--features` reaches both. `smear-compiler`'s `graphql` and
+# `graphqlx` are its two compilers, which `smear/validator` and `smear/analysis` turn on, while
+# `smear`'s, `smear-lexer`'s and `smear-parser`'s features of those names are the dialects. Cargo
+# applies a bare `--features graphql` to every selected package that declares it, so a selection
+# holding `smear` and `smear-compiler` turns a compiler on behind `smear`, and the feature fence in
+# `smear/src/lib.rs` refuses the graph by name: name `validator` or `analysis` beside the dialect,
+# or select one package.
+#
 # TWO members this arithmetic does not reach, both deliberately and for different reasons.
 #
 # `smear-noatomic`'s `[dependencies]` table is empty and CI asserts that out of `cargo metadata`,

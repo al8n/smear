@@ -23,13 +23,12 @@
 //!   [`Scratch`]. The document is the one either of `smear-parser`'s parser layers answered, or one
 //!   the caller built, and a syntax error never reaches the sink: it leaves by the layer's own.
 //!
-//! The links here are bare, and they were crate-absolute until the split. While this was
-//! `smear::validator`, a module whose declaration carried an outer doc comment, they had to be:
-//! rustdoc resolves the MERGED fragments of a module's documentation in the parent's scope, so a
-//! `schema`-relative link reported "no item named `schema` in module `smear`" under
-//! `RUSTDOCFLAGS="-D warnings"`. A crate root has no parent to be merged into, and the absolute
-//! spelling then became a *redundant explicit link target*, which the same flag denies just as
-//! firmly. `graphql-proto`'s header records the identical reversal.
+//! The links here are bare, and they resolve in this module because its declaration carries no
+//! outer doc comment. Rustdoc resolves the MERGED fragments of a module's documentation in the scope
+//! of the first one, so an outer comment on `pub mod graphql;` would resolve every link here in the
+//! crate root, where `Schema`, `Sink` and the rest are not. A crate-absolute spelling resolves in
+//! either scope, and is a *redundant explicit link target*, which `RUSTDOCFLAGS="-D warnings"`
+//! denies.
 //!
 //! # Validating a request
 //!

@@ -17,8 +17,8 @@ questions about them through the `Values` trait — the same choice `smear-lexer
 source, for the same reason: an owned enum would force an allocation per leaf and would make a
 wasm or FFI handle second-class.
 
-It depends on `smear-schema` with **default features off**, so reading a schema at execution time
-does not put the front end in the graph.
+It depends on `smear-compiler` with **default features off** and no compiler feature, so reading a
+schema at execution time does not put the front end in the graph.
 
 ## Feature flags
 
@@ -35,8 +35,7 @@ consumer names `std` or `alloc` itself.
 
 - `smear-lexer` — lexical analysis
 - `smear-parser` — parser combinators, ASTs and the lossless CST tower
-- `smear-schema` — the built-once schema representation and its builder
-- `smear-compiler` — draft §5 validation and diagnostics
+- `smear-compiler` — the built-once schema, its §3 builder, §5 validation and the GraphQLx analyzer
 - `graphql-proto` — the Sans-I/O protocol machine (this crate)
 - `smear` — the umbrella that re-exports all of them, each behind a feature
 

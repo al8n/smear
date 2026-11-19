@@ -11,9 +11,10 @@ keywords = ["graphql", "graphqlx", "schema", "validation", "no-std"]
 categories = ["parsing", "compilers", "web-programming", "no-std"]
 readme = "README.md"
 
-# NOT named `smear-validator`, and the design says why: the crate would validate nothing under that
-# name — it also carries the §3 build's caller, the rule vocabulary and the diagnostic rendering. A
-# name that misdescribes its contents is the defect family this program keeps hitting.
+# Named for what it holds: the compilers a parsed document goes through, GraphQL's §3 builder and
+# §5 validator and the GraphQLx analyzer, over the runtime schema layer they share.
+# `smear-validator` would name one of the three, and a name that misdescribes its contents is the
+# defect family this program keeps hitting.
 
 # ── WHY THE BUILDER IS A FEATURE AND NOT ANOTHER CRATE ──────────────────────────────────────
 #
@@ -72,12 +73,11 @@ std = [
 # parsed `TypeSystemDocument`. The interner, duplicate index and cycle kernel the builder runs on
 # are the private `kernel` module, compiled with either capability.
 #
-# `error.rs` IS BEHIND THIS, which the design's §2 did not say and which is the one place this
-# manifest reads differently from it. `SchemaError` is what the build refuses with; ungated, this
-# crate would publish an error type no configuration it was compiled in could produce — the
-# unreachable-variant shape §8 files as a defect twice over — and `error.rs`'s own two doc links
-# point at `Schema::build`, so they would be unresolvable under `-D warnings` in exactly the
-# configuration that kept them. It costs the reader tier 1173 lines of compile it has no use for.
+# `schema/error.rs` IS BEHIND THIS. `SchemaError` is what the build refuses with; ungated, the
+# runtime layer would publish an error type no configuration it was compiled in could produce, and
+# `error.rs`'s own doc links point at `Schema::build`, so they would be unresolvable under
+# `-D warnings` in exactly the configuration that kept them. Gating it also keeps it out of a build
+# that only reads a schema.
 graphql = ["dep:smear-parser", "smear-parser/graphql"]
 
 # The second construction door: building a `Schema` out of a draft §4 introspection response
