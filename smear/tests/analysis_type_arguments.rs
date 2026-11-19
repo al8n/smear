@@ -2025,6 +2025,44 @@ fn a_forced_omission_is_one_report_however_many_uses() {
   assert_eq!(diagnostics.error_count(), 1);
 }
 
+/// Two arguments one application leaves out, each typed by a set's element, are two mistakes and
+/// two reports, both at that application's path, each naming its own argument and labelled at its
+/// own declaration; a use of the set adds none. Refuses the two folded into one report, and either
+/// recorded for an instantiation.
+#[test]
+fn two_forced_omissions_at_one_application_are_two_reports() {
+  let text = "type Query {\n  x: Tags<Int>\n}\ndirective @tag<T>(a: T, b: T) on SCALAR\n\
+              scalar Tags<K> @set @tag<K>\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let path = named(schema, text, "@", "tag", 1);
+  assert_eq!(found(&analysis), [(MISSING, path), (MISSING, path)]);
+  let reports: Vec<(String, Vec<(Location, &str)>)> = analysis
+    .diagnostics()
+    .iter()
+    .map(|report: &Diagnostic| (report.to_string(), labels(report)))
+    .collect();
+  let forced = |argument: &str| -> String {
+    format!(
+      "`K`, the element of the set `Tags`, is non-null in every instantiation, so `@tag` requires \
+       its argument `{argument}`, and this application leaves it out"
+    )
+  };
+  assert_eq!(
+    reports,
+    [
+      (
+        forced("a"),
+        vec![(named(schema, text, "(", "a", 0), "required here")]
+      ),
+      (
+        forced("b"),
+        vec![(named(schema, text, ", ", "b", 0), "required here")]
+      ),
+    ]
+  );
+}
+
 /// A field an object literal of a generic definition leaves out, whose type there is its input
 /// object's bare nullable type parameter, is judged by the same rule: the literal is a value its
 /// definition records, and its count at each instantiation reads the field under that

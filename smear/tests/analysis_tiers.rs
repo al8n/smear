@@ -1388,8 +1388,10 @@ fn an_occurrence_a_phase_refused_reaches_nothing() {
 
 /// Which definitions are metadata, and what the rule says, labels included, is the same whichever
 /// order the files and the dependencies are passed in: a dependency's directive and the uses of
-/// the root package and of a sibling; a cycle written over two files; and a dependant's directive
-/// that takes a dependency's input object.
+/// the root package and of a sibling; a cycle written over two files; a dependant's directive that
+/// takes a dependency's input object; and a root package two of whose files each hold an
+/// executable directive's own parameter in an argument's type, where nothing is metadata and every
+/// definition metadata reaches is labelled at the first of the two by id.
 #[test]
 fn the_metadata_flags_do_not_depend_on_order() {
   const GEO: &str = "input Binding {\n  lang: string!\n}\ndirective @bind(b: Binding) on SCALAR\n\
@@ -1404,6 +1406,8 @@ fn the_metadata_flags_do_not_depend_on_order() {
                      input C {\n  c: C\n  s: string\n}\ndirective @e(c: C) on OBJECT\n";
   const FAR: &str = "input Cfg {\n  s: string\n}\n";
   const TAKES: &str = "directive @rd(c: ^::far::Cfg) on OBJECT\n";
+  const ONE_RUN: &str = "type Query {\n  ok: Int\n}\ndirective @one<T>(v: T) on FIELD\n";
+  const TWO_RUN: &str = "directive @two<U>(w: [U]) on FIELD\n";
   let geo = || package("geo", Tier::Core, &[("geo.graphqlx", GEO)]);
   let sib = || package("sib", Tier::Alloc, &[("sib.graphqlx", SIB)]).with_dependencies(["geo"]);
   let far = || package("far", Tier::Core, &[("far.graphqlx", FAR)]);
@@ -1484,6 +1488,50 @@ fn the_metadata_flags_do_not_depend_on_order() {
     assert_eq!(flags(&forward), flags(&backward));
     assert_eq!(forward.diagnostics(), backward.diagnostics());
   }
+
+  // The flooded program: `far`'s `Cfg`, which no metadata reaches, is judged unlabelled, and
+  // `geo`'s `Binding` and `Cfg`, which only `geo`'s directives take, are judged too, each labelled
+  // at `T` in `a.graphqlx`, the first parameter by id, whichever file is passed first.
+  let forward = analyze(
+    &package(
+      "app",
+      Tier::Std,
+      &[("a.graphqlx", ONE_RUN), ("b.graphqlx", TWO_RUN)],
+    )
+    .with_dependencies(["far", "geo"]),
+    &[far(), geo()],
+    &Limits::new(),
+  );
+  let backward = analyze(
+    &package(
+      "app",
+      Tier::Std,
+      &[("b.graphqlx", TWO_RUN), ("a.graphqlx", ONE_RUN)],
+    )
+    .with_dependencies(["geo", "far"]),
+    &[geo(), far()],
+    &Limits::new(),
+  );
+  let entered = within(file(&forward, 3, "a.graphqlx"), ONE_RUN, "(v: T)", "T");
+  assert!(
+    flags(&forward)
+      .iter()
+      .all(|&(_, flag): &(String, bool)| !flag),
+    "{:#?}",
+    flags(&forward)
+  );
+  assert_eq!(
+    labels(&forward, TIER),
+    [
+      vec![],
+      vec![(entered, entry("Binding"))],
+      vec![(entered, entry("Cfg"))],
+    ],
+    "{:#?}",
+    forward.diagnostics()
+  );
+  assert_eq!(flags(&forward), flags(&backward));
+  assert_eq!(forward.diagnostics(), backward.diagnostics());
 }
 
 /// An analysis of the root package `app`, `Flat`, at `core`, holding `files`, `(path, text)`.
@@ -1736,6 +1784,105 @@ fn an_executable_directives_own_parameter_can_receive_any_metadata() {
     quiet(&analysis);
     assert!(metadata(analysis.model(), "^::app::Payload"), "{text}");
   }
+}
+
+/// What an executable directive's own type parameter can receive is every definition metadata
+/// reaches, whatever package defines it: the root package's `@run<T>(v: T)` makes `geo`'s
+/// `Payload`, which only `geo`'s own directive takes, no metadata, and its `[Int]` is refused in
+/// `geo`, labelled at `T` in the root package's file. A definition a type outside metadata reached
+/// first keeps its own entry: `Early`, which a field's argument of `Query` takes, stays labelled at
+/// that argument, while `Payload` is labelled at `T`. Refuses the parameter's reach kept to its own
+/// package, and an earlier entry overwritten.
+#[test]
+fn an_executable_directives_parameter_reaches_every_package_and_keeps_earlier_entries() {
+  const GEO: &str = "input Payload {\n  items: [Int]\n}\ndirective @meta(v: Payload) on OBJECT\n";
+  const RUN: &str = "type Query {\n  ok: Int\n}\ndirective @run<T>(v: T) on FIELD\n";
+  let root = package("app", Tier::Std, &[("schema.graphqlx", RUN)]).with_dependencies(["geo"]);
+  let geo = package("geo", Tier::Core, &[("geo.graphqlx", GEO)]);
+  let analysis = analyze(&root, &[geo], &Limits::new());
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  let geo_file = file(&analysis, 4, "geo.graphqlx");
+  let entered = within(schema, RUN, "(v: T)", "T");
+  assert_eq!(
+    found(&analysis, TIER),
+    [(at(geo_file, GEO, "[Int]", 0), Some(entered))]
+  );
+  assert_eq!(labels(&analysis, TIER), [vec![(entered, entry("Payload"))]]);
+  assert_eq!(
+    messages(&analysis, TIER),
+    ["a list needs `alloc`, and package `geo` is declared at tier `core`"]
+  );
+  assert_eq!(
+    analysis.diagnostics().len(),
+    1,
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert!(!metadata(analysis.model(), "^::geo::Payload"));
+
+  let text = "type Query {\n  ok: Int\n  f(e: Early): Int\n}\ninput Early {\n  items: [Int]\n}\n\
+              input Payload {\n  items: [Int]\n}\ndirective @meta(e: Early, p: Payload) on OBJECT\n\
+              directive @run<T>(v: T) on FIELD\n";
+  let analysis = analyze_at(text, Tier::Core);
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  let early = within(schema, text, "f(e: Early)", "Early");
+  let parameter = within(schema, text, "(v: T)", "T");
+  assert_eq!(
+    found(&analysis, TIER),
+    [
+      (at(schema, text, "[Int]", 0), Some(early)),
+      (at(schema, text, "[Int]", 1), Some(parameter)),
+    ]
+  );
+  assert_eq!(
+    labels(&analysis, TIER),
+    [
+      vec![(early, entry("Early"))],
+      vec![(parameter, entry("Payload"))],
+    ]
+  );
+  assert_eq!(
+    analysis.diagnostics().len(),
+    2,
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let model = analysis.model();
+  assert!(!metadata(model, "^::app::Early"));
+  assert!(!metadata(model, "^::app::Payload"));
+}
+
+/// The report at an extern's `tier` is labelled at the entry too: `Url`, whose `@extern` says
+/// `ALLOC` in a package at `core`, is taken by a directive's argument and by a field's argument, so
+/// it is judged, and the report at `ALLOC` has its last label at `Url` in that field's argument.
+/// Refuses the label left off the extern's report.
+#[test]
+fn an_externs_report_is_labelled_at_the_entry() {
+  let text = "type Query {\n  x: Int\n  f(u: Url): Int\n}\n\
+              scalar Url @extern(lang: \"rust\", type: \"url::Url\", tier: ALLOC)\n\
+              directive @meta(u: Url) on OBJECT\n";
+  let analysis = analyze_at(text, Tier::Core);
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  let entered = within(schema, text, "f(u: Url)", "Url");
+  assert_eq!(
+    found(&analysis, TIER),
+    [(at(schema, text, "ALLOC", 0), Some(entered))]
+  );
+  assert_eq!(labels(&analysis, TIER), [vec![(entered, entry("Url"))]]);
+  assert_eq!(
+    messages(&analysis, TIER),
+    [
+      "this `@extern` says its host type needs `alloc`, and package `app`, which declares the \
+       scalar, is declared at tier `core`"
+    ]
+  );
+  assert_eq!(
+    analysis.diagnostics().len(),
+    1,
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert!(!metadata(analysis.model(), "^::app::Url"));
 }
 
 /// A bound in a directive no operation can apply roots what its interface's arguments name: `Cfg`,
