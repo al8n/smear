@@ -30,6 +30,10 @@ const ARGUMENT: &str = "smear::schema::invalid-directive-argument-value";
 const MISSING: &str = "smear::schema::missing-required-directive-argument";
 /// GraphQL's code for a default that needs a copy of itself.
 const CYCLE: &str = "smear::schema::input-object-default-value-cycle";
+/// The code of a marker that declares a field.
+const MARKER_MISUSE: &str = "smear::graphqlx::marker-misuse";
+/// GraphQL's code for two arguments of one name.
+const DUPLICATE_ARGUMENT: &str = "smear::schema::duplicate-argument-name";
 /// The label at the type that derives the instantiation a report names.
 const DERIVES: &str = "this derives that instantiation";
 
@@ -1506,6 +1510,56 @@ fn a_foreign_implements_entry_makes_nothing_relevant() {
     let analysis = analyze(&root, &dependencies, &limits);
     assert!(
       codes_at(&analysis, LIMIT).is_empty(),
+      "{:#?}",
+      analysis.diagnostics()
+    );
+  }
+}
+
+/// A marker's fields are none of the implementation check's: `Page<T>` implements the marker `M`,
+/// which declares `f` and is `marker-misuse` there, and `Page`'s `f` takes `extra: T`, which the
+/// check never compares with anything, so `Page` is not relevant. With no value step to spend,
+/// `Outer<Int>`, which holds a `Page<T>`, says nothing of what it derives. Refuses a marker's field
+/// read as an obligation.
+#[test]
+fn a_markers_field_makes_nothing_relevant() {
+  let text = "type Query {\n  o: Outer<Int>\n}\ninterface M @marker {\n  f: Int\n}\n\
+              type Page<T> implements M {\n  f(extra: T): Int\n}\n\
+              type Outer<T> {\n  p: Page<T>\n}\n";
+  for limits in [Limits::new().with_max_value_steps(0), Limits::new()] {
+    let analysis = analyze_text(text, &limits);
+    let schema = schema_file(&analysis);
+    assert!(
+      codes_at(&analysis, LIMIT).is_empty(),
+      "{:#?}",
+      analysis.diagnostics()
+    );
+    assert_eq!(
+      codes_at(&analysis, MARKER_MISUSE),
+      [named(schema, text, "  ", "f", 0)]
+    );
+  }
+}
+
+/// An argument name written more than once is one name: `Page<T>` implements `I`, whose `f`
+/// declares `a`, and `Page`'s `f` writes `a` three times, `duplicate-argument-name`, twice typed
+/// `T`. The implementation check passes over every `a`, which `I`'s `f` declares, so `Page` is not
+/// relevant, and with no value step to spend `Outer<Int>` says nothing of what it derives. Refuses
+/// a repeated name counted as more arguments added than the interface's field declares.
+#[test]
+fn an_argument_name_written_twice_is_one_name_to_the_relevance_scan() {
+  let text = "type Query {\n  o: Outer<Int>\n}\ninterface I {\n  f(a: Int): Int\n}\n\
+              type Page<T> implements I {\n  f(a: Int, a: T, a: T): Int\n}\n\
+              type Outer<T> {\n  p: Page<T>\n}\n";
+  for limits in [Limits::new().with_max_value_steps(0), Limits::new()] {
+    let analysis = analyze_text(text, &limits);
+    assert!(
+      codes_at(&analysis, LIMIT).is_empty(),
+      "{:#?}",
+      analysis.diagnostics()
+    );
+    assert!(
+      !codes_at(&analysis, DUPLICATE_ARGUMENT).is_empty(),
       "{:#?}",
       analysis.diagnostics()
     );

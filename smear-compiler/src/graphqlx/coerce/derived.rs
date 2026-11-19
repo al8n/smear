@@ -26,20 +26,20 @@
 //! value recorded under its definition, here, and in the implementation check an `implements` entry
 //! or a union member that names its type parameters, or an argument typed by its own bare nullable
 //! type parameter with no default, which may be required, that a field of an object or an interface
-//! adds beside the field of its name of an interface one of the definition's entries names: each
-//! entry and member one its own package writes, as the check reads them, and each field one its
-//! definition's package writes. A definition is relevant when it has something judged, or when one
-//! of its positions holds, at any depth and through any definition, a named type of a relevant
-//! definition that does not grow and that no supplied package writes, open or closed, a type a
-//! default fills among them, or a type whose arguments hold one; and a position is read only when
-//! it holds such a type. A derived instantiation of a definition that grows is neither judged nor
-//! expanded, so its own definition makes it reach nothing: it reaches through what its arguments
-//! hold alone. That is a least fixpoint, and so transitive: a definition is relevant exactly when
-//! an expansion of an instantiation of it can reach an instantiation of a definition with something
-//! judged, since the walk that finds it reads below each position what an expansion walks below its
-//! rebuild, a written instantiation ending both, and what a rebuild puts in a type parameter's
-//! place is written or was met above. So a program whose generic definitions hold nothing to judge
-//! derives nothing, and pays nothing.
+//! adds beside the field of its name of an interface, no marker, that one of the definition's
+//! entries names: each entry and member one its own package writes, as the check reads them, and
+//! each field one its definition's package writes. A definition is relevant when it has something
+//! judged, or when one of its positions holds, at any depth and through any definition, a named
+//! type of a relevant definition that does not grow and that no supplied package writes, open or
+//! closed, a type a default fills among them, or a type whose arguments hold one; and a position is
+//! read only when it holds such a type. A derived instantiation of a definition that grows is
+//! neither judged nor expanded, so its own definition makes it reach nothing: it reaches through
+//! what its arguments hold alone. That is a least fixpoint, and so transitive: a definition is
+//! relevant exactly when an expansion of an instantiation of it can reach an instantiation of a
+//! definition with something judged, since the walk that finds it reads below each position what an
+//! expansion walks below its rebuild, a written instantiation ending both, and what a rebuild puts
+//! in a type parameter's place is written or was met above. So a program whose generic definitions
+//! hold nothing to judge derives nothing, and pays nothing.
 //!
 //! # What it costs, and what ends it
 //!
@@ -213,8 +213,10 @@ struct Declared {
   /// Those of them that add an argument the implementation check may judge, by name, each with its
   /// run of `names`.
   adding: Vec<(Sym, MemberId, PoolRange)>,
-  /// The runs `adding` names: the names of the arguments each field adds, sorted.
+  /// The runs `adding` names: the names of the arguments each field adds, sorted, each once.
   names: Vec<Sym>,
+  /// The names of the arguments the field being read adds, before they are sorted and kept once.
+  added: Vec<Sym>,
   /// The interfaces the definition being asked about's own entries name, each once.
   interfaces: Vec<DefId>,
 }
@@ -660,11 +662,12 @@ impl Coercion<'_, '_, '_> {
   /// Whether the implementation check judges something at an instantiation of `def`, read
   /// generously: an `implements` entry or a union member whose type names a type parameter, or, for
   /// an object or an interface, an argument one of its fields adds beside the field of its name of
-  /// an interface one of its entries names, typed by its own bare nullable type parameter with no
-  /// default, which may be required. An argument of a field that implements no interface's field,
-  /// or that the interface's field declares, is the check's never. Entries and members are those
-  /// the check reads, as [`own_item`](Self::own_item) finds them: what another package writes into
-  /// the definition is that package's mistake, and makes nothing relevant.
+  /// an interface one of its entries names, but a marker, whose fields the check does not compare,
+  /// typed by its own bare nullable type parameter with no default, which may be required, each
+  /// name once. An argument of a field that implements no interface's field, or that the
+  /// interface's field declares, is the check's never. Entries and members are those the check
+  /// reads, as [`own_item`](Self::own_item) finds them: what another package writes into the
+  /// definition is that package's mistake, and makes nothing relevant.
   ///
   /// Of the definition's own fields, the first of each name is read, the one the implementation
   /// check finds to implement an interface's field of that name. Then, for each interface its
@@ -694,7 +697,8 @@ impl Coercion<'_, '_, '_> {
       }
     }
     // An argument the interface's field does not declare is the check's only where the definition
-    // implements one: the interfaces its entries name, each once.
+    // implements one: the interfaces its entries name, each once, but a marker, whose fields the
+    // check does not compare.
     if !matches!(kind, Some(DefKind::Object | DefKind::Interface)) {
       return false;
     }
@@ -704,6 +708,7 @@ impl Coercion<'_, '_, '_> {
         && let Some(Shape::Named(interface)) = self.builder.ty_shape(ty)
         && interface != def
         && self.builder.def_kind(interface) == Some(DefKind::Interface)
+        && !self.builder.def_marker(interface)
       {
         declared.interfaces.push(interface);
       }
@@ -729,24 +734,28 @@ impl Coercion<'_, '_, '_> {
     declared.adding.clear();
     declared.names.clear();
     for &(name, field) in &declared.own {
-      let start = dense(declared.names.len());
+      declared.added.clear();
       for argument in self.builder.member_arguments(field) {
         if self.bare_param(argument, def)
           && !self.raw.defaults.contains_key(&argument)
           && let Some(added) = self.builder.member_name(argument)
         {
-          declared.names.push(added);
+          declared.added.push(added);
         }
       }
+      if declared.added.is_empty() {
+        continue;
+      }
+      // Each name once: the check passes over every argument of a name its interface's field
+      // declares, however often it is written.
+      declared.added.sort_unstable();
+      declared.added.dedup();
+      let start = dense(declared.names.len());
+      declared.names.extend_from_slice(&declared.added);
       let end = dense(declared.names.len());
-      if end > start {
-        if let Some(run) = declared.names.get_mut(start as usize..end as usize) {
-          run.sort_unstable();
-        }
-        declared
-          .adding
-          .push((name, field, PoolRange { start, end }));
-      }
+      declared
+        .adding
+        .push((name, field, PoolRange { start, end }));
     }
     if declared.adding.is_empty() {
       return false;
