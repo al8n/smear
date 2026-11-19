@@ -2063,6 +2063,50 @@ fn two_forced_omissions_at_one_application_are_two_reports() {
   );
 }
 
+/// `null` written for an argument a collection's key or element makes required, with no default,
+/// is refused at the application, once, as leaving it out is, and recorded for no instantiation:
+/// `@need<K>(v: null)` on the set `Tags` is `missing-required-directive-argument` at `v`, whether
+/// nothing uses `Tags` or `Tags<Int>` and `Tags<String>` do, which report nothing more. A map's
+/// value is no key, and keeps its check at each instantiation: `@need<V>(v: null)` on `Vals` holds
+/// under `Vals<Int, Int>`, and is refused under `Vals<Int, Int!>`, at that use, labelled at the
+/// value. Refuses the `null` recorded and judged only at each instantiation, which an unused
+/// collection never asks and each use repeats, and a map's value taken as forced.
+#[test]
+fn null_for_an_argument_a_collections_key_or_element_makes_required_is_refused_once() {
+  let need = "directive @need<T>(v: T) on SCALAR\nscalar Tags<K> @set @need<K>(v: null)\n";
+  for query in [
+    "type Query {\n  x: Int\n}\n",
+    "type Query {\n  a: Tags<Int>\n  b: Tags<String>\n}\n",
+  ] {
+    let text = format!("{query}{need}");
+    let analysis = analyze_text(&text, &Limits::new());
+    let schema = schema_file(&analysis);
+    let argument = after(schema, &text, "@need<K>(", "v");
+    assert_eq!(found(&analysis), [(MISSING, argument)], "{text}");
+    assert_eq!(
+      the(&analysis, MISSING, argument).to_string(),
+      "the argument `v` of `@need` is required, and `null` is given"
+    );
+  }
+
+  let text = "type Query {\n  a: Vals<Int, Int>\n  b: Vals<Int, Int!>\n}\n\
+              directive @need<T>(v: T) on SCALAR\nscalar Vals<K, V> @map @need<V>(v: null)\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, text, "Vals<Int, Int!>", 0);
+  assert_eq!(found(&analysis), [(ARGUMENT, occurrence)]);
+  let report = the(&analysis, ARGUMENT, occurrence);
+  assert_eq!(
+    report.to_string(),
+    "`Vals` is instantiated here with type arguments under which `null`, a value it holds, does \
+     not fit the type it takes"
+  );
+  assert_eq!(
+    labels(report),
+    [(after(schema, text, "@need<V>(v: ", "null"), "this value")]
+  );
+}
+
 /// A field an object literal of a generic definition leaves out, whose type there is its input
 /// object's bare nullable type parameter, is judged by the same rule: the literal is a value its
 /// definition records, and its count at each instantiation reads the field under that

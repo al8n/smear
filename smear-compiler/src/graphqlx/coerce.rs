@@ -209,11 +209,12 @@
 //! type there is a bare nullable type parameter of the definition: whether it is required is each
 //! instantiation's to say. But where that parameter is a collection's key or element, which every
 //! instantiation makes non-null however it is written or filled, the argument is required in
-//! each: the application's own mistake, `missing-required-directive-argument` at its path, with a
-//! label at the argument, reported once whatever uses the collection has, and recorded nowhere.
-//! `null` written for an argument required under the application's open
-//! type arguments, its type there non-null, is required under every instantiation of them: it is
-//! refused where it is written, once, and recorded nowhere. A generic directive's own arguments'
+//! each: left out, it is the application's own mistake, `missing-required-directive-argument` at
+//! its path, with a label at the argument, reported once whatever uses the collection has, and
+//! recorded nowhere; and written `null`, it is refused as below. `null` written for an argument
+//! required under the application's open type arguments, its type there non-null or a
+//! collection's key or element, is required under every instantiation of them: it is refused
+//! where it is written, once, and recorded nowhere. A generic directive's own arguments'
 //! defaults are judged where its applications leave them out, and recorded nowhere. When the walk
 //! has ended, each type
 //! occurrence a supplied package writes, in id order, whose type is a closed named type of a
@@ -3331,9 +3332,11 @@ impl<'p> Coercion<'_, 'p, '_> {
 
   /// The argument `argument` of the application `applying` says, as written: its value coerced
   /// against the argument's type under the application's type arguments. A required argument,
-  /// non-null there and with no default, given `null` is reported as left out, at its name, and
-  /// its value is unresolved. A value whose type cannot be built under the arguments is one
-  /// unresolved row, typed with the type the argument is written with, `resource-limit` at it.
+  /// with no default and non-null there or a collection's key or element, which every
+  /// instantiation makes non-null, given `null` is reported as left out, at its name, once, and
+  /// its value is unresolved and recorded for no instantiation. A value whose type cannot be
+  /// built under the arguments is one unresolved row, typed with the type the argument is written
+  /// with, `resource-limit` at it.
   fn written_argument(&mut self, applying: Applying, argument: RawArgument) {
     let application = applying.application;
     let expected = match self.under(argument.argument, applying.env, applying.library) {
@@ -3352,7 +3355,8 @@ impl<'p> Coercion<'_, 'p, '_> {
       }
     };
     let (ty, non_null) = (expected.ty, expected.non_null);
-    let required = non_null && !self.raw.defaults.contains_key(&argument.argument);
+    let required = (non_null || self.forced(ty).is_some())
+      && !self.raw.defaults.contains_key(&argument.argument);
     let null = self
       .raw
       .trees
@@ -3361,8 +3365,9 @@ impl<'p> Coercion<'_, 'p, '_> {
       .is_some_and(|node: &RawNode| matches!(node.kind, RawKind::Null));
     let value = if required && null {
       // Required under the application's own arguments, open or not, is required under every
-      // instantiation of them: refused here once, and recorded nowhere, so that no instantiation
-      // reports it again.
+      // instantiation of them, and so is a collection's key or element, which every
+      // instantiation makes non-null: refused here once, and recorded nowhere, so that no
+      // instantiation reports it again.
       self.null_for_required(application, argument, ty)
     } else {
       if applying.env.is_some() {
