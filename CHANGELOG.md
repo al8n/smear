@@ -409,7 +409,9 @@ All notable changes to Smear are documented in this file.
     off by default and the analysis's whole, built as `Limits` is.
     `extern_collections_as_written` lets an extern collection, a set or a map its own package
     binds with `@extern`, keep a literal that is no collection literal as written, as an extern
-    scalar keeps its value.
+    scalar keeps its value. `judged_metadata` makes the tier rule judge compile-time metadata too,
+    which it skips by default, an application's left-out type arguments and `@heap` on a
+    directive's argument included; `Def::is_metadata` answers the same either way.
   - **Stability.** The `graphqlx` module makes no semver promise yet: a release may change any
     path, signature or answer of it, and which programs it accepts.
   - **Tests.** A `test-support` feature, which `smear/test-support` forwards, compiles a hidden

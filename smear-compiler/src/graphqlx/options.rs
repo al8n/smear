@@ -17,6 +17,7 @@
 /// | Switch | Kind | Off, by default | On |
 /// |---|---|---|---|
 /// | [`extern_collections_as_written`](Self::extern_collections_as_written) | relaxes | A collection takes its own literal or `null`, an extern one as any other; any other literal is `smear::graphqlx::collection-literal` | An extern collection keeps a literal that is neither `set!{…}`, `map!{…}` nor `null` as written |
+/// | [`judged_metadata`](Self::judged_metadata) | tightens | The tier rule judges no compile-time metadata: the types a directive definition writes, every application's type arguments, written or left to a default, and the definitions `Def::is_metadata` marks | The tier rule judges them as it judges any other use, `@heap` on a directive's argument included, and never a value |
 ///
 /// [`Limits`](crate::graphqlx::Limits) is the other half of an analysis's configuration: it bounds
 /// what the analysis spends and the shapes it admits, where these switches relax or tighten what
@@ -31,15 +32,19 @@
 /// ```
 /// use smear_compiler::graphqlx::Options;
 ///
-/// const MINE: Options = Options::new().with_extern_collections_as_written(true);
+/// const MINE: Options = Options::new()
+///   .with_extern_collections_as_written(true)
+///   .with_judged_metadata(true);
 ///
-/// assert!(MINE.extern_collections_as_written());
+/// assert!(MINE.extern_collections_as_written() && MINE.judged_metadata());
 /// assert_eq!(Options::new(), Options::default());
 /// assert!(!Options::new().extern_collections_as_written());
+/// assert!(!Options::new().judged_metadata());
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Options {
   extern_collections_as_written: bool,
+  judged_metadata: bool,
 }
 
 impl Default for Options {
@@ -57,6 +62,7 @@ impl Options {
   pub const fn new() -> Self {
     Self {
       extern_collections_as_written: false,
+      judged_metadata: false,
     }
   }
 
@@ -86,6 +92,43 @@ impl Options {
   #[must_use]
   pub const fn with_extern_collections_as_written(mut self, allow: bool) -> Self {
     self.extern_collections_as_written = allow;
+    self
+  }
+
+  /// Whether the tier rule judges compile-time metadata too, as it judges every other use.
+  /// Compile-time metadata is every type a directive definition writes, its arguments' types and
+  /// its type parameters' defaults and bounds; every type argument of an application of any
+  /// directive, the written ones and those its directive's defaults fill; and every definition
+  /// [`Def::is_metadata`](crate::graphqlx::Def::is_metadata) marks.
+  ///
+  /// Off, none of it counts toward a `smear::graphqlx::tier` report: a package declared at `core`
+  /// may declare a directive whose argument is a `string`, apply another package's directive with
+  /// a `string` type argument, written or left to its default, and declare an input object of
+  /// `string` fields that `Def::is_metadata` marks. On, the tier rule judges each of them as it
+  /// judges any other use, each where it is written: a list; another package's definition that
+  /// needs more; `core`'s `@heap`, on a directive's argument too; an extern's `tier`; and an
+  /// application of another package's generic directive whose left-out type arguments' defaults
+  /// need more, at its path, labelled at the default.
+  ///
+  /// It judges types and never a value: an application of another package's directive is accepted
+  /// whatever types that directive's arguments take, the strings it writes among them.
+  ///
+  /// It changes what the rule reports and nothing the model answers but the `has_errors()` of what
+  /// those reports mark: [`Def::is_metadata`](crate::graphqlx::Def::is_metadata) and
+  /// [`Def::tier`](crate::graphqlx::Def::tier) answer the program's own facts whatever it says.
+  /// Under it, in an analysis that is ok, every definition's tier is at most its package's,
+  /// GraphQL's meta-types aside and metadata included: what a backend that emits every definition
+  /// at its package's tier needs.
+  #[inline]
+  pub const fn judged_metadata(&self) -> bool {
+    self.judged_metadata
+  }
+
+  /// The same options with [`judged_metadata`](Self::judged_metadata) set to `judge`.
+  #[inline]
+  #[must_use]
+  pub const fn with_judged_metadata(mut self, judge: bool) -> Self {
+    self.judged_metadata = judge;
     self
   }
 }

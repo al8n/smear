@@ -21,10 +21,11 @@
 //!   the binding: the tier is reported at the value of the `@extern`'s first `tier`, which is
 //!   written, since an extern that writes none takes its package's tier.
 //!
-//! Compile-time metadata counts nowhere, and none of it is judged. It is every type occurrence
-//! under a directive definition, its arguments' types and its type parameters' defaults and
-//! bounds; every type argument of an application of any directive, the written ones and those its
-//! directive's defaults fill, each with every type nested in it; and everything within a
+//! Compile-time metadata counts nowhere, and none of it is judged, unless the analysis runs under
+//! `Options::judged_metadata`, which judges it as everything else is judged. It is every type
+//! occurrence under a directive definition, its arguments' types and its type parameters' defaults
+//! and bounds; every type argument of an application of any directive, the written ones and those
+//! its directive's defaults fill, each with every type nested in it; and everything within a
 //! definition only compile-time metadata reaches, which `Def::is_metadata` answers: its type
 //! occurrences, its `@heap`s and its externs. Such a definition is a scalar, an enum or an input
 //! object of a supplied package that a type a type-system directive writes, one that lists no
@@ -43,6 +44,18 @@
 //! any of them. The types such a directive writes are exempt all the same, as every directive's
 //! are. An object, an interface and a union are never metadata: one can be a runtime type that no
 //! type names.
+//!
+//! Under `Options::judged_metadata` nothing is skipped as metadata: every use above is judged
+//! wherever it stands, what a directive definition writes, an application's type arguments and what
+//! `Def::is_metadata` marks among it, and so is `@heap` on a directive definition's argument, in a
+//! package declared at `core`. And an application `P` writes of another package's generic
+//! directive is judged by the type arguments it leaves to its directive's defaults, which need what
+//! those defaults need of their own, read off its written count and capped at that package's tier,
+//! as an occurrence's are: a directive needs `core` itself, and its written type arguments are
+//! occurrences, judged where they are written. It is reported once, at its path, with a label at
+//! the default that raises it. `Def::is_metadata` and `Def::tier` answer the same either way: the
+//! switch changes what the rule reports, and nothing the model holds but the marks of those
+//! reports.
 //!
 //! A report within a definition both reach has a last label at where the reach from outside
 //! metadata entered, "`A` is reached from here, outside compile-time metadata": the occurrence
@@ -63,7 +76,9 @@
 //! otherwise the first step of the chain whose writer's tier is below the source's is an
 //! occurrence of another package's definition, whose capped need is at least the source's tier,
 //! and which is reported. So in an analysis that is ok, every definition's tier is at most its
-//! package's, but a metadata definition's, whose own tier feeds no definition that is no metadata.
+//! package's, but a metadata definition's, whose own tier feeds no definition that is no metadata;
+//! under `Options::judged_metadata` that exception is gone, every occurrence on a chain being
+//! judged, a metadata definition's included.
 //!
 //! The rule says nothing where a phase refused something in the contribution that holds what it
 //! judges, or, for a written root, in one of the schema's. A `use` item is no use: an unused one
@@ -95,18 +110,19 @@ use super::Silence;
 /// `enter_def` hook. It says nothing within compile-time metadata, which counts nowhere: at an
 /// application's type argument, nor at anything within a directive definition or a definition
 /// only compile-time metadata reaches, one predicate, `exempt`, saying so at each of the three
-/// hooks. It says nothing about what a phase refused something in the contribution of, or for a
-/// root, the schema's, nor in a package declared at `std`; it reports only what a supplied package
-/// wrote, which is all the walk reaches.
+/// hooks, unless it judges metadata, when it skips none. It says nothing about what a phase
+/// refused something in the contribution of, or for a root, the schema's, nor in a package declared
+/// at `std`; it reports only what a supplied package wrote, which is all the walk reaches.
 ///
 /// It costs one look at each occurrence, application and extern the walk reaches, and at the
 /// definition the walk is in for each; below `std` one look at the package that wrote each and at
 /// the type of an occurrence of another package's definition; a binary search of the scalar's
 /// externs, sorted when the walk enters it, for each application of `@extern`; and once for each
-/// definition whose defaults an occurrence may fill, one look at each of its type parameters,
-/// kept. It keeps the scalar's externs, one at a time, and those defaults' tiers, each
-/// definition's once, until the next walk. Its messages quote a definition's own name and a
-/// package's name as excerpts, so each is bounded whatever their lengths.
+/// definition whose defaults an occurrence may fill, or, when it judges metadata, an application of
+/// another package's directive, one look at each of its type parameters, kept. It keeps the
+/// scalar's externs, one at a time, and those defaults' tiers, each definition's once, until the
+/// next walk. Its messages quote a definition's own name and a package's name as excerpts, so each
+/// is bounded whatever their lengths.
 #[derive(Default)]
 pub(super) struct TierViolation {
   /// Whether it says nothing at an occurrence.
@@ -120,6 +136,9 @@ pub(super) struct TierViolation {
   /// tier the defaults from that one to the last need of their own, and the first default that
   /// needs it.
   defaults: BTreeMap<DefId, Vec<(Tier, Option<TypeExprId>)>>,
+  /// Whether compile-time metadata is judged too, as `Options::judged_metadata` says:
+  /// configuration, which `begin` leaves alone.
+  pub(super) judge_metadata: bool,
 }
 
 /// `core`'s `@heap`, its `@extern` and that directive's `tier` argument.
@@ -157,7 +176,7 @@ impl Visitor for TierViolation {
     // A metadata scalar's externs are not judged: with none collected, the extern arm finds none.
     if definition.kind() != DefKind::Scalar
       || definition.origin() != Origin::User
-      || exempt(model, Some(def), None)
+      || exempt(model, self.judge_metadata, Some(def), None)
     {
       return;
     }
@@ -173,7 +192,7 @@ impl Visitor for TierViolation {
 
   fn type_expr(&mut self, cx: &mut Cx<'_>, ty: TypeExprId) {
     let model = cx.model();
-    if exempt(model, cx.def(), cx.site()) {
+    if exempt(model, self.judge_metadata, cx.def(), cx.site()) {
       return;
     }
     if self.silence.silenced(cx) {
@@ -280,11 +299,11 @@ impl Visitor for TierViolation {
     if directive == keys.heap {
       // A field's, a field's argument's or an input field's outside compile-time metadata, which
       // counts nowhere: not a directive definition's argument, nor a metadata definition's input
-      // field, nor an enum value's.
+      // field, nor an enum value's. Under `Options::judged_metadata`, metadata is judged too.
       let position = cx
         .member()
         .is_some_and(|member: MemberId| model.member(member).kind() != MemberKind::EnumValue)
-        && !exempt(model, cx.def(), cx.site());
+        && !exempt(model, self.judge_metadata, cx.def(), cx.site());
       if !position || declared >= Tier::Alloc {
         return;
       }
@@ -339,6 +358,54 @@ impl Visitor for TierViolation {
         report = report.label(entry, text);
       }
       cx.report(report.build());
+    } else if self.judge_metadata {
+      // Any other directive another package defines, under `Options::judged_metadata`: the type
+      // arguments the application leaves to its directive's defaults need what those defaults need
+      // of their own, read off its written count as an occurrence's are, the directive itself
+      // needing `core`. One whose type arguments could not be completed was refused at its path,
+      // and its contribution is silent.
+      let home = model.module(model.def(directive).module()).package();
+      if home == writer {
+        return;
+      }
+      let ceiling = model.package(home).tier();
+      if ceiling <= declared {
+        return;
+      }
+      let own = model.def(directive).tier();
+      let (filled, default) = self.filled(model, directive, applied.type_args().len());
+      let need = own.max(filled).min(ceiling);
+      if need <= declared {
+        return;
+      }
+      let name = Excerpt(model.def(directive).name().as_bytes());
+      let mut report = Diagnostic::builder(kind.code(), applied.path_location())
+        .severity(kind.severity())
+        .message(format!(
+          "`@{name}`, with the type arguments this application leaves to its defaults, needs \
+           `{}`, and package `{package}` is declared at tier `{}`",
+          spelled(need),
+          spelled(declared)
+        ))
+        .primary_label(kind.title())
+        .help(format!(
+          "declare package `{package}` at tier `{}` or above, or write the type arguments with \
+           what tier `{}` holds",
+          spelled(need),
+          spelled(declared)
+        ));
+      if filled > own
+        && let Some(default) = default
+      {
+        report = report.label(
+          model.type_expr(default).location(),
+          "filled from this default",
+        );
+      }
+      if let Some((entry, text)) = entered(model, cx.def()) {
+        report = report.label(entry, text);
+      }
+      cx.report(report.build());
     }
   }
 }
@@ -376,8 +443,12 @@ impl TierViolation {
 
 /// Whether what the walk is at is compile-time metadata, which the rule does not judge: an
 /// application's type argument, every type nested in it sharing its `site`; or anything within a
-/// directive definition, or within a definition only compile-time metadata reaches, `def`.
-fn exempt(model: &Model, def: Option<DefId>, site: Option<Site>) -> bool {
+/// directive definition, or within a definition only compile-time metadata reaches, `def`; unless
+/// `judge`, which judges everything.
+fn exempt(model: &Model, judge: bool, def: Option<DefId>, site: Option<Site>) -> bool {
+  if judge {
+    return false;
+  }
   site == Some(Site::ApplicationTypeArgument)
     || def.is_some_and(|def: DefId| {
       let definition = model.def(def);

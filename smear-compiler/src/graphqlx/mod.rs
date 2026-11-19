@@ -156,8 +156,9 @@
 //! - every application's arguments are its directive's, in its order, each at most once, every
 //!   required one present, each value coerced to its argument's type under the application's type
 //!   arguments, or kept as written while that type still names a type parameter;
-//! - every definition's [`tier`](Def::tier) is at most its package's, GraphQL's meta-types and
-//!   the definitions only compile-time metadata reaches, [`is_metadata`](Def::is_metadata), aside;
+//! - every definition's [`tier`](Def::tier) is at most its package's, GraphQL's meta-types and,
+//!   but under [`Options::judged_metadata`], the definitions only compile-time metadata reaches,
+//!   [`is_metadata`](Def::is_metadata), aside;
 //! - every rule of the table under "Rules" holds, the type-system rules GraphQLx shares with
 //!   GraphQL in this release among them.
 //!
@@ -321,6 +322,7 @@
 //! | Switch | Kind | What it does when on |
 //! |---|---|---|
 //! | [`extern_collections_as_written`](Options::extern_collections_as_written) | relaxes | An extern collection, a set or a map its own package binds with `@extern`, keeps a literal that is neither `set!{…}`, `map!{…}` nor `null` as written, as an extern scalar keeps its value |
+//! | [`judged_metadata`](Options::judged_metadata) | tightens | The tier rule judges compile-time metadata too: the types a directive definition writes, every application's type arguments, left-out ones included, and the definitions [`is_metadata`](Def::is_metadata) marks; `@heap` on a directive's argument is judged, and no value is |
 //!
 //! # Rules
 //!
@@ -369,7 +371,7 @@
 //! | `smear::schema`: `missing-query-root-operation-type` | A schema with no query root, neither written nor presumed, while every file of the root package was read whole |
 //! | `smear::graphqlx`: `extern-misuse` | An `@extern` whose `lang` an earlier one of its scalar has, and one the root package writes on a GraphQL built-in it replaces |
 //! | `smear::graphqlx`: `repr-misuse` | An `@repr` on the schema with no `for`, one elsewhere that writes `for`, and one that chooses twice for a language at a position, or for a type and a language on the schema |
-//! | `smear::graphqlx`: `tier` | Below `std`, a use above the tier its package declares: a list in a `core` package, another package's definition that needs more, `@heap` in a `core` package, an extern's `tier` above its package's. What a directive definition writes, an application's type arguments, and what a definition holds that only those of a directive no operation can apply and application type arguments reach, [`is_metadata`](Def::is_metadata), are compile-time metadata and count nowhere; a definition a type outside metadata names too is judged where it is written, and while a directive an operation can apply holds one of its own type parameters in an argument's type, every such definition is judged, since an operation can fill that parameter with any of them |
+//! | `smear::graphqlx`: `tier` | Below `std`, a use above the tier its package declares: a list in a `core` package, another package's definition that needs more, `@heap` in a `core` package, an extern's `tier` above its package's. What a directive definition writes, an application's type arguments, and what a definition holds that only those of a directive no operation can apply and application type arguments reach, [`is_metadata`](Def::is_metadata), are compile-time metadata and count nowhere, but under [`Options::judged_metadata`]; a definition a type outside metadata names too is judged where it is written, and while a directive an operation can apply holds one of its own type parameters in an argument's type, every such definition is judged, since an operation can fill that parameter with any of them |
 //! | `smear::schema`: `circular-non-null-input-field`, `circular-one-of-input-field` | An input object that requires a value of itself, through fields each non-null and no list, or by way of a OneOf none of whose fields can be given a finite value, a generic input object requiring what its type arguments must hold; never one a finite value satisfies, and in a program with type parameters it may miss one |
 //!
 //! # A rule a backend composes

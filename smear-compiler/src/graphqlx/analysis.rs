@@ -487,7 +487,12 @@ impl Analysis {
 ///   one of its own type parameters in an argument's type, every such definition is judged, since
 ///   an operation can fill that parameter with any of them. A report within a definition both
 ///   reach has a last label at where the reach from outside metadata entered, which for what such
-///   a parameter can receive is that argument's type. GraphQL's own rules
+///   a parameter can receive is that argument's type. Under
+///   [`Options::judged_metadata`] none of it is skipped: the rule judges compile-time metadata as
+///   it judges every other use, `@heap` on a directive's argument included, and an application of
+///   another package's generic directive by the type arguments it leaves to its directive's
+///   defaults, at its path, labelled at the default that raised the need; `Def::is_metadata` and
+///   `Def::tier` answer the same either way. GraphQL's own rules
 ///   judge what a definition a supplied package wrote holds, a GraphQL built-in the root package
 ///   replaces among them, with GraphQL's codes: a member whose name begins with `__` is
 ///   `reserved-field-name`, `reserved-argument-name`, `reserved-enum-value-name`,
@@ -819,7 +824,7 @@ fn finish<'a>(
     reporter,
     limits,
     options,
-    &mut Rules::default(),
+    &mut Rules::of(options),
   )
 }
 
