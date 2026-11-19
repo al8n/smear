@@ -211,7 +211,7 @@ impl Analysis {
 ///   the whole of it. Each keeps what it writes. A value a supplied package writes is charged its
 ///   literals to [`Limits::max_values`] before any of it is read: one whose literals are more than
 ///   the bound has left is `resource-limit` once, at the whole of it, and is one unresolved value,
-///   none of it read. Then the schema's
+///   none of it read and nothing more said of it. Then the schema's
 ///   contributions: every package's schema definitions, then its schema extensions, each by source
 ///   and position and each marked as what it is. The root package's first schema definition gives
 ///   the schema its description, its roots and its applications, and each schema extension the

@@ -354,14 +354,15 @@
 //! `Limits::max_values` bounds the rows themselves, one budget over the whole analysis. Lowering
 //! charged each literal a supplied package writes to it before any of its value was read, and a
 //! value it could not pay for is one row here, unresolved whatever its type, none of its literals
-//! read. Two kinds of row no literal writes are charged to it here, besides their steps: each list
-//! a written lone value stands for, one value each, and each row of a copy, its whole count at
-//! once. Each is charged to both budgets, all of it or none, the steps asked first, and a report
-//! names the budget that could not pay; the work stops as it stops past the steps, a lone value's
-//! level its one unresolved row, an application filled no further and an object literal given no
-//! more of its defaults. Nothing else this phase spends a step on makes a row, so the rows it makes
-//! are at most the built-in library's own, those `Limits::max_values` paid for, and one for each
-//! value lowering refused.
+//! read and nothing more said of it: it fits every type, so no instantiation checks it, and a type
+//! it cannot be read under is not reported at it. Two kinds of row no literal writes are charged to
+//! it here, besides their steps: each list a written lone value stands for, one value each, and
+//! each row of a copy, its whole count at once. Each is charged to both budgets, all of it or none,
+//! the steps asked first, and a report names the budget that could not pay; the work stops as it
+//! stops past the steps, a lone value's level its one unresolved row, an application filled no
+//! further and an object literal given no more of its defaults. Nothing else this phase spends a
+//! step on makes a row, so the rows it makes are at most the built-in library's own, those
+//! `Limits::max_values` paid for, and one for each value lowering refused.
 //!
 //! # The arenas
 //!
@@ -1723,12 +1724,13 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// the walk is in, when that is a generic definition and `ty` names its type parameters: each
   /// closed instantiation of it checks the value, a type's written or a directive's applied. A
   /// whole `null` no instantiation takes is refused instead, and never recorded: its callers ask
-  /// first, as [`never_null`](Self::never_null) says.
+  /// first, as [`never_null`](Self::never_null) says. Nor is a value lowering refused, which fits
+  /// every type and was reported where it is written: checking it could only spend steps.
   fn record(&mut self, tree: u32, ty: Option<TyId>, site: Site) {
     let (Some(def), Some(ty)) = (self.owner, ty) else {
       return;
     };
-    if !self.builder.ty_closed(ty) {
+    if !self.builder.ty_closed(ty) && !self.refused_tree(tree) {
       self.recorded.push(Recorded {
         def,
         ty,
@@ -3259,6 +3261,17 @@ impl<'p> Coercion<'_, 'p, '_> {
     !self.builder.ty_closed(ty) && (self.builder.ty_non_null(ty) || self.forced(Some(ty)).is_some())
   }
 
+  /// Whether the tree `tree` is a value lowering refused: one node, which fits every type and was
+  /// reported where it is written.
+  fn refused_tree(&self, tree: u32) -> bool {
+    self
+      .raw
+      .trees
+      .get(tree as usize)
+      .and_then(|tree: &RawTree| self.raw.nodes.get(tree.root as usize))
+      .is_some_and(|node: &RawNode| matches!(node.kind, RawKind::Refused))
+  }
+
   /// Whether the tree `tree`, of the type `ty`, is a whole `null` no instantiation takes.
   fn whole_null(&self, tree: u32, ty: Option<TyId>) -> bool {
     ty.is_some_and(|ty: TyId| self.never_null(ty))
@@ -3502,7 +3515,7 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// instantiation takes is refused at it, once, as `null` for a non-null type is, and recorded
   /// for none, as the module's section on such a `null` says. A value whose type cannot be built
   /// under the arguments is one unresolved row, typed with the type the argument is written with,
-  /// `resource-limit` at it.
+  /// `resource-limit` at it, but for a value lowering refused, which lowering reported.
   fn written_argument(&mut self, applying: Applying, argument: RawArgument) {
     let application = applying.application;
     let expected = match self.under(argument.argument, applying.env, applying.library) {
@@ -3556,7 +3569,8 @@ impl<'p> Coercion<'_, 'p, '_> {
 
   /// The value of the tree `tree`, written where it takes a type that `stop` kept from being read
   /// under type arguments: one unresolved row at its root, typed `ty`, the type it is written
-  /// against, with the path its root is written as when it is one, and `resource-limit` at it.
+  /// against, with the path its root is written as when it is one, and `resource-limit` at it. A
+  /// value lowering refused is that one row and nothing more: lowering reported it.
   fn unbuilt_value(&mut self, tree: u32, ty: Option<TyId>, stop: Stop) -> Option<ValueId> {
     let RawTree { root, source, .. } = self.raw.trees.get(tree as usize).copied()?;
     let node = self.raw.nodes.get(root as usize).copied()?;
@@ -3566,8 +3580,10 @@ impl<'p> Coercion<'_, 'p, '_> {
       self.builder.set_value_ty(id, ty);
     }
     self.path(id, node.kind);
-    let message = self.stopped(stop, "this value takes");
-    self.limit(at, message);
+    if !matches!(node.kind, RawKind::Refused) {
+      let message = self.stopped(stop, "this value takes");
+      self.limit(at, message);
+    }
     Some(id)
   }
 

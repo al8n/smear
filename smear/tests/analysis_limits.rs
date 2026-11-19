@@ -40,6 +40,9 @@ const VALUES: &str = "`Limits::max_values`";
 /// What a report of a written value `Limits::max_values` refused says, and no other report.
 const UNREAD: &str = "so none of it is read";
 
+/// GraphQL's code for a default that does not fit.
+const DEFAULT: &str = "smear::schema::invalid-default-value";
+
 /// GraphQL's code for a schema with no query root, which a library analyzed as the root package
 /// has.
 const NO_QUERY_ROOT: &str = "smear::schema::missing-query-root-operation-type";
@@ -1051,6 +1054,76 @@ fn a_refused_value_says_nothing_at_an_instantiation() {
     analysis.diagnostics()
   );
   assert_eq!(argument_default(analysis.model(), "Box", "f", "a"), "?");
+}
+
+/// A value lowering refused is reported once, by lowering, even where its type cannot be built
+/// under its application's type arguments: with no value and no step to spend, `@d<Int>(a: 1)`'s
+/// `1` is refused, `T` cannot be rebuilt as `Int`, and the one `resource-limit` is lowering's, at
+/// `1`. The argument is one unresolved value of the type it is written with. Refuses a second
+/// report at the same literal.
+#[test]
+fn a_refused_argument_is_reported_once_where_its_type_cannot_be_built() {
+  let text = "directive @d<T>(a: T) on OBJECT\ntype Query @d<Int>(a: 1) {\n  f: Int\n}\n";
+  let analysis = analyze_text(
+    text,
+    &Limits::new().with_max_values(0).with_max_value_steps(0),
+    &Options::new(),
+  );
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis, LIMIT),
+    [(at(schema, text, "1", 0), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let message = only(messages(&analysis, LIMIT));
+  assert!(message.contains(UNREAD), "{message}");
+  let model = analysis.model();
+  let application = model.def(type_def(model, "Query")).applications()[0];
+  let [argument] = model.application(application).arguments() else {
+    panic!("`@d<Int>(a: 1)` has one argument");
+  };
+  let value = model.value(argument.value());
+  assert_eq!(value.kind(), ValueKind::Unresolved);
+  let d = model
+    .lookup(Namespace::Directive, "@^::app::d")
+    .expect("`@d`");
+  let a = model.def(d).arguments().into_iter().next().expect("`a`");
+  let written = model.member(a).ty().expect("`a` has a type");
+  assert_eq!(value.ty(), model.type_expr(written).ty());
+}
+
+/// A value lowering refused is checked at no instantiation, since it fits every type, so its check
+/// spends no step that a value read needs: under one value and three steps, `Box`'s `[1, 2]` is
+/// refused and its `"x"` read, and the check of `Box<Int>` spends its three steps on `"x"` alone,
+/// one for the row, one to rebuild `T` and one for the value, which does not fit `Int` and is
+/// reported there, labelled at `"x"`. The one `resource-limit` is lowering's. Refuses a refused
+/// value checked before the values that were read.
+#[test]
+fn a_refused_default_spends_no_step_at_an_instantiation() {
+  let text = "input Box<T> {\n  dropped: T = [1, 2]\n  kept: T = \"x\"\n}\n\
+              type Query {\n  f(b: Box<Int>): Int\n}\n";
+  let analysis = analyze_text(
+    text,
+    &Limits::new().with_max_values(1).with_max_value_steps(3),
+    &Options::new(),
+  );
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis, LIMIT),
+    [(at(schema, text, "[1, 2]", 0), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    found(&analysis, DEFAULT),
+    [(
+      at(schema, text, "Box<Int>", 0),
+      Some(at(schema, text, "\"x\"", 0))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
 }
 
 /// The model holds at most the bound's values beyond the built-in library's own and one for each
