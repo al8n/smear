@@ -354,15 +354,16 @@
 //! `Limits::max_values` bounds the rows themselves, one budget over the whole analysis. Lowering
 //! charged each literal a supplied package writes to it before any of its value was read, and a
 //! value it could not pay for is one row here, unresolved whatever its type, none of its literals
-//! read and nothing more said of it: it fits every type, so no instantiation checks it, and a type
-//! it cannot be read under is not reported at it. Two kinds of row no literal writes are charged to
-//! it here, besides their steps: each list a written lone value stands for, one value each, and
-//! each row of a copy, its whole count at once. Each is charged to both budgets, all of it or none,
-//! the steps asked first, and a report names the budget that could not pay; the work stops as it
-//! stops past the steps, a lone value's level its one unresolved row, an application filled no
-//! further and an object literal given no more of its defaults. Nothing else this phase spends a
-//! step on makes a row, so the rows it makes are at most the built-in library's own, those
-//! `Limits::max_values` paid for, and one for each value lowering refused.
+//! read and nothing spent on it or said of it: it fits every type, so no instantiation checks it,
+//! and no type is rebuilt for it under an application's type arguments. A copy of it is one row,
+//! charged as any copy is. Two kinds of row no literal writes are charged to the budget here,
+//! besides their steps: each list a written lone value stands for, one value each, and each row of
+//! a copy, its whole count at once. Each is charged to both budgets, all of it or none, the steps
+//! asked first, and a report names the budget that could not pay; the work stops as it stops past
+//! the steps, a lone value's level its one unresolved row, an application filled no further and an
+//! object literal given no more of its defaults. Nothing else this phase spends a step on makes a
+//! row, so the rows it makes are at most the built-in library's own, those `Limits::max_values`
+//! paid for, and one for each value lowering refused.
 //!
 //! # The arenas
 //!
@@ -3515,9 +3516,23 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// instantiation takes is refused at it, once, as `null` for a non-null type is, and recorded
   /// for none, as the module's section on such a `null` says. A value whose type cannot be built
   /// under the arguments is one unresolved row, typed with the type the argument is written with,
-  /// `resource-limit` at it, but for a value lowering refused, which lowering reported.
+  /// `resource-limit` at it. A value lowering refused is one unresolved row of that type too, read
+  /// under no type arguments: no type is rebuilt for it, no step spent, and nothing said, lowering
+  /// having reported it.
   fn written_argument(&mut self, applying: Applying, argument: RawArgument) {
     let application = applying.application;
+    if self.refused_tree(argument.tree) {
+      let written = self.member_type(argument.argument);
+      if let Some(value) = self.value(argument.tree, written, Mode::Written(Site::Argument)) {
+        self.builder.push_application_argument(
+          application,
+          argument.argument,
+          Some(argument.name),
+          value,
+        );
+      }
+      return;
+    }
     let expected = match self.under(argument.argument, applying.env, applying.library) {
       Ok(expected) => expected,
       Err(stop) => {
@@ -3569,8 +3584,7 @@ impl<'p> Coercion<'_, 'p, '_> {
 
   /// The value of the tree `tree`, written where it takes a type that `stop` kept from being read
   /// under type arguments: one unresolved row at its root, typed `ty`, the type it is written
-  /// against, with the path its root is written as when it is one, and `resource-limit` at it. A
-  /// value lowering refused is that one row and nothing more: lowering reported it.
+  /// against, with the path its root is written as when it is one, and `resource-limit` at it.
   fn unbuilt_value(&mut self, tree: u32, ty: Option<TyId>, stop: Stop) -> Option<ValueId> {
     let RawTree { root, source, .. } = self.raw.trees.get(tree as usize).copied()?;
     let node = self.raw.nodes.get(root as usize).copied()?;
@@ -3580,10 +3594,8 @@ impl<'p> Coercion<'_, 'p, '_> {
       self.builder.set_value_ty(id, ty);
     }
     self.path(id, node.kind);
-    if !matches!(node.kind, RawKind::Refused) {
-      let message = self.stopped(stop, "this value takes");
-      self.limit(at, message);
-    }
+    let message = self.stopped(stop, "this value takes");
+    self.limit(at, message);
     Some(id)
   }
 

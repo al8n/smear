@@ -1056,11 +1056,10 @@ fn a_refused_value_says_nothing_at_an_instantiation() {
   assert_eq!(argument_default(analysis.model(), "Box", "f", "a"), "?");
 }
 
-/// A value lowering refused is reported once, by lowering, even where its type cannot be built
-/// under its application's type arguments: with no value and no step to spend, `@d<Int>(a: 1)`'s
-/// `1` is refused, `T` cannot be rebuilt as `Int`, and the one `resource-limit` is lowering's, at
-/// `1`. The argument is one unresolved value of the type it is written with. Refuses a second
-/// report at the same literal.
+/// A value lowering refused is reported once, by lowering, and no type is rebuilt for it under its
+/// application's type arguments: with no value and no step to spend, `@d<Int>(a: 1)`'s `1` is
+/// refused, and the one `resource-limit` is lowering's, at `1`. The argument is one unresolved
+/// value of the type it is written with. Refuses a second report at the same literal.
 #[test]
 fn a_refused_argument_is_reported_once_where_its_type_cannot_be_built() {
   let text = "directive @d<T>(a: T) on OBJECT\ntype Query @d<Int>(a: 1) {\n  f: Int\n}\n";
@@ -1091,6 +1090,50 @@ fn a_refused_argument_is_reported_once_where_its_type_cannot_be_built() {
   let a = model.def(d).arguments().into_iter().next().expect("`a`");
   let written = model.member(a).ty().expect("`a` has a type");
   assert_eq!(value.ty(), model.type_expr(written).ty());
+}
+
+/// A value lowering refused spends no step: no type is rebuilt for it. Under no value and two
+/// steps, `@d<Int>(a: 1)`'s `1` is refused, and `@d<String>`, which leaves `a` out, has the two
+/// steps it needs, one to ask whether `a` is required there and one to rebuild `T` as `String`; one
+/// step short, it is starved at its path. Refuses a refused argument's type rebuilt with a step
+/// another application needs.
+#[test]
+fn a_refused_argument_spends_no_step() {
+  let text = "directive @d<T>(a: T) repeatable on OBJECT\n\
+              type Query @d<Int>(a: 1) @d<String> {\n  f: Int\n}\n";
+  let analysis = analyze_text(
+    text,
+    &Limits::new().with_max_values(0).with_max_value_steps(2),
+    &Options::new(),
+  );
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis, LIMIT),
+    [(at(schema, text, "1", 0), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  let short = analyze_text(
+    text,
+    &Limits::new().with_max_values(0).with_max_value_steps(1),
+    &Options::new(),
+  );
+  let schema = schema_file(&short);
+  assert_eq!(
+    found(&short, LIMIT),
+    [
+      (at(schema, text, "1", 0), None),
+      (after(schema, text, "(a: 1) @", "d"), None),
+    ],
+    "{:#?}",
+    short.diagnostics()
+  );
+  let reports = messages(&short, LIMIT);
+  assert!(
+    reports[1].contains("`Limits::max_value_steps`, 1"),
+    "{reports:#?}"
+  );
 }
 
 /// A value lowering refused is checked at no instantiation, since it fits every type, so its check
