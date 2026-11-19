@@ -31,7 +31,7 @@ use std::{vec, vec::Vec};
 use tokora::{SimpleSpan, diagnostic::Location};
 
 use crate::graphqlx::{
-  id::{ApplicationId, MemberId, SourceId, Sym, TypeExprId, ValueId, dense},
+  id::{ApplicationId, DefId, MemberId, SourceId, Sym, TypeExprId, ValueId, dense},
   set::ROOT,
 };
 
@@ -62,6 +62,28 @@ pub(super) fn check(model: &Model) {
   lists(model);
   walk(model);
   types(model);
+  entries(model);
+}
+
+/// Where a type outside compile-time metadata first reaches each definition compile-time metadata
+/// reaches too: by definition, strictly increasing, each a definition of the model that is no
+/// metadata.
+fn entries(model: &Model) {
+  let mut previous: Option<DefId> = None;
+  for (index, &(def, _)) in model.runtime_entries.iter().enumerate() {
+    assert!(
+      previous.is_none_or(|before: DefId| before < def),
+      "runtime entry {index} is of a later definition than the entry before it"
+    );
+    assert!(
+      model
+        .defs
+        .get(def.get() as usize)
+        .is_some_and(|row: &DefRow| !row.metadata),
+      "runtime entry {index} is of a definition of the model that is no metadata"
+    );
+    previous = Some(def);
+  }
 }
 
 /// Packages: `core`, `alloc` and `std`, the root, then dependencies, each numbering its sources

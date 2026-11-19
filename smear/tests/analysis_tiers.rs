@@ -880,6 +880,40 @@ fn flags(analysis: &Analysis) -> Vec<(String, bool)> {
     .collect()
 }
 
+/// Where `needle` is in the first occurrence of `around` in `text`, the file `source`.
+fn within(source: SourceId, text: &str, around: &str, needle: &str) -> Location {
+  let start = text
+    .find(around)
+    .unwrap_or_else(|| panic!("`{around}` does not occur"));
+  let offset = around
+    .find(needle)
+    .unwrap_or_else(|| panic!("`{needle}` is not in `{around}`"));
+  let start = start + offset;
+  Location::new(source.get(), SimpleSpan::new(start, start + needle.len()))
+}
+
+/// Each label of each diagnostic whose code is `code`, where it is and what it says, in the list's
+/// order.
+fn labels(analysis: &Analysis, code: &str) -> Vec<Vec<(Location, String)>> {
+  analysis
+    .diagnostics()
+    .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() == code)
+    .map(|diagnostic: &Diagnostic| {
+      (0..diagnostic.labels())
+        .filter_map(|index: usize| diagnostic.label(index))
+        .map(|label| (label.location(), String::from(label.text())))
+        .collect()
+    })
+    .collect()
+}
+
+/// The label of a report within `name`, a definition compile-time metadata reaches, at where a
+/// type outside metadata first reaches it.
+fn entry(name: &str) -> String {
+  format!("`{name}` is reached from here, outside compile-time metadata")
+}
+
 /// The code of each diagnostic, in the list's order.
 fn codes(analysis: &Analysis) -> Vec<&str> {
   analysis
@@ -937,18 +971,27 @@ fn what_directive_arguments_reach_transitively_is_metadata() {
 }
 
 /// A definition both reach is judged: `Binding`, which a field's argument takes too, is refused at
-/// each `string!`, and is no metadata. Refuses an exemption read off what metadata reaches alone.
+/// each `string!`, and is no metadata. Each report is labelled at where the reach from outside
+/// metadata entered, `Binding` in that argument. A report that a default raises has that label
+/// last, after its label at the default: `Binding` holds `^::dep::P`, whose default `string` makes
+/// it need `alloc`. Refuses an exemption read off what metadata reaches alone, and the label
+/// placed before the default's.
 #[test]
 fn a_definition_reached_both_ways_is_judged() {
   let text = BINDING.replacen("  x: Int\n", "  x: Int\n  f(b: Binding): Int\n", 1);
   let analysis = analyze_at(&text, Tier::Core);
   let schema = file(&analysis, 3, "schema.graphqlx");
+  let entered = within(schema, &text, "f(b: Binding)", "Binding");
   assert_eq!(
     found(&analysis, TIER),
     [
-      (at(schema, &text, "string!", 0), None),
-      (at(schema, &text, "string!", 1), None),
+      (at(schema, &text, "string!", 0), Some(entered)),
+      (at(schema, &text, "string!", 1), Some(entered)),
     ]
+  );
+  assert_eq!(
+    labels(&analysis, TIER),
+    vec![vec![(entered, entry("Binding"))]; 2]
   );
   assert_eq!(messages(&analysis, TIER), [STRING; 2]);
   assert_eq!(
@@ -958,35 +1001,91 @@ fn a_definition_reached_both_ways_is_judged() {
     analysis.diagnostics()
   );
   assert!(!metadata(analysis.model(), "^::app::Binding"));
+
+  let theirs = "input P<T = string> {\n  v: T\n}\n";
+  let ours = "type Query {\n  x: Int\n  f(b: Binding): Int\n}\ninput Binding {\n  p: ^::dep::P\n}\n\
+              directive @bind(b: Binding) on SCALAR\n";
+  let root = package("app", Tier::Core, &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
+  let dep = package("dep", Tier::Std, &[("dep.graphqlx", theirs)]);
+  let analysis = analyze(&root, &[dep], &Limits::new());
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  let dep_file = file(&analysis, 4, "dep.graphqlx");
+  assert_eq!(
+    found(&analysis, TIER),
+    [(
+      at(schema, ours, "^::dep::P", 0),
+      Some(at(dep_file, theirs, "string", 0))
+    )]
+  );
+  assert_eq!(
+    labels(&analysis, TIER),
+    [vec![
+      (
+        at(dep_file, theirs, "string", 0),
+        String::from("filled from this default")
+      ),
+      (
+        within(schema, ours, "f(b: Binding)", "Binding"),
+        entry("Binding")
+      ),
+    ]]
+  );
+  assert_eq!(
+    messages(&analysis, TIER),
+    ["`P` needs `alloc`, and package `app` is declared at tier `core`"]
+  );
 }
 
 /// A use through any type argument is a use, whatever a value of the type holds: `Binding` is
 /// judged when a field's type `Ref<Binding>` names it, though a value of `Ref` holds none; when an
 /// object's type parameter has the default `Binding`; when an object implements `I<Binding>`; when
 /// an object's bound is `I<Binding>`; and when a field's argument takes `[Binding]`, in a package
-/// at `alloc`, where its `HashMap` is refused. Refuses the walk outside metadata following only
-/// what a value holds.
+/// at `alloc`, where its `HashMap` is refused. Each report is labelled at the use: the field's
+/// type, the default, the `implements` entry, the bound's interface, and the argument's type.
+/// Refuses the walk outside metadata following only what a value holds.
 #[test]
 fn a_use_through_any_type_argument_is_a_use() {
   let binding = "input Binding {\n  lang: string!\n  path: string!\n}\n\
                  directive @bind(with: [Binding!]!) on SCALAR\n";
-  for uses in [
-    "type Query {\n  x: Int\n  r: Ref<Binding>\n}\nscalar Ref<T>\n",
-    "type Query {\n  x: Int\n}\ntype P<T = Binding> {\n  f(b: T): Int\n}\n",
-    "type Query {\n  x: Int\n}\ninterface I<X> {\n  x: Int\n}\n\
-     type Impl implements I<Binding> {\n  x: Int\n}\n",
-    "type Query {\n  x: Int\n}\ninterface I<X> {\n  x: Int\n}\n\
-     type B<T> where T: I<Binding> {\n  v: T\n}\n",
+  for (uses, around, used) in [
+    (
+      "type Query {\n  x: Int\n  r: Ref<Binding>\n}\nscalar Ref<T>\n",
+      "r: Ref<Binding>",
+      "Ref<Binding>",
+    ),
+    (
+      "type Query {\n  x: Int\n}\ntype P<T = Binding> {\n  f(b: T): Int\n}\n",
+      "T = Binding",
+      "Binding",
+    ),
+    (
+      "type Query {\n  x: Int\n}\ninterface I<X> {\n  x: Int\n}\n\
+       type Impl implements I<Binding> {\n  x: Int\n}\n",
+      "implements I<Binding>",
+      "I<Binding>",
+    ),
+    (
+      "type Query {\n  x: Int\n}\ninterface I<X> {\n  x: Int\n}\n\
+       type B<T> where T: I<Binding> {\n  v: T\n}\n",
+      "T: I<Binding>",
+      "I<Binding>",
+    ),
   ] {
     let text = format!("{uses}{binding}");
     let analysis = analyze_at(&text, Tier::Core);
     let schema = file(&analysis, 3, "schema.graphqlx");
+    let entered = within(schema, &text, around, used);
     assert_eq!(
       found(&analysis, TIER),
       [
-        (at(schema, &text, "string!", 0), None),
-        (at(schema, &text, "string!", 1), None),
+        (at(schema, &text, "string!", 0), Some(entered)),
+        (at(schema, &text, "string!", 1), Some(entered)),
       ],
+      "{text}"
+    );
+    assert_eq!(
+      labels(&analysis, TIER),
+      vec![vec![(entered, entry("Binding"))]; 2],
       "{text}"
     );
     assert_eq!(
@@ -1004,7 +1103,10 @@ fn a_use_through_any_type_argument_is_a_use() {
   let schema = file(&analysis, 3, "schema.graphqlx");
   assert_eq!(
     found(&analysis, TIER),
-    [(at(schema, text, "HashMap<i32, i32>", 0), None)]
+    [(
+      at(schema, text, "HashMap<i32, i32>", 0),
+      Some(at(schema, text, "[Binding]", 0))
+    )]
   );
   assert_eq!(
     messages(&analysis, TIER),
@@ -1016,9 +1118,10 @@ fn a_use_through_any_type_argument_is_a_use() {
 /// What metadata reaches is found over every package together. `geo`, at `core`, takes its
 /// `Binding` in a directive's argument alone: under a root package at `alloc` that uses `geo`'s
 /// `Point`, and alone, nothing is said. When the root package's field argument takes `Binding` too,
-/// it is refused once, in `geo`, and the root package's use, capped at `geo`'s tier, says nothing;
-/// and so it is when a sibling dependency's field argument takes it. Refuses metadata found one
-/// package at a time, which a dependant's use would escape under the cap.
+/// it is refused once, in `geo`, labelled at that use in the root package's file, and the root
+/// package's use, capped at `geo`'s tier, says nothing; and so it is when a sibling dependency's
+/// field argument takes it, labelled in the sibling's file. Refuses metadata found one package at
+/// a time, which a dependant's use would escape under the cap.
 #[test]
 fn metadata_reaches_over_every_package() {
   const GEO: &str = "type Query {\n  ok: Int\n}\ninput Binding {\n  lang: string!\n}\n\
@@ -1026,6 +1129,7 @@ fn metadata_reaches_over_every_package() {
                      scalar Point @bind(b: { lang: \"rust\" })\n";
   const POINT: &str = "type Query {\n  p: ^::geo::Point\n}\n";
   const USES: &str = "type Query {\n  p: ^::geo::Point\n  f(b: ^::geo::Binding): Int\n}\n";
+  const SIB: &str = "type Uses {\n  f(b: ^::geo::Binding): Int\n}\n";
   let geo = || package("geo", Tier::Core, &[("geo.graphqlx", GEO)]);
   let refused = "`string` needs `alloc`, and package `geo` is declared at tier `core`";
 
@@ -1036,11 +1140,14 @@ fn metadata_reaches_over_every_package() {
 
   let root = package("app", Tier::Alloc, &[("schema.graphqlx", USES)]).with_dependencies(["geo"]);
   let analysis = analyze(&root, &[geo()], &Limits::new());
+  let schema = file(&analysis, 3, "schema.graphqlx");
   let geo_file = file(&analysis, 4, "geo.graphqlx");
+  let entered = at(schema, USES, "^::geo::Binding", 0);
   assert_eq!(
     found(&analysis, TIER),
-    [(at(geo_file, GEO, "string!", 0), None)]
+    [(at(geo_file, GEO, "string!", 0), Some(entered))]
   );
+  assert_eq!(labels(&analysis, TIER), [vec![(entered, entry("Binding"))]]);
   assert_eq!(messages(&analysis, TIER), [refused]);
   assert_eq!(
     analysis.diagnostics().len(),
@@ -1054,22 +1161,18 @@ fn metadata_reaches_over_every_package() {
   quiet(&analysis);
   assert!(metadata(analysis.model(), "^::geo::Binding"));
 
-  let sibling = package(
-    "sib",
-    Tier::Alloc,
-    &[(
-      "sib.graphqlx",
-      "type Uses {\n  f(b: ^::geo::Binding): Int\n}\n",
-    )],
-  )
-  .with_dependencies(["geo"]);
+  let sibling = package("sib", Tier::Alloc, &[("sib.graphqlx", SIB)]).with_dependencies(["geo"]);
   let root =
     package("app", Tier::Alloc, &[("schema.graphqlx", POINT)]).with_dependencies(["geo", "sib"]);
   let analysis = analyze(&root, &[geo(), sibling], &Limits::new());
   let geo_file = file(&analysis, 4, "geo.graphqlx");
+  let sib_file = file(&analysis, 5, "sib.graphqlx");
   assert_eq!(
     found(&analysis, TIER),
-    [(at(geo_file, GEO, "string!", 0), None)]
+    [(
+      at(geo_file, GEO, "string!", 0),
+      Some(at(sib_file, SIB, "^::geo::Binding", 0))
+    )]
   );
   assert_eq!(messages(&analysis, TIER), [refused]);
   assert_eq!(
@@ -1083,8 +1186,9 @@ fn metadata_reaches_over_every_package() {
 
 /// A cycle only metadata reaches is metadata, two input objects that hold each other and one that
 /// holds itself, and nothing in them is said. When a field's argument takes `B`, `B` and then `A`,
-/// which `B` holds, are judged, and `A`'s `string` is refused; `C` stays metadata. Refuses a cycle
-/// cut, and a cycle's runtime half missed.
+/// which `B` holds, are judged, and `A`'s `string` is refused, labelled at `B` in that argument,
+/// where the chain starts, and not at `B`'s field; `C` stays metadata. Refuses a cycle cut, a
+/// cycle's runtime half missed, and a label at the occurrence that reached `A` last.
 #[test]
 fn a_cycle_only_metadata_reaches_is_metadata() {
   let analysis = analyze_at(CYCLE, Tier::Core);
@@ -1097,10 +1201,12 @@ fn a_cycle_only_metadata_reaches_is_metadata() {
   let text = CYCLE.replacen("  x: Int\n", "  x: Int\n  f(b: B): Int\n", 1);
   let analysis = analyze_at(&text, Tier::Core);
   let schema = file(&analysis, 3, "schema.graphqlx");
+  let entered = within(schema, &text, "f(b: B)", "B");
   assert_eq!(
     found(&analysis, TIER),
-    [(at(schema, &text, "string", 0), None)]
+    [(at(schema, &text, "string", 0), Some(entered))]
   );
+  assert_eq!(labels(&analysis, TIER), [vec![(entered, entry("A"))]]);
   assert_eq!(messages(&analysis, TIER), [STRING]);
   let model = analysis.model();
   assert!(!metadata(model, "^::app::A"));
@@ -1115,8 +1221,8 @@ fn a_cycle_only_metadata_reaches_is_metadata() {
 /// type argument `Tags` is metadata, with no application. (d) An object's type parameter's default
 /// `Filter` is a use, and judged. (e) `Outer<In>` names `In`, which only substitution gives `Box`:
 /// judged, and metadata with no such field. (f) `Empty<In>` names `In`, though no value of `Empty`
-/// holds one: metadata. Refuses an argument missed by either walk, and a default read only where
-/// an application fills it.
+/// holds one: metadata. Each report is labelled at the use outside metadata. Refuses an argument
+/// missed by either walk, and a default read only where an application fills it.
 #[test]
 fn generics_and_instantiations() {
   let pair = "type Query {\n  x(p: Pair<Int>): Int \
@@ -1130,10 +1236,12 @@ fn generics_and_instantiations() {
   let text = pair.replacen("x(p: Pair<Int>)", "x(p: Pair<Note>)", 1);
   let analysis = analyze_at(&text, Tier::Core);
   let schema = file(&analysis, 3, "schema.graphqlx");
+  let entered = at(schema, &text, "Pair<Note>", 0);
   assert_eq!(
     found(&analysis, TIER),
-    [(at(schema, &text, "string!", 0), None)]
+    [(at(schema, &text, "string!", 0), Some(entered))]
   );
+  assert_eq!(labels(&analysis, TIER), [vec![(entered, entry("Note"))]]);
   assert!(!metadata(analysis.model(), "^::app::Note"));
 
   let written = "type Query {\n  x: Int @doc<Sample>(example: { text: \"hi\" })\n}\n\
@@ -1153,10 +1261,12 @@ fn generics_and_instantiations() {
               input Filter {\n  q: string\n}\ndirective @f(x: Filter) on OBJECT\n";
   let analysis = analyze_at(page, Tier::Core);
   let schema = file(&analysis, 3, "schema.graphqlx");
+  let entered = within(schema, page, "T = Filter", "Filter");
   assert_eq!(
     found(&analysis, TIER),
-    [(at(schema, page, "string", 0), None)]
+    [(at(schema, page, "string", 0), Some(entered))]
   );
+  assert_eq!(labels(&analysis, TIER), [vec![(entered, entry("Filter"))]]);
   assert!(!metadata(analysis.model(), "^::app::Filter"));
 
   let outer = "type Query {\n  x: Int\n  o: Outer<In>\n}\ntype Outer<U> {\n  b(a: Box<U>): Int\n}\n\
@@ -1164,10 +1274,12 @@ fn generics_and_instantiations() {
                directive @d(i: In) on OBJECT\n";
   let analysis = analyze_at(outer, Tier::Core);
   let schema = file(&analysis, 3, "schema.graphqlx");
+  let entered = at(schema, outer, "Outer<In>", 0);
   assert_eq!(
     found(&analysis, TIER),
-    [(at(schema, outer, "string", 0), None)]
+    [(at(schema, outer, "string", 0), Some(entered))]
   );
+  assert_eq!(labels(&analysis, TIER), [vec![(entered, entry("In"))]]);
   assert!(!metadata(analysis.model(), "^::app::In"));
   let unused = outer.replacen("  o: Outer<In>\n", "", 1);
   let analysis = analyze_at(&unused, Tier::Core);
@@ -1274,10 +1386,10 @@ fn an_occurrence_a_phase_refused_reaches_nothing() {
   assert!(metadata(analysis.model(), "^::app::Binding"));
 }
 
-/// Which definitions are metadata, and what the rule says, is the same whichever order the files
-/// and the dependencies are passed in: a dependency's directive and the uses of the root package
-/// and of a sibling; a cycle written over two files; and a dependant's directive that takes a
-/// dependency's input object.
+/// Which definitions are metadata, and what the rule says, labels included, is the same whichever
+/// order the files and the dependencies are passed in: a dependency's directive and the uses of
+/// the root package and of a sibling; a cycle written over two files; and a dependant's directive
+/// that takes a dependency's input object.
 #[test]
 fn the_metadata_flags_do_not_depend_on_order() {
   const GEO: &str = "input Binding {\n  lang: string!\n}\ndirective @bind(b: Binding) on SCALAR\n\
@@ -1381,9 +1493,10 @@ fn analyze_files(files: &[(&str, &str)]) -> Analysis {
 
 /// Two thousand input objects, each holding the next and the last a `string`, reached from one
 /// directive's argument: every one is metadata, and nothing is said. With a field's argument taking
-/// the thousandth, the rest of the chain is judged, its one `string` refused, and the first
-/// thousand stay metadata. Written forwards and backwards, so that each names a later definition
-/// by id, or an earlier one. Refuses a walk that stops short, and one pass in id order.
+/// the thousandth, the rest of the chain is judged, its one `string` refused and labelled at that
+/// argument, a thousand definitions away, and the first thousand stay metadata. Written forwards
+/// and backwards, so that each names a later definition by id, or an earlier one. Refuses a walk
+/// that stops short, and one pass in id order.
 #[test]
 fn a_long_chain_only_metadata_reaches() {
   const LENGTH: usize = 2_000;
@@ -1410,9 +1523,20 @@ fn a_long_chain_only_metadata_reaches() {
       let analysis = analyze_at(&text, Tier::Core);
       if used {
         let schema = file(&analysis, 3, "schema.graphqlx");
+        let entered = within(
+          schema,
+          &text,
+          &format!("f(a: A{USED})"),
+          &format!("A{USED}"),
+        );
         assert_eq!(
           found(&analysis, TIER),
-          [(at(schema, &text, "string", 0), None)],
+          [(at(schema, &text, "string", 0), Some(entered))],
+          "forwards {forwards}"
+        );
+        assert_eq!(
+          labels(&analysis, TIER),
+          [vec![(entered, entry(&format!("A{}", LENGTH - 1)))]],
           "forwards {forwards}"
         );
         assert_eq!(analysis.diagnostics().len(), 1, "forwards {forwards}");
@@ -1432,8 +1556,9 @@ fn a_long_chain_only_metadata_reaches() {
 }
 
 /// Two thousand directives, each taking one input object in its argument: it is metadata, and
-/// nothing is said; with a field's argument taking it too, its `string` is refused once. Each
-/// directive's type is the one type, pushed once however many directives write it.
+/// nothing is said; with a field's argument taking it too, its `string` is refused once, labelled
+/// at that argument. Each directive's type is the one type, pushed once however many directives
+/// write it.
 #[test]
 fn many_directives_reaching_one_definition() {
   const DIRECTIVES: usize = 2_000;
@@ -1451,7 +1576,10 @@ fn many_directives_reaching_one_definition() {
       let schema = file(&analysis, 3, "schema.graphqlx");
       assert_eq!(
         found(&analysis, TIER),
-        [(at(schema, &text, "string", 0), None)]
+        [(
+          at(schema, &text, "string", 0),
+          Some(within(schema, &text, "f(b: Binding)", "Binding"))
+        )]
       );
       assert_eq!(analysis.diagnostics().len(), 1);
     } else {
@@ -1496,29 +1624,40 @@ fn a_wide_type_is_walked_once() {
 /// What the argument types of a directive an operation can apply name is used outside metadata, its
 /// values arriving at run time: `Hint`, which `@cached` on `FIELD` takes, is judged, its list, its
 /// `string!` and its `@heap` refused; and so it is when the directive is on `FIELD | OBJECT`, and
-/// when a directive no operation can apply takes `Hint` too. The types such a directive writes are
+/// when a directive no operation can apply takes `Hint` too, each report then labelled at `Hint`
+/// in `@cached`'s argument, where the reach from outside metadata entered. With no such directive
+/// nothing else reaches `Hint`, and no report is labelled. The types such a directive writes are
 /// exempt all the same: `@c(key: string!)` on `FIELD` says nothing. Refuses every directive's
 /// arguments taken for metadata, and the exemption of what a directive writes lost.
 #[test]
 fn an_executable_directives_arguments_are_a_runtime_use() {
   let hint = "type Query {\n  x: Int\n}\ninput Hint {\n  tags: [string!]!\n  ttl: i64 @heap\n}\n";
-  for directives in [
-    "directive @cached(hint: Hint) on FIELD\n",
-    "directive @cached(hint: Hint) on FIELD | OBJECT\n",
-    "directive @cached(hint: Hint) on FIELD\ndirective @meta(hint: Hint) on OBJECT\n",
+  for (directives, labelled) in [
+    ("directive @cached(hint: Hint) on FIELD\n", false),
+    ("directive @cached(hint: Hint) on FIELD | OBJECT\n", false),
+    (
+      "directive @cached(hint: Hint) on FIELD\ndirective @meta(hint: Hint) on OBJECT\n",
+      true,
+    ),
   ] {
     let text = format!("{hint}{directives}");
     let analysis = analyze_at(&text, Tier::Core);
     let schema = file(&analysis, 3, "schema.graphqlx");
+    let entered = labelled.then(|| within(schema, &text, "@cached(hint: Hint)", "Hint"));
     assert_eq!(
       found(&analysis, TIER),
       [
-        (at(schema, &text, "[string!]!", 0), None),
-        (at(schema, &text, "string!", 0), None),
-        (at(schema, &text, "heap", 0), None),
+        (at(schema, &text, "[string!]!", 0), entered),
+        (at(schema, &text, "string!", 0), entered),
+        (at(schema, &text, "heap", 0), entered),
       ],
       "{text}"
     );
+    let label: Vec<(Location, String)> = entered
+      .map(|at: Location| (at, entry("Hint")))
+      .into_iter()
+      .collect();
+    assert_eq!(labels(&analysis, TIER), vec![label; 3], "{text}");
     assert_eq!(messages(&analysis, TIER), [LIST, STRING, HEAP], "{text}");
     assert_eq!(
       analysis.diagnostics().len(),
@@ -1551,8 +1690,8 @@ fn a_bound_in_a_directive_roots_its_interfaces_arguments() {
 }
 
 /// The schema's written roots are used outside metadata: `Root<Binding>`, the query root, names
-/// `Binding`, which a directive's argument takes too, so it is judged. Refuses the walk outside
-/// metadata without the schema's roots.
+/// `Binding`, which a directive's argument takes too, so it is judged, and each report is labelled
+/// at that root. Refuses the walk outside metadata without the schema's roots.
 #[test]
 fn a_schema_root_is_a_runtime_use() {
   let text = "schema {\n  query: Root<Binding>\n}\ntype Root<T> {\n  f(b: T): Int\n}\n\
@@ -1561,12 +1700,17 @@ fn a_schema_root_is_a_runtime_use() {
               scalar Point @bind(with: [{ lang: \"rust\", path: \"geo::Point\" }])\n";
   let analysis = analyze_at(text, Tier::Core);
   let schema = file(&analysis, 3, "schema.graphqlx");
+  let entered = at(schema, text, "Root<Binding>", 0);
   assert_eq!(
     found(&analysis, TIER),
     [
-      (at(schema, text, "string!", 0), None),
-      (at(schema, text, "string!", 1), None),
+      (at(schema, text, "string!", 0), Some(entered)),
+      (at(schema, text, "string!", 1), Some(entered)),
     ]
+  );
+  assert_eq!(
+    labels(&analysis, TIER),
+    vec![vec![(entered, entry("Binding"))]; 2]
   );
   assert_eq!(
     analysis.diagnostics().len(),
@@ -1580,7 +1724,8 @@ fn a_schema_root_is_a_runtime_use() {
 /// An extension's occurrences are its definition's: an extension of `Binding` adds a list of
 /// `string!`, and with only the directive taking `Binding` nothing is said; when an extension of
 /// `Query` takes `Binding` in a field's argument, each `string!` and the extension's list are
-/// refused. Refuses an extension's occurrences read apart from its definition's.
+/// refused, each labelled at that argument. Refuses an extension's occurrences read apart from its
+/// definition's.
 #[test]
 fn an_extension_is_its_definitions() {
   let text = format!("{BINDING}extend input Binding {{\n  more: [string!]\n}}\n");
@@ -1591,13 +1736,14 @@ fn an_extension_is_its_definitions() {
   let used = format!("{text}extend type Query {{\n  g(b: Binding): Int\n}}\n");
   let analysis = analyze_at(&used, Tier::Core);
   let schema = file(&analysis, 3, "schema.graphqlx");
+  let entered = Some(within(schema, &used, "g(b: Binding)", "Binding"));
   assert_eq!(
     found(&analysis, TIER),
     [
-      (at(schema, &used, "string!", 0), None),
-      (at(schema, &used, "string!", 1), None),
-      (at(schema, &used, "[string!]", 0), None),
-      (at(schema, &used, "string!", 2), None),
+      (at(schema, &used, "string!", 0), entered),
+      (at(schema, &used, "string!", 1), entered),
+      (at(schema, &used, "[string!]", 0), entered),
+      (at(schema, &used, "string!", 2), entered),
     ]
   );
   assert_eq!(messages(&analysis, TIER), [STRING, STRING, LIST, STRING]);

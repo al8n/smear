@@ -49,6 +49,20 @@
 //! a `TypeRef` that names a definition neither makes it metadata nor makes a metadata definition
 //! runtime.
 //!
+//! # Where a reach entered
+//!
+//! For each definition of `reached` that it makes runtime, the walk of `runtime` keeps where that
+//! reach entered from outside metadata, and the tier rule labels its reports within it there. For
+//! a definition that the type of a schema root, or of an occurrence of a root definition, an
+//! executable directive among them, names, it is that root or that occurrence; for one that a
+//! definition the walk made runtime names, it is that definition's own entry, carried through the
+//! queue. So when a field's argument takes `B` and `B` holds `A`, `A`'s entry is `B` in that
+//! argument, where the chain starts, and not `B`'s field. The walk's order is fixed: the root
+//! definitions in id order, each definition's occurrences in the order the section above lists
+//! them, the schema's roots, then the queue, first in, first out; and each type is walked once,
+//! from the first occurrence that reaches it. No entry depends on the order of the files or of the
+//! dependencies.
+//!
 //! # Why it is not the `TypeRef` reach
 //!
 //! `reach::Reach` follows what a value can hold, and hides a scalar's arguments when it is no
@@ -71,8 +85,10 @@
 
 use std::{vec, vec::Vec};
 
+use tokora::diagnostic::Location;
+
 use crate::graphqlx::{
-  id::{ApplicationId, DefId, TyId, TypeExprId},
+  id::{ApplicationId, DefId, TyId, TypeExprId, dense},
   model::{
     DefKind, DirectiveLocation, ModelBuilder, Occurrence, Origin, Root, Shape, TypeBound,
     WrittenParam,
@@ -83,22 +99,35 @@ use crate::graphqlx::{
 pub(super) struct Metadata {
   /// For each definition, by id: whether it is metadata.
   pub(super) flags: Vec<bool>,
+  /// Each definition compile-time metadata reaches that a type outside it reaches too, with where
+  /// that reach entered from outside metadata, in id order.
+  pub(super) entries: Vec<(DefId, Location)>,
 }
 
 /// Which definitions of `builder` are compile-time metadata: those that what metadata reaches
-/// holds and that what is used outside it does not.
+/// holds and that what is used outside it does not; and, for each that both reach, where the reach
+/// from outside metadata entered.
 pub(super) fn metadata(builder: &ModelBuilder) -> Metadata {
   let reached = reached(builder);
   if !reached.contains(&true) {
-    return Metadata { flags: reached };
+    return Metadata {
+      flags: reached,
+      entries: Vec::new(),
+    };
   }
-  let runtime = used(builder, &reached);
-  let flags: Vec<bool> = reached
-    .iter()
-    .zip(&runtime)
-    .map(|(&marked, &outside): (&bool, &bool)| marked && !outside)
-    .collect();
-  Metadata { flags }
+  let entered = used(builder, &reached);
+  let mut flags: Vec<bool> = Vec::with_capacity(reached.len());
+  let mut entries: Vec<(DefId, Location)> = Vec::new();
+  for (index, (&marked, entry)) in reached.iter().zip(&entered).enumerate() {
+    match *entry {
+      Some(at) => {
+        flags.push(false);
+        entries.push((DefId::new(dense(index)), at));
+      }
+      None => flags.push(marked),
+    }
+  }
+  Metadata { flags, entries }
 }
 
 /// What metadata reaches, by definition id: each scalar, enum and input object a supplied package
@@ -174,15 +203,16 @@ fn reached(builder: &ModelBuilder) -> Vec<bool> {
   reached
 }
 
-/// What is used outside metadata, by definition id, given what metadata reaches, `reached`: each
-/// definition of `reached` that a type outside metadata names, through lists and every type
-/// argument. The walk starts from each definition [`runtime_root`] answers for, in id order, and
-/// then from the schema's written roots, and reads each definition it makes runtime in turn.
-fn used(builder: &ModelBuilder, reached: &[bool]) -> Vec<bool> {
+/// What is used outside metadata, by definition id, given what metadata reaches, `reached`: for
+/// each definition of `reached` that a type outside metadata names, through lists and every type
+/// argument, where that reach entered. The walk starts from each definition [`runtime_root`]
+/// answers for, in id order, and then from the schema's written roots, each occurrence the entry
+/// of what its type names; and reads each definition it makes runtime in turn, with its entry.
+fn used(builder: &ModelBuilder, reached: &[bool]) -> Vec<Option<Location>> {
   let mut walk = Walk {
     builder,
     reached,
-    runtime: vec![false; builder.def_count() as usize],
+    entered: vec![None; builder.def_count() as usize],
     looked: vec![false; builder.ty_count() as usize],
     stack: Vec::new(),
     queue: Vec::new(),
@@ -193,24 +223,24 @@ fn used(builder: &ModelBuilder, reached: &[bool]) -> Vec<bool> {
     if runtime_root(builder, def, reached) {
       occurrences(builder, def, &mut written);
       for &occurrence in &written {
-        walk.occurrence(occurrence);
+        walk.occurrence(occurrence, None);
       }
     }
   }
   for root in builder.schema_roots().into_iter().flatten() {
     if let Root::Written(occurrence) = root {
-      walk.occurrence(occurrence);
+      walk.occurrence(occurrence, None);
     }
   }
   let mut head = 0usize;
-  while let Some(&def) = walk.queue.get(head) {
+  while let Some(&(def, at)) = walk.queue.get(head) {
     head = head.saturating_add(1);
     occurrences(builder, def, &mut written);
     for &occurrence in &written {
-      walk.occurrence(occurrence);
+      walk.occurrence(occurrence, Some(at));
     }
   }
-  walk.runtime
+  walk.entered
 }
 
 /// The walk of what is used outside metadata.
@@ -219,28 +249,37 @@ struct Walk<'a> {
   builder: &'a ModelBuilder,
   /// What metadata reaches, by definition id.
   reached: &'a [bool],
-  /// Each definition of `reached` the walk made runtime, by id.
-  runtime: Vec<bool>,
+  /// For each definition of `reached` the walk made runtime, by id, where that reach entered.
+  entered: Vec<Option<Location>>,
   /// Each type the walk pushed, by id.
   looked: Vec<bool>,
   /// The types still to look at.
   stack: Vec<TyId>,
-  /// Each definition the walk made runtime, in that order, each read in turn, first in, first out.
-  queue: Vec<DefId>,
+  /// Each definition the walk made runtime, with where that reach entered, in that order, each
+  /// read in turn, first in, first out.
+  queue: Vec<(DefId, Location)>,
 }
 
 impl Walk<'_> {
-  /// Walks the type of the occurrence `written`, once a phase gave it one.
-  fn occurrence(&mut self, written: TypeExprId) {
-    if let Some(ty) = typed(self.builder, written) {
-      self.walk(ty);
-    }
+  /// Walks the type of the occurrence `written`, once a phase gave it one, with `at` as the entry
+  /// of what it names, or, when `at` is `None`, where `written` is written.
+  fn occurrence(&mut self, written: TypeExprId, at: Option<Location>) {
+    let builder = self.builder;
+    let Some(occurrence) = builder.occurrence(written) else {
+      return;
+    };
+    let Some(ty) = occurrence.ty else {
+      return;
+    };
+    let entry = at.unwrap_or(occurrence.location);
+    self.walk(ty, entry);
   }
 
   /// Walks `ty` and every type under it, each that the walk has not pushed before: a list leads to
   /// its element, and a named type to every argument, whatever its definition's kind. A definition
-  /// of `reached` that a named type names is made runtime and queued, the first time.
-  fn walk(&mut self, ty: TyId) {
+  /// of `reached` that a named type names is made runtime and queued, the first time, with `at` as
+  /// its entry.
+  fn walk(&mut self, ty: TyId, at: Location) {
     let builder = self.builder;
     push(&mut self.looked, &mut self.stack, ty);
     while let Some(ty) = self.stack.pop() {
@@ -249,11 +288,11 @@ impl Walk<'_> {
         Some(Shape::Named(def)) => {
           let index = def.get() as usize;
           if self.reached.get(index).copied().unwrap_or(false)
-            && let Some(slot) = self.runtime.get_mut(index)
-            && !*slot
+            && let Some(slot) = self.entered.get_mut(index)
+            && slot.is_none()
           {
-            *slot = true;
-            self.queue.push(def);
+            *slot = Some(at);
+            self.queue.push((def, at));
           }
           for &argument in builder.ty_args(ty) {
             push(&mut self.looked, &mut self.stack, argument);

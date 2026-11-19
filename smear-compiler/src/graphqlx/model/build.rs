@@ -465,6 +465,13 @@ impl ModelBuilder {
     self.model.defs[def.get() as usize].metadata = true;
   }
 
+  /// Records `entries`: each definition compile-time metadata reaches that a type outside it
+  /// reaches too, with where that reach entered from outside metadata, by definition id, each
+  /// definition once.
+  pub(crate) fn set_runtime_entries(&mut self, entries: Vec<(DefId, Location)>) {
+    self.model.runtime_entries = entries;
+  }
+
   /// Gives `ty` the tier it requires.
   pub fn set_ty_tier(&mut self, ty: TyId, tier: Tier) {
     self.model.tys[ty.get() as usize].tier = tier;

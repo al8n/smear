@@ -557,6 +557,22 @@ impl<'a> Def<'a> {
     self.row().metadata
   }
 
+  /// Where a type outside compile-time metadata first reaches it, when compile-time metadata
+  /// reaches it too: where the tier rule labels its reports within it. `None` for every other
+  /// definition.
+  //
+  // Crate-private: no public view answers where a reach entered, and the tier rule reads it here.
+  #[inline]
+  pub(crate) fn runtime_entry(&self) -> Option<Location> {
+    let entries = &self.model.runtime_entries;
+    let at = entries
+      .binary_search_by_key(&self.id, |&(def, _): &(DefId, Location)| def)
+      .ok()?;
+    entries
+      .get(at)
+      .map(|&(_, location): &(DefId, Location)| location)
+  }
+
   /// The intrinsic primitive it is, or `None` for every definition but `core`'s primitives.
   #[inline]
   pub fn intrinsic(&self) -> Option<Primitive> {

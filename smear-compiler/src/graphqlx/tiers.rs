@@ -35,7 +35,8 @@
 //! It runs last: after binding, whose externs it reads, and after every phase that interns a type,
 //! so that every type has its tier but the unresolved type the model's finishing may intern, whose
 //! `core` is its tier. A phase that interns types goes before it. It reports nothing, and writes
-//! only the tiers above `core` and which definitions are metadata, onto rows already appended.
+//! only the tiers above `core` and which definitions are metadata, onto rows already appended, and
+//! where a type outside metadata first reaches each definition metadata reaches too.
 
 use std::{vec, vec::Vec};
 
@@ -59,6 +60,7 @@ pub(crate) fn tiers(declarations: &Declarations<'_, '_>, builder: &mut ModelBuil
       builder.set_metadata(DefId::new(dense(index)));
     }
   }
+  builder.set_runtime_entries(found.entries);
 
   let heap = binding(declarations, builder, CORE, DIRECTIVE, b"heap");
   let defs = builder.def_count() as usize;

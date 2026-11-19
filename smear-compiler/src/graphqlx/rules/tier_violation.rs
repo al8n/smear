@@ -40,6 +40,12 @@
 //! types such a directive writes are exempt all the same, as every directive's are. An object, an
 //! interface and a union are never metadata: one can be a runtime type that no type names.
 //!
+//! A report within a definition both reach has a last label at where the reach from outside
+//! metadata entered, "`A` is reached from here, outside compile-time metadata": the occurrence
+//! outside metadata whose type names it, or, for a definition that another such definition holds,
+//! that definition's own entry. So when a field's argument takes `B` and `B` holds `A`, a report
+//! in `A` is labelled at `B` in that argument, where the chain starts, and not at `B`'s field.
+//!
 //! So one cause is one report: a `string` field in a `core` package is reported at `string`, and
 //! not at the uses of the type that holds it; a dependency's type that needs more than the root
 //! package's tier is reported at each use in the root package. A definition of `P` that is no
@@ -59,9 +65,13 @@
 //!
 //! The rule reads the public model, the public `SourceMap::written_by` among it, the package that
 //! wrote what is judged, the public `Extern::application`, the application an extern is bound
-//! from, and the public `Def::is_metadata`.
+//! from, and the public `Def::is_metadata`. It reads one crate-private accessor,
+//! `Def::runtime_entry`: where a type outside compile-time metadata first reaches a definition
+//! metadata reaches too, which no public view answers, and which is a candidate for a public one.
 
-use std::{collections::BTreeMap, format, vec, vec::Vec};
+use std::{collections::BTreeMap, format, string::String, vec, vec::Vec};
+
+use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
   ApplicationArgument, ApplicationId, Cx, DefId, DefKind, Diagnostic, DiagnosticKind, MemberId,
@@ -174,8 +184,8 @@ impl Visitor for TierViolation {
     let kind = DiagnosticKind::Tier;
     let package = Excerpt(model.package(writer).name().as_bytes());
     match occurrence.kind() {
-      TypeExprKind::List(_) if declared < Tier::Alloc => cx.report(
-        Diagnostic::builder(kind.code(), occurrence.location())
+      TypeExprKind::List(_) if declared < Tier::Alloc => {
+        let mut report = Diagnostic::builder(kind.code(), occurrence.location())
           .severity(kind.severity())
           .message(format!(
             "a list needs `alloc`, and package `{package}` is declared at tier `core`"
@@ -183,9 +193,12 @@ impl Visitor for TierViolation {
           .primary_label(kind.title())
           .help(format!(
             "declare package `{package}` at tier `alloc` or above, or hold what `core` holds"
-          ))
-          .build(),
-      ),
+          ));
+        if let Some((entry, text)) = entered(model, cx.def()) {
+          report = report.label(entry, text);
+        }
+        cx.report(report.build());
+      }
       TypeExprKind::Named(NamedTypeExpr { def, args }) => {
         let home = model.module(model.def(def).module()).package();
         if home == writer {
@@ -231,6 +244,9 @@ impl Visitor for TierViolation {
             "filled from this default",
           );
         }
+        if let Some((entry, text)) = entered(model, cx.def()) {
+          report = report.label(entry, text);
+        }
         cx.report(report.build());
       }
       _ => {}
@@ -266,19 +282,20 @@ impl Visitor for TierViolation {
       if !position || declared >= Tier::Alloc {
         return;
       }
-      cx.report(
-        Diagnostic::builder(kind.code(), applied.path_location())
-          .severity(kind.severity())
-          .message(format!(
-            "`@heap` keeps this value on the heap, which needs `alloc`, and package `{package}` \
-             is declared at tier `core`"
-          ))
-          .primary_label(kind.title())
-          .help(format!(
-            "remove `@heap`, or declare package `{package}` at tier `alloc` or above"
-          ))
-          .build(),
-      );
+      let mut report = Diagnostic::builder(kind.code(), applied.path_location())
+        .severity(kind.severity())
+        .message(format!(
+          "`@heap` keeps this value on the heap, which needs `alloc`, and package `{package}` \
+           is declared at tier `core`"
+        ))
+        .primary_label(kind.title())
+        .help(format!(
+          "remove `@heap`, or declare package `{package}` at tier `alloc` or above"
+        ));
+      if let Some((entry, text)) = entered(model, cx.def()) {
+        report = report.label(entry, text);
+      }
+      cx.report(report.build());
     } else if directive == keys.host {
       let Ok(at) = self
         .externs
@@ -299,22 +316,23 @@ impl Visitor for TierViolation {
       else {
         return;
       };
-      cx.report(
-        Diagnostic::builder(kind.code(), model.value(written.value()).location())
-          .severity(kind.severity())
-          .message(format!(
-            "this `@extern` says its host type needs `{}`, and package `{package}`, which declares \
-             the scalar, is declared at tier `{}`",
-            spelled(tier),
-            spelled(declared)
-          ))
-          .primary_label(kind.title())
-          .help(format!(
-            "lower this `tier`, or declare package `{package}` at tier `{}` or above",
-            spelled(tier)
-          ))
-          .build(),
-      );
+      let mut report = Diagnostic::builder(kind.code(), model.value(written.value()).location())
+        .severity(kind.severity())
+        .message(format!(
+          "this `@extern` says its host type needs `{}`, and package `{package}`, which declares \
+           the scalar, is declared at tier `{}`",
+          spelled(tier),
+          spelled(declared)
+        ))
+        .primary_label(kind.title())
+        .help(format!(
+          "lower this `tier`, or declare package `{package}` at tier `{}` or above",
+          spelled(tier)
+        ));
+      if let Some((entry, text)) = entered(model, cx.def()) {
+        report = report.label(entry, text);
+      }
+      cx.report(report.build());
     }
   }
 }
@@ -359,6 +377,19 @@ fn exempt(model: &Model, def: Option<DefId>, site: Option<Site>) -> bool {
       let definition = model.def(def);
       definition.kind() == DefKind::Directive || definition.is_metadata()
     })
+}
+
+/// Where a type outside compile-time metadata first reaches `def`, the definition the walk is in,
+/// with the text of the label there, when compile-time metadata reaches it too: the last label of
+/// each report within it. `None` for every other definition, and outside every definition.
+fn entered(model: &Model, def: Option<DefId>) -> Option<(Location, String)> {
+  let definition = model.def(def?);
+  let at = definition.runtime_entry()?;
+  let name = Excerpt(definition.name().as_bytes());
+  Some((
+    at,
+    format!("`{name}` is reached from here, outside compile-time metadata"),
+  ))
 }
 
 /// `tier` as a package spells it.

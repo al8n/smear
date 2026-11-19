@@ -450,15 +450,17 @@ impl Analysis {
 ///   through lists and every type argument, or that such a definition's own types name in turn,
 ///   and that no type written anywhere else names, every package's together. A definition both
 ///   reach is judged where it is written, and so is what the argument types of a directive an
-///   operation can apply name, whose values arrive at run time. GraphQL's own rules judge what a
-///   definition a supplied package wrote holds, a GraphQL built-in the root package replaces among
-///   them, with GraphQL's codes: a member whose name begins with `__` is `reserved-field-name`,
-///   `reserved-argument-name`, `reserved-enum-value-name`, `reserved-input-field-name` or
-///   `reserved-directive-argument-name`, by what it is, at its name. A member whose name an
-///   earlier member of its list has, the definition's own and its extensions' members being one
-///   list and each field's arguments another, is `duplicate-field-name`,
-///   `duplicate-argument-name`, `duplicate-enum-value`, `duplicate-input-field-name` or
-///   `duplicate-directive-argument-name`, at its name, with a label at the first. An object, or
+///   operation can apply name, whose values arrive at run time; a report within a definition both
+///   reach has a last label at where the reach from outside metadata entered. GraphQL's own rules
+///   judge what a definition a supplied package wrote holds, a GraphQL built-in the root package
+///   replaces among them, with GraphQL's codes: a member whose name begins with `__` is
+///   `reserved-field-name`, `reserved-argument-name`, `reserved-enum-value-name`,
+///   `reserved-input-field-name` or `reserved-directive-argument-name`, by what it is, at its name.
+///   A member whose name an earlier member of its list has, the definition's own and its
+///   extensions' members being one list and each field's arguments another, is
+///   `duplicate-field-name`, `duplicate-argument-name`, `duplicate-enum-value`,
+///   `duplicate-input-field-name` or `duplicate-directive-argument-name`, at its name, with a label
+///   at the first. An object, or
 ///   an interface that is no marker, with no field, a union with no member, an enum with no value
 ///   and an input object with no field, its extensions' members counted, is
 ///   `empty-fields-definition`, `empty-union-members`, `empty-enum-values` or

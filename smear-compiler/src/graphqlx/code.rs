@@ -262,7 +262,9 @@ pub enum DiagnosticKind {
   /// what a definition holds that only the types of a directive no operation can apply, and
   /// application type arguments, reach, [`Def::is_metadata`](crate::graphqlx::Def::is_metadata):
   /// none of it is judged. A definition a type outside metadata names too, such as the argument
-  /// type of a directive an operation can apply, is judged where it is written.
+  /// type of a directive an operation can apply, is judged where it is written; a report within a
+  /// definition compile-time metadata reaches, which a type outside it reaches too, is labelled at
+  /// where that reach entered.
   Tier,
 
   // -- The rule a backend composes ---------------------------------------------------------------
