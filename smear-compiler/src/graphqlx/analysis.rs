@@ -299,7 +299,9 @@ impl Analysis {
 ///   occurrence of it, with the value's site code, labelled at the value. So is an argument such
 ///   an application leaves out, its type there the definition's bare nullable type parameter:
 ///   where the instantiation's arguments make it non-null, it is
-///   `missing-required-directive-argument` at the occurrence, labelled at the application. The
+///   `missing-required-directive-argument` at the occurrence, labelled at the application; but
+///   where that parameter is a collection's key or element, which every instantiation makes
+///   non-null, the argument is required at the application itself, and reported there once. The
 ///   values of the applications on a generic directive and on its arguments are checked likewise
 ///   at each closed application of the directive, reported at its path; the directive's own
 ///   arguments' defaults are judged only where an application leaves them out. A copy is

@@ -207,7 +207,11 @@
 //! under the application's open type arguments, names them, written or copied from its
 //! directive's default. So is an argument such an application leaves out with no default, whose
 //! type there is a bare nullable type parameter of the definition: whether it is required is each
-//! instantiation's to say. `null` written for an argument required under the application's open
+//! instantiation's to say. But where that parameter is a collection's key or element, which every
+//! instantiation makes non-null however it is written or filled, the argument is required in
+//! each: the application's own mistake, `missing-required-directive-argument` at its path, with a
+//! label at the argument, reported once whatever uses the collection has, and recorded nowhere.
+//! `null` written for an argument required under the application's open
 //! type arguments, its type there non-null, is required under every instantiation of them: it is
 //! refused where it is written, once, and recorded nowhere. A generic directive's own arguments'
 //! defaults are judged where its applications leave them out, and recorded nowhere. When the walk
@@ -375,6 +379,12 @@ const FLOAT_BITS: u32 = 1024;
 /// How many bytes of the identities a judged count searches for one held twice a step of
 /// `Limits::max_value_steps` renders.
 const RENDERED: usize = 64;
+
+/// What the phase tells the author of an application that leaves out an argument a collection's
+/// key or element makes required.
+const FORCED_HELP: &str = "a set's element and a map's key are non-null however they are \
+                           written: write the argument, give it a default, or do not pass the \
+                           key or element to it";
 
 /// Makes the model's values of `raw`, the values lowering read, in `builder`, whose declarations
 /// are `declarations`, whose scopes are `scopes` and whose sources `sources` numbers, with the type
@@ -662,7 +672,9 @@ enum Owed {
   Value(OwedValue),
   /// That the argument `argument`, which the application `application` leaves out with no
   /// default, its type a bare nullable type parameter of the definition, take no non-null type
-  /// from them, which would make it required.
+  /// from them, which would make it required. Never recorded for a collection's key or element,
+  /// which every instantiation makes non-null: that is the application's own mistake, reported
+  /// where it is merged.
   Omitted(OmittedArgument),
 }
 
@@ -1436,9 +1448,9 @@ struct Coercion<'c, 'p, 'x> {
   /// directive.
   owner: Option<DefId>,
   /// Each value of a generic definition whose type names its type parameters, and each argument
-  /// an application in it leaves out whose type is a bare nullable type parameter of it, in the
-  /// walk's order, and so by its definition: what each closed instantiation of it checks, a
-  /// type's written or a directive's applied.
+  /// an application in it leaves out whose type is a bare nullable type parameter of it, but not
+  /// a collection's key or element, in the walk's order, and so by its definition: what each
+  /// closed instantiation of it checks, a type's written or a directive's applied.
   recorded: Vec<Recorded>,
   /// What the rows recorded under each closed instantiation's definition come to under its
   /// arguments, by the instantiation's nullable form.
@@ -1624,6 +1636,8 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// type there `ty`, when the walk is in a generic definition and `ty` is a bare nullable type
   /// parameter of it: whether the argument is required is each instantiation's to say, and each
   /// closed instantiation of the definition checks it, a type's written or a directive's applied.
+  /// A collection's key or element is never recorded: every instantiation makes it non-null, so
+  /// [`forced`](Self::forced) finds it first, and the application's own mistake is reported once.
   fn owe(&mut self, application: ApplicationId, argument: MemberId, ty: Option<TyId>) {
     let (Some(def), Some(ty)) = (self.owner, ty) else {
       return;
@@ -2036,10 +2050,12 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// required, a report that it is left out; and one that may be required, a step, then that
   /// report when its type under the arguments is non-null, recorded for each instantiation to
   /// check when that type is a nullable type parameter of the generic definition the walk is in,
-  /// and passed over with no step when the application has no complete type arguments. Each is
-  /// charged first, but on an application the built-in library writes. A copy under the arguments
-  /// that does not fit them is reported at the application, the first of its arguments' copies
-  /// alone, as `reported` keeps, and so is a default left absent, its copy holding a copy of
+  /// and passed over with no step when the application has no complete type arguments. Where that
+  /// parameter is a collection's key or element, which every instantiation makes non-null, the
+  /// argument is required in each: it is reported at the application, once, and recorded for none.
+  /// Each is charged first, but on an application the built-in library writes. A copy under the
+  /// arguments that does not fit them is reported at the application, the first of its arguments'
+  /// copies alone, as `reported` keeps, and so is a default left absent, its copy holding a copy of
   /// itself, whose count reached a node that does not fit them. Answers `false`, and reports the
   /// application once, when the budget cannot pay, or when a type the argument takes cannot be
   /// built under the arguments.
@@ -2072,6 +2088,10 @@ impl<'p> Coercion<'_, 'p, '_> {
           Ok(expected) => {
             if expected.non_null {
               self.missing(application, left.argument, at);
+            } else if let Some(forced) = self.forced(expected.ty) {
+              // A collection's key or element, non-null in every instantiation: required in each,
+              // so the application's own mistake, reported here once and recorded for none.
+              self.missing_forced(application, left.argument, at, forced);
             } else {
               // Nullable under type arguments that still name the walk's definition's parameter:
               // required at each instantiation that makes it non-null.
@@ -3077,6 +3097,69 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// Whether `ty` is a list type.
   fn is_list(&self, ty: TyId) -> bool {
     matches!(self.builder.ty_shape(ty), Some(Shape::List(_)))
+  }
+
+  /// The walk's definition and the collection it stands for, when `ty` is that definition's first
+  /// type parameter, nullable: its key or element, which every instantiation makes non-null,
+  /// however it is written or filled. `None` otherwise.
+  fn forced(&self, ty: Option<TyId>) -> Option<(DefId, Collection)> {
+    let owner = self.owner?;
+    let collection = self.builder.def_collection(owner)?;
+    let ty = ty?;
+    let key = matches!(
+      self.builder.ty_shape(ty),
+      Some(Shape::Param(TypeParamRef { def, index: 0 })) if def == owner
+    );
+    (key && !self.builder.ty_non_null(ty)).then_some((owner, collection))
+  }
+
+  /// Reports `argument`, which `application`, whose path is at `at`, leaves out, as required by
+  /// the key or element of `forced`'s collection: once, at the application, whatever uses the
+  /// collection has, with a label at the argument's declaration.
+  fn missing_forced(
+    &mut self,
+    application: ApplicationId,
+    argument: MemberId,
+    at: Location,
+    forced: (DefId, Collection),
+  ) {
+    let (collection, kind) = forced;
+    let directive: &[u8] = match self.builder.applied(application) {
+      Some(Applied {
+        directive: Resolution::Resolved(def),
+        ..
+      }) => self.builder.def_name(def),
+      _ => b"",
+    };
+    let name: &[u8] = match self.builder.member_name(argument) {
+      Some(sym) => self.builder.spelling(sym),
+      None => b"",
+    };
+    let parameter: &[u8] = match self.builder.type_param(collection, 0) {
+      Some(param) => self.builder.spelling(param.name),
+      None => b"",
+    };
+    let (part, what) = match kind {
+      Collection::Set => ("element", "set"),
+      Collection::Map => ("key", "map"),
+    };
+    let message = format!(
+      "`{}`, the {part} of the {what} `{}`, is non-null in every instantiation, so `@{}` requires \
+       its argument `{}`, and this application leaves it out",
+      Excerpt(parameter),
+      Excerpt(self.builder.def_name(collection)),
+      Excerpt(directive),
+      Excerpt(name)
+    );
+    let mut report = Diagnostic::builder(schema::MISSING_REQUIRED_DIRECTIVE_ARGUMENT, at)
+      .message(message)
+      .primary_label("missing required directive argument");
+    if let Some(declared) = self.builder.member_location(argument)
+      && !declared.is_entire()
+    {
+      report = report.label(declared, "required here");
+    }
+    self.reporter.report(report.help(FORCED_HELP).build());
   }
 
   /// Reports `argument`, required, as left out by `application`, whose path is at `at`, with a

@@ -1883,6 +1883,148 @@ fn an_argument_left_out_is_required_where_an_instantiation_makes_it_non_null() {
   quiet(&analyze_text(defaulted, &Limits::new()));
 }
 
+/// An argument an application leaves out, whose type there is a collection's key or element, is
+/// required in every instantiation, since a set's element and a map's key are non-null however
+/// they are written or filled. It is the application's own mistake, not any use's:
+/// `missing-required-directive-argument` at the application's path, once, labelled at the
+/// argument, and recorded for no instantiation, whatever uses the collection has or has none. A
+/// map's value is no key, and keeps the check at each instantiation; an argument written is a value
+/// each instantiation judges, and nothing is left out. Refuses the report kept at each use,
+/// `Tags<Int>`, `Tags<String>` and `Tags<ID>` each, the omission recorded and checked again at
+/// each instantiation, and a map's value taken as forced.
+#[test]
+fn an_argument_a_collections_key_or_element_makes_required_is_reported_once() {
+  const PRIMARY: &str = "missing required directive argument";
+  const HELP: &str = "a set's element and a map's key are non-null however they are written: write \
+                      the argument, give it a default, or do not pass the key or element to it";
+  let forced = |part: &str, kind: &str, collection: &str, parameter: &str| -> String {
+    format!(
+      "`{parameter}`, the {part} of the {kind} `{collection}`, is non-null in every instantiation, \
+       so `@tag` requires its argument `value`, and this application leaves it out"
+    )
+  };
+
+  // A set, used under three element types.
+  let text = "type Query {\n  a: Tags<Int>\n  b: Tags<String>\n  c: Tags<ID>\n}\n\
+              directive @tag<X>(value: X) on SCALAR\nscalar Tags<T> @set @tag<T>\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let path = named(schema, text, "@", "tag", 1);
+  assert_eq!(found(&analysis), [(MISSING, path)]);
+  let report = the(&analysis, MISSING, path);
+  assert_eq!(report.to_string(), forced("element", "set", "Tags", "T"));
+  assert_eq!(
+    (report.primary_label(), report.help()),
+    (Some(PRIMARY), Some(HELP))
+  );
+  assert_eq!(
+    labels(report),
+    [(named(schema, text, "(", "value", 0), "required here")]
+  );
+
+  // A map's key, used under two key types: `Dict`'s one report says "key" and "map".
+  let text = "type Query {\n  a: Dict<Int, Int>\n  b: Dict<String, Int>\n}\n\
+              directive @tag<X>(value: X) on SCALAR\nscalar Dict<K, V> @map @tag<K>\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let path = named(schema, text, "@", "tag", 1);
+  assert_eq!(found(&analysis), [(MISSING, path)]);
+  let report = the(&analysis, MISSING, path);
+  assert_eq!(report.to_string(), forced("key", "map", "Dict", "K"));
+  assert_eq!(
+    (report.primary_label(), report.help()),
+    (Some(PRIMARY), Some(HELP))
+  );
+  assert_eq!(
+    labels(report),
+    [(named(schema, text, "(", "value", 0), "required here")]
+  );
+
+  // A map's value is no key: `Vals<Int, Int>` holds, and `Vals<Int, Int!>` alone is refused, at
+  // the use, with the per-use message, labelled at the application and at the argument.
+  let text = "type Query {\n  a: Vals<Int, Int>\n  b: Vals<Int, Int!>\n}\n\
+              directive @tag<X>(value: X) on SCALAR\nscalar Vals<K, V> @map @tag<V>\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, text, "Vals<Int, Int!>", 0);
+  assert_eq!(found(&analysis), [(MISSING, occurrence)]);
+  let report = the(&analysis, MISSING, occurrence);
+  assert_eq!(
+    report.to_string(),
+    "`Vals` is instantiated here with type arguments under which `@tag` requires its argument \
+     `value`, and an application it holds leaves it out"
+  );
+  assert_eq!(
+    labels(report),
+    [
+      (
+        named(schema, text, "@", "tag", 1),
+        "this application leaves it out"
+      ),
+      (named(schema, text, "(", "value", 0), "required here"),
+    ]
+  );
+
+  // The set never used: the definition's mistake is its own, whatever uses exist.
+  let text = "type Query {\n  x: Int\n}\n\
+              directive @tag<X>(value: X) on SCALAR\nscalar Tags<T> @set @tag<T>\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let path = named(schema, text, "@", "tag", 1);
+  assert_eq!(found(&analysis), [(MISSING, path)]);
+  assert_eq!(
+    the(&analysis, MISSING, path).to_string(),
+    forced("element", "set", "Tags", "T")
+  );
+
+  // The root package's extension of `std`'s `HashSet`, whose own parameter is `T`: the extension
+  // writes `U`, and the report names the definition's.
+  let text = "type Query {\n  x: Int\n}\n\
+              directive @tag<X>(value: X) on SCALAR\nextend scalar HashSet<U> @tag<U>\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let path = named(schema, text, "@", "tag", 1);
+  assert_eq!(found(&analysis), [(MISSING, path)]);
+  assert_eq!(
+    the(&analysis, MISSING, path).to_string(),
+    forced("element", "set", "HashSet", "T")
+  );
+
+  // Written, the argument is a value each instantiation judges, and nothing is left out.
+  let text = "type Query {\n  a: Tags<Int>\n}\n\
+              directive @tag<X>(value: X) on SCALAR\nscalar Tags<T> @set @tag<T>(value: 1)\n";
+  quiet(&analyze_text(text, &Limits::new()));
+}
+
+/// A forced omission is one report, not one for each use: a set `Tags` used in 3,000 fields, whose
+/// `@tag<T>` leaves out the argument its element makes required, is one report at the application,
+/// and, under a ceiling of zero diagnostics, none kept and one error counted. Refuses the report
+/// made at each use, which is 3,000.
+#[test]
+fn a_forced_omission_is_one_report_however_many_uses() {
+  const USES: usize = 3_000;
+  let fields: String = (0..USES)
+    .map(|index: usize| format!("  f{index}: Tags<Int>\n"))
+    .collect();
+  let text = format!(
+    "type Query {{\n{fields}}}\ndirective @tag<X>(value: X) on SCALAR\n\
+     scalar Tags<T> @set @tag<T>\n"
+  );
+  let analysis = analyze_text(&text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(MISSING, named(schema, &text, "@", "tag", 1))]
+  );
+  assert_eq!(analysis.diagnostics().error_count(), 1);
+
+  let silent = analyze_text(&text, &Limits::new().with_max_diagnostics(0));
+  let diagnostics = silent.diagnostics();
+  assert!(diagnostics.is_empty());
+  assert!(diagnostics.truncated());
+  assert_eq!(diagnostics.error_count(), 1);
+}
+
 /// A field an object literal of a generic definition leaves out, whose type there is its input
 /// object's bare nullable type parameter, is judged by the same rule: the literal is a value its
 /// definition records, and its count at each instantiation reads the field under that
