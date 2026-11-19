@@ -160,13 +160,13 @@ impl Stop {
 pub(crate) enum Spent {
   /// `Limits::max_bound_steps`, the judging of bounds.
   Bounds,
-  /// `Limits::max_value_steps`, coercion's.
-  Values,
+  /// `Limits::max_value_steps`, the steps coercion spends on values.
+  ValueSteps,
   /// `Limits::max_values`, what coercion's lists and copies find left of it. Lowering, which runs
   /// before these services, says its own once at each written value it refuses; coercion says this
   /// kind at an application's path, an object literal or a lone value it makes, and makes a value
   /// lowering refused one unresolved value and says nothing of it: the two never meet at one place.
-  Made,
+  Values,
   /// `Limits::max_implementation_steps`, the implementation check's.
   Implementation,
   /// A limit on the types a phase builds or derives.

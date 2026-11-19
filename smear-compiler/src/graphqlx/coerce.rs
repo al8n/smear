@@ -961,8 +961,8 @@ impl Budget {
   /// The kind of `resource-limit` a row this budget could not pay for is.
   const fn spent(self) -> Spent {
     match self {
-      Self::Steps => Spent::Values,
-      Self::Values => Spent::Made,
+      Self::Steps => Spent::ValueSteps,
+      Self::Values => Spent::Values,
     }
   }
 }
@@ -3608,12 +3608,12 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// first. Each phase's steps are a kind of their own, and a limit on types is one kind across
   /// the phases.
   fn limit(&mut self, at: Location, stop: Stop, message: Message) {
-    self.report_limit(at, stop.spent(Spent::Values), message);
+    self.report_limit(at, stop.spent(Spent::ValueSteps), message);
   }
 
   /// Reports `resource-limit` of the kind `spent` at `at`, saying `message`, with its help, unless
   /// one of that kind was said there already, as [`limit`](Self::limit) says. A report of
-  /// `Limits::max_values`, which no `Stop` names, is of the kind `Spent::Made`.
+  /// `Limits::max_values`, which no `Stop` names, is of the kind `Spent::Values`.
   fn report_limit(&mut self, at: Location, spent: Spent, message: Message) {
     if !self.types.say_limit(at, spent) {
       return;
@@ -4666,7 +4666,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         "raise the limit with `Limits::with_max_values`, or write the {left}"
       )),
     };
-    self.report_limit(at, Spent::Made, message);
+    self.report_limit(at, Spent::Values, message);
   }
 
   /// Makes the row of `making`'s node one unresolved row, typed with its type, with the path the
@@ -5642,8 +5642,8 @@ impl<'p> Coercion<'_, 'p, '_> {
     let at = Location::new(source, raw.span);
     // A `resource-limit` is said once for each place and kind of limit.
     let spent = match refused.why {
-      Why::Costly(_) => Some(Spent::Values),
-      Why::Unbuilt(stop) => Some(stop.spent(Spent::Values)),
+      Why::Costly(_) => Some(Spent::ValueSteps),
+      Why::Unbuilt(stop) => Some(stop.spent(Spent::ValueSteps)),
       _ => None,
     };
     if spent.is_some_and(|spent: Spent| !self.types.say_limit(at, spent)) {

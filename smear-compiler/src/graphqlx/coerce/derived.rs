@@ -1201,7 +1201,7 @@ impl Coercion<'_, '_, '_> {
           Some(&Checked::Stopped(stop)) => Some(stop),
           _ => None,
         })
-        .is_some_and(|stop: Stop| self.types.limit_said(at, stop.spent(Spent::Values)));
+        .is_some_and(|stop: Stop| self.types.limit_said(at, stop.spent(Spent::ValueSteps)));
       if said {
         chosen = confirmed.get(root as usize).copied().flatten();
       }
