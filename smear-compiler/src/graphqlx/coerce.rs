@@ -2165,11 +2165,14 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// arguments that does not fit them is reported at the application, the first of its arguments'
   /// copies alone, as `reported` keeps, and so is a default left absent, its copy holding a copy of
   /// itself, whose count reached a node that does not fit them. Under open type arguments, a copy
-  /// that is a whole `null` no instantiation takes does not fit them, and is recorded for none. A
-  /// copy of a default its declaration refuses, such a `null`, is judged and charged as any other,
-  /// but that declaration owns its report, and it is recorded for none. Answers `false`, and
-  /// reports the application once, when the budget, or `Limits::max_values` for a copy's values,
-  /// cannot pay, or when a type the argument takes cannot be built under the arguments.
+  /// that is a whole `null` no instantiation takes does not fit them, and is recorded for none; any
+  /// other is recorded for each instantiation to check once it is made, or left absent and judged
+  /// all the same, and for none when a budget keeps it from being made, the argument then absent
+  /// and the application reported. A copy of a default its declaration refuses, such a `null`, is
+  /// judged and charged as any other, but that declaration owns its report, and it is recorded for
+  /// none. Answers `false`, and reports the application once, when the budget, or
+  /// `Limits::max_values` for a copy's values, cannot pay, or when a type the argument takes cannot
+  /// be built under the arguments.
   fn left_out(&mut self, applying: Applying, left: Listed, reported: &mut bool) -> bool {
     let Applying {
       application,
@@ -2225,11 +2228,6 @@ impl<'p> Coercion<'_, 'p, '_> {
       }
     };
     let ty = expected.ty;
-    // A copy that is a whole `null` no instantiation takes is recorded for none, whatever the
-    // budget answers below: it is the application's to report, once, or its declaration's.
-    if env.is_some() && !self.whole_null(tree, ty) {
-      self.record(tree, ty, Site::Default);
-    }
     // A default its declaration refuses, such a `null`, is that declaration's to report: its copy
     // is judged and charged as any other, and reports nothing.
     let owned = self.owned(left.argument, tree);
@@ -2250,6 +2248,13 @@ impl<'p> Coercion<'_, 'p, '_> {
         return false;
       }
     };
+    // Recorded for the instantiations only now that the copy is made, or left absent and judged all
+    // the same: one a budget kept from being made is absent, and its application was reported. A
+    // copy that is a whole `null` no instantiation takes is recorded for none either: it is the
+    // application's to report, once, or its declaration's.
+    if env.is_some() && !self.whole_null(tree, ty) {
+      self.record(tree, ty, Site::Default);
+    }
     if !fits && !*reported && !owned {
       *reported = true;
       self.unfit_default(at, left.argument, tree);

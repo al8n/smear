@@ -1167,6 +1167,70 @@ fn a_refused_default_spends_no_step_at_an_instantiation() {
   );
 }
 
+/// A copy `Limits::max_values` kept from being made is checked at no instantiation, so the check
+/// spends no step on it that a written value needs: under two values and five steps, `@d<T>` on
+/// `Box` spends two steps rebuilding `U` and counting the copy of `true`, cannot pay for its value,
+/// and is `resource-limit` at its path; `Box<Boolean>`'s check then spends its three steps on
+/// `f`'s `0` alone, one for the row, one to rebuild `T` and one for the value, which does not fit
+/// `Boolean` and is reported there, labelled at `0`. Refuses a copy never made checked before the
+/// values that were.
+#[test]
+fn a_copy_never_made_is_checked_at_no_instantiation() {
+  let text = "directive @d<U>(a: U = true) on OBJECT\n\
+              type Box<T> @d<T> {\n  f(x: T = 0): Boolean\n}\ntype Query {\n  b: Box<Boolean>\n}\n";
+  let analysis = analyze_text(
+    text,
+    &Limits::new().with_max_values(2).with_max_value_steps(5),
+    &Options::new(),
+  );
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis, LIMIT),
+    [(after(schema, text, "type Box<T> @", "d"), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let message = only(messages(&analysis, LIMIT));
+  assert!(message.contains(&format!("{VALUES}, 2")), "{message}");
+  assert_eq!(
+    found(&analysis, DEFAULT),
+    [(
+      at(schema, text, "Box<Boolean>", 0),
+      Some(after(schema, text, "x: T = ", "0"))
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+/// A copy the step budget kept from being made is checked at no instantiation either, so no use of
+/// its definition is reported again for it: under one step, `@d<T>` on `Box` rebuilds `U` and
+/// cannot pay to count the copy of `true`, and is `resource-limit` at its path; `Box` records
+/// nothing else, so `Box<Boolean>` is checked for nothing and says nothing. Refuses a starved copy
+/// that each use then reports again, `resource-limit` at it.
+#[test]
+fn a_starved_copy_is_checked_at_no_instantiation() {
+  let text = "directive @d<U>(a: U = true) on OBJECT\n\
+              type Box<T> @d<T> {\n  f: Boolean\n}\ntype Query {\n  b: Box<Boolean>\n}\n";
+  let analysis = analyze_text(
+    text,
+    &Limits::new().with_max_value_steps(1),
+    &Options::new(),
+  );
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis, LIMIT),
+    [(after(schema, text, "type Box<T> @", "d"), None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let message = only(messages(&analysis, LIMIT));
+  assert!(
+    message.contains("`Limits::max_value_steps`, 1"),
+    "{message}"
+  );
+}
+
 /// The model holds at most the bound's values beyond the built-in library's own and one for each
 /// written value refused: measured for the programs above at each bound they run at, the values a
 /// program's model holds beyond an empty root package's, against the bound and the reports that
