@@ -16,8 +16,9 @@ use std::{
 use tokora::diagnostic::Code;
 
 use super::{
-  Visitor,
+  UnboundedInstantiation, Visitor,
   analysis::{Analysis, resolve_door},
+  id::DefId,
   limits::Limits,
   model::Model,
   package::Package,
@@ -61,6 +62,17 @@ pub fn counts(model: &Model) -> Counts {
 /// keeps of the values written is bounded by the source.
 pub fn text_len(model: &Model) -> usize {
   model.text_len()
+}
+
+/// The definitions that grow by the graph [`UnboundedInstantiation`] builds in its `begin` over
+/// the finished `model`, in id order: empty when that graph cannot be numbered. For the test that
+/// holds the rule and `Def::grows`, which the analysis reads off the same graph once instantiation
+/// has typed every occurrence, to one answer.
+pub fn grown_by_the_rule(model: &Model) -> Vec<DefId> {
+  match UnboundedInstantiation::graph(model) {
+    Ok(grown) => grown.defs,
+    Err(_) => Vec::new(),
+  }
 }
 
 /// What `path` names, written in the module `module` of `root` beside `dependencies`, where

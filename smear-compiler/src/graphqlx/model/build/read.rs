@@ -12,7 +12,7 @@ use crate::graphqlx::{
     dense,
   },
   model::{
-    ApplicationArgument, Collection, DefKind, DirectiveLocation, Origin, Resolution, Root,
+    ApplicationArgument, Collection, DefKind, DirectiveLocation, Model, Origin, Resolution, Root,
     TypeBound, TypeParamRef,
     satisfy::{Keys, Steps, Wanted},
     table::{
@@ -350,6 +350,14 @@ impl ModelBuilder {
       .iter()
       .map(|bound: &ExternRow| bound.tier)
       .max()
+  }
+
+  /// The model as the phases have written it so far, for a routine that reads it through the
+  /// finished model's views: the growth graph, once instantiation has typed every occurrence and
+  /// completed every application. Such a routine reads only rows written by then: names, the marks
+  /// and each definition's instantiations are written when the model is finished.
+  pub(crate) fn so_far(&self) -> &Model {
+    &self.model
   }
 
   /// Whether `def` is a marker, once built-in meaning is given: `false` for an id the builder did

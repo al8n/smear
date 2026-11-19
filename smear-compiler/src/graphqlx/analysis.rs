@@ -26,7 +26,7 @@ use super::{
   source::SourceMap,
   text::SourceText,
   tiers,
-  types::Types,
+  types::{self, Types},
   visitor::{Packages, Visitor, drive},
 };
 
@@ -243,6 +243,11 @@ impl Analysis {
 ///   [`Limits::max_bound_steps`]; an occurrence or an application whose bounds that budget, or a
 ///   type they derive past [`Limits::max_generic_depth`] or [`Limits::max_instantiations`], kept
 ///   from being judged is `resource-limit`, and an occurrence keeps its type too.
+/// - Finds which generic definitions grow, once, over every package's definitions: one whose type
+///   parameter reaches itself, through what a copy of an instantiation needs, with a type argument
+///   that wraps what it was given, on the graph
+///   [`UnboundedInstantiation`](super::UnboundedInstantiation) builds,
+///   [`Def::grows`](super::Def::grows). It reports nothing.
 /// - Makes every value, in the model's walk, each by the type expected where it stands, a
 ///   member's type for its default and an argument's for its value, with its `!`: `null` where it
 ///   is nullable; a list's elements each against its element, and any other value where a list is
@@ -751,6 +756,7 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
     &mut builder,
     &mut reporter,
   );
+  types::grow(&mut builder);
   coerce::coerce(
     raw,
     &declarations,

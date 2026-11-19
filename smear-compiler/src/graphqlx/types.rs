@@ -12,6 +12,10 @@
 //! use leaves out, and `Limits::max_bound_steps` the judging of bounds. The rebuild, which puts an
 //! instantiation's arguments in place of its definition's type parameters in a type that names
 //! them, charges the budget its caller passes, so each phase pays for its rebuilds from its own.
+//!
+//! Which generic definitions grow is one fact, found once, after instantiation, by [`grow`], which
+//! marks each on the model: the `growth` graph, the one `UnboundedInstantiation` builds. Every
+//! phase after instantiation reads the mark, and `Def::grows` answers it.
 
 use std::{collections::BTreeMap, vec::Vec};
 
@@ -20,6 +24,25 @@ use crate::graphqlx::{
   limits::Limits,
   model::{ModelBuilder, Shape, TypeParamRef},
 };
+
+pub(crate) mod growth;
+
+/// Marks each definition of `builder` that grows, once instantiation has typed every occurrence
+/// and completed every application: one of its type parameters reaches itself, through the
+/// positions a copy of an instantiation needs, with a type argument that wraps what it was given.
+/// The graph is read off the model as instantiation left it, which holds everything it reads.
+///
+/// A graph too large to number in a `u32`, which only a model of tens of gigabytes holds, marks
+/// nothing: what a derived instantiation costs is then bounded by the limits alone, as it is
+/// everywhere.
+pub(crate) fn grow(builder: &mut ModelBuilder) {
+  let Ok(grown) = growth::grown(builder.so_far(), false) else {
+    return;
+  };
+  for def in grown.defs {
+    builder.set_grows(def);
+  }
+}
 
 /// A type being walked, with the index of the next of its children to look at: a walk's stack
 /// holds them, in the type services and in the positions.

@@ -59,7 +59,7 @@
 //! | Declaration | Every module and every definition, numbered, the built-in library's and the primitives the program writes included; a GraphQL built-in the root package's root module defines again, replaced; each module's names | `smear::schema`: `duplicate-type-name`, `duplicate-directive-definition`, `reserved-type-name`, `reserved-directive-name`, `redefined-built-in-type`; `smear::graphqlx`: `module-type-collision` |
 //! | Name resolution | Every module's scope, its `use` items resolved to a fixpoint; and each path, resolved where it stands for the phases after it | `smear::schema`: `undefined-type`, `undefined-directive`, `undefined-extension-target`, `undefined-implements-interface`, `undefined-union-member`, `undefined-root-operation-type`; `smear::graphqlx`: `unknown-package`, `unresolved-path`, `ambiguous-glob`, `url-unsupported`, `file-path-use`, `use-resolution-changed`, `use-declaration-collision`, `use-name-collision`, `shadowed-primitive`, `unknown-item`, `resource-limit` |
 //! | Lowering | What each definition holds beyond its identity: its contributions, its type parameters and bounds, a directive's locations, and its members; every type occurrence and application, its path resolved where it is written; every value, as written; and the schema's contributions and roots | `smear::schema`: `extension-kind-mismatch`, `undefined-extension-target`, `undefined-directive-argument`, `duplicate-root-operation-type`; `smear::graphqlx`: `generic-arity`, `invalid-bound`, `unresolved-path`, `unknown-item` |
-//! | Instantiation | Each definition's built-in meaning and its defaults; every occurrence's type, each type interned once; each application's complete type arguments; and the bounds of every instantiation the program writes | `smear::graphqlx`: `generic-arity`, `generic-default`, `unsatisfied-bound`, `resource-limit` |
+//! | Instantiation | Each definition's built-in meaning and its defaults; every occurrence's type, each type interned once; each application's complete type arguments; the bounds of every instantiation the program writes; and, last, which generic definitions grow | `smear::graphqlx`: `generic-arity`, `generic-default`, `unsatisfied-bound`, `resource-limit` |
 //! | Coercion | Every value, by the type expected where it stands, an argument or a field left out filled from its default; and a generic definition's values, at each closed instantiation of it a supplied package writes | `smear::schema`: `invalid-default-value`, `invalid-directive-argument-value`, `missing-required-directive-argument`, `undefined-input-object-field`, `missing-required-input-object-field`, `input-object-default-value-cycle`; `smear::graphqlx`: `width-overflow`, `nonzero-zero`, `collection-literal`, `resource-limit` |
 //! | Binding | Each scalar's host types, from the `@extern`s its own package writes on it | none |
 //! | Implementation | What each definition says it is: its `implements` entries, transitively, with the fields and arguments each interface asks for, and a union's members; and each written instantiation's entries and members, and the arguments it makes required | `smear::schema`: `duplicate-implements-interface`, `duplicate-union-member`, `missing-transitive-interface`, `missing-interface-field`, `invalid-interface-field-type`, `interface-field-not-deprecated`, `missing-interface-field-argument`, `invalid-interface-field-argument-type`, `unexpected-required-argument`; `smear::graphqlx`: `resource-limit` |
@@ -88,9 +88,11 @@
 //! types, each `@extern` its own package writes on it whose values fit, an [`Extern`], a built-in
 //! having none; its [`tier`](Def::tier), the least of `core`, `alloc` and `std` that holds what
 //! its members, its union members and its host types need, a built-in's being its package's and a
-//! directive's `core`; and whether it is compile-time metadata, which only the types of a
+//! directive's `core`; whether it is compile-time metadata, which only the types of a
 //! directive no operation can apply and applications' type arguments reach,
-//! [`is_metadata`](Def::is_metadata). A definition, a contribution and a member each answer
+//! [`is_metadata`](Def::is_metadata); and whether it grows, one of its type parameters reaching
+//! itself with a type argument that wraps what it was given, [`grows`](Def::grows), read off the
+//! graph [`UnboundedInstantiation`] builds. A definition, a contribution and a member each answer
 //! `has_errors()`: whether a phase or a rule reported an error in it, a syntax error aside.
 //! GraphQL's introspection meta-types are definitions of [`Origin::Compat`], which a code
 //! generator skips.
@@ -360,7 +362,9 @@
 //! [`UnboundedInstantiation`] refuses a generic definition that reaches itself with a type argument
 //! that grows, which a backend that makes one copy per instantiation could never finish.
 //! [`analyze`] never runs it, so [`Analysis::is_ok`] means what it meant. A backend composes it into
-//! its own [`visit`], and its verdict is the conjunction of the two.
+//! its own [`visit`], and its verdict is the conjunction of the two. The analysis builds the rule's
+//! graph once itself, after instantiation, and [`Def::grows`] answers which definitions it finds
+//! to grow.
 //!
 //! # Sources and rendering
 //!

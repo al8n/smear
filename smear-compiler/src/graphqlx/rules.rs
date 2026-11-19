@@ -66,7 +66,9 @@
 //! module's own, and read the public model alone.
 //!
 //! One rule is in no set: `UnboundedInstantiation`, which is public, which `analyze` never runs,
-//! and which a backend composes into its own walk. It reads the public model alone.
+//! and which a backend composes into its own walk. It reads the public model alone, through the
+//! graph of `types::growth`, which reads the public views alone: the graph the analysis builds once
+//! after instantiation, so that the rule and `Def::grows` read one fact.
 
 mod circular_input_field;
 mod collection_arity;
