@@ -1845,6 +1845,32 @@ fn null_for_an_argument_required_under_open_arguments_is_refused_once() {
   );
 }
 
+/// A default stands in for an argument only where it is left out: `null` written for one whose
+/// type under an application's open type arguments is non-null is refused at the application, once,
+/// though it has a default, as `null` for a non-null type is, `invalid-directive-argument-value` at
+/// the `null`, and recorded for no instantiation: `@d<T>`'s `a` takes `T!` on `G`, with a default,
+/// whether nothing uses `G` or `G<Int>` and `G<String>` do, which report nothing more. Refuses the
+/// `null` the default lets through to be judged only at each instantiation, which an unused
+/// definition never asks and each use repeats.
+#[test]
+fn null_for_a_defaulted_argument_non_null_under_open_arguments_is_refused_once() {
+  let generic = "directive @d<X>(a: X! = 1) on OBJECT\ntype G<T> @d<T>(a: null) {\n  f: Int\n}\n";
+  for query in [
+    "type Query {\n  x: Int\n}\n",
+    "type Query {\n  g: G<Int>\n  h: G<String>\n}\n",
+  ] {
+    let text = format!("{query}{generic}");
+    let analysis = analyze_text(&text, &Limits::new());
+    let schema = schema_file(&analysis);
+    let null = after(schema, &text, "@d<T>(a: ", "null");
+    assert_eq!(found(&analysis), [(ARGUMENT, null)], "{text}");
+    assert_eq!(
+      the(&analysis, ARGUMENT, null).to_string(),
+      "`null` is given where a non-null value is expected"
+    );
+  }
+}
+
 /// An argument an application on a generic definition leaves out, whose type there is the
 /// definition's bare nullable type parameter, is required wherever an instantiation makes that
 /// parameter non-null. `@need<T>` on `Box` leaves out `v`, whose type there is `Box`'s `T`:

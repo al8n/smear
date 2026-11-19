@@ -302,7 +302,8 @@ impl Analysis {
 ///   `missing-required-directive-argument` at the occurrence, labelled at the application; but
 ///   where that parameter is a collection's key or element, which every instantiation makes
 ///   non-null, the application itself is judged: left out with no default, or written `null`,
-///   default or not, the argument is reported there once, and recorded for no instantiation. The
+///   default or not, the argument is reported there once, and recorded for no instantiation; and
+///   so is `null` written for an argument whose type there is non-null, default or not. The
 ///   values of the applications on a generic directive and on its arguments are checked likewise
 ///   at each closed application of the directive, reported at its path; the directive's own
 ///   arguments' defaults are judged only where an application leaves them out. A copy is

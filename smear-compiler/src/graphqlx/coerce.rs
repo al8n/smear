@@ -215,10 +215,10 @@
 //! required under the application's open type arguments, its type there non-null or a
 //! collection's key or element, is required under every instantiation of them: it is refused
 //! where it is written, once, and recorded nowhere. A default stands in only for an argument left
-//! out: with one, `null` written for a collection's key or element is refused where it is written
-//! too, once, as `null` for a non-null type is, `invalid-directive-argument-value`, and recorded
-//! nowhere. A generic directive's own arguments' defaults are judged where its applications leave
-//! them out, and recorded nowhere. When the walk has ended, each type
+//! out: with one, `null` written for one whose type there is non-null or a collection's key or
+//! element is `invalid-directive-argument-value` at the `null`, once, as `null` for a non-null
+//! type is, and recorded nowhere. A generic directive's own arguments' defaults are judged where
+//! its applications leave them out, and recorded nowhere. When the walk has ended, each type
 //! occurrence a supplied package writes, in id order, whose type is a closed named type of a
 //! definition with recorded rows, and then each application a supplied package writes, in id
 //! order, whose type is a closed instantiation of its directive, asks that instantiation's
@@ -3337,10 +3337,10 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// with no default and non-null there or a collection's key or element, which every
   /// instantiation makes non-null, given `null` is reported as left out, at its name, once, and
   /// its value is unresolved and recorded for no instantiation. With a default, which stands in
-  /// only where it is left out, `null` for a collection's key or element is refused where it is
-  /// written, as `null` for a non-null type is, once, and is likewise unresolved and recorded for
-  /// none. A value whose type cannot be built under the arguments is one unresolved row, typed
-  /// with the type the argument is written with, `resource-limit` at it.
+  /// only where it is left out, `null` for a type non-null there, or a collection's key or element,
+  /// is refused where it is written, as `null` for a non-null type is, once, and is likewise
+  /// unresolved and recorded for none. A value whose type cannot be built under the arguments is
+  /// one unresolved row, typed with the type the argument is written with, `resource-limit` at it.
   fn written_argument(&mut self, applying: Applying, argument: RawArgument) {
     let application = applying.application;
     let expected = match self.under(argument.argument, applying.env, applying.library) {
@@ -3361,6 +3361,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     let (ty, non_null) = (expected.ty, expected.non_null);
     let forced = self.forced(ty).is_some();
     let required = (non_null || forced) && !self.raw.defaults.contains_key(&argument.argument);
+    let open = ty.is_some_and(|ty: TyId| !self.builder.ty_closed(ty));
     let null = self
       .raw
       .trees
@@ -3373,11 +3374,12 @@ impl<'p> Coercion<'_, 'p, '_> {
       // instantiation makes non-null: refused here once, and recorded nowhere, so that no
       // instantiation reports it again.
       self.null_for_required(application, argument, ty)
-    } else if forced && null {
+    } else if null && (forced || (non_null && open)) {
       // A default stands in for the argument only where it is left out, and every instantiation
-      // refuses `null` for a collection's key or element: refused here too, once, as `null` for
-      // a non-null type is, and recorded nowhere.
-      self.null_for_forced(argument.tree, ty)
+      // refuses `null` for a collection's key or element, and for a type non-null here that still
+      // names type parameters: refused here too, once, as `null` for a non-null type is, and
+      // recorded nowhere. A closed non-null type refuses it as the value is made.
+      self.null_for_defaulted(argument.tree, ty)
     } else {
       if applying.env.is_some() {
         self.record(argument.tree, ty, Site::Argument);
@@ -3453,11 +3455,11 @@ impl<'p> Coercion<'_, 'p, '_> {
     Some(id)
   }
 
-  /// The value of the tree `tree`, `null` written for an argument whose type `ty` is a
-  /// collection's key or element, which every instantiation makes non-null, and whose default
-  /// stands in only where it is left out: one unresolved row, and, at it, the refusal `null` gets
-  /// where a non-null value is expected.
-  fn null_for_forced(&mut self, tree: u32, ty: Option<TyId>) -> Option<ValueId> {
+  /// The value of the tree `tree`, `null` written for an argument that has a default, of type
+  /// `ty`, which every instantiation makes non-null: a collection's key or element, or a non-null
+  /// type that names type parameters. A default stands in only where it is left out, so this is
+  /// one unresolved row, and, at it, the refusal `null` gets where a non-null value is expected.
+  fn null_for_defaulted(&mut self, tree: u32, ty: Option<TyId>) -> Option<ValueId> {
     let RawTree { root, source, .. } = self.raw.trees.get(tree as usize).copied()?;
     let node = self.raw.nodes.get(root as usize).copied()?;
     let id = self
