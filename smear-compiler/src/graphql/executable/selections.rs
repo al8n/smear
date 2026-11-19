@@ -21,7 +21,7 @@ use super::{
   Charged, Rule, TypeId, Validator,
   nodes::{child_selection_set, fragment, name_bytes, root_selection_set},
 };
-use crate::{
+use crate::graphql::{
   diagnostic::Context,
   schema::DirectiveLocation,
   scratch::{Frame, NONE, get_bit, push_frame},
@@ -148,7 +148,7 @@ where
   /// reaches a fragment at depth `D` gives every level of that fragment body a resolution of its
   /// own, each `O(1)` and each billed `D`. `Θ(D · W)` charged for `Θ(W)` performed, and at
   /// `D = 128` about thirty-two thousand such levels exhaust the default ceiling and answer
-  /// [`Refusal::Budget`](crate::Refusal::Budget) for a document with nothing wrong with it — under
+  /// [`Refusal::Budget`](crate::graphql::Refusal::Budget) for a document with nothing wrong with it — under
   /// any rule set, with no merge engine involved.
   ///
   /// A depth is a population like any other, and the question the list, group and bitset audits ask
@@ -353,7 +353,7 @@ where
     // [`descends_for_usages`](Validator::descends_for_usages), which is `collects_usages` again. So
     // `O` operations sharing one `W`-field fragment spent `Θ(O · W)` units off `O(O + W)` of syntax
     // to reach conclusions no rule set could act on, and a valid document under
-    // `RuleSet::only(FieldSelections)` could be answered [`Refusal::Budget`](crate::Refusal::Budget)
+    // `RuleSet::only(FieldSelections)` could be answered [`Refusal::Budget`](crate::graphql::Refusal::Budget)
     // at the default ceiling. Round 6's discipline — *gate on the readers, not on the family* —
     // applied to a traversal rather than to a charge. al8n/smear#198's seventeenth round.
     //

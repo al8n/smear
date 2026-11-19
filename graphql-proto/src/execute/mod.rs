@@ -75,11 +75,11 @@ use std::vec::Vec;
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use tokora::{SimpleSpan, span::AsSpan};
 
+use smear_compiler::schema::{PackedType, RootOperation, Schema, Sym, TypeId, TypeKind, builtin};
 use smear_parser::graphql::ast::{
   ExecutableDefinition, ExecutableDocument, Field, InputValue, OperationDefinition, OperationType,
   SelectionSet,
 };
-use smear_schema::{PackedType, RootOperation, Schema, Sym, TypeId, TypeKind, builtin};
 
 use crate::request::NamedVariable;
 
@@ -138,7 +138,7 @@ const DEFAULT_RESPONSE_METADATA: NonZeroU32 = NonZeroU32::new(1 << 22).expect("2
 ///
 /// # What the number means now, measured rather than argued (al8n/smear#172, al8n/smear#196)
 ///
-/// Since [`hash_bytes`](smear_schema::hash_bytes) gained its avalanche step and its fold between
+/// Since [`hash_bytes`](smear_compiler::schema::hash_bytes) gained its avalanche step and its fold between
 /// rounds, 4,096 distinct response keys cost 1.73–1.77 units each — one selection plus about three
 /// quarters of a comparison, summed over every table size the interner grows through — across
 /// thirty-three families that cross the radix a counter is written in against the width it is
@@ -173,7 +173,7 @@ const DEFAULT_RESPONSE_METADATA: NonZeroU32 = NonZeroU32::new(1 << 22).expect("2
 /// **The other factor of that scan is not charged here and must not be.** `declared` is the
 /// schema's; at one unit per declared argument per position this ceiling refuses a full-occupancy
 /// response at about thirteen of them, and public schemas write ten-argument fields. It is bounded
-/// at schema build by [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) instead, which is
+/// at schema build by [`MAX_FIELD_ARGUMENTS`](smear_compiler::schema::MAX_FIELD_ARGUMENTS) instead, which is
 /// what keeps this number a statement about the client's document and not about the operator's SDL.
 ///
 /// # Tightening it is a separate decision, and deliberately not taken here
@@ -268,13 +268,13 @@ const DEFAULT_REQUEST_ERROR_LOCATIONS: NonZeroU32 = NonZeroU32::new(64).expect("
 /// | outstanding work | requests | [`max_in_flight`](Limits::max_in_flight) | `poll_resolve` withholds, and the slab reuses freed entries | — |
 /// | response positions | positions | [`max_response_slots`](Limits::max_response_slots) | `push_child`, the only creator | — |
 /// | response metadata | merged selections **and** location spans, counted as one | [`max_response_metadata`](Limits::max_response_metadata) | `expand` before appending, and `fail_at` | a writer appending spans without charging — which `fail_at` did, making the ceiling neither bound it claimed |
-/// | collection work | selections **examined**, name-table entries **compared**, the fragment index's pass, the directives and arguments a request **writes** at a selection, and the bytes of every name it writes there, as one | [`max_selection_visits`](Limits::max_selection_visits) | `walk` per selection; `Interner::intern` and `Fragments::get` per entry compared, before comparing it; `Fragments::build` per definition and fragment; `included` per directive on a selection it **examines** and `condition_is_true` per argument at a `@skip`/`@include` usage it **compares**, each in front of that one comparison rather than over the list, since both scans short-circuit; **`coerce_arguments`** per written argument the scan **examines**, once however many of §6.4.1's `declared` scans reach it, and both readers of a variable **spelling** — `coerce_arguments` and `condition_is_true` — through `metered_variable_key`, a unit at a time as draft §2.1.9's pass examines the bytes; and draft §4's meta walk per schema member a meta list reads and per possible-object word an interface's `possibleTypes` scans, and per pass over the bytes of a `__type` name it decodes and looks up | charging appends instead of visits; charging visits without their lookups, which is a budget on one factor of a product; leaving *any* uncharged way into a name table, which a claim about callers cannot prevent and a signature can; **charging one name where the position reads two**, which is what the argument key's charge did while the variable written for it went to the driver unmeasured; **charging a whole list in front of a scan that short-circuits**, which refuses a valid operation for work the taken branch never performs — a *list* is not the only such scan, and the variable spelling's own admission pass is one, so a charge over its whole length turned an unreadable name into a resource refusal; and §6.4.1's scan, whose *other* factor is the schema's and is bounded at build by [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) rather than here; and a meta list that `includeDeprecated` empties, which creates no position for a ceiling to count while reading the schema's whole width — once per alias the client writes |
+/// | collection work | selections **examined**, name-table entries **compared**, the fragment index's pass, the directives and arguments a request **writes** at a selection, and the bytes of every name it writes there, as one | [`max_selection_visits`](Limits::max_selection_visits) | `walk` per selection; `Interner::intern` and `Fragments::get` per entry compared, before comparing it; `Fragments::build` per definition and fragment; `included` per directive on a selection it **examines** and `condition_is_true` per argument at a `@skip`/`@include` usage it **compares**, each in front of that one comparison rather than over the list, since both scans short-circuit; **`coerce_arguments`** per written argument the scan **examines**, once however many of §6.4.1's `declared` scans reach it, and both readers of a variable **spelling** — `coerce_arguments` and `condition_is_true` — through `metered_variable_key`, a unit at a time as draft §2.1.9's pass examines the bytes; and draft §4's meta walk per schema member a meta list reads and per possible-object word an interface's `possibleTypes` scans, and per pass over the bytes of a `__type` name it decodes and looks up | charging appends instead of visits; charging visits without their lookups, which is a budget on one factor of a product; leaving *any* uncharged way into a name table, which a claim about callers cannot prevent and a signature can; **charging one name where the position reads two**, which is what the argument key's charge did while the variable written for it went to the driver unmeasured; **charging a whole list in front of a scan that short-circuits**, which refuses a valid operation for work the taken branch never performs — a *list* is not the only such scan, and the variable spelling's own admission pass is one, so a charge over its whole length turned an unreadable name into a resource refusal; and §6.4.1's scan, whose *other* factor is the schema's and is bounded at build by [`MAX_FIELD_ARGUMENTS`](smear_compiler::schema::MAX_FIELD_ARGUMENTS) rather than here; and a meta list that `includeDeprecated` empties, which creates no position for a ceiling to count while reading the schema's whole width — once per alias the client writes |
 /// | collection depth | — | **removed, not bounded** | `walk` runs on an explicit stack | a recursive walk, which a flat fragment chain drove to `SIGABRT` |
 /// | interned text | bytes | [`max_interned_bytes`](Limits::max_interned_bytes) | `Interner::intern` | driver messages, one per failed position, at any length |
 /// | draft §7.1.7 `extensions`, and §7.1.6's per-error map | entries **and** key bytes, as two ceilings | [`max_extension_entries`](Limits::max_extension_entries), [`max_extension_key_bytes`](Limits::max_extension_key_bytes) | `Extensions::insert`, before the key is copied; and **each of the three retainers** — [`set_extensions`](Executor::set_extensions), [`RequestErrorResult::set_extensions`](super::RequestErrorResult::set_extensions) and [`handle_field_error_with`](Executor::handle_field_error_with), all of which re-derive an accepted map's allocations from its entries | bounding either alone: one ceiling leaves a single gigabyte key, the other leaves unbounded empty-keyed entries, because a zero-length key is a legal key. And bounding both while retaining the caller's allocation: `remove` refunds the budget and returns no room, so an emptied map reports nothing and holds everything it grew to. And a **second** retainer of the same container that re-checks only the two reported quantities, since §7.1.7 admits the entry in a §7.1.3 result too — and a third, since §7.1.6 admits one on every error |
 /// | draft §7.1.3's driver-supplied request errors | entries, message bytes **and** spans per entry, as three ceilings | [`max_request_errors`](Limits::max_request_errors), [`max_request_error_message_bytes`](Limits::max_request_error_message_bytes), [`max_request_error_locations`](Limits::max_request_error_locations) | [`RequestError::new`](super::RequestError::new) and [`from_diagnose`](super::RequestError::from_diagnose), before the message or a span is copied; and **the result that lists the entry** — [`RequestErrorResult::from_driver`](super::RequestErrorResult::from_driver) and [`push`](super::RequestErrorResult::push), which re-check every quantity the entry reports against the result's own ceilings, the extension pair included for the entry's own §7.1.6 map, and re-derive that map's allocations | bounding the count alone: one message a gigabyte long, or one entry with a million spans. Bounding the lengths alone: an unbounded list of short entries. Trusting the entry's construction: an entry is built under whatever `Limits` the driver passed, so a result that did not re-check would retain what a laxer budget let it grow to. And letting `Vec` double the list's spine: a ceiling of a hundred would hold a hundred and twenty-eight slots |
 /// | error rows | rows | derived: at most one per position | — | a position able to fail twice, or an argument coercion raising more than once |
-/// | list nesting | — | [`MAX_WRAPPERS`](smear_schema::MAX_WRAPPERS) = 15, by the schema | `complete`'s list arm strips one wrapper per level | — |
+/// | list nesting | — | [`MAX_WRAPPERS`](smear_compiler::schema::MAX_WRAPPERS) = 15, by the schema | `complete`'s list arm strips one wrapper per level | — |
 ///
 /// Two rows are deliberately not ceilings. **Depth was removed rather than bounded**, because a
 /// depth ceiling's right value is a function of the deployment's stack and a heap stack has no such
@@ -375,7 +375,7 @@ const DEFAULT_REQUEST_ERROR_LOCATIONS: NonZeroU32 = NonZeroU32::new(64).expect("
 /// | `scratch_sets` | `complete`'s object arm and draft §4's meta walk, one entry per merged selection carrying a sub-selection | `max_response_metadata`, being a slice of `merged` |
 /// | `fragments` — the index | `Fragments::build`, once, kept across resets on purpose | **the document's** definition count, and the pass is charged against `max_selection_visits` before the storage exists |
 /// | `arg_prefix` | `coerce_arguments`, one `u32` per written entry the scan admits, pushed **behind** that entry's own charged opening unit | [`max_selection_visits`](Limits::max_selection_visits), and cleared at every coercion with `scratch_args` |
-/// | **`scratch_args`** | `coerce_arguments`, which charges the request's **written** argument bytes against `max_selection_visits` and does not charge the *length* of what it pushes | **the schema's** declared argument list for the *one* field being coerced — the function clears and then pushes at most one entry per declared argument — which [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) refuses past sixty-four at schema build |
+/// | **`scratch_args`** | `coerce_arguments`, which charges the request's **written** argument bytes against `max_selection_visits` and does not charge the *length* of what it pushes | **the schema's** declared argument list for the *one* field being coerced — the function clears and then pushes at most one entry per declared argument — which [`MAX_FIELD_ARGUMENTS`](smear_compiler::schema::MAX_FIELD_ARGUMENTS) refuses past sixty-four at schema build |
 ///
 /// **`scratch_args` is the row this section exists for, and it is the third kind of bound rather
 /// than a missing one.** Two rows above are bounded by the document and one by the schema, and a
@@ -394,7 +394,7 @@ const DEFAULT_REQUEST_ERROR_LOCATIONS: NonZeroU32 = NonZeroU32::new(64).expect("
 /// halves of that are closed now and the mechanisms are deliberately different, because the two
 /// factors belong to different parties. The written half is the caller's and is charged, at
 /// `coerce_arguments`, in front of the scan. The declared half is the deployment's and is refused
-/// at **schema build**: [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) is sixty-four,
+/// at **schema build**: [`MAX_FIELD_ARGUMENTS`](smear_compiler::schema::MAX_FIELD_ARGUMENTS) is sixty-four,
 /// so no schema an executor can be handed carries a wider field.
 ///
 /// **The ceiling this section previously left to the owner was a `Limits` knob, and that one is
@@ -489,7 +489,7 @@ const DEFAULT_REQUEST_ERROR_LOCATIONS: NonZeroU32 = NonZeroU32::new(64).expect("
 ///    rule and still be an unbounded product, because this rule is about a buffer and that is about
 ///    a loop. Both are now closed and by different mechanisms — the written factor is charged here,
 ///    and the declared factor is refused at schema build by
-///    [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS). al8n/smear#198.
+///    [`MAX_FIELD_ARGUMENTS`](smear_compiler::schema::MAX_FIELD_ARGUMENTS). al8n/smear#198.
 ///
 /// # Every event that reaches a death point
 ///
@@ -909,7 +909,7 @@ impl Limits {
   /// because the schema is wide — measured, one unit per declared argument per position refuses a
   /// full-occupancy response at about thirteen declared arguments, which is ordinary input. It is
   /// bounded at schema build instead, by
-  /// [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS), so the scan is
+  /// [`MAX_FIELD_ARGUMENTS`](smear_compiler::schema::MAX_FIELD_ARGUMENTS), so the scan is
   /// `positions × 64` with positions metered by this ceiling and by
   /// [`max_response_slots`](Limits::max_response_slots). al8n/smear#198.
   ///
@@ -939,7 +939,7 @@ impl Limits {
   /// true of `k0…k4095` — 1.89 units per key — and false of every other ordinary spelling: 4,096
   /// **distinct** keys spelled `user0000Name…` charged 15.83 each, `field0…` charged 41.45 and
   /// `h00000000…` charged 64.60, growing quadratically, with no collision search anywhere. That was
-  /// [`hash_bytes`](smear_schema::hash_bytes)'s fold leaving a name's late bytes out of the bucket
+  /// [`hash_bytes`](smear_compiler::schema::hash_bytes)'s fold leaving a name's late bytes out of the bucket
   /// index.
   ///
   /// **Then the replacement claim was asserted over the same five fixtures (al8n/smear#196).** An
@@ -3703,7 +3703,7 @@ where
   /// Draft §6.4.3 `CompleteValue`, step for step.
   ///
   /// Recursive only through its list arm, and therefore bounded by
-  /// [`MAX_WRAPPERS`](smear_schema::MAX_WRAPPERS) — an object's sub-selections do not
+  /// [`MAX_WRAPPERS`](smear_compiler::schema::MAX_WRAPPERS) — an object's sub-selections do not
   /// recurse, they become ready slots and come back through `poll_resolve`. That is what keeps a
   /// deeply nested query from being a deeply nested call stack, which is the property a Sans-I/O
   /// machine is supposed to have.
@@ -4292,7 +4292,7 @@ where
     // `max_selection_visits` of `2^24`, with the ~2.5 units a position already costs — and public
     // schemas write ten-argument fields. That is a false refusal of ordinary input, so the
     // deployment's factor is bounded where the deployment writes it:
-    // [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) refuses a schema declaring more
+    // [`MAX_FIELD_ARGUMENTS`](smear_compiler::schema::MAX_FIELD_ARGUMENTS) refuses a schema declaring more
     // than sixty-four arguments on one field, once, at build. The scan is
     // `positions × MAX_FIELD_ARGUMENTS` from then on, and *positions* are metered: every one is
     // charged against this same ceiling on its way in — measured, five units per list element —
@@ -4601,7 +4601,7 @@ where
       };
       self.scratch_args.push(Argument {
         // The *schema's* name for the argument, which its own arena already holds as a `str`: the
-        // builder admits nothing outside draft §2.1.9 (`smear_schema::is_name`), so there is no
+        // builder admits nothing outside draft §2.1.9 (`smear_compiler::schema::is_name`), so there is no
         // conversion to get wrong. The two `from_utf8(..).unwrap_or("")`s that used to stand here
         // read the same arena the long way round.
         name: self.schema.name(argument.name()),

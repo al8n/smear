@@ -126,7 +126,7 @@ use core::{fmt, iter::FusedIterator};
 
 use derive_more::IsVariant;
 use indexmap::IndexMap;
-use smear_schema::FrozenStr;
+use smear_compiler::schema::FrozenStr;
 
 use crate::Limits;
 

@@ -5,6 +5,7 @@
 //! instruments are this crate's own: the counting allocator, which only a `std` build of these
 //! tests installs, and the visit ledger's `spent`, which only a test build has.
 
+use smear_compiler::schema::Schema;
 use smear_parser::{
   graphql::{
     GraphQL,
@@ -14,7 +15,6 @@ use smear_parser::{
   },
   lexer::tokora::{Parse as _, Parser},
 };
-use smear_schema::Schema;
 
 use super::{Read, literal_type};
 use crate::{

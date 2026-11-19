@@ -1,9 +1,9 @@
 use tokora::SimpleSpan;
 
+use smear_compiler::schema::{bucket, hash_bytes};
 use smear_parser::graphql::ast::{
   DescribedExecutableDefinition, ExecutableDefinition, FragmentDefinition,
 };
-use smear_schema::{bucket, hash_bytes};
 
 use std::vec::Vec;
 

@@ -64,7 +64,7 @@ use core::fmt;
 use std::collections::TryReserveError;
 
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use smear_schema::{DirectiveLocation, PackedType, Schema, Sym, Text, TypeId, TypeKind};
+use smear_compiler::schema::{DirectiveLocation, PackedType, Schema, Sym, Text, TypeId, TypeKind};
 
 #[cfg(all(test, feature = "std"))]
 mod tests;

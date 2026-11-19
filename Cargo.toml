@@ -3,13 +3,10 @@ members = [
   "ci/source_census",
   "graphql-proto",
   "smear",
-  "smear-analysis",
   "smear-lexer",
   "tests/smear-noatomic",
   "smear-parser",
   "smear-compiler",
-  "smear-schema",
-  "smear-semantics",
   "tests/smear-smoke",
 ]
 
@@ -92,12 +89,9 @@ thiserror = { version = "2", default-features = false }
 
 graphql-proto = { path = "graphql-proto", version = "0.0.1", default-features = false }
 smear = { path = "smear", version = "0.0.1", default-features = false }
-smear-analysis = { path = "smear-analysis", version = "0.0.1", default-features = false }
 smear-lexer = { path = "smear-lexer", version = "0.0.1", default-features = false }
 smear-parser = { path = "smear-parser", version = "0.0.1", default-features = false }
 smear-compiler = { path = "smear-compiler", version = "0.0.1", default-features = false }
-smear-schema = { path = "smear-schema", version = "0.0.1", default-features = false }
-smear-semantics = { path = "smear-semantics", version = "0.0.1", default-features = false }
 serde = { version = "1", default-features = false, features = ["derive"] }
 
 [workspace.lints.rust]
@@ -128,9 +122,9 @@ unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(smear_lexer_force_scalar)',
   'cfg(smear_lexer_disable_avx512)',
   'cfg(smear_lexer_disable_avx2)',
-  # `smear-schema/src/text.rs`: selects the owned-text seam's `Box<str>` arm on a target that has
-  # pointer-width atomics, so the `noatomic` job compiles that arm on its host. Declared here
-  # because every member takes `[lints] workspace = true`, which a member cannot extend.
+  # `smear-compiler/src/schema/text.rs`: selects the owned-text seam's `Box<str>` arm on a target
+  # that has pointer-width atomics, so the `noatomic` job compiles that arm on its host. Declared
+  # here because every member takes `[lints] workspace = true`, which a member cannot extend.
   'cfg(smear_seam_fallback)',
 ] }
 

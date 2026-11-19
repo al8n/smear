@@ -636,11 +636,11 @@ pub(crate) struct Names {
   /// These were `u32`s, checked through an `arena_range` helper that answered [`None`] when the
   /// pair would not narrow — and that [`None`] was the *same* [`None`]
   /// [`Names::intern`](Names::intern) returns when the ledger refuses. The caller reads a refusal
-  /// as [`Rule::MergeWorkBudget`](crate::Rule::MergeWorkBudget) and sets
-  /// [`Invalid::budget_tripped`](crate::Invalid::budget_tripped), so a document whose only problem
+  /// as [`Rule::MergeWorkBudget`](crate::graphql::Rule::MergeWorkBudget) and sets
+  /// [`Invalid::budget_tripped`](crate::graphql::Invalid::budget_tripped), so a document whose only problem
   /// was that four gibibytes of names will not fit a `u32` was told to raise a knob that could not
   /// help it. Two different abandonments wearing one `None` — the shape
-  /// [`Match`](crate::executable) was introduced for one level up, where a scan the budget stopped
+  /// [`Match`](crate::graphql::executable) was introduced for one level up, where a scan the budget stopped
   /// had not established that a name was absent. An arena that cannot represent a name has not
   /// established that the budget was exhausted.
   ///
@@ -649,7 +649,7 @@ pub(crate) struct Names {
   /// there is nothing left for the second variant to say. What it costs is eight bytes an entry on
   /// a 64-bit target — the per-name overhead beside the name's own bytes goes from twenty to
   /// twenty-eight. What it buys is that a caller who raised
-  /// [`Budget::merge_work`](crate::Budget::merge_work) far enough to admit such a document gets the
+  /// [`Budget::merge_work`](crate::graphql::Budget::merge_work) far enough to admit such a document gets the
   /// document validated rather than a verdict naming a ceiling they had already raised. That is
   /// this crate's own posture about ceilings: the knob is the bound, and a limit no caller can
   /// reach past is not one.
@@ -894,7 +894,7 @@ struct NameRange {
 
 /// FxHash-style multiply-fold over short keys, finished with an avalanche step.
 ///
-/// The same shape `smear_schema::hash_bytes` has, and for the same reason: the keys are
+/// The same shape `crate::schema::hash_bytes` has, and for the same reason: the keys are
 /// identifiers, so one multiply per eight bytes is all the compression a probe table needs and it
 /// costs no dependency.
 ///
@@ -907,7 +907,7 @@ struct NameRange {
 /// assumes the shared dependency carried the repair gets the opposite of what is true.
 ///
 /// This table was the **worse** of the two. `smear-schema` masks the hash's high half through
-/// `smear_schema::bucket`; this one masks the low half, which is the least mixed word in the
+/// `crate::schema::bucket`; this one masks the low half, which is the least mixed word in the
 /// product. Measured over 4,096 names of the most ordinary spelling there is — `k0` to `k4095` —
 /// the unfinished hash masked low occupies **ten** buckets of 4,096 and costs 464.27 comparisons
 /// per interned name. Through the finalizer the same names cost 0.50 across 2,586 buckets. Hence
@@ -1228,7 +1228,7 @@ pub(crate) struct MergeName {
 /// allocate nothing.
 ///
 /// ```
-/// # use smear_compiler::Scratch;
+/// # use smear_compiler::graphql::Scratch;
 /// let mut scratch = Scratch::new();
 /// // … validate_executable(&schema, &document, &mut scratch, &budget, &mut sink) …
 /// scratch.reset(); // clears, keeps capacity
@@ -1755,7 +1755,7 @@ mod tests {
   /// between the two was reachable past four gibibytes of names, and the helper refused rather than
   /// letting an `as u32` wrap. The check was right; its *report* was not. The [`None`] it answered
   /// is the same [`None`] a ledger refusal answers, and [`Names::intern`]'s only caller reads a
-  /// [`None`] as [`Rule::MergeWorkBudget`](crate::Rule::MergeWorkBudget) — so a document whose only
+  /// [`None`] as [`Rule::MergeWorkBudget`](crate::graphql::Rule::MergeWorkBudget) — so a document whose only
   /// problem was that its names will not fit a `u32` was told to raise a knob that could not help
   /// it, and `Invalid::budget_tripped` said a budget had refused when none had. Two abandonments
   /// wearing one `None`, which is the shape `Match` was introduced for one level up.

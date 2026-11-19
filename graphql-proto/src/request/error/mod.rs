@@ -137,10 +137,10 @@
 //!   client can use; a diagnostic whose sentence also spells its span says so twice, and that is
 //!   the diagnostic's choice to change, not this door's to edit.
 //! - **The locations are the primary span and then each label's**, in the diagnostic's own order.
-//!   A [`Location::entire`](smear_schema::diagnostic::Location::entire) is skipped rather than
+//!   A [`Location::entire`](smear_compiler::schema::diagnostic::Location::entire) is skipped rather than
 //!   written: it says the diagnostic has no point in the text to show, and §7.1.6 asks for a point.
 //! - **No code is invented.** §7.1.6 gives an error no `code` entry. `extensions.code` is a
-//!   convention a driver may adopt — the diagnostic's [`Code`](smear_schema::diagnostic::Code) is
+//!   convention a driver may adopt — the diagnostic's [`Code`](smear_compiler::schema::diagnostic::Code) is
 //!   right there for [`set_extensions`](RequestError::set_extensions) — and not one this crate
 //!   imposes on every driver's wire format.
 //!
@@ -216,7 +216,7 @@ use core::fmt;
 use std::boxed::Box;
 
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use smear_schema::{FrozenStr, StrBuf, diagnostic::Diagnose};
+use smear_compiler::schema::{FrozenStr, StrBuf, diagnostic::Diagnose};
 use tokora::SimpleSpan;
 
 use crate::{Ceiling, Extensions, Limits, StartError};
@@ -422,7 +422,7 @@ impl<V> RequestError<V> {
   /// - **The message** is the diagnostic's `Display`, as it renders. The position travels in the
   ///   entry's `locations`, in the form a client can use.
   /// - **The locations** are the primary span and then each label's, in order, skipping a
-  ///   [`Location::entire`](smear_schema::diagnostic::Location::entire), which is no point in the
+  ///   [`Location::entire`](smear_compiler::schema::diagnostic::Location::entire), which is no point in the
   ///   text.
   /// - **No `extensions`.** The diagnostic's code is the driver's to publish or not, through
   ///   [`set_extensions`](RequestError::set_extensions); `request/error/mod.rs`'s header has why
@@ -716,7 +716,7 @@ impl<V> fmt::Display for RequestErrorEntry<'_, V> {
 ///   },
 ///   lexer::tokora::{Parse as _, Parser},
 /// };
-/// use smear_schema::Schema;
+/// use smear_compiler::schema::Schema;
 ///
 /// # struct Space;
 /// # impl Values for Space {
@@ -1211,7 +1211,7 @@ impl<'r, V> Iterator for Entries<'r, V> {
 impl<V> ExactSizeIterator for Entries<'_, V> {}
 
 /// The spans a diagnostic's labels point at, in the diagnostic's order, skipping a label whose
-/// location is [`Location::entire`](smear_schema::diagnostic::Location::entire).
+/// location is [`Location::entire`](smear_compiler::schema::diagnostic::Location::entire).
 ///
 /// The walk stops at the first index with no label, which is where [`Diagnose::labels`] promises
 /// the count ends, so an implementor that broke that promise is read no further than it kept it.

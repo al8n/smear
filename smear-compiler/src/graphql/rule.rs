@@ -11,7 +11,7 @@
 //! a policy rule, or a subset — a linter checking only the fragment rules, say — hands its own set
 //! to [`validate_executable_with`](super::validate_executable_with).
 
-use smear_schema::diagnostic::{Code, Severity};
+use crate::schema::diagnostic::{Code, Severity};
 
 /// One validation rule: a draft §5 rule, a resource bound, or an opt-in policy rule.
 ///

@@ -571,7 +571,7 @@ fn the_index_agrees_with_the_prefix_walk_it_replaced() {
 use core::fmt;
 
 use graphql_proto::{Executor, Leaf, Response, Values};
-use smear_compiler::Schema;
+use smear_compiler::schema::Schema;
 use smear_lexer::{
   limits::SyntacticLimits,
   tokora::{Parse as _, Parser},

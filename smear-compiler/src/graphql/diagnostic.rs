@@ -12,7 +12,7 @@ use super::{
   Rule,
   schema::{DirectiveLocation, PackedType, RootOperation, Schema, Sym},
 };
-use smear_schema::diagnostic::{Code, Diagnose, Label, Location, PathSegment, Severity};
+use crate::schema::diagnostic::{Code, Diagnose, Label, Location, PathSegment, Severity};
 
 /// The schema-side half of a diagnostic: what the rule expected, in the schema's own vocabulary.
 ///
@@ -259,7 +259,7 @@ impl<S> Diagnostic<S> {
 /// The rendering of a [`Diagnostic`] against its schema, from [`Diagnostic::display`].
 ///
 /// It is also the value that implements
-/// [`Diagnose`](smear_schema::diagnostic::Diagnose), and for the same reason it exists at all: a
+/// [`Diagnose`](crate::schema::diagnostic::Diagnose), and for the same reason it exists at all: a
 /// [`Diagnostic`] alone cannot answer, because its [`Context`] is interned symbols and its message
 /// needs the schema those symbols index. Pairing the two is what makes a resolved view, so the
 /// door into the contract is the door that was already there —
@@ -267,7 +267,7 @@ impl<S> Diagnostic<S> {
 ///
 /// Its [`Display`](core::fmt::Display) is the sentence alone. Where the diagnostic points is
 /// structure rather than prose —
-/// [`primary`](smear_schema::diagnostic::Diagnose::primary) and the labels, or
+/// [`primary`](crate::schema::diagnostic::Diagnose::primary) and the labels, or
 /// [`Diagnostic::span`] and [`Diagnostic::related_span`] — so a renderer that draws the position
 /// from the contract does not print it a second time in the message.
 #[derive(Debug, Clone, Copy)]
@@ -304,7 +304,7 @@ const SOURCE: u32 = 0;
 /// A draft §5 diagnostic, read as structure rather than as a sentence.
 ///
 /// The bound is the same one [`Display`](core::fmt::Display) carries, because
-/// [`Diagnose`](smear_schema::diagnostic::Diagnose) has it as a supertrait: rendering a diagnostic means
+/// [`Diagnose`](crate::schema::diagnostic::Diagnose) has it as a supertrait: rendering a diagnostic means
 /// writing the document's own spelling of a name, and that spelling is `S`.
 ///
 /// No path segments. Draft §5 runs before execution begins, so there is no response tree for a

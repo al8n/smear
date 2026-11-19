@@ -6,7 +6,7 @@
 //! *pair* of selections that a response name collects, at every level of the response shape, after
 //! fragments have been expanded — and the expansion of a nested, reused fragment graph is where
 //! both graphql-js and apollo-compiler have had denial-of-service incidents. So it gets a working
-//! set, a memo, and a [`Budget`](crate::Budget), from the first line rather than after
+//! set, a memo, and a [`Budget`](crate::graphql::Budget), from the first line rather than after
 //! the first incident.
 //!
 //! # The algorithm
@@ -31,7 +31,7 @@
 //!
 //! One pass over the document builds a table of every selection set, every field occurrence, and
 //! every spread, all reduced to integers — response names and field names interned into the
-//! caller's [`Scratch`](crate::Scratch), return types already resolved to
+//! caller's [`Scratch`](crate::graphql::Scratch), return types already resolved to
 //! the schema's own packed form. After that the engine sorts, groups and compares `u32`s, and goes back to the
 //! syntax tree only to compare argument literals and to quote a name in a diagnostic.
 //!
@@ -52,7 +52,7 @@
 //! rows, comparisons, partition rows and tree-resolution steps as one running total for the call.
 //! Reaching either one abandons the engine and refuses the document, and
 //! [`Invalid::budget_tripped`](super::Invalid::budget_tripped) says so — with the bound's own rule
-//! in the [`RuleSet`](crate::RuleSet) it also emits that rule, and without it the refusal is
+//! in the [`RuleSet`](crate::graphql::RuleSet) it also emits that rule, and without it the refusal is
 //! carried by the verdict alone. It never passes the document unvalidated and it never panics.
 
 use core::ops::ControlFlow;
@@ -65,7 +65,7 @@ use super::{
     ValueLike, child_selection_set, fragment, name_bytes, response_name, root_selection_set,
   },
 };
-use crate::{
+use crate::graphql::{
   diagnostic::{Context, MergeConflict},
   schema::{Range32, RootOperation, TypeId},
   scratch::{
@@ -245,9 +245,9 @@ where
 
   /// Charges `units` of work, returning whether the engine may continue.
   ///
-  /// The ledger itself lives in [`Work`], because the tables in [`crate::scratch`] have loops the
+  /// The ledger itself lives in [`Work`], because the tables in [`crate::graphql::scratch`] have loops the
   /// *document* decides the length of and those loops must not be reachable without one — see
-  /// [`Names::intern`](crate::scratch::Names::intern).
+  /// [`Names::intern`](crate::graphql::scratch::Names::intern).
   #[inline]
   pub(super) fn charge(&mut self, units: u32) -> bool {
     self.work.take(units)
@@ -287,12 +287,12 @@ where
   /// Everything below the todo loop was written under one charge — `charge(1)` per queued set —
   /// and everything *above* it under none. Two document-sized `resize`s, a row per operation, a
   /// row per fragment, and a `Schema::sym` hash over each fragment's type condition all ran before
-  /// the first unit was taken, so a [`Budget::merge_work`](crate::Budget::merge_work) of **zero**
+  /// the first unit was taken, so a [`Budget::merge_work`](crate::graphql::Budget::merge_work) of **zero**
   /// still bought `O(definitions + fragments + condition bytes)` of work and allocation before the
   /// refusal. al8n/smear#198.
   ///
   /// It could not be answered by widening
-  /// [`Budget::validation_work`](crate::Budget::validation_work) over it. The two ledgers are
+  /// [`Budget::validation_work`](crate::graphql::Budget::validation_work) over it. The two ledgers are
   /// separate because a caller may raise or disable that one while relying on this one to cap
   /// draft 5.3.2, and a bound a caller can switch off is not a bound on the pass it was kept for.
   ///
@@ -307,7 +307,7 @@ where
   ///
   /// The last one is the [`check_fragment_spread`](Validator::check_fragment_spread) repair
   /// arriving at its merge twin: `composite_of` resolves through
-  /// [`Schema::sym`](crate::schema::Schema::sym), which hashes every byte of a spelling the
+  /// [`Schema::sym`](crate::graphql::schema::Schema::sym), which hashes every byte of a spelling the
   /// *document* chose, and one unit a row prices a name of any length at one unit.
   fn build_merge_index(&mut self) -> ControlFlow<()> {
     let document = self.document;
@@ -634,7 +634,7 @@ where
   /// holds one copy of each — and the caller must use the range that comes back, not the one it
   /// handed in.
   ///
-  /// # It charges, for the same reason [`Names::intern`](crate::scratch::Names::intern) does
+  /// # It charges, for the same reason [`Names::intern`](crate::graphql::scratch::Names::intern) does
   ///
   /// [`hash_u32`] is the same unkeyed multiply-fold, read on its low half, and the key it folds is
   /// a row-id sequence the *document*'s structure decides. That is a weaker handle than a name —

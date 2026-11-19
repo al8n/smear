@@ -18,11 +18,11 @@ readme = "README.md"
 # id multiplexing and the entire client half are new code that arrives after the split, not with
 # it.
 #
-# `smear-schema` is taken with DEFAULT FEATURES OFF, which is the whole reason that crate has a
-# `build` feature instead of a sibling crate: a machine that READS a schema at execution time does
-# not get the parser underneath it through that edge. The parser is here anyway, directly, because
-# `Executor::new` takes an `&ExecutableDocument<S>` — that is not new and it is not the schema
-# edge's doing.
+# `smear-compiler` is taken with DEFAULT FEATURES OFF and no capability, which is the whole reason
+# that crate's builder is behind its `graphql` feature instead of in a sibling crate: a machine that
+# READS a schema at execution time gets the runtime layer through that edge, and not the parser
+# underneath a compiler. The parser is here anyway, directly, because `Executor::new` takes an
+# `&ExecutableDocument<S>` — that is not new and it is not the schema edge's doing.
 
 [features]
 default = ["std"]
@@ -34,8 +34,8 @@ default = ["std"]
 #
 # Each tier forwards to `serde` weakly, so the feature below takes the tier the build has and
 # turning a tier on never turns `serde` on.
-alloc = ["smear-parser/alloc", "smear-schema/alloc", "tokora/alloc", "dep:indexmap", "dep:foldhash", "serde?/alloc"]
-std = ["smear-parser/std", "smear-schema/std", "tokora/std", "dep:indexmap", "indexmap?/std", "foldhash?/std", "serde?/std"]
+alloc = ["smear-parser/alloc", "smear-compiler/alloc", "tokora/alloc", "dep:indexmap", "dep:foldhash", "serde?/alloc"]
+std = ["smear-parser/std", "smear-compiler/std", "tokora/std", "dep:indexmap", "indexmap?/std", "foldhash?/std", "serde?/std"]
 
 # `Serialize` and `Deserialize` for `Limits`, so a deployment can read its ceilings from its own
 # configuration; a field the input leaves out takes its default. `Extensions` has neither:
@@ -46,7 +46,7 @@ serde = ["dep:serde"]
 derive_more.workspace = true
 
 smear-parser = { workspace = true, features = ["graphql"] }
-smear-schema = { workspace = true }
+smear-compiler = { workspace = true }
 tokora.workspace = true
 
 # `Extensions`' map, which keeps insertion order, and its hasher where there is no standard
@@ -57,10 +57,10 @@ foldhash = { version = "0.2", default-features = false, optional = true }
 serde = { workspace = true, optional = true }
 
 [dev-dependencies]
-# The unit tests build a `Schema` from SDL, which is `smear-schema/build`. A dev-dependency rather
-# than a feature: it must not reach a consumer's graph, and cargo unifies it only into targets that
-# need dev-dependencies, so `cargo tree -p graphql-proto` is unaffected.
-smear-schema = { workspace = true, features = ["build"] }
+# The unit tests build a `Schema` from SDL, which is `smear-compiler/graphql`. A dev-dependency
+# rather than a feature: it must not reach a consumer's graph, and cargo unifies it only into
+# targets that need dev-dependencies, so `cargo tree -p graphql-proto` is unaffected.
+smear-compiler = { workspace = true, features = ["graphql"] }
 
 [lints]
 workspace = true

@@ -51,7 +51,7 @@ use core::fmt;
 use derive_more::IsVariant;
 use tokora::SimpleSpan;
 
-use smear_schema::{PackedType, Schema, Sym, TypeId};
+use smear_compiler::schema::{PackedType, Schema, Sym, TypeId};
 
 use super::{
   Extensions,
@@ -123,7 +123,7 @@ pub(super) enum Raw {
   /// position. The two factors belong to different parties and are bounded in different places:
   /// `written` is the caller's and is charged against this ceiling, which is what raises this; and
   /// `declared` is the deployment's, bounded at schema build by
-  /// [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) rather than billed to a request
+  /// [`MAX_FIELD_ARGUMENTS`](smear_compiler::schema::MAX_FIELD_ARGUMENTS) rather than billed to a request
   /// that did not choose it. Charging `written` alone was published as bounding the product, and
   /// it does not — the product is zero at zero written and the scan is not. al8n/smear#198.
   ArgumentBudget(FieldBudget),

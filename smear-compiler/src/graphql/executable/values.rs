@@ -19,7 +19,7 @@ use super::{
   nodes::{ArgumentLike, DirectiveLike, ObjectFieldLike, ValueLike, name_bytes},
   probe_partition, sort_metered, units,
 };
-use crate::{
+use crate::graphql::{
   diagnostic::{Context, MemberContext, UsageContext},
   schema::{DirectiveLocation, PackedType, Range32, Sym, TypeKind},
   scratch::{
@@ -389,11 +389,11 @@ where
     //
     // "Bounded by it" is a claim about **two** groups, because this function is reached from
     // `check_arguments`'s field caller and from `check_directives` — and for a round it held for
-    // only one of them: `smear_schema::MAX_FIELD_ARGUMENTS` was enforced at a single site, the
+    // only one of them: `crate::schema::MAX_FIELD_ARGUMENTS` was enforced at a single site, the
     // field path, so a directive definition's declared list was unbounded here and the charge
     // below was the only thing standing in front of it. A charge is not a bound, it is a bill,
     // and this one bills the request for a width the deployment wrote.
-    // `smear_schema::MAX_DIRECTIVE_ARGUMENTS` closes the other group at the same place and for
+    // `crate::schema::MAX_DIRECTIVE_ARGUMENTS` closes the other group at the same place and for
     // the same reason. al8n/smear#198.
     if let Some(group) = definitions
       && check
@@ -1435,7 +1435,7 @@ fn is_finite(spelling: &str) -> bool {
 #[cfg(test)]
 mod tests {
   use super::{are_types_compatible, fits_i32, is_finite};
-  use smear_schema::{PackedType, Sym, TypeId};
+  use crate::schema::{PackedType, Sym, TypeId};
 
   fn named(id: u32) -> PackedType {
     PackedType::named(Sym::new(id), TypeId::new(id))

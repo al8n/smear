@@ -36,6 +36,7 @@
 //! "removed, not bounded", because "a flat fragment chain drove [a recursive walk] to `SIGABRT`".
 //! This is that chain, met by the walk that reads the tree back.
 
+use smear_compiler::schema::Schema;
 use smear_parser::{
   graphql::{
     GraphQL,
@@ -45,7 +46,6 @@ use smear_parser::{
   },
   lexer::tokora::{Parse as _, Parser},
 };
-use smear_schema::Schema;
 
 use crate::{Executor, Leaf, Response, Values};
 

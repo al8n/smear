@@ -38,11 +38,11 @@
 
 use tokora::{SimpleSpan, span::AsSpan};
 
+use smear_compiler::schema::{Schema, TypeId, bucket, hash_bytes, is_name, is_name_tail};
 use smear_parser::graphql::ast::{
   Directive, Directives, ExecutableDocument, Field, FragmentDefinition, InputValue, Selection,
   SelectionSet,
 };
-use smear_schema::{Schema, TypeId, bucket, hash_bytes, is_name, is_name_tail};
 
 use super::{
   Values,
@@ -340,7 +340,7 @@ pub(super) struct Fault<'a> {
 /// [`Groups`].
 ///
 /// **`Schema::sym`, which was examined, cleared, and cleared on the wrong axis.** `expand` and
-/// [`applies`] probe the schema's [`NameIndex`](smear_schema::NameIndex) with *document* bytes.
+/// [`applies`] probe the schema's [`NameIndex`](smear_compiler::schema::NameIndex) with *document* bytes.
 /// The residual here used to end there: the table is populated from the **schema**, which the
 /// operator wrote, so a client chooses the lookup key and never the run it walks — the same
 /// question that condemned [`Fragments`], answered the other way.

@@ -574,6 +574,7 @@
 #![cfg(any(feature = "std", feature = "alloc"))]
 
 use graphql_proto::{Executor, Leaf, Node, ReqId, Values};
+use smear_compiler::schema::Schema;
 use smear_parser::{
   graphql::{
     GraphQL,
@@ -585,7 +586,6 @@ use smear_parser::{
   },
   lexer::tokora::{Parse as _, Parser},
 };
-use smear_schema::Schema;
 
 /// One field at a leaf type and one at an object type, each of which the documents below take
 /// twice: once under an alias and once under its own name.

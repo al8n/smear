@@ -1,0 +1,524 @@
+//! Types: each written occurrence, and each type's interned identity.
+
+use core::num::NonZeroU32;
+
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
+use tokora::diagnostic::Location;
+
+use crate::graphqlx::{
+  id::{DefId, IdRange, Sym, TyId, TypeExprId, dense},
+  package::Tier,
+};
+
+use super::{
+  Model,
+  satisfy::{Steps, Wanted},
+  table::{KIND_LIST, KIND_NAMED, KIND_PARAM, KIND_UNRESOLVED, PathRow, TyRow, TypeExprRow},
+};
+
+/// Where a written path starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
+pub enum PathRoot {
+  /// No root: the path starts in the scope it is written in, as `Int` and `geo::Point` do.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
+  Relative,
+  /// `~::`: the root module of the package it is written in.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
+  Package,
+  /// `^::`: a package the one it is written in may reach, named by the path's first segment.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
+  Dependency,
+  /// `..::`, as many times as it holds: that many modules up from the one it is written in.
+  Parent(NonZeroU32),
+}
+
+/// A path as written: where it starts, and its segments.
+///
+/// The written spelling is kept beside what it resolved to: `Int` stays `Int` although it names
+/// `i32`, and an extension's own name for a type parameter stays its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Path<'a> {
+  root: PathRoot,
+  segments: &'a [Sym],
+}
+
+impl<'a> Path<'a> {
+  /// The path `row` holds in `model`.
+  pub(super) fn of(model: &'a Model, row: PathRow) -> Self {
+    Self {
+      root: row.root,
+      segments: row.segments.of(&model.paths),
+    }
+  }
+
+  /// Where it starts.
+  #[inline]
+  pub const fn root(&self) -> PathRoot {
+    self.root
+  }
+
+  /// Its segments, in order: `geo` and `Point` for `^::geo::Point`. Each reads through
+  /// [`Model::name`].
+  #[inline]
+  pub const fn segments(&self) -> &'a [Sym] {
+    self.segments
+  }
+}
+
+/// What one written type occurrence is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
+pub enum TypeExprKind<'a> {
+  /// A definition, and the arguments written for it.
+  Named(NamedTypeExpr<'a>),
+  /// One of a definition's type parameters, by its [`index`](TypeParamRef::index), which may lie
+  /// past every parameter the definition has: an extension names its target's parameters by
+  /// position, so a name it gives past them has a position past them too; and a definition that
+  /// replaces a GraphQL built-in declares no parameter, so a name its refused list gives has a
+  /// position no parameter has. Each such list is refused where it is written, and the
+  /// occurrence's type is the unresolved one.
+  Param(TypeParamRef),
+  /// A list, of its element as written.
+  List(TypeExprId),
+  /// A path that did not resolve. Only an analysis that is not ok has one, within the extent of
+  /// the error that says why.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
+  Unresolved,
+}
+
+/// A definition, and the arguments written for it: [`TypeExprKind::Named`]'s payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NamedTypeExpr<'a> {
+  pub(crate) def: DefId,
+  pub(crate) args: &'a [TypeExprId],
+}
+
+impl<'a> NamedTypeExpr<'a> {
+  /// The definition it names.
+  #[inline]
+  pub const fn def(&self) -> DefId {
+    self.def
+  }
+
+  /// The arguments as written, in order: fewer than the definition's parameters when trailing
+  /// defaults fill the rest, and none for an alias such as `NonZeroU32`. The complete
+  /// instantiation is the occurrence's type.
+  #[inline]
+  pub const fn args(&self) -> &'a [TypeExprId] {
+    self.args
+  }
+}
+
+/// One of a definition's type parameters, by its position: [`TypeExprKind::Param`]'s and
+/// [`TyKind::Param`]'s payload. What the position may be is each variant's to say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TypeParamRef {
+  pub(crate) def: DefId,
+  pub(crate) index: u32,
+}
+
+impl TypeParamRef {
+  /// The definition the parameter belongs to.
+  #[inline]
+  pub const fn def(&self) -> DefId {
+    self.def
+  }
+
+  /// The parameter's position: its index among the definition's type parameters.
+  #[inline]
+  pub const fn index(&self) -> u32 {
+    self.index
+  }
+}
+
+/// What one type is: the shapes of [`TypeExprKind`], with every argument a type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
+#[non_exhaustive]
+pub enum TyKind<'a> {
+  /// A definition with every argument it has: the written ones, then the defaults that filled the
+  /// rest, substituted, with an alias expanded.
+  Named(NamedTy<'a>),
+  /// One of a definition's type parameters: the `T` of `Page<T>` and the `U` of `Cursor<U>` are
+  /// two types.
+  Param(TypeParamRef),
+  /// A list, of its element.
+  List(TyId),
+  /// The one type every unresolved occurrence shares, which a rule tests for before it compares
+  /// two types.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
+  Unresolved,
+}
+
+/// A definition with every argument it has: [`TyKind::Named`]'s payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NamedTy<'a> {
+  pub(crate) def: DefId,
+  pub(crate) args: &'a [TyId],
+}
+
+impl<'a> NamedTy<'a> {
+  /// The type `def` names, with `args`, every argument it has.
+  ///
+  /// Crate-private: the model builds these, and nothing outside the crate has a model to point
+  /// into.
+  #[inline]
+  pub(crate) const fn new(def: DefId, args: &'a [TyId]) -> Self {
+    Self { def, args }
+  }
+
+  /// The definition.
+  #[inline]
+  pub const fn def(&self) -> DefId {
+    self.def
+  }
+
+  /// Every argument, in the definition's order: the written ones, then the defaults that filled
+  /// the rest. A collection's key or element, the first argument of a definition `@set` or `@map`
+  /// makes one, is non-null here however it is written, so it may differ in nullness from the type
+  /// of the occurrence that writes it.
+  #[inline]
+  pub const fn args(&self) -> &'a [TyId] {
+    self.args
+  }
+}
+
+impl Model {
+  /// The type occurrence `id` names.
+  ///
+  /// # Panics
+  ///
+  /// If `id` is not one of this model's type occurrences: an id belongs to the analysis that
+  /// issued it.
+  #[inline]
+  pub fn type_expr(&self, id: TypeExprId) -> TypeExpr<'_> {
+    assert!(
+      (id.get() as usize) < self.type_exprs.len(),
+      "type occurrence id {} is past the {} type occurrences of this model",
+      id.get(),
+      self.type_exprs.len()
+    );
+    TypeExpr { model: self, id }
+  }
+
+  /// Every type occurrence, in id order: each written occurrence, in every package, a nested
+  /// argument's and a default's included.
+  #[inline]
+  pub(crate) fn type_exprs(&self) -> IdRange<TypeExprId> {
+    IdRange::new(0, dense(self.type_exprs.len()))
+  }
+
+  /// The type `id` names.
+  ///
+  /// # Panics
+  ///
+  /// If `id` is not one of this model's types: an id belongs to the analysis that issued it.
+  #[inline]
+  pub fn ty(&self, id: TyId) -> Ty<'_> {
+    assert!(
+      (id.get() as usize) < self.tys.len(),
+      "type id {} is past the {} types of this model",
+      id.get(),
+      self.tys.len()
+    );
+    Ty { model: self, id }
+  }
+
+  /// The distinct closed types that the program's written occurrences of `def` resolve to, with
+  /// defaults filled, in id order.
+  ///
+  /// Substitution is not followed: a written `Page<User>` is listed, and a `Cursor<User>` that
+  /// `Page`'s fields would need is listed only where the program writes one. A code generator that
+  /// monomorphises computes that closure from these.
+  /// [`UnboundedInstantiation`](crate::graphqlx::UnboundedInstantiation), walked over every
+  /// supplied package, refuses every growth that could make that closure infinite. A directive has
+  /// none here: an application is no type occurrence, and its instantiation is
+  /// [`Application::ty`](crate::graphqlx::Application::ty).
+  ///
+  /// # Panics
+  ///
+  /// If `def` is not one of [`defs`](Self::defs).
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use smear_compiler::graphqlx::{
+  ///   Layout, Limits, Namespace, Package, SourceFile, Tier, TyKind, analyze,
+  /// };
+  ///
+  /// let root = Package::new("app", Layout::Flat, Tier::Std).with_files([SourceFile::new(
+  ///   "schema.graphqlx",
+  ///   "type Page<T> { items: [T!]! } type Query { a: Page<String> b: Page<Int> c: Page<String> }",
+  /// )]);
+  /// let analysis = analyze(&root, &[], &Limits::new());
+  /// assert!(analysis.is_ok());
+  ///
+  /// let model = analysis.model();
+  /// let page = model.lookup(Namespace::Type, "^::app::Page").expect("the root declares `Page`");
+  /// // `Page<String>`, written twice, is one type: two instantiations, each with its argument.
+  /// let instantiations = model.instantiations(page);
+  /// assert_eq!(instantiations.len(), 2);
+  /// for &ty in instantiations {
+  ///   let TyKind::Named(named) = model.ty(ty).kind() else {
+  ///     panic!("an instantiation is a named type");
+  ///   };
+  ///   assert_eq!(named.def(), page);
+  ///   assert_eq!(named.args().len(), 1);
+  /// }
+  /// ```
+  //
+  // The instantiation phase records each written occurrence's own type, both nullnesses when both
+  // are written; the builder sorts them and keeps each once.
+  #[inline]
+  pub fn instantiations(&self, def: DefId) -> &[TyId] {
+    self.defs[def.get() as usize]
+      .instantiations
+      .of(&self.instantiations)
+  }
+
+  /// Whether `ty` satisfies the interface or marker `interface`: for an interface that takes type
+  /// parameters, whether it satisfies some instantiation of it, whichever.
+  /// [`satisfies_ty`](Self::satisfies_ty) asks about one instantiation, exactly. For an interface
+  /// that takes none, a marker among them, the two are one question: `satisfies(ty,
+  /// model.builtins().map_key())` is whether `ty` may be a map's key or a set's element.
+  ///
+  /// Satisfaction is by declaration:
+  ///
+  /// - non-null is transparent on `ty`: `User!` satisfies what `User` does;
+  /// - a list, and the unresolved type, satisfy nothing;
+  /// - a named type satisfies what it is; each interface its definition's `implements` entries
+  ///   write, every contribution's, with its own arguments in place of the definition's type
+  ///   parameters; and `core`'s `MapKey` intrinsically when it is an integer primitive, `bool`,
+  ///   `string`, `id`, an enum, or `NonZero` of an integer primitive, each told by its definition
+  ///   and never by a spelling;
+  /// - a type parameter satisfies each interface one of its definition's bounds on it names, and
+  ///   each interface that bound's interface declares, with the bound's arguments in place of the
+  ///   interface's parameters;
+  /// - an interface that an interface declares is satisfied only by a type that declares it too,
+  ///   as GraphQL's rule on transitive interfaces asks of every type that implements an interface.
+  ///
+  /// [`Def::implements`](super::Def::implements) lists only what is written; this answers whether
+  /// the type may stand where the interface is required. Nothing is stored: a call costs the
+  /// `implements` entries of the type's definition, or for a type parameter its definition's bounds
+  /// and the entries of each bound's interface.
+  #[inline]
+  pub fn satisfies(&self, ty: TyId, interface: DefId) -> bool {
+    self
+      .judge(
+        &self.keys(),
+        ty,
+        Wanted::Definition(interface),
+        &mut Steps::uncounted(),
+      )
+      .unwrap_or(false)
+  }
+
+  /// Whether `ty` satisfies the interface type `interface`, exactly: an interface with its every
+  /// type argument, compared as one type, the `!` of each of its arguments included. `User`, which
+  /// declares `Comparable<User>`, satisfies `Comparable<User>` and not `Comparable<User!>`.
+  ///
+  /// It answers as [`satisfies`](Self::satisfies) does, with each interface type a definition
+  /// declares, or a bound names, compared with `interface`: a named type's `implements` entry is
+  /// compared with its type's own arguments in place of its definition's type parameters, and a
+  /// bound's interface's entry with the bound's arguments in place. An `interface` that is no
+  /// interface type, or a non-null one, which no `implements` entry and no bound writes, is
+  /// satisfied by nothing.
+  ///
+  /// Nothing is stored: a call costs the `implements` entries of the type's definition, or for a
+  /// type parameter its definition's bounds and the entries of each bound's interface, and for an
+  /// entry that names a type parameter, the distinct nodes of its type, each compared once.
+  #[inline]
+  pub fn satisfies_ty(&self, ty: TyId, interface: TyId) -> bool {
+    self
+      .judge(
+        &self.keys(),
+        ty,
+        Wanted::Type(interface),
+        &mut Steps::uncounted(),
+      )
+      .unwrap_or(false)
+  }
+}
+
+/// One written type occurrence of the model: what a diagnostic about a type points at.
+///
+/// `Copy`: it holds the model and an id, and everything it answers is borrowed from the model.
+#[derive(Clone, Copy)]
+pub struct TypeExpr<'a> {
+  model: &'a Model,
+  id: TypeExprId,
+}
+
+impl<'a> TypeExpr<'a> {
+  /// Its id.
+  #[inline]
+  pub const fn id(&self) -> TypeExprId {
+    self.id
+  }
+
+  /// What it is.
+  #[inline]
+  pub fn kind(&self) -> TypeExprKind<'a> {
+    let model: &'a Model = self.model;
+    let row = self.row();
+    match row.shape {
+      KIND_NAMED => TypeExprKind::Named(NamedTypeExpr {
+        def: row.def,
+        args: row.args.of(&model.type_expr_args),
+      }),
+      KIND_PARAM => TypeExprKind::Param(TypeParamRef {
+        def: row.def,
+        index: row.index,
+      }),
+      KIND_LIST => TypeExprKind::List(row.element),
+      KIND_UNRESOLVED => TypeExprKind::Unresolved,
+      _ => TypeExprKind::Unresolved,
+    }
+  }
+
+  /// Whether it is written non-null, with `!`.
+  #[inline]
+  pub fn non_null(&self) -> bool {
+    self.row().non_null
+  }
+
+  /// Where it is written. Its source is its own, which for an occurrence an extension wrote is
+  /// the extension's.
+  #[inline]
+  pub fn location(&self) -> Location {
+    self.row().location
+  }
+
+  /// Its type: the complete instantiation, with defaults filled and substituted and an alias
+  /// expanded. Two occurrences of one type answer one id.
+  //
+  // The instantiation phase gives it. An occurrence it could not type, or that holds one it could
+  // not, has the one unresolved type, within the extent of the error a phase reported for it.
+  #[inline]
+  pub fn ty(&self) -> TyId {
+    self.row().ty
+  }
+
+  /// The path as written, for every occurrence but a list: `Int`, `NonZeroU32`, `^::geo::Point`.
+  #[inline]
+  pub fn path(&self) -> Option<Path<'a>> {
+    let row = self.row().path?;
+    Some(Path::of(self.model, row))
+  }
+
+  /// Where the path is written, for every occurrence but a list.
+  #[inline]
+  pub fn path_location(&self) -> Option<Location> {
+    self.row().path.map(|row: PathRow| row.location)
+  }
+
+  /// The arguments as written, in order, whatever the occurrence resolved to: one that did not
+  /// resolve, or that names a type parameter, keeps those it was written with. They are the same
+  /// as [`kind`](Self::kind)'s [`args`](NamedTypeExpr::args) for a named occurrence, and the walk
+  /// reaches them for every shape. A list has none: its element is the one [`kind`](Self::kind)
+  /// answers.
+  #[inline]
+  pub fn written_args(&self) -> &'a [TypeExprId] {
+    let model: &'a Model = self.model;
+    self.row().args.of(&model.type_expr_args)
+  }
+
+  /// The model's record of this occurrence.
+  fn row(&self) -> &'a TypeExprRow {
+    let model: &'a Model = self.model;
+    &model.type_exprs[self.id.get() as usize]
+  }
+}
+
+impl core::fmt::Debug for TypeExpr<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    f.debug_struct("TypeExpr")
+      .field("id", &self.id)
+      .field("kind", &self.kind())
+      .field("non_null", &self.non_null())
+      .field("ty", &self.ty())
+      .finish()
+  }
+}
+
+/// One type of the model: its interned identity, so `==` on [`TyId`] is type equality.
+///
+/// `Copy`: it holds the model and an id, and everything it answers is borrowed from the model.
+#[derive(Clone, Copy)]
+pub struct Ty<'a> {
+  model: &'a Model,
+  id: TyId,
+}
+
+impl<'a> Ty<'a> {
+  /// Its id.
+  #[inline]
+  pub const fn id(&self) -> TyId {
+    self.id
+  }
+
+  /// What it is.
+  #[inline]
+  pub fn kind(&self) -> TyKind<'a> {
+    let model: &'a Model = self.model;
+    let row = self.row();
+    match row.shape {
+      KIND_NAMED => TyKind::Named(NamedTy::new(row.def, row.args.of(&model.ty_args))),
+      KIND_PARAM => TyKind::Param(TypeParamRef {
+        def: row.def,
+        index: row.index,
+      }),
+      KIND_LIST => TyKind::List(row.element),
+      KIND_UNRESOLVED => TyKind::Unresolved,
+      _ => TyKind::Unresolved,
+    }
+  }
+
+  /// Whether it is non-null. The unresolved type is not.
+  #[inline]
+  pub fn non_null(&self) -> bool {
+    self.row().non_null
+  }
+
+  /// The tier it requires: for a named type, the greatest of its definition's
+  /// [`tier`](crate::graphqlx::Def::tier) and its arguments'; for a list, `alloc` at least, and its
+  /// element's; and `core` for a type parameter and the unresolved type. A type parameter counting
+  /// as `core`, it is a lower bound for a type that names one.
+  #[inline]
+  pub fn tier(&self) -> Tier {
+    self.row().tier
+  }
+
+  /// Whether it names no type parameter, in itself or in any argument or element.
+  #[inline]
+  pub fn is_closed(&self) -> bool {
+    self.row().closed
+  }
+
+  /// The model's record of this type.
+  fn row(&self) -> &'a TyRow {
+    let model: &'a Model = self.model;
+    &model.tys[self.id.get() as usize]
+  }
+}
+
+impl core::fmt::Debug for Ty<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    f.debug_struct("Ty")
+      .field("id", &self.id)
+      .field("kind", &self.kind())
+      .field("non_null", &self.non_null())
+      .finish()
+  }
+}

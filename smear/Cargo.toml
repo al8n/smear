@@ -58,14 +58,14 @@ default = ["std", "graphql", "graphqlx", "parser"]
 # workspace no longer has: `std`, both dialects, and the parser, which a `smear` dependency
 # compiled unconditionally. A default build compiled the same code before and after the merge.
 
-alloc = ["smear-lexer/alloc", "smear-parser?/alloc", "smear-schema/alloc", "smear-semantics?/alloc", "smear-compiler?/alloc", "graphql-proto?/alloc", "smear-analysis?/alloc", "tokora/alloc", "bstr_1?/alloc", "smol-bytes_0_2?/alloc"]
+alloc = ["smear-lexer/alloc", "smear-parser?/alloc", "smear-compiler/alloc", "graphql-proto?/alloc", "tokora/alloc", "bstr_1?/alloc", "smol-bytes_0_2?/alloc"]
 
 # `thiserror/default` is gone from this list and is NOT a lost forward. The only
 # `#[derive(thiserror::Error)]` in the tree is `smear-lexer`'s `LengthError`, so the crate that
 # derives it is now the crate that owns the forward, and `smear-lexer/std` below is what turns it
 # on. `smear-smoke::std_tier` asserts that exact `impl std::error::Error` across a real dependency
 # edge, so a dropped forward is a compile error in a member rather than a silent tier change.
-std = ["smear-lexer/std", "smear-parser?/std", "smear-schema/std", "smear-semantics?/std", "smear-compiler?/std", "graphql-proto?/std", "smear-analysis?/std", "tokora/std", "bytes_1?/std", "bstr_1?/std", "hipstr_0_8?/std", "smol-bytes_0_2?/std"]
+std = ["smear-lexer/std", "smear-parser?/std", "smear-compiler/std", "graphql-proto?/std", "tokora/std", "bytes_1?/std", "bstr_1?/std", "hipstr_0_8?/std", "smol-bytes_0_2?/std"]
 
 graphql = ["smear-lexer/graphql", "smear-parser?/graphql"]
 # Tracks a moving dialect spec: the GraphQLx surface is semver-exempt until the dialect
@@ -95,14 +95,16 @@ parser = ["dep:smear-parser"]
 # because the specification it implements is standard GraphQL's: GraphQLx's schemas are analyzed
 # by `analysis`, and the dialect has no executable-document validator.
 #
-# It adds no THIRD-PARTY dependency — it adds `smear-compiler` and turns on `smear-schema/build`,
-# which is where the §3 pass lives, and the edge to `smear-semantics`, the kernels that pass runs
-# on, so the feature fence in `src/lib.rs` can read them. The schema representation itself is
-# `core` + `alloc`, which the `smear-noatomic` workspace member holds to by compiling those very
-# files for `thumbv6m-none-eabi` with an empty `[dependencies]` table of its own. What every build
-# with a tier already has is the base this is measured against: `smear-schema`'s owned-text seam
-# brings smol-bytes, and `bytes` under it, on a target with pointer-width atomics.
-validator = ["parser", "graphql", "dep:smear-compiler", "smear-schema/build", "dep:smear-semantics"]
+# It adds no THIRD-PARTY dependency — it turns on `smear-compiler/graphql`, which is where the §3
+# pass and the §5 rules live, with the private kernel they run on. That is the compiler's own
+# `graphql`, and the umbrella's `graphql` above is the dialect: the two names meet only here, and
+# the feature fence in `src/lib.rs` asserts `smear-compiler/graphql` against this feature. The
+# schema representation itself is `core` + `alloc`, which the `smear-noatomic` workspace member
+# holds to by compiling those very files for `thumbv6m-none-eabi` with an empty `[dependencies]`
+# table of its own. What every build with a tier already has is the base this is measured against:
+# `smear-compiler`'s owned-text seam brings smol-bytes, and `bytes` under it, on a target with
+# pointer-width atomics.
+validator = ["parser", "graphql", "smear-compiler/graphql"]
 
 # Draft §6 execution (`smear::proto`): the Sans-I/O query executor.
 #
@@ -113,8 +115,8 @@ validator = ["parser", "graphql", "dep:smear-compiler", "smear-schema/build", "d
 #
 # `graphql-proto` defines no value type of its own: the driver's representation reaches it through
 # the `proto::Values` trait, so it is `core` + `alloc` for the same reason the schema representation
-# is, and it takes `smear-schema` with default features off so reading a schema does not pull the
-# front end. It brings one THIRD-PARTY crate for its draft §7.1.7 maps, `indexmap` — with
+# is, and it takes `smear-compiler` with default features off and no capability, so reading a
+# schema does not pull the front end. It brings one THIRD-PARTY crate for its draft §7.1.7 maps, `indexmap` — with
 # `hashbrown` and `equivalent` beneath it, and with `alloc` `foldhash`, the hasher where `std` is
 # off — and both of its tiers turn that on, so a build with no tier compiles none of them.
 #
@@ -133,15 +135,15 @@ proto = ["validator", "dep:graphql-proto", "dep:itoa", "dep:zmij"]
 # THIS IS NOT WHAT PUTS INTROSPECTION IN A SCHEMA. The `__`-prefixed meta-schema is injected by
 # every build, feature or no feature, because an introspection *query* is an executable document
 # that draft 5.3.1 asks about like any other. This feature is only about where a schema comes
-# *from*, and `smear-schema/src/builtin.rs` carries that distinction at the other end.
-introspection = ["validator", "smear-compiler/introspection", "smear-schema/introspection"]
+# *from*, and `smear-compiler/src/schema/builtin.rs` carries that distinction at the other end.
+introspection = ["validator", "smear-compiler/introspection"]
 
 # GraphQLx schema analysis (`smear::analysis`): GraphQLx packages in, a resolved model and its
 # diagnostics out. It implies `parser` and `graphqlx`, because the analyzer reads the GraphQLx
 # parser's tree, and no tier: like every capability here it compiles nothing that allocates until
-# `std` or `alloc` is on as well. It turns on `smear-semantics` beside `smear-analysis`, which is
-# the edge the feature fence in `src/lib.rs` reads that crate's witnesses through.
-analysis = ["parser", "graphqlx", "dep:smear-analysis", "dep:smear-semantics"]
+# `std` or `alloc` is on as well. It turns on `smear-compiler/graphqlx`, the compiler's own
+# `graphqlx` and not the dialect above, and the feature fence in `src/lib.rs` asserts the two equal.
+analysis = ["parser", "graphqlx", "smear-compiler/graphqlx"]
 
 # `Serialize` and `Deserialize` for `proto::Limits`, so a deployment can read the executor's
 # ceilings from its own configuration; a field the input leaves out takes its default. The
@@ -158,16 +160,20 @@ serde = ["graphql-proto?/serde"]
 # silent — cargo falls back to the implicit feature an optional dependency creates and resolution
 # still succeeds.
 #
+# Each also forwards to `smear-compiler`, whose analyzer implements `SourceText` for the backing:
+# strongly, because that edge is unconditional. The compiler forwards it to the parser weakly, so
+# without `analysis` the backing compiles nothing more there.
+#
 # The versioned feature is the switch, and the unversioned name is a pure alias for the current
 # major. The dependency key carries the version too, so the crate is `bytes_1` in code.
 bytes = ["bytes_1"]
-bytes_1 = ["dep:bytes_1", "smear-lexer/bytes_1", "smear-parser?/bytes_1", "smear-analysis?/bytes_1", "tokora/bytes_1"]
+bytes_1 = ["dep:bytes_1", "smear-lexer/bytes_1", "smear-parser?/bytes_1", "smear-compiler/bytes_1", "tokora/bytes_1"]
 bstr = ["bstr_1"]
-bstr_1 = ["dep:bstr_1", "smear-lexer/bstr_1", "smear-parser?/bstr_1", "smear-analysis?/bstr_1", "tokora/bstr_1"]
+bstr_1 = ["dep:bstr_1", "smear-lexer/bstr_1", "smear-parser?/bstr_1", "smear-compiler/bstr_1", "tokora/bstr_1"]
 hipstr = ["hipstr_0_8"]
-hipstr_0_8 = ["dep:hipstr_0_8", "smear-lexer/hipstr_0_8", "smear-parser?/hipstr_0_8", "smear-analysis?/hipstr_0_8", "tokora/hipstr_0_8"]
+hipstr_0_8 = ["dep:hipstr_0_8", "smear-lexer/hipstr_0_8", "smear-parser?/hipstr_0_8", "smear-compiler/hipstr_0_8", "tokora/hipstr_0_8"]
 smol-bytes = ["smol-bytes_0_2"]
-smol-bytes_0_2 = ["dep:smol-bytes_0_2", "smear-lexer/smol-bytes_0_2", "smear-parser?/smol-bytes_0_2", "smear-analysis?/smol-bytes_0_2", "tokora/smol-bytes_0_2"]
+smol-bytes_0_2 = ["dep:smol-bytes_0_2", "smear-lexer/smol-bytes_0_2", "smear-parser?/smol-bytes_0_2", "smear-compiler/smol-bytes_0_2", "tokora/smol-bytes_0_2"]
 
 # The umbrella twin of `smear-parser/materialized-numbers` — a second set of GraphQL value
 # productions carrying `i64` and `f64` where the slice parser carries a source slice.
@@ -229,9 +235,10 @@ lossless-coverage = ["rowan_0_17", "smear-parser/lossless-coverage"]
 #
 # It also compiles `analysis::graphqlx::test_support`, the door through which the analysis model
 # tests build small models with the analyzer's crate-private builder, for the same reason: those
-# tests are separate crates. Like the lossless scaffolding it is hidden, and it implies nothing: the
-# forward is weak, so a build without `analysis` asks `smear-analysis` for nothing.
-test-support = ["smear-parser?/test-support", "smear-analysis?/test-support"]
+# tests are separate crates. Like the lossless scaffolding it is hidden, and it implies nothing. The
+# forward to `smear-compiler` is strong, because that edge is unconditional, and it is inert there
+# without `analysis`: the door is inside the analyzer, which `smear-compiler/graphqlx` gates.
+test-support = ["smear-parser?/test-support", "smear-compiler/test-support"]
 
 # ── AN UMBRELLA'S DEPENDENCY TABLE ──────────────────────────────────────────────────────────
 #
@@ -256,30 +263,18 @@ smear-lexer.workspace = true
 smear-parser = { workspace = true, optional = true }
 
 # UNCONDITIONAL, and that is a decision rather than an oversight. `smear::diagnostic` is an ungated
-# public module today and the vocabulary behind it moved into `smear-schema`, so an optional edge
-# would make that path appear and disappear with a feature — an API change this split is not
-# allowed. What it costs a `--no-default-features` build is this crate's ungated half, `builtin`
-# and `diagnostic`; `std` or `alloc` adds the representation. The builder and the introspection
-# door are behind `smear-schema/build`, which `validator` above turns on.
-smear-schema.workspace = true
+# public module today and the vocabulary behind it lives in `smear-compiler`'s runtime layer, so an
+# optional edge would make that path appear and disappear with a feature — an API change this split
+# is not allowed. What it costs a `--no-default-features` build is that layer's ungated half,
+# `builtin` and `diagnostic`; `std` or `alloc` adds the representation. The two compilers are behind
+# the crate's own features: `smear-compiler/graphql`, which `validator` above turns on, and
+# `smear-compiler/graphqlx`, which `analysis` turns on.
+smear-compiler.workspace = true
 
-# The protocol machine, behind `proto`. It brings `smear-schema` with DEFAULT FEATURES OFF of its
-# own accord; the unconditional edge above is what keeps `smear::diagnostic` ungated, and the two
-# requests unify the way cargo unifies any two.
+# The protocol machine, behind `proto`. It brings `smear-compiler` with DEFAULT FEATURES OFF and no
+# capability of its own accord; the unconditional edge above is what keeps `smear::diagnostic`
+# ungated, and the two requests unify the way cargo unifies any two.
 graphql-proto = { workspace = true, optional = true }
-
-# Draft §5 validation, behind `validator`. It takes `smear-schema` WITH `build`, which is the whole
-# difference between it and the protocol machine above: this crate produces a `Schema`, that one
-# reads one.
-smear-compiler = { workspace = true, optional = true }
-
-# GraphQLx schema analysis, behind `analysis`.
-smear-analysis = { workspace = true, optional = true }
-
-# MOUNTED NOWHERE, and a dependency anyway: the edge exists so the feature fence in `src/lib.rs`
-# can read this crate's witnesses. The crate sits beneath `smear-schema`'s builder and beneath
-# `smear-analysis`, and `validator` and `analysis`, which turn those on, turn this edge on too.
-smear-semantics = { workspace = true, optional = true }
 
 # ── THE TWO NUMBER FORMATTERS, BEHIND `proto` WITH THE MODULE THAT USES THEM ─────────────────
 #

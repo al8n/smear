@@ -40,7 +40,7 @@
 //! [`FieldRequest::path`] is how it is reported.
 //!
 //! [`ArgumentSource::SchemaDefault`] carries a known limit of the schema representation.
-//! [`DefaultKind`](smear_schema::DefaultKind) reduces a declared default to two bits —
+//! [`DefaultKind`](smear_compiler::schema::DefaultKind) reduces a declared default to two bits —
 //! present, and null — because that is all the validator ever needed. So `proto` can say *that*
 //! draft §6.4.1 step 5.h.i applies and cannot say what the default's content is, and the driver,
 //! which owns the SDL, supplies it. Teaching the schema to retain default literals would let
@@ -50,8 +50,8 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use tokora::SimpleSpan;
 
+use smear_compiler::schema::{PackedType, Schema, Sym, TypeId};
 use smear_parser::graphql::ast::{Field, InputValue, SelectionSet};
-use smear_schema::{PackedType, Schema, Sym, TypeId};
 
 use super::response::{FlatRun, Path, Slot};
 

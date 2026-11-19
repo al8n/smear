@@ -11,7 +11,7 @@
 //!
 //! # What this module is
 //!
-//! [`Executor`] runs a validated query against a built [`Schema`](smear_schema::Schema) and
+//! [`Executor`] runs a validated query against a built [`Schema`](smear_compiler::schema::Schema) and
 //! produces a draft §7.1 response. It performs no I/O, holds no runtime, spawns nothing, and never
 //! calls a resolver: it says which field it needs next and waits to be told the answer. That is
 //! what makes it usable from a thread pool, an async runtime, a wasm host or a C caller without
@@ -144,7 +144,7 @@
 //! about none of them. `__typename` is answered from the object type the executor resolved and
 //! arrives as [`Node::TypeName`], because the executor has already spent that object type deciding
 //! which fragments applied and must not let the answer disagree with them. `__schema` and `__type`
-//! are answered from the [`Schema`](smear_schema::Schema) itself — every field beneath them, to any
+//! are answered from the [`Schema`](smear_compiler::schema::Schema) itself — every field beneath them, to any
 //! depth, before the call that collected them returns — and arrive as [`Node::Str`],
 //! [`Node::Bool`] and [`Node::Enum`] inside ordinary lists and objects. Only the query root type
 //! has them, which is draft §4.4's placement, and the one thing about them a driver still answers
@@ -227,7 +227,7 @@
 //! #   },
 //! #   lexer::tokora::{Parse as _, Parser},
 //! # };
-//! # use smear_schema::Schema;
+//! # use smear_compiler::schema::Schema;
 //!
 //! // Draft §6's `extensions`, held where every reader can reach it. §6 asks only that it be a map
 //! // with unique-prefixed keys; nothing reads it but this driver, so nothing else constrains it.
@@ -336,7 +336,7 @@
 //!   },
 //!   lexer::tokora::{Parse as _, Parser},
 //! };
-//! use smear_schema::Schema;
+//! use smear_compiler::schema::Schema;
 //!
 //! // The driver's value representation, and the space that interprets it.
 //! #[derive(Clone, Debug)]

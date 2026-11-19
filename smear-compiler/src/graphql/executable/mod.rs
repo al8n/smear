@@ -619,7 +619,7 @@ impl core::error::Error for Invalid {}
 /// # Example
 ///
 /// ```
-/// use smear_compiler::{Budget, First, Schema, Scratch, validate_executable};
+/// use smear_compiler::graphql::{Budget, First, Schema, Scratch, validate_executable};
 /// use smear_parser::{
 ///   graphql::{
 ///     GraphQL,
@@ -2682,7 +2682,7 @@ where
   ///
   /// [`Validator::resolve_frames`]'s twin over the other stack, and for the same reason — including
   /// the reason its number was wrong. This stack enters a fragment body through
-  /// [`Frame::root`](crate::scratch::Frame::root) exactly as the selection stack does, so a
+  /// [`Frame::root`](crate::graphql::scratch::Frame::root) exactly as the selection stack does, so a
   /// subscription whose root fields sit inside a fragment reached at depth `D` billed `D` for each
   /// `O(1)` resolution in it. Named in the same finding, repaired in the same way, and through the
   /// same helper rather than a second copy of the arithmetic. al8n/smear#198.
@@ -3157,7 +3157,7 @@ where
 #[cfg(test)]
 mod tests {
   use super::{Ledger, units};
-  use crate::Budget;
+  use crate::graphql::Budget;
 
   /// An absent bound is closed under spending.
   ///

@@ -25,6 +25,7 @@
 #![cfg(any(feature = "std", feature = "alloc"))]
 
 use graphql_proto::{ArgumentSource, Executor, Kind, Leaf, Node, Segment, Values, variable_key};
+use smear_compiler::schema::Schema;
 use smear_parser::{
   graphql::{
     GraphQL,
@@ -38,7 +39,6 @@ use smear_parser::{
   },
   lexer::tokora::{Parse as _, Parser},
 };
-use smear_schema::Schema;
 use tokora::SimpleSpan;
 
 /// A spelling no `S` can turn into a `&str`: `0xff` never begins a UTF-8 sequence.

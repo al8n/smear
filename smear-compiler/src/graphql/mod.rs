@@ -34,7 +34,7 @@
 //! # Validating a request
 //!
 //! ```
-//! use smear_compiler::{Budget, First, Rule, Schema, Scratch, validate_executable};
+//! use smear_compiler::graphql::{Budget, First, Rule, Schema, Scratch, validate_executable};
 //! use smear_parser::{
 //!   graphql::{
 //!     GraphQL,
@@ -107,48 +107,11 @@
 //!   `u32` mask, and an interface's implementors are a bitset — so draft 5.5.2.3, all four of its
 //!   subsections, is one word-`AND`.
 
-#![cfg_attr(not(feature = "std"), no_std)]
-#![cfg_attr(docsrs, feature(doc_cfg))]
-#![cfg_attr(docsrs, allow(unused_attributes))]
-#![deny(missing_docs)]
-
-// The alloc-as-std alias: the crate's files spell their allocations `std::boxed::Box`, which
-// resolves to `alloc` in a `no_std` build with `alloc` and to the real `std` in a `std` build.
-//
-// `#[allow(unused_extern_crates)]`, ON EVERY MEMBER AND NOT ONLY THE ONE THAT TRIPS TODAY. The
-// alias is a crate-wide compatibility shim whose USERS are feature-gated, and
-// `unused_extern_crates` is a lint about the item: it fires in any configuration that happens to
-// compile none of them. On this tree that is `smear-parser` with `alloc` alone, where every
-// `std::` use is inside a dialect or `rowan` module — but the construct is identical in all five
-// members and which one trips is an accident of where the uses sit. Measured: `smear-lexer` 41,
-// `smear-parser` 70, `smear-schema` 15, `smear-compiler` 8, `graphql-proto` 82.
-//
-// Not a narrower `#[cfg]`: the honest predicate would be "any feature whose module names `std::`",
-// which is a restatement of the module list and drifts the first time one is added. And not
-// deletion, because the gated modules need it.
-//
-// `unused_extern_crates` is DENIED in `[workspace.lints.rust]` so that this allow is the recorded
-// exception rather than the lint being off — a stray `extern crate` anywhere else is a hard error
-// locally, with no `RUSTFLAGS` needed. That deny is the repair for the gate, not for the code:
-// this construct reddened CI twice, and both times the local run that cleared it was narrower
-// than CI's.
-#[cfg(all(not(feature = "std"), feature = "alloc"))]
-#[allow(unused_extern_crates)]
-extern crate alloc as std;
-
-#[cfg(feature = "std")]
-#[allow(unused_extern_crates)]
-extern crate std;
-
-/// The built-once schema, and the draft §3 "Type Validation" pass that runs while building it.
-///
-/// The layer is the `smear-schema` crate; this is the name it has always had inside `smear` and
-/// the path every consumer already writes. Its `build` feature — which is what carries
-/// [`Schema::build`](smear_schema::Schema::build) — is a hard dependency of this crate rather
-/// than a feature of it: a validator with no builder could not produce the `Schema` its rules
-/// read.
+// The crate's `schema` module, re-exported so that `smear::validator::schema` resolves. No outer
+// doc comment: the module's own header is its one doc fragment, so its links resolve where they
+// are written.
 #[doc(inline)]
-pub use smear_schema as schema;
+pub use crate::schema;
 
 #[cfg(any(feature = "std", feature = "alloc"))]
 mod diagnostic;
@@ -188,29 +151,3 @@ pub use scratch::{Budget, Scratch};
 #[cfg(any(feature = "std", feature = "alloc"))]
 #[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
 pub use sink::{Collect, Count, First, Ignore, Sink};
-
-/// The features this crate was compiled with, as constants the umbrella asserts against.
-///
-/// **Not public API.** `smear` re-exports this crate whole, so every `#[cfg(feature = …)]` inside
-/// it is gated by THIS crate's features — and cargo unifies a package's features across the entire
-/// graph, so a second dependency naming `smear-compiler` directly could switch a capability on behind a
-/// `smear` consumer who never asked for it. Observed, not argued: with
-/// `smear = { default-features = false, features = ["std"] }` plus a direct `smear-compiler` dependency,
-/// a path the consumer had not enabled resolved.
-///
-/// `smear` reads these constants and refuses to compile when one disagrees with its own matching
-/// feature, which is what makes "the umbrella's feature is the gate" true rather than advertised.
-/// The alternative — a facade module per gated path — cannot reach trait impls, which are not
-/// namespaced, and would have to mirror every nested `#[cfg]` besides.
-///
-/// `ci/feature_reachability.py` derives this list from `cargo metadata` and fails when a feature
-/// this crate declares has no constant here or no assertion in `smear`.
-#[doc(hidden)]
-pub mod __features {
-  /// `alloc`, as this crate resolved it.
-  pub const ALLOC: bool = cfg!(feature = "alloc");
-  /// `introspection`, as this crate resolved it.
-  pub const INTROSPECTION: bool = cfg!(feature = "introspection");
-  /// `std`, as this crate resolved it.
-  pub const STD: bool = cfg!(feature = "std");
-}
