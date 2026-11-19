@@ -957,6 +957,16 @@ enum Budget {
   Values,
 }
 
+impl Budget {
+  /// The kind of `resource-limit` a row this budget could not pay for is.
+  const fn spent(self) -> Spent {
+    match self {
+      Self::Steps => Spent::Values,
+      Self::Values => Spent::Made,
+    }
+  }
+}
+
 /// What leaves out the defaults whose copies `Limits::max_values` could not pay for: what the
 /// report names.
 #[derive(Clone, Copy)]
@@ -3598,7 +3608,14 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// first. Each phase's steps are a kind of their own, and a limit on types is one kind across
   /// the phases.
   fn limit(&mut self, at: Location, stop: Stop, message: Message) {
-    if !self.types.say_limit(at, stop.spent(Spent::Values)) {
+    self.report_limit(at, stop.spent(Spent::Values), message);
+  }
+
+  /// Reports `resource-limit` of the kind `spent` at `at`, saying `message`, with its help, unless
+  /// one of that kind was said there already, as [`limit`](Self::limit) says. A report of
+  /// `Limits::max_values`, which no `Stop` names, is of the kind `Spent::Made`.
+  fn report_limit(&mut self, at: Location, spent: Spent, message: Message) {
+    if !self.types.say_limit(at, spent) {
       return;
     }
     let kind = DiagnosticKind::ResourceLimit;
@@ -4633,7 +4650,7 @@ impl<'p> Coercion<'_, 'p, '_> {
 
   /// Reports that `Limits::max_values` cannot pay for the copies of the defaults `asker`, at `at`,
   /// leaves out, which are not filled: an application's arguments, at its path, or an object
-  /// literal's fields, at the literal.
+  /// literal's fields, at the literal. Once for each place, as every `resource-limit`.
   fn full(&mut self, at: Location, asker: Asker) {
     let (left, what) = match asker {
       Asker::Application => ("arguments", "application"),
@@ -4649,7 +4666,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         "raise the limit with `Limits::with_max_values`, or write the {left}"
       )),
     };
-    self.limit(at, message);
+    self.report_limit(at, Spent::Made, message);
   }
 
   /// Makes the row of `making`'s node one unresolved row, typed with its type, with the path the
@@ -5813,7 +5830,8 @@ impl<'p> Coercion<'_, 'p, '_> {
     self.reporter.report(report.build());
   }
 
-  /// Reports that the lists a value written at `at` stands for are past `budget`.
+  /// Reports that the lists a value written at `at` stands for are past `budget`: once for each
+  /// place and budget, as every `resource-limit`.
   fn lone_limit(&mut self, at: Location, budget: Budget) {
     let message = match budget {
       Budget::Steps => Message {
@@ -5835,7 +5853,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         help: Cow::Borrowed("raise the limit with `Limits::with_max_values`, or write the lists"),
       },
     };
-    self.limit(at, message);
+    self.report_limit(at, budget.spent(), message);
   }
 }
 

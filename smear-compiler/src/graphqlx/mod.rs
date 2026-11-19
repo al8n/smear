@@ -287,8 +287,9 @@
 //! analysis says and not what it accepts, and the three bounds on a field's and a directive's
 //! arguments and a written type's wrappers, which refuse a shape and stop no work. From
 //! instantiation on, a written occurrence reports one for each kind of bound, whichever phase or
-//! path passes it there first: each phase's step budget is a kind of its own, and a bound on the
-//! types the phases build one kind across them.
+//! path passes it there first: each phase's step budget is a kind of its own,
+//! [`max_values`](Limits::max_values) another, and a bound on the types the phases build one kind
+//! across them.
 //!
 //! Before any bound applies, the diagnostic ceiling aside, the analysis reads what the caller
 //! supplied, to number and order it. It sorts each package's files by path, and orders two files

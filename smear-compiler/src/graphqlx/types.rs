@@ -24,8 +24,8 @@
 //!
 //! Every phase that shares these services says a `resource-limit` once for each written occurrence
 //! and kind of limit, whichever phase or path meets it there first, as `say_limit` keeps them: each
-//! phase's step budget is a kind of its own, and a limit on types, which every phase shares, one
-//! kind across the phases.
+//! phase's step budget is a kind of its own, `Limits::max_values` another, and a limit on types,
+//! which every phase shares, one kind across the phases.
 //!
 //! They also carry the analysis's limits and options for the phases after lowering, which read
 //! them through `Types::limits` and `Types::options` and keep no copy of their own.
@@ -154,13 +154,19 @@ impl Stop {
 }
 
 /// A kind of `resource-limit`: the step budget of the phase that ran out of it, each phase's its
-/// own, or a limit on the types a phase builds or derives, which every phase shares.
+/// own, `Limits::max_values`, or a limit on the types a phase builds or derives, which every phase
+/// shares.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Spent {
   /// `Limits::max_bound_steps`, the judging of bounds.
   Bounds,
   /// `Limits::max_value_steps`, coercion's.
   Values,
+  /// `Limits::max_values`, what coercion's lists and copies find left of it. Lowering, which runs
+  /// before these services, says its own once at each written value it refuses; coercion says this
+  /// kind at an application's path, an object literal or a lone value it makes, and makes a value
+  /// lowering refused one unresolved value and says nothing of it: the two never meet at one place.
+  Made,
   /// `Limits::max_implementation_steps`, the implementation check's.
   Implementation,
   /// A limit on the types a phase builds or derives.

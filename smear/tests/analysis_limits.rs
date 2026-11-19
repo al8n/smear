@@ -1231,6 +1231,54 @@ fn a_starved_copy_is_checked_at_no_instantiation() {
   );
 }
 
+/// `Limits::max_values` is a kind of `resource-limit` of its own, said once at a place, beside
+/// another kind said there: under two values, `@d<String>` reads its defaults' two literals, cannot
+/// pay for the copy of `a`'s `1`, and is `resource-limit` at its path; under a step budget that then
+/// leaves the check of `d<String>` too little to read `b`'s `"s"`, that check is `resource-limit`
+/// at the same path. Two reports there, one naming each limit. Refuses a value bound said as the
+/// step budget's kind, which would hide the check's stop.
+#[test]
+fn a_full_application_and_its_stopped_check_are_two_limits_at_its_path() {
+  let text = "directive @d<T>(a: Int = 1, b: T = \"s\") on OBJECT\n\
+              type Query @d<String> {\n  f: Int\n}\n";
+  let limits =
+    |steps: u32| -> Limits { Limits::new().with_max_values(2).with_max_value_steps(steps) };
+  let steps = (0..64_u32)
+    .find(|&steps: &u32| {
+      let analysis = analyze_text(text, &limits(steps), &Options::new());
+      found(&analysis, LIMIT).len() == 2
+    })
+    .expect("a step budget at which both limits are said");
+  let analysis = analyze_text(text, &limits(steps), &Options::new());
+  let schema = schema_file(&analysis);
+  let path = after(schema, text, "type Query @", "d");
+  assert_eq!(
+    found(&analysis, LIMIT),
+    [(path, None), (path, None)],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    analysis.diagnostics().len(),
+    2,
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  let reports = messages(&analysis, LIMIT);
+  assert!(
+    reports
+      .iter()
+      .any(|report: &String| report.contains(&format!("{VALUES}, 2"))),
+    "{reports:#?}"
+  );
+  assert!(
+    reports
+      .iter()
+      .any(|report: &String| report.contains(&format!("`Limits::max_value_steps`, {steps}"))),
+    "{reports:#?}"
+  );
+}
+
 /// A copy's count reads its default under the asker's type arguments, and what that reading reports
 /// stands whatever either budget then answers, once: at `core`, under the switch that judges
 /// compile-time metadata, `@d<E>` counts `Missing::A` under `E`, and the resolver refuses `Missing`.
