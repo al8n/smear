@@ -52,30 +52,22 @@ USER_AGENT = f"smear-release/{TOOLCHAIN} (+https://github.com/{REPOSITORY})"
 PUBLISH_ORDER = (
     "smear-lexer",
     "smear-parser",
-    "smear-semantics",
-    "smear-schema",
     "smear-compiler",
     "graphql-proto",
-    "smear-analysis",
     "smear",
 )
 BOOTSTRAP_0_0_1 = frozenset((
-    "smear-lexer", "smear-parser", "smear-semantics", "smear-schema", "smear-compiler",
-    "graphql-proto", "smear-analysis",
+    "smear-lexer", "smear-parser", "smear-compiler", "graphql-proto",
 ))
 BOOTSTRAP_LOGIN = "al8n"
 UNPUBLISHED_MEMBERS = frozenset(("smear-noatomic", "smear-smoke", "source-census"))
 INTERNAL_EDGES = {
     "smear-lexer": frozenset(),
     "smear-parser": frozenset(("smear-lexer",)),
-    "smear-semantics": frozenset(),
-    "smear-schema": frozenset(("smear-parser", "smear-semantics")),
-    "smear-compiler": frozenset(("smear-parser", "smear-schema")),
-    "graphql-proto": frozenset(("smear-parser", "smear-schema")),
-    "smear-analysis": frozenset(("smear-lexer", "smear-parser", "smear-semantics")),
+    "smear-compiler": frozenset(("smear-lexer", "smear-parser")),
+    "graphql-proto": frozenset(("smear-compiler", "smear-parser")),
     "smear": frozenset((
-        "graphql-proto", "smear-analysis", "smear-compiler", "smear-lexer", "smear-parser",
-        "smear-schema", "smear-semantics",
+        "graphql-proto", "smear-compiler", "smear-lexer", "smear-parser",
     )),
 }
 REQUIRED_WORKFLOWS = {
@@ -2007,8 +1999,7 @@ class ReleaseSelfTests(unittest.TestCase):
                 result = bootstrap_packages(manifest, target, self.commit, 0, output)
                 self.assertEqual(
                     selected,
-                    ["smear-semantics", "smear-schema", "smear-compiler", "graphql-proto",
-                     "smear-analysis"],
+                    ["smear-compiler", "graphql-proto"],
                 )
                 self.assertEqual([p["name"] for p in result["packages"]], list(PUBLISH_ORDER[:-1]))
                 self.assertEqual(load_json(output), result)
@@ -2249,7 +2240,7 @@ class ReleaseSelfTests(unittest.TestCase):
 
     def test_verify_refuses_a_missing_or_open_crate_name(self) -> None:
         verify_registry_names("0.0.2", self.fake_crate_registry())
-        for name in ("smear-semantics", "smear-analysis"):
+        for name in ("smear-compiler", "graphql-proto"):
             with self.subTest(absent=name), self.assertRaisesRegex(
                 ReleaseError,
                 f"{name} does not exist on crates.io.*publish it by hand once, before the release",
@@ -2284,9 +2275,9 @@ class ReleaseSelfTests(unittest.TestCase):
                 with self.subTest(**flags):
                     verify(self.fake_crate_registry(), **flags)
                     with self.assertRaisesRegex(
-                        ReleaseError, "smear-analysis does not exist on crates.io"
+                        ReleaseError, "smear-compiler does not exist on crates.io"
                     ):
-                        verify(self.fake_crate_registry(absent=("smear-analysis",)), **flags)
+                        verify(self.fake_crate_registry(absent=("smear-compiler",)), **flags)
                     with self.assertRaisesRegex(
                         ReleaseError, "smear does not enforce Trusted-Publishing-only"
                     ):
