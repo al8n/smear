@@ -14,9 +14,11 @@
 //! labelled at the type or the application that derives the instantiation and at the two; an
 //! argument made required, `unexpected-required-argument`, labelled there, at the argument and at
 //! the interface's field; or a stop, `resource-limit`. A derived instantiation of a definition that
-//! grows is not judged, nor is what only it derives.
+//! grows is not judged, nor is what only it derives. The report pass reads each occurrence and
+//! application once, finding its root by its type, whose nullable form is found once for each type
+//! and kept: so repeated occurrences of a wide type cost a lookup each.
 
-use std::{format, string::String, vec::Vec};
+use std::{collections::BTreeMap, format, string::String, vec::Vec};
 
 use tokora::diagnostic::Location;
 
@@ -79,6 +81,8 @@ impl Implementing<'_> {
       made: closure.blame(&making),
     };
     let supplied = self.sources.package_sources(ROOT).start();
+    // The root of each type an occurrence or an application has, by that type, either nullness.
+    let mut roots: BTreeMap<TyId, Option<u32>> = BTreeMap::new();
     for index in 0..self.builder.type_expr_count() {
       let Some((written, ty, at)) = self
         .builder
@@ -91,7 +95,7 @@ impl Implementing<'_> {
         continue;
       };
       if at.source() >= supplied {
-        self.report_derived(&closure, &blamed, at, def, ty);
+        self.report_derived(&closure, &blamed, &mut roots, at, def, ty);
       }
     }
     for index in 0..self.builder.application_count() {
@@ -111,7 +115,7 @@ impl Implementing<'_> {
         continue;
       };
       if at.source() >= supplied {
-        self.report_derived(&closure, &blamed, at, def, ty);
+        self.report_derived(&closure, &blamed, &mut roots, at, def, ty);
       }
     }
   }
@@ -139,11 +143,13 @@ impl Implementing<'_> {
 
   /// Reports at `at`, an occurrence or an application of `ty`, an instantiation of `user`, what its
   /// expansion reaches first that fails, for each check whose own verdict at `ty` holds, when `ty`
-  /// is a closed named type of `user` and a root of `closure`.
+  /// is a closed named type of `user` and a root of `closure`: found through `roots`, which keeps
+  /// each type's root the first time it is asked.
   fn report_derived(
     &mut self,
     closure: &Closure,
     blamed: &Blamed,
+    roots: &mut BTreeMap<TyId, Option<u32>>,
     at: Location,
     user: DefId,
     ty: TyId,
@@ -154,15 +160,22 @@ impl Implementing<'_> {
     {
       return;
     }
-    let nullable = if self.builder.ty_non_null(ty) {
-      self
-        .builder
-        .find_named(user, self.builder.ty_args(ty), false)
-        .unwrap_or(ty)
+    let found = if let Some(&known) = roots.get(&ty) {
+      known
     } else {
-      ty
+      let nullable = if self.builder.ty_non_null(ty) {
+        self
+          .builder
+          .find_named(user, self.builder.ty_args(ty), false)
+          .unwrap_or(ty)
+      } else {
+        ty
+      };
+      let found = closure.find(nullable);
+      roots.insert(ty, found);
+      found
     };
-    let Some(root) = closure.find(nullable) else {
+    let Some(root) = found else {
       return;
     };
     // Its own verdicts, made where it is written: one that fails was reported there.

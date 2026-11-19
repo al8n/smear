@@ -40,23 +40,27 @@
 //! A root is expanded once, and a derived instantiation only when its definition does not grow,
 //! where a type argument is passed on and never wrapped on a cycle: so the closure is finite, and
 //! each instantiation it derives is new to the model, counted toward `Limits::max_instantiations`
-//! and depth-checked against `Limits::max_generic_depth` as every rebuild is. Its cost is bounded,
-//! and all of it but the reading of the model is paid from `Limits::max_value_steps`:
+//! and depth-checked against `Limits::max_generic_depth` as every rebuild is. Each turn of each of
+//! its loops is a step of `Limits::max_value_steps`, or is bounded by the model's size:
 //!
-//! - finding the roots and what is relevant reads the types instantiation built, each distinct
-//!   type below a position once, with its arguments: linear in the model but for one sort, and
-//!   charged nothing;
-//! - each rebuild is a step for its root and one for each argument or element it looks at, as the
-//!   check at a written instantiation pays for its own, and a rebuild remembered costs nothing;
-//! - each generic named type or list an expansion walks is a step, once for each expansion that
-//!   walks it. A named type of no type parameter is free, and is met only as an argument or the
-//!   element of a type paid for, or as an argument a root's default fills: so a walk does at most
-//!   the steps it pays times the most type arguments a definition takes, plus one for each argument
-//!   a root's default fills;
+//! - finding the roots, what is relevant, and which positions an expansion reads, reads the types
+//!   instantiation built, each distinct type below a position once, with its arguments: linear in
+//!   the model but for sorting, and charged nothing. Each definition keeps its useful positions
+//!   alone, each distinct type once;
+//! - each position an expansion reads is a rebuild, a step for its root and one for each argument
+//!   or element it looks at, as the check at a written instantiation pays for its own; a position
+//!   whose rebuild the check of its instantiation made already is put on the walk's stack, a step;
+//! - a walk's stack holds generic named types and lists alone, each a step as it is put on it. A
+//!   type's distinct such arguments, or its element, are read the first time a walk meets it and
+//!   kept: so a type of no type parameter costs nothing past that one reading, and a type many
+//!   walks meet is read once;
 //! - each derived instantiation's check is a step for each pair of it and a row, made once, as
 //!   soon as it is derived;
-//! - blaming the failing instantiations reads each instantiation and each edge once, each edge a
-//!   step its walk paid.
+//! - blaming the failing instantiations reads each instantiation and each edge once, each edge
+//!   made by a step its walk paid; each report pass reads each occurrence and application once,
+//!   finding its root by its type's nullable form, found once for each type and kept.
+//!
+//! So the closure does work linear in the model's size and in the steps it pays, but for sorting.
 //!
 //! A limit that stops an expansion is `resource-limit`, once, at where the root whose expansion was
 //! running is first written, and the closure ends there. What it derived is still judged, each
@@ -121,12 +125,20 @@ struct Position {
 struct Building {
   /// The closure so far.
   closure: Closure,
-  /// Every generic definition's open positions, each definition's a run.
+  /// Every generic definition's open positions, each definition's a run; once what is relevant is
+  /// found, each definition's useful ones alone, each distinct type once, where first written.
   positions: Vec<Position>,
   /// Each definition's run of `positions`, by `DefId`.
   runs: Vec<PoolRange>,
   /// Whether each definition is relevant, by `DefId`.
   relevant: Vec<bool>,
+  /// Each type a walk met, with its run of `children`: its distinct arguments, or its element,
+  /// that are generic named types or lists, in order, read the first time a walk meets it.
+  kept: BTreeMap<TyId, PoolRange>,
+  /// The runs `kept` names.
+  children: Vec<TyId>,
+  /// The types a type's children being read have given already.
+  distinct: BTreeSet<TyId>,
   /// The types the expansion being made has walked.
   seen: BTreeSet<TyId>,
   /// The children the expansion being made has derived.
@@ -190,6 +202,9 @@ impl Coercion<'_, '_, '_> {
       positions: Vec::new(),
       runs: Vec::new(),
       relevant: Vec::new(),
+      kept: BTreeMap::new(),
+      children: Vec::new(),
+      distinct: BTreeSet::new(),
       seen: BTreeSet::new(),
       derived: BTreeSet::new(),
       stack: Vec::new(),
@@ -254,6 +269,9 @@ impl Coercion<'_, '_, '_> {
   /// parameter's place, an argument of the instantiation being expanded, which is written, ending
   /// the walk, or was met already: by the walk that derived that instantiation, or by a root's walk
   /// of the arguments its defaults fill.
+  ///
+  /// Then each definition's run of positions keeps its useful ones alone, each distinct type once,
+  /// at its first place, so that an expansion reads nothing it cannot use.
   fn relevance(&mut self, building: &mut Building) {
     let count = self.builder.def_count();
     building.runs = vec![PoolRange { start: 0, end: 0 }; count as usize];
@@ -414,6 +432,26 @@ impl Coercion<'_, '_, '_> {
         }
       }
     }
+    // Each definition's useful positions alone, each distinct type once, at its first place.
+    let mut compact: Vec<Position> = Vec::new();
+    for slot in &mut building.runs {
+      let start = dense(compact.len());
+      building.distinct.clear();
+      for &position in building
+        .positions
+        .get(slot.start as usize..slot.end as usize)
+        .unwrap_or_default()
+      {
+        if position.useful && building.distinct.insert(position.ty) {
+          compact.push(position);
+        }
+      }
+      *slot = PoolRange {
+        start,
+        end: dense(compact.len()),
+      };
+    }
+    building.positions = compact;
   }
 
   /// Appends to `into` each open position of `def`: its `implements` entries, its union members,
@@ -535,28 +573,16 @@ impl Coercion<'_, '_, '_> {
     let from = building.closure.next_edge();
     building.seen.clear();
     building.derived.clear();
-    // A definition that is not relevant has no useful position.
-    let relevant = building
-      .relevant
-      .get(node.def.get() as usize)
-      .copied()
-      .unwrap_or(false);
+    // Its definition's useful positions, each distinct type once: none when it is not relevant.
     let run = building
       .runs
       .get(node.def.get() as usize)
       .copied()
-      .filter(|_: &PoolRange| relevant)
       .unwrap_or(PoolRange { start: 0, end: 0 });
     for index in run.start..run.end {
-      let Some(&Position {
-        place, ty, useful, ..
-      }) = building.positions.get(index as usize)
-      else {
+      let Some(&Position { place, ty, .. }) = building.positions.get(index as usize) else {
         break;
       };
-      if !useful {
-        continue;
-      }
       if let Some(under) = self.rebuilt(ty, node.ty, node.def, false)? {
         self.collect(building, under, place)?;
       }
@@ -582,65 +608,108 @@ impl Coercion<'_, '_, '_> {
     Ok(())
   }
 
-  /// Walks `ty`, closed, for the instantiations it derives at `place`, with an explicit stack: each
-  /// generic named type or list it meets is a step of `Limits::max_value_steps`, once for the
-  /// expansion, and a type of no type parameter is free. Each instantiation of a relevant generic
-  /// definition no supplied package writes is a child of the node being expanded, once; one new to
-  /// the closure whose definition does not grow is judged at once, so that a limit that stops the
-  /// closure later leaves it judged, and queued to be expanded. A written one is no child, and its
-  /// arguments are its own. `Err` when the budget cannot pay for a type.
+  /// Walks `ty`, closed, for the instantiations it derives at `place`, with an explicit stack that
+  /// holds generic named types and lists alone, each a step of `Limits::max_value_steps` as it is
+  /// put on it: a type's distinct such arguments, or its element, are read the first time a walk
+  /// meets it and kept, so a type of no type parameter is never put on the stack. Each
+  /// instantiation of a relevant generic definition no supplied package writes is a child of the
+  /// node being expanded, once; one new to the closure whose definition does not grow is judged at
+  /// once, so that a limit that stops the closure later leaves it judged, and queued to be
+  /// expanded. A written one is no child, and its arguments are its own. `Err` when the budget
+  /// cannot pay for a type.
   fn collect(&mut self, building: &mut Building, ty: TyId, place: Place) -> Result<(), Stop> {
     building.stack.clear();
+    if !self.walked(ty) {
+      return Ok(());
+    }
+    if !self.charge(1) {
+      return Err(Stop::Steps);
+    }
     building.stack.push(ty);
     while let Some(held) = building.stack.pop() {
       if !building.seen.insert(held) {
         continue;
       }
-      match self.builder.ty_shape(held) {
-        Some(Shape::Named(def)) => {
-          if self.builder.type_param_count(def) == 0 {
-            continue;
-          }
-          if !self.charge(1) {
-            return Err(Stop::Steps);
-          }
-          let nullable = self.nullable(held, def);
-          if let Some(known) = building.closure.find(nullable)
-            && building
-              .closure
-              .node(known)
-              .is_some_and(|node: Node| node.written)
-          {
-            continue;
-          }
-          if building
-            .relevant
-            .get(def.get() as usize)
-            .copied()
-            .unwrap_or(false)
-          {
-            let grows = self.builder.def_grows(def);
-            let (child, new) = building.closure.join(nullable, def, false, grows);
-            if building.derived.insert(child) {
-              building.closure.derive(child, place);
-              if new && !grows {
-                self.derived_verdict(def, nullable);
-                building.queue.push(child);
-              }
+      if let Some(Shape::Named(def)) = self.builder.ty_shape(held) {
+        let nullable = self.nullable(held, def);
+        if let Some(known) = building.closure.find(nullable)
+          && building
+            .closure
+            .node(known)
+            .is_some_and(|node: Node| node.written)
+        {
+          continue;
+        }
+        if building
+          .relevant
+          .get(def.get() as usize)
+          .copied()
+          .unwrap_or(false)
+        {
+          let grows = self.builder.def_grows(def);
+          let (child, new) = building.closure.join(nullable, def, false, grows);
+          if building.derived.insert(child) {
+            building.closure.derive(child, place);
+            if new && !grows {
+              self.derived_verdict(def, nullable);
+              building.queue.push(child);
             }
           }
-          building.stack.extend_from_slice(self.builder.ty_args(held));
         }
-        Some(Shape::List(element)) => {
-          if !self.charge(1) {
-            return Err(Stop::Steps);
-          }
-          building.stack.push(element);
+      }
+      let run = self.children_of(building, held);
+      for index in run.start..run.end {
+        let Some(&child) = building.children.get(index as usize) else {
+          break;
+        };
+        if !self.charge(1) {
+          return Err(Stop::Steps);
         }
-        Some(Shape::Param(_) | Shape::Unresolved) | None => {}
+        building.stack.push(child);
       }
     }
     Ok(())
+  }
+
+  /// The run of `building.children` that holds the distinct arguments of `ty`, or its element, that
+  /// are generic named types or lists, in order: read the first time a walk meets `ty`, and kept.
+  fn children_of(&self, building: &mut Building, ty: TyId) -> PoolRange {
+    if let Some(&run) = building.kept.get(&ty) {
+      return run;
+    }
+    let start = dense(building.children.len());
+    building.distinct.clear();
+    match self.builder.ty_shape(ty) {
+      Some(Shape::Named(_)) => {
+        for &argument in self.builder.ty_args(ty) {
+          if self.walked(argument) && building.distinct.insert(argument) {
+            building.children.push(argument);
+          }
+        }
+      }
+      Some(Shape::List(element)) => {
+        if self.walked(element) {
+          building.children.push(element);
+        }
+      }
+      Some(Shape::Param(_) | Shape::Unresolved) | None => {}
+    }
+    let run = PoolRange {
+      start,
+      end: dense(building.children.len()),
+    };
+    building.kept.insert(ty, run);
+    run
+  }
+
+  /// Whether a walk puts `ty` on its stack: a generic named type or a list. A type of no type
+  /// parameter, a type parameter and the unresolved type hold nothing a walk derives.
+  fn walked(&self, ty: TyId) -> bool {
+    match self.builder.ty_shape(ty) {
+      Some(Shape::Named(def)) => self.builder.type_param_count(def) > 0,
+      Some(Shape::List(_)) => true,
+      Some(Shape::Param(_) | Shape::Unresolved) | None => false,
+    }
   }
 
   /// Reports, at each occurrence and each application of a root whose own verdict holds, the

@@ -324,7 +324,7 @@
 //! closed instantiation checked, written, applied or derived, and a row recorded under its
 //! definition; and, building the closure of derived instantiations, each node a rebuild of a
 //! position under an instantiation's arguments looks at, once for each type and instantiation, and
-//! each generic named type or list an expansion walks, once for each expansion that walks it. So
+//! each generic named type or list a walk of the closure puts on its stack. So
 //! is the one reading that is more than linear: a decimal integer of more than 38
 //! significant digits, the most `u128` arithmetic reads whatever they spell, is converted nine
 //! digits at a time over a vector of limbs, and that is charged first, an upper bound of its limb

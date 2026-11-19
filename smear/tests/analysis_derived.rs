@@ -777,3 +777,79 @@ fn a_default_an_application_reported_owns_what_fails_inside_it() {
     [(after(schema, text, "Box<T> = ", "{}"), "this default")]
   );
 }
+
+/// The closure's work follows what it can use: `W` has many fields typed by its bare parameter and
+/// one that derives `Bad<T>`, and each of many written instantiations of it derives its `Bad`,
+/// judged once each, within a budget linear in the program. Refuses an expansion whose steps grow
+/// with the positions it cannot use.
+#[test]
+fn many_instantiations_of_a_wide_definition_are_read_within_a_linear_budget() {
+  const N: usize = 200;
+  const M: usize = 200;
+  let fields: String = (0..M).map(|k: usize| format!("  f{k}: T\n")).collect();
+  let uses: String = (0..N)
+    .map(|j: usize| format!("  u{j}(w: W<X{j}>): Int\n"))
+    .collect();
+  let inputs: String = (0..N)
+    .map(|j: usize| format!("input X{j} {{\n  v: Int\n}}\n"))
+    .collect();
+  let text = format!(
+    "type Query {{\n{uses}}}\ninput Bad<T> {{\n  v: [T] = []\n}}\n\
+     input W<T> {{\n{fields}  b: Bad<T>\n}}\n{inputs}"
+  );
+  let budget = u32::try_from(16 * (N + M)).expect("a small budget");
+  quiet(&analyze_text(
+    &text,
+    &Limits::new().with_max_value_steps(budget),
+  ));
+}
+
+/// A type many roots share through a default is read once, however wide: each `Pair<Int, Xj>`
+/// fills `Extra` with the one `Wide<Int, …>`, whose many arguments, all of no type parameter, cost
+/// nothing past the first reading, within a budget linear in the program. Refuses a walk that
+/// rereads a shared type's arguments for each root.
+#[test]
+fn a_wide_type_many_roots_fill_is_read_within_a_linear_budget() {
+  const N: usize = 200;
+  const M: usize = 200;
+  let params: Vec<String> = (0..M).map(|i: usize| format!("A{i} = Int")).collect();
+  let params = params.join(", ");
+  let uses: String = (0..N)
+    .map(|j: usize| format!("  u{j}(p: Pair<Int, X{j}>): Int\n"))
+    .collect();
+  let inputs: String = (0..N)
+    .map(|j: usize| format!("input X{j} {{\n  v: Int\n}}\n"))
+    .collect();
+  let text = format!(
+    "type Query {{\n{uses}}}\ninput Wide<{params}> {{\n  a: A0 = 1\n}}\n\
+     input Pair<A, B, Extra = Wide<A>> {{\n  b: B\n  e: Extra\n}}\n{inputs}"
+  );
+  let budget = u32::try_from(16 * (N + M)).expect("a small budget");
+  quiet(&analyze_text(
+    &text,
+    &Limits::new().with_max_value_steps(budget),
+  ));
+}
+
+/// The implementation check's report pass reads each occurrence once, a lookup each: one derived
+/// failure, `Outer<User>`'s `Either<User, User>`, beside many occurrences of a wide `Wide!`, is
+/// reported once. Refuses a pass that rebuilds a wide type's key for each occurrence.
+#[test]
+fn many_occurrences_of_a_wide_type_beside_a_failure_are_read_once_each() {
+  const N: usize = 200;
+  const M: usize = 200;
+  let params: Vec<String> = (0..M).map(|i: usize| format!("A{i} = Int")).collect();
+  let params = params.join(", ");
+  let wides: String = (0..N).map(|j: usize| format!("  w{j}: Wide!\n")).collect();
+  let text = format!(
+    "type Query {{\n  o: Outer<User>\n{wides}}}\ntype User {{\n  id: ID\n}}\n\
+     union Either<A, B> = A | B\ntype Outer<T> {{\n  e: Either<T, User>\n}}\n\
+     type Wide<{params}> {{\n  a: A0\n}}\n"
+  );
+  let analysis = analyze_text(&text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(MEMBER, at(schema, &text, "Outer<User>", 0))]
+  );
+}
