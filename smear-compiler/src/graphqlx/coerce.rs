@@ -182,8 +182,11 @@
 //!   the first such copy that does not fit, in its directive's order: one `invalid-default-value`,
 //!   at its path, labelled at the default;
 //! - a written object literal whose type a type occurrence a supplied package writes has, in
-//!   either nullness, is silent: that type's instantiation is checked where it is written, and its
-//!   check reports the default there, once at each occurrence;
+//!   either nullness, is silent about a copy of a default that type's check records: that type's
+//!   instantiation is checked where it is written, and its check reports the default there, once at
+//!   each occurrence. A default a contribution the orphan rule refuses writes is recorded for no
+//!   check, so the literal reports the first copy of one that does not fit, as any other literal
+//!   does;
 //! - any other written object literal reports the first copy of a default it leaves out that does
 //!   not fit, in its input object's order: one `invalid-default-value`, at the literal, labelled
 //!   at the default. So does one whose type a rebuild made, a field's or an argument's type under
@@ -192,8 +195,9 @@
 //!
 //! Which types occurrences write is read once, before the walk: the nullable form of each closed
 //! instantiation of a generic definition that a supplied package's type occurrence has, as the
-//! check at each instantiation reads them. A literal asks at its first copy that does not fit,
-//! once. Whether a rebuild made a type says only whether a copy against it is judged.
+//! check at each instantiation reads them. A literal asks at its first copy that does not fit of
+//! a default that check records, once. Whether a rebuild made a type says only whether a copy
+//! against it is judged.
 //!
 //! A copy reports nothing: whether it fits reaches whoever asked for its outermost count. A
 //! default whose copy would hold a copy of itself is not copied, and is judged all the same, by
@@ -213,9 +217,14 @@
 //! each: left out, it is the application's own mistake, `missing-required-directive-argument` at
 //! its path, with a label at the argument, reported once whatever uses the collection has, and
 //! recorded nowhere. Nor is a whole `null` no instantiation takes recorded: it is refused at once,
-//! as the next section says. A generic directive's own arguments' defaults are judged where its
-//! applications leave them out, but for such a `null`, and recorded nowhere. When the walk has
-//! ended, each type
+//! as the next section says. Nor is anything a contribution the orphan rule refuses writes, nor an
+//! application it refuses, as `rules::accepted` answers: what it writes is coerced where it is
+//! written all the same, and judged at no instantiation, written or derived. Its members still
+//! shape the definition every check reads, where a value is written and at each instantiation,
+//! written or derived alike: an input object's fields and an enum's values are indexed from every
+//! contribution, a refused extension's among them. A generic directive's own arguments' defaults
+//! are judged where its applications leave them out, but for such a `null`, and recorded nowhere.
+//! When the walk has ended, each type
 //! occurrence a supplied package writes, in id order, whose type is a closed named type of a
 //! definition with recorded rows, and then each application a supplied package writes, in id
 //! order, whose type is a closed instantiation of its directive, asks that instantiation's
@@ -230,9 +239,26 @@
 //! `Literal`, and the check makes no row. A count that meets itself is judged by what it reached,
 //! as an exact one is: the cycle is reported where the count meets itself, below, and a value
 //! that does not fit is
-//! reported all the same. An instantiation only a derivation reaches is not checked, nor an
-//! application only an instantiation reaches: a value written under such a type is judged where
-//! it is written.
+//! reported all the same.
+//!
+//! Then the instantiations those written ones derive, through the definitions that do not grow, are
+//! checked the same way, as the `derived` module says: what a copy of a written instantiation
+//! needs, its definition's members' types, `implements` entries, union members and the complete
+//! types of its applications, each read under its arguments, and each instantiation of a generic
+//! definition they hold that no supplied package writes, in turn, an application only an
+//! instantiation reaches among them. Each occurrence, or application, of a written instantiation
+//! whose own verdict holds reports the first that fails, with the code the same failure has at a
+//! written instantiation, labelled at the type or the application that derives it. Each mistake has
+//! one owner (W:979): a written object literal that reports its copy of a default owns that copy's
+//! count and each count beneath it that does not fit; an application that reports its copy of one
+//! owns each count beneath the default's, whether a copy is made or not, the default's own being
+//! its omission alone; and the check of a derived instantiation passes over a row whose value's
+//! count, against the type it takes there, is owned, to its next row. A default its declaration
+//! refuses, a whole `null` no instantiation takes, is that declaration's alone, as the next section
+//! says: a copy of it reports nothing, and so claims nothing; it makes no copy that holds it not
+//! fit, and so no count beneath a claimed one holds it; and it is recorded for none, so no derived
+//! instantiation judges it. A derived instantiation of a definition that grows is not checked, nor
+//! what only it derives: a value written under such a type is judged where it is written.
 //!
 //! # A `null` no instantiation takes
 //!
@@ -313,11 +339,11 @@
 //! So a program that holds a cycle among closed types gets at least one report, and not one for
 //! each cycle: once a count meets one, every count on its stack ends poisoned, and a second cycle
 //! that only reads one of them is never met. No cycle is met through a OneOf's defaulted field,
-//! which is never filled and which `one-of-field-has-default` refuses; in the defaults of an
-//! instantiation only a fill or a substitution derives, which is not checked; or in a generic
-//! definition no closed instantiation reaches. A cycle met only past the budget is
-//! `resource-limit`, and nothing more. The report reads the frames above the one met, once for
-//! each count, each opened by a read the count paid for, and it charges nothing.
+//! which is never filled and which `one-of-field-has-default` refuses; in the defaults of a
+//! derived instantiation of a definition that grows, which is not checked; or in a generic
+//! definition no closed instantiation reaches, written or derived. A cycle met only past the
+//! budget is `resource-limit`, and nothing more. The report reads the frames above the one met,
+//! once for each count, each opened by a read the count paid for, and it charges nothing.
 //!
 //! # What bounds it
 //!
@@ -332,8 +358,11 @@
 //! for one held twice, a step for each 64 bytes of it or part, once for each literal and the type
 //! its identities are read against; each node a rebuild of a member's type under type
 //! arguments looks at, its root included, once for each type and instantiation; each argument or
-//! field that may be required left out where the type arguments are complete; and each pair of a
-//! closed instantiation checked, written or applied, and a row recorded under its definition. So
+//! field that may be required left out where the type arguments are complete; each pair of a
+//! closed instantiation checked, written, applied or derived, and a row recorded under its
+//! definition; and, building the closure of derived instantiations, each node a rebuild of a
+//! position under an instantiation's arguments looks at, once for each type and instantiation, and
+//! each generic named type or list a walk of the closure puts on its stack. So
 //! is the one reading that is more than linear: a decimal integer of more than 38
 //! significant digits, the most `u128` arithmetic reads whatever they spell, is converted nine
 //! digits at a time over a vector of limbs, and that is charged first, an upper bound of its limb
@@ -362,6 +391,7 @@ use std::{
   collections::{BTreeMap, BTreeSet},
   format,
   string::String,
+  vec,
   vec::Vec,
 };
 
@@ -387,11 +417,13 @@ use super::{
   },
   raw::{FloatSpelling, Radix, RawArgument, RawKind, RawNode, RawPath, RawTree, RawValues, UNREAD},
   resolve::{ParamName, Position, Request, Resolved, Root, Scopes, Segment, Wanted},
+  rules::{Accepted, Meanings, accepted, accepts_application},
   set::ROOT,
   source::SourceMap,
-  types::{Counter, Limit, Stop, Types},
+  types::{Counter, Limit, Spent, Stop, Types},
 };
 
+mod derived;
 mod number;
 mod spelling;
 
@@ -435,6 +467,8 @@ pub(crate) fn coerce(
   let one_of_directive = binding(declarations, builder, CORE, DIRECTIVE, b"oneOf");
   let set_directive = binding(declarations, builder, CORE, DIRECTIVE, b"set");
   let map_directive = binding(declarations, builder, CORE, DIRECTIVE, b"map");
+  // The model's built-ins answer nothing until it is finished: `core`'s declarations do.
+  let meanings = Meanings::declared(declarations, builder);
   // Every enum's values and every input object's fields, the first of each name: what an enum
   // value's name, and an object literal's field, is looked up by.
   let mut members: BTreeMap<(DefId, Sym), MemberId> = BTreeMap::new();
@@ -477,6 +511,8 @@ pub(crate) fn coerce(
     reporter,
     types,
     scopes,
+    sources,
+    meanings,
     raw,
     primitives: &declarations.primitives,
     builtins,
@@ -522,9 +558,15 @@ pub(crate) fn coerce(
     held: Vec::new(),
     searched: BTreeMap::new(),
     owner: None,
+    refusing: false,
+    refused_applications: Vec::new(),
+    refused_members: Vec::new(),
     recorded: Vec::new(),
     checked: BTreeMap::new(),
     written: BTreeSet::new(),
+    owned: BTreeSet::new(),
+    beneath: BTreeMap::new(),
+    claimed: BTreeSet::new(),
     paid: 0,
     copied: 0,
     levels: BTreeMap::new(),
@@ -534,6 +576,7 @@ pub(crate) fn coerce(
   coercion.list_fields();
   coercion.list_cycled();
   coercion.list_written();
+  coercion.list_refused();
   for index in 0..coercion.builder.def_count() {
     let def = DefId::new(index);
     // A generic definition's values that name its type parameters are recorded under it: a
@@ -543,15 +586,19 @@ pub(crate) fn coerce(
     let count = coercion.builder.def_applications(def).len();
     for at in 0..count {
       if let Some(&application) = coercion.builder.def_applications(def).get(at) {
+        coercion.refusing = coercion.refused_application(application);
         coercion.application(application);
       }
     }
     for member in coercion.builder.def_members(def) {
+      // A member's arguments and applications are its contribution's, refused with it.
+      coercion.refusing = coercion.refused_member(member);
       coercion.member(member);
       for argument in coercion.builder.member_arguments(member) {
         coercion.member(argument);
       }
     }
+    coercion.refusing = false;
   }
   coercion.owner = None;
   let count = coercion.builder.schema_applications().len();
@@ -561,6 +608,7 @@ pub(crate) fn coerce(
     }
   }
   coercion.instantiations();
+  coercion.derived();
   debug_assert_eq!(
     coercion.paid, coercion.copied,
     "the copies make exactly the rows they were counted to"
@@ -1364,6 +1412,11 @@ struct Coercion<'c, 'p, 'x> {
   types: &'c mut Types,
   /// Every module's scope: what a qualified enum value's prefix names.
   scopes: &'c Scopes<'x>,
+  /// Each source's package: which package wrote a member, and which a definition.
+  sources: &'c SourceMap,
+  /// The directives the root package's extension of a built-in may not apply, as `core`'s
+  /// declarations bind them: the model's built-ins answer nothing until it is finished.
+  meanings: Meanings,
   /// The trees, and each source's text.
   raw: RawValues<'p>,
   /// Each primitive `core` materialises, with its definition: the primitive at index `i` is the
@@ -1479,6 +1532,16 @@ struct Coercion<'c, 'p, 'x> {
   /// The generic definition whose values the walk is making, when it is in one: a type, or a
   /// directive.
   owner: Option<DefId>,
+  /// Whether the walk is in a contribution the orphan rule refuses, or in an application it
+  /// refuses: what is written there is coerced where it is written, and recorded for none.
+  refusing: bool,
+  /// The applications that contributions of generic definitions the orphan rule refuses write,
+  /// and those it refuses in the root package's extensions of built-ins, sorted, as
+  /// [`list_refused`](Self::list_refused) finds them.
+  refused_applications: Vec<ApplicationId>,
+  /// The direct members that contributions of generic definitions the orphan rule refuses write,
+  /// sorted, as [`list_refused`](Self::list_refused) finds them.
+  refused_members: Vec<MemberId>,
   /// Each value of a generic definition whose type names its type parameters, but not a whole
   /// `null` no instantiation takes, and each argument an application in it leaves out whose type is
   /// a bare nullable type parameter of it, but not a collection's key or element, in the walk's
@@ -1494,6 +1557,18 @@ struct Coercion<'c, 'p, 'x> {
   /// where it is written. A written object literal of one of them leaves a copy that does not fit
   /// to that check; of any other type it reports the copy itself.
   written: BTreeSet<TyId>,
+  /// Each count that does not fit that a report already owns (W:979): the copy a written object
+  /// literal reports and each count beneath it that does not fit, as [`claim`](Self::claim) finds
+  /// them, and each count beneath the default an application reports. The check of a derived
+  /// instantiation passes over a row whose value, counted against the type it takes there, is one
+  /// of them.
+  owned: BTreeSet<CountKey>,
+  /// Each judged count that does not fit because a count it reads does not, with each such count:
+  /// what a report that owns the first owns too.
+  beneath: BTreeMap<CountKey, Vec<CountKey>>,
+  /// Each count whose counts beneath it were claimed: an application's report of the same default
+  /// claims them once, however many applications leave it out.
+  claimed: BTreeSet<CountKey>,
   /// The rows of every count a copy was made of, charged or not.
   paid: u64,
   /// The rows made of copies: what `paid` is when the phase ends, since a copy and its count are
@@ -1651,13 +1726,66 @@ impl<'p> Coercion<'_, 'p, '_> {
     found
   }
 
+  /// Lists what the contributions of each generic definition that the orphan rule refuses write,
+  /// as `rules::accepted` answers, each sorted: each application of a contribution it refuses
+  /// whole, and each it refuses in the root package's extension of a built-in, as
+  /// `rules::accepts_application` answers; and each direct member of a contribution it refuses,
+  /// whose arguments and applications are refused with it. A definition of no type parameter
+  /// records nothing, and lists nothing. One look at each contribution of each generic definition,
+  /// before the walk.
+  fn list_refused(&mut self) {
+    let model = self.builder.so_far();
+    let mut applications: Vec<ApplicationId> = Vec::new();
+    let mut members: Vec<MemberId> = Vec::new();
+    for index in 0..self.builder.def_count() {
+      let def = DefId::new(index);
+      if self.builder.type_param_count(def) == 0 {
+        continue;
+      }
+      for part in model.def(def).contributions() {
+        let judged = accepted(model, self.sources, def, &part);
+        for &application in part.applications() {
+          if !accepts_application(model, self.meanings, judged, application) {
+            applications.push(application);
+          }
+        }
+        if judged == Accepted::Refused {
+          members.extend(part.members());
+        }
+      }
+    }
+    applications.sort_unstable();
+    members.sort_unstable();
+    self.refused_applications = applications;
+    self.refused_members = members;
+  }
+
+  /// Whether `application` is one the orphan rule refuses, as
+  /// [`list_refused`](Self::list_refused) found: nothing it writes is recorded.
+  fn refused_application(&self, application: ApplicationId) -> bool {
+    self
+      .refused_applications
+      .binary_search(&application)
+      .is_ok()
+  }
+
+  /// Whether a contribution the orphan rule refuses wrote `member`, a direct member of a generic
+  /// definition, as [`list_refused`](Self::list_refused) found: nothing it writes is recorded, its
+  /// default among them, so no check at an instantiation holds a row of that default. The walk
+  /// records by this answer, and a written object literal leaves its copy of a default to such a
+  /// check by it too: one answer for both.
+  fn refused_member(&self, member: MemberId) -> bool {
+    self.refused_members.binary_search(&member).is_ok()
+  }
+
   /// Records the value of the tree `tree`, of the type `ty`, written at `site` in the definition
   /// the walk is in, when that is a generic definition and `ty` names its type parameters: each
   /// closed instantiation of it checks the value, a type's written or a directive's applied. A
   /// whole `null` no instantiation takes is refused instead, and never recorded: its callers ask
-  /// first, as [`never_null`](Self::never_null) says.
+  /// first, as [`never_null`](Self::never_null) says. Nor is anything a contribution the orphan
+  /// rule refuses writes, nor an application it refuses, as `refusing` says.
   fn record(&mut self, tree: u32, ty: Option<TyId>, site: Site) {
-    let (Some(def), Some(ty)) = (self.owner, ty) else {
+    let (Some(def), Some(ty), false) = (self.owner, ty, self.refusing) else {
       return;
     };
     if !self.builder.ty_closed(ty) {
@@ -1675,8 +1803,9 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// closed instantiation of the definition checks it, a type's written or a directive's applied.
   /// A collection's key or element is never recorded: every instantiation makes it non-null, so
   /// [`forced`](Self::forced) finds it first, and the application's own mistake is reported once.
+  /// Nor is an argument an application the orphan rule refuses leaves out, as `refusing` says.
   fn owe(&mut self, application: ApplicationId, argument: MemberId, ty: Option<TyId>) {
-    let (Some(def), Some(ty)) = (self.owner, ty) else {
+    let (Some(def), Some(ty), false) = (self.owner, ty, self.refusing) else {
       return;
     };
     let param = matches!(
@@ -1721,11 +1850,14 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
   }
 
-  /// Whether a written object literal of the input object `def`, made against `ty`, leaves a copy
-  /// that does not fit under `ty`'s arguments to the check where `ty` is written: when a type
-  /// occurrence a supplied package writes has `ty`, in either nullness. One look at `ty`'s
-  /// nullable form and one search of [`Coercion::written`], asked once for each literal, at its
-  /// first such copy, whose count the literal paid for.
+  /// Whether a written object literal of the input object `def`, made against `ty`, may leave a
+  /// copy that does not fit under `ty`'s arguments to the check where `ty` is written: when a type
+  /// occurrence a supplied package writes has `ty`, in either nullness. It leaves that check only
+  /// the copy of a default the check records: a default a contribution the orphan rule refuses
+  /// writes is recorded for none, as [`refused_member`](Self::refused_member) says, and its copy is
+  /// reported at the literal. One look at `ty`'s nullable form and one search of
+  /// [`Coercion::written`], asked once for each literal, at its first such copy, whose count the
+  /// literal paid for.
   fn checked_where_written(&mut self, ty: Option<TyId>, def: DefId) -> bool {
     let Some(ty) = ty else {
       return false;
@@ -1974,7 +2106,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       },
       Stop::Built(_) => self.stopped(stop, &format!("a value `{sigil}{name}` holds takes")),
     };
-    self.limit(at, message);
+    self.limit(at, stop, message);
   }
 
   /// Whether `ty` is a named type of `def`.
@@ -2178,6 +2310,9 @@ impl<'p> Coercion<'_, 'p, '_> {
     if !fits && !*reported && !owned {
       *reported = true;
       self.unfit_default(at, left.argument, tree);
+      // The report owns each count beneath the default's that does not fit, whether or not a copy
+      // is made (W:979); the default's own count is this application's omission alone.
+      self.claim_beneath(CountKey { tree, ty });
     }
     let Some(rows) = rows else {
       return true;
@@ -2444,7 +2579,10 @@ impl<'p> Coercion<'_, 'p, '_> {
         // A copy that holds one that does not fit does not fit, but for one whose declaration
         // refuses it, which owns that.
         if !frame.fits && !frame.owned {
-          self.misfit();
+          self.misfit_by(CountKey {
+            tree: frame.tree,
+            ty: frame.ty,
+          });
         }
         // One that holds a copy of itself is poisoned.
         if frame.poisoned {
@@ -2478,7 +2616,7 @@ impl<'p> Coercion<'_, 'p, '_> {
           match self.counts.get(&CountKey { tree, ty }).copied() {
             Some(Count::Rows(rows)) => {
               if !owned && self.unfit.contains(&CountKey { tree, ty }) {
-                self.misfit();
+                self.misfit_by(CountKey { tree, ty });
               }
               self.add_rows(rows, charged)
             }
@@ -2494,7 +2632,7 @@ impl<'p> Coercion<'_, 'p, '_> {
             }
             Some(Count::Poisoned) => {
               if !owned && self.unfit.contains(&CountKey { tree, ty }) {
-                self.misfit();
+                self.misfit_by(CountKey { tree, ty });
               }
               self.poison();
               Ok(())
@@ -2584,6 +2722,62 @@ impl<'p> Coercion<'_, 'p, '_> {
       && frame.judged
     {
       frame.fits = false;
+    }
+  }
+
+  /// The copy of the default counted on top does not fit because the one `child` counts does not,
+  /// when it is judged: as [`misfit`](Self::misfit), and `child` kept beneath it, so that a report
+  /// that owns the top one owns `child` too. Each read is kept once: a count is made once.
+  fn misfit_by(&mut self, child: CountKey) {
+    let Some(frame) = self.frames.last_mut() else {
+      return;
+    };
+    if !frame.judged {
+      return;
+    }
+    frame.fits = false;
+    let parent = CountKey {
+      tree: frame.tree,
+      ty: frame.ty,
+    };
+    self.beneath.entry(parent).or_default().push(child);
+  }
+
+  /// Claims for an application's report of a default it leaves out each count beneath the
+  /// default's own, `key`, that does not fit, as [`claim`](Self::claim) does, but not `key`: a row
+  /// that holds that default under a definition is another application's omission, a mistake of its
+  /// own, which this report does not own.
+  fn claim_beneath(&mut self, key: CountKey) {
+    // Claimed beneath already, by this report's default or by a claim of the default itself.
+    if self.owned.contains(&key) || !self.claimed.insert(key) {
+      return;
+    }
+    let count = self.beneath.get(&key).map_or(0, Vec::len);
+    for index in 0..count {
+      let Some(&child) = self
+        .beneath
+        .get(&key)
+        .and_then(|below: &Vec<CountKey>| below.get(index))
+      else {
+        break;
+      };
+      self.claim(child);
+    }
+  }
+
+  /// Claims for the report just made the count `key` and each count beneath it that does not fit,
+  /// as [`misfit_by`](Self::misfit_by) kept them: each mistake has one owner (W:979), and the check
+  /// of a derived instantiation passes over a row whose count is claimed. A count claimed already
+  /// is not walked again, so all the claims together walk each kept read once.
+  fn claim(&mut self, key: CountKey) {
+    let mut stack: Vec<CountKey> = vec![key];
+    while let Some(key) = stack.pop() {
+      if !self.owned.insert(key) {
+        continue;
+      }
+      if let Some(below) = self.beneath.get(&key) {
+        stack.extend_from_slice(below);
+      }
     }
   }
 
@@ -3295,11 +3489,17 @@ impl<'p> Coercion<'_, 'p, '_> {
       },
       Stop::Built(_) => self.stopped(stop, "the arguments this application leaves out take"),
     };
-    self.limit(at, message);
+    self.limit(at, stop, message);
   }
 
-  /// Reports `resource-limit` at `at`, saying `message`, with its help.
-  fn limit(&mut self, at: Location, message: Message) {
+  /// Reports `resource-limit` at `at`, where `stop` stopped what is reported, saying `message`,
+  /// with its help: once for each place and kind of limit, whichever phase or path met it there
+  /// first. Each phase's steps are a kind of their own, and a limit on types is one kind across
+  /// the phases.
+  fn limit(&mut self, at: Location, stop: Stop, message: Message) {
+    if !self.types.say_limit(at, stop.spent(Spent::Values)) {
+      return;
+    }
     let kind = DiagnosticKind::ResourceLimit;
     self.reporter.report(
       Diagnostic::builder(kind.code(), at)
@@ -3489,7 +3689,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
     self.path(id, node.kind);
     let message = self.stopped(stop, "this value takes");
-    self.limit(at, message);
+    self.limit(at, stop, message);
     Some(id)
   }
 
@@ -3923,9 +4123,12 @@ impl<'p> Coercion<'_, 'p, '_> {
     // The entries' tasks are pushed in order, then reversed, so that the first is made first.
     let tasks = self.stack.len();
     let alone = one_of && fields.written == 1;
-    // Whether the first copy that does not fit under the object's type arguments was met: reported
-    // here, or left to the check where the object's type is written. Once for the literal.
+    // Whether a copy that does not fit under the object's type arguments was reported here: once
+    // for the literal.
     let mut met = false;
+    // Whether a type occurrence a supplied package writes has the object's type: asked at the
+    // first copy that does not fit of a default the check there records, and kept.
+    let mut written: Option<bool> = None;
     while let Some(next) = self.next(&mut merge) {
       let (field, default) = match next {
         Next::Set(set) => {
@@ -3975,13 +4178,19 @@ impl<'p> Coercion<'_, 'p, '_> {
           }
         };
         // A literal whose type a type occurrence a supplied package writes has leaves its copy that
-        // does not fit to that occurrence's check, which reports it there; any other reports it
-        // here, whether a rebuild or a fill made its type. A copy of a default its declaration
-        // refuses, judged and charged as any other, is that declaration's to report.
+        // does not fit of a default the check there records to that occurrence's check, which
+        // reports it there; it reports here the first other, as any other literal does, whether a
+        // rebuild or a fill made its type. A copy of a default its declaration refuses, judged and
+        // charged as any other, is that declaration's to report.
         if !fits && !met && !self.owned(field, default) {
-          met = true;
-          if !self.checked_where_written(making.ty, def) {
+          let left = !self.refused_member(field)
+            && *written.get_or_insert_with(|| self.checked_where_written(making.ty, def));
+          if !left {
+            met = true;
             self.unfit_field(at, field, default);
+            // The literal owns the default's count, and each one beneath it that does not fit
+            // (W:979).
+            self.claim(CountKey { tree: default, ty });
           }
         }
         if !made {
@@ -4290,7 +4499,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       },
       Stop::Built(_) => self.stopped(stop, "the fields this literal leaves out take"),
     };
-    self.limit(at, message);
+    self.limit(at, stop, message);
   }
 
   /// Makes the row of `making`'s node one unresolved row, typed with its type, with the path the
@@ -5229,6 +5438,15 @@ impl<'p> Coercion<'_, 'p, '_> {
       return;
     }
     let at = Location::new(source, raw.span);
+    // A `resource-limit` is said once for each place and kind of limit.
+    let spent = match refused.why {
+      Why::Costly(_) => Some(Spent::Values),
+      Why::Unbuilt(stop) => Some(stop.spent(Spent::Values)),
+      _ => None,
+    };
+    if spent.is_some_and(|spent: Spent| !self.types.say_limit(at, spent)) {
+      return;
+    }
     let literal = Excerpt(self.raw.text(source, raw.span));
     let name: &[u8] = match ty.and_then(|ty: TyId| self.builder.ty_shape(ty)) {
       Some(Shape::Named(def)) => self.builder.def_name(def),
@@ -5410,8 +5628,12 @@ impl<'p> Coercion<'_, 'p, '_> {
     self.reporter.report(report.build());
   }
 
-  /// Reports that the lists a value written at `at` stands for are past the budget.
+  /// Reports that the lists a value written at `at` stands for are past the budget: once for each
+  /// place, as every `resource-limit`.
   fn lone_limit(&mut self, at: Location) {
+    if !self.types.say_limit(at, Spent::Values) {
+      return;
+    }
     let kind = DiagnosticKind::ResourceLimit;
     let max = self.values.max();
     self.reporter.report(

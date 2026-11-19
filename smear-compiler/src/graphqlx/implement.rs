@@ -84,9 +84,9 @@
 //! each for an occurrence. `Either<User, User>` of `union Either<A, B> = A | B` is one. An open
 //! occurrence is judged too: `Pair<X, X>` inside a definition of `X` has two entries of one type
 //! whatever `X` stands for. A written duplicate was reported where it is written, and is not
-//! again; an instantiation only a fill derives is not judged. Each type is judged once, its two
-//! nullnesses sharing one verdict, and a verdict a limit stopped is `resource-limit` at each
-//! occurrence of it, but at an entry a definition's check stopped at, which said so.
+//! again. Each type is judged once, its two nullnesses sharing one verdict, and a verdict a limit
+//! stopped is `resource-limit` at each occurrence of it, but where the same kind of limit was said
+//! already, at an entry a definition's check stopped at for that limit among them.
 //!
 //! # What an instantiation makes required
 //!
@@ -97,9 +97,22 @@
 //! `Page<Int!>` of `type Page<T> implements Paged { items(after: T): [Int] }` is one, and so is
 //! `Page` of `type Page<T = Int!>`, whose default makes it so. Each type is judged once, a step
 //! for each such argument it looks at, and one a limit stopped is `resource-limit` at each
-//! occurrence of it. An instantiation that only a fill or a substitution derives is not judged:
-//! `Outer<Int!>` of `type Outer<U> { p: Page<U> }` makes a `Page<Int!>` that no occurrence writes,
-//! as no derived instantiation is judged here.
+//! occurrence of it.
+//!
+//! # Derived instantiations
+//!
+//! Last, each instantiation the closure coercion built derives from a written one, through the
+//! definitions that do not grow, is judged for both, by the same verdicts, as the `derived` module
+//! says: `Outer<Int!>` of `type Outer<U> { p: Page<U> }` derives a `Page<Int!>` that no occurrence
+//! writes, which makes `after` required, and `unexpected-required-argument` is at `Outer<Int!>`,
+//! labelled at `Page<U>`, the type that derives it. Each occurrence of a written instantiation, and
+//! each application, whose own verdict holds reports the first derived instantiation that fails. A
+//! derived instantiation of a definition that grows is not judged, nor what only it derives.
+//!
+//! Every `resource-limit` is said once for each written occurrence and kind of limit, whichever
+//! phase or path meets it there first, as the type services keep them: this check's steps are a
+//! kind of their own, and a limit on types one kind with coercion's, so a type coercion could not
+//! build at an occurrence, which it said, is not said there again by any of this check's paths.
 //!
 //! # What it costs, and what bounds it
 //!
@@ -111,9 +124,10 @@
 //! interface looked at, and each argument of it or of the field that implements it; each pair of
 //! types the relation looks at, one answered before included,
 //! and each entry, bound and member it looks at to answer one; each distinct written entry and
-//! member a verdict reads; each argument a field adds that a written instantiation's type is read
-//! for, once for each type; and each node of a type rebuilt under an entry's arguments, a rebuild
-//! remembered by the type and the arguments' named type costing nothing more. A listed
+//! member a verdict reads; each argument a field adds that a written or a derived instantiation's
+//! type is read for, once for each type; and each node of a type rebuilt under an entry's
+//! arguments, a rebuild remembered by the type and the arguments' named type costing nothing
+//! more. A listed
 //! definition's own entries and members are read once, when an occurrence first asks about it,
 //! and a verdict looked up costs nothing. On a program the check accepts, each root costs its interface's entries
 //! and its fields, and no more. The definition's own fields are indexed by name once, at its first
@@ -149,19 +163,21 @@ use super::{
     WrittenParam,
   },
   source::SourceMap,
-  types::{Counter, Limit, Stop, Types},
+  types::{Counter, Limit, Spent, Stop, Types},
 };
 
 use subtype::{Alternative, Answer, Frame, TyPair};
 
+mod derived;
 mod subtype;
 
 /// Checks what each definition `builder` holds says it is, whose declarations are `declarations`
 /// and whose sources `sources` numbers, with the type services of `types`, reporting into
 /// `reporter`: that no two of its `implements` entries, nor of a union's members, are one type, as
-/// written or under the type arguments of an instantiation the program writes; that it implements
-/// what the interfaces it implements implement; and that an object or an interface declares their
-/// fields, with their arguments.
+/// written or under the type arguments of an instantiation the program writes or derives; that it
+/// implements what the interfaces it implements implement; and that an object or an interface
+/// declares their fields, with their arguments. The closure of derived instantiations is read from
+/// `types`, where coercion left it, and dropped.
 pub(crate) fn implement(
   declarations: &Declarations<'_, '_>,
   sources: &SourceMap,
@@ -203,7 +219,6 @@ pub(crate) fn implement(
     frontier: Vec::new(),
     fields: Vec::new(),
     indexed: false,
-    stopped_roots: BTreeSet::new(),
     listings: BTreeMap::new(),
     distinct: Vec::new(),
     under: Vec::new(),
@@ -213,6 +228,7 @@ pub(crate) fn implement(
   };
   implementing.definitions();
   implementing.occurrences();
+  implementing.derived();
 }
 
 /// One of a definition's lists of types.
@@ -379,9 +395,6 @@ struct Implementing<'p> {
   fields: Vec<(Sym, MemberId)>,
   /// Whether `fields` holds them: built at its first root whose fields are compared.
   indexed: bool,
-  /// The entries a definition's check stopped at, and reported: an occurrence that is one says
-  /// nothing more of a stop.
-  stopped_roots: BTreeSet<TypeExprId>,
   /// Each definition an occurrence asked about, by the definition: listed when one of its own
   /// entries or members names its type parameters, `None` otherwise.
   listings: BTreeMap<DefId, Option<Listed>>,
@@ -495,7 +508,6 @@ impl Implementing<'_> {
       };
       if let Err(stop) = self.root(root, wide) {
         self.report_stopped(root, stop);
-        self.stopped_roots.insert(root.entry);
         return;
       }
     }
@@ -931,11 +943,8 @@ impl Implementing<'_> {
           self.report_meeting(at, def, List::Members, first, later);
         }
       }
-      Verdict::Stopped(stop) => {
-        if !self.stopped_roots.contains(&id) {
-          self.report_uncompared(at, def, stop);
-        }
-      }
+      // Said once for each kind at the entry, whichever check of it stopped there first.
+      Verdict::Stopped(stop) => self.report_uncompared(at, def, stop),
     }
   }
 
@@ -1480,6 +1489,11 @@ impl Implementing<'_> {
   /// Reports `resource-limit` at `at`, where `stop` stopped the check of `subject`, naming the
   /// limit: one message for each way to stop.
   fn report_limit(&mut self, at: Location, subject: &str, stop: Stop) {
+    // Once for each place and kind of limit, whichever phase or path met it there first: this
+    // phase's steps are a kind of their own, a limit on types one kind across the phases.
+    if !self.types.say_limit(at, stop.spent(Spent::Implementation)) {
+      return;
+    }
     let limits = self.types.limits();
     let (message, help): (String, &'static str) = match stop {
       Stop::Steps => (

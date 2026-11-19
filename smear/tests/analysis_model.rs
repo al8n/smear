@@ -498,6 +498,7 @@ fn fixture() -> Model {
   b.set_collection(TAGS, Collection::Set);
   b.set_def_tier(PHOTO, Tier::Alloc);
   b.set_metadata(FILTER);
+  b.set_grows(PAGE);
   b.push_extern(PHOTO, "rust", "image::Photo", Tier::Std);
   b.set_def_description(QUERY, "The root.", at(APP_SCHEMA, 200, 210));
   b.push_directive_location(DEPRECATED, DirectiveLocation::FieldDefinition);
@@ -1401,12 +1402,14 @@ fn a_definition_answers_every_accessor() {
   assert_eq!(query.applications(), &[QUERY_CACHE]);
   assert_eq!(query.tier(), Tier::Core);
   assert!(!query.is_metadata());
+  assert!(!query.grows());
   assert_eq!(query.intrinsic(), None);
   assert!(!query.is_marker());
   assert_eq!(query.collection(), None);
   assert_eq!(query.externs().len(), 0);
 
   let page = model.def(PAGE);
+  assert!(page.grows());
   let mut params: TypeParams<'_> = page.type_params();
   assert_eq!(params.len(), 1);
   let param: TypeParam<'_> = params.next().expect("`Page` has a type parameter");

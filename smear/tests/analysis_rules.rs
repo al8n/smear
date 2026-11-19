@@ -21,7 +21,8 @@ use smear::{
     Analysis, ApplicationId, Collection, Contribution, Cx, DefId, Diagnostic, DiagnosticKind,
     Layout, Limits, MemberId, Model, ModuleId, Namespace, Package, PackageId, Packages, Primitive,
     Root, RootOperation, SourceFile, SourceId, Tier, TypeExprId, ValueId, Visitor, analyze,
-    test_support::RULES, visit,
+    test_support::{JudgedExtension, RULES, judged_extensions},
+    visit,
   },
   diagnostic::{Code, Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -2518,6 +2519,203 @@ fn a_flat_package_extending_its_own_definitions_never_meets_the_orphan_rule() {
       analysis.diagnostics()
     );
   }
+}
+
+/// The orphan rule and its predicate, `rules::accepted` and `rules::accepts_application`, which the
+/// phases read before the model is finished, are two statements of one rule. Over a program for
+/// each case the rule's module names, an extension the predicate refuses whole is exactly one the
+/// rule reports, at the extension's target; an application in an extension it does not refuse
+/// whole is refused exactly where the rule reports one, at the application's path; and the rule
+/// reports nothing the predicate does not judge. No program here has a phase's error within an
+/// extension, of which the rule says nothing. Refuses the two statements drifting apart.
+#[test]
+fn the_orphan_rules_predicate_agrees_with_its_reports() {
+  let beside = |ours: &'static str, theirs: &'static str| -> Analysis {
+    let root =
+      package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
+    let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
+    analyze(&root, &[geo], &Limits::new())
+  };
+  let programs: Vec<Analysis> = vec![
+    // A package's own extensions, from any of its modules.
+    analyze(
+      &package(
+        "app",
+        Layout::Directory,
+        &[
+          (
+            "shape.graphqlx",
+            "type Shape {\n  own: Int\n}\nextend type Shape {\n  beside: Int\n}\n\
+             mod inner {\n  extend type ..::Shape {\n    inMod: Int\n  }\n}\n",
+          ),
+          ("m/x.graphqlx", "extend type ~::Shape {\n  fromM: Int\n}\n"),
+        ],
+      )
+      .with_dependencies(["geo"]),
+      &[package(
+        "geo",
+        Layout::Directory,
+        &[
+          ("lib.graphqlx", "type Point {\n  x: Int\n}\n"),
+          ("ext/e.graphqlx", "extend type ~::Point {\n  y: Int\n}\n"),
+        ],
+      )],
+      &Limits::new(),
+    ),
+    // The root package extending a dependency's type, and its directive.
+    beside(
+      "extend type ^::geo::Point {\n  label: String\n}\n\
+       extend directive @^::geo::tag @deprecated\n",
+      "type Point {\n  x: Int\n}\ndirective @tag on OBJECT\n",
+    ),
+    // A dependency extending another dependency's type, and the root package's.
+    analyze(
+      &package(
+        "app",
+        Layout::Flat,
+        &[("schema.graphqlx", "type Query {\n  ok: Int\n}\n")],
+      ),
+      &[
+        package(
+          "geo",
+          Layout::Flat,
+          &[(
+            "geo.graphqlx",
+            "extend type ^::astro::Star {\n  near: Int\n}\n\
+             extend type ^::app::Query {\n  fromGeo: Int\n}\n",
+          )],
+        )
+        .with_dependencies(["astro", "app"]),
+        package(
+          "astro",
+          Layout::Flat,
+          &[("astro.graphqlx", "type Star {\n  name: String\n}\n")],
+        ),
+      ],
+      &Limits::new(),
+    ),
+    // A dependency extending built-ins: with a directive alone, with an enum value, with `@set`,
+    // and with `@extern`.
+    beside(
+      "type Query {\n  ok: Int\n}\n",
+      "directive @once on SCALAR\nextend scalar String @once\nextend enum Tier {\n  X\n}\n",
+    ),
+    beside(
+      "type Query {\n  ok: Int\n}\n",
+      "extend scalar NonZero @set\n",
+    ),
+    beside(
+      "type Query {\n  x: Int\n}\n",
+      "extend scalar string @extern(lang: \"rust\", type: \"geo::Str\")\n",
+    ),
+    // The root package adding directives alone to built-ins: by a GraphQL name, to a primitive
+    // `core` materialises, to a GraphQL built-in it replaces, to `NonZero` and to a directive; and
+    // its own directive named `set`.
+    analyze_one(
+      "directive @x on SCALAR | DIRECTIVE_DEFINITION\n\
+       extend scalar String @x\nextend scalar Int @x\n\
+       scalar Float\nextend scalar Float @x\n\
+       extend scalar NonZero @x\nextend directive @deprecated @x\n",
+    ),
+    analyze_one(
+      "directive @set on SCALAR\nextend scalar NonZero @set\ndirective @x on SCALAR\n\
+       extend scalar String @x\n",
+    ),
+    // The root package adding more than directives to built-ins, meta-types among them.
+    analyze_one(
+      "interface Marked @marker\n\
+       extend enum Tier {\n  EXTRA\n}\n\
+       extend type __Type {\n  extra: Int\n}\n\
+       extend scalar String implements Marked\n\
+       extend scalar Int implements Marked\n\
+       scalar Float\nextend scalar Float implements Marked\n",
+    ),
+    analyze_one(
+      "type Query {\n  ok: Int\n}\ninterface Face {\n  description: String\n}\n\
+       extend type __Type {\n  extra: Int\n}\n\
+       extend enum __TypeKind {\n  EXTRA\n}\n\
+       extend type __Schema implements Face\n",
+    ),
+    // `@marker`, `@set`, `@map` and `@extern` in the root package's extensions of built-ins: with
+    // directives alone, beside more, on a GraphQL built-in it replaces, and on a generic built-in
+    // beside an ordinary directive.
+    analyze_one(
+      "extend scalar NonZero @set\nextend interface MapKey @marker\nextend scalar HashMap @set\n",
+    ),
+    analyze_one(
+      "extend scalar BTreeMap @map\nextend scalar Int @set\nextend scalar HashSet @set @map\n",
+    ),
+    analyze_one(
+      "type Query {\n  x: Int\n}\n\
+       extend scalar string @extern(lang: \"rust\", type: \"my::Str\")\n\
+       extend scalar Int @extern(lang: \"rust\", type: \"i32\")\n\
+       extend scalar HashSet @extern(lang: \"rust\", type: \"std::collections::HashSet\")\n",
+    ),
+    analyze_one("interface Marked @marker\nextend scalar NonZero implements Marked @set\n"),
+    analyze_one("scalar String\nextend scalar String @set\n"),
+    analyze_one(
+      "type Query {\n  f(s: HashSet<Int>): Int\n}\n\
+       directive @tag<X>(value: X) on SCALAR\n\
+       extend scalar HashSet<U> @tag<U>(value: 1) @map\n",
+    ),
+  ];
+  // How many extensions are refused whole and how many not, and how many applications in the
+  // latter are refused alone and how many read: each statement is read on both sides.
+  let (mut refused, mut accepted, mut alone, mut read) = (0_u32, 0_u32, 0_u32, 0_u32);
+  for analysis in &programs {
+    let reported: Vec<Location> = analysis
+      .diagnostics()
+      .iter()
+      .filter(|diagnostic: &&Diagnostic| {
+        [ORPHAN, INTROSPECTION].contains(&diagnostic.code().as_str())
+      })
+      .map(|diagnostic: &Diagnostic| diagnostic.primary())
+      .collect();
+    let judged = judged_extensions(analysis.model(), analysis.sources());
+    for extension in &judged {
+      assert_eq!(
+        reported.contains(&extension.location),
+        extension.refused,
+        "{extension:#?}\n{:#?}",
+        analysis.diagnostics()
+      );
+      if extension.refused {
+        refused += 1;
+        continue;
+      }
+      accepted += 1;
+      for &(at, accepts) in &extension.applications {
+        assert_eq!(
+          reported.contains(&at),
+          !accepts,
+          "{extension:#?}\n{:#?}",
+          analysis.diagnostics()
+        );
+        if accepts {
+          read += 1;
+        } else {
+          alone += 1;
+        }
+      }
+    }
+    for location in &reported {
+      assert!(
+        judged.iter().any(|extension: &JudgedExtension| {
+          extension.location == *location
+            || extension
+              .applications
+              .iter()
+              .any(|&(at, _): &(Location, bool)| at == *location)
+        }),
+        "{location:?}\n{:#?}",
+        analysis.diagnostics()
+      );
+    }
+  }
+  assert!(
+    refused > 0 && accepted > 0 && alone > 0 && read > 0,
+    "{refused} {accepted} {alone} {read}"
+  );
 }
 
 #[test]

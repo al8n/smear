@@ -21,12 +21,12 @@ use super::{
   package::Package,
   parse::{self, Documents},
   resolve,
-  rules::Rules,
+  rules::{Meanings, Rules},
   set::{self, PackageView, ROOT},
   source::SourceMap,
   text::SourceText,
   tiers,
-  types::Types,
+  types::{self, Types},
   visitor::{Packages, Visitor, drive},
 };
 
@@ -243,6 +243,11 @@ impl Analysis {
 ///   [`Limits::max_bound_steps`]; an occurrence or an application whose bounds that budget, or a
 ///   type they derive past [`Limits::max_generic_depth`] or [`Limits::max_instantiations`], kept
 ///   from being judged is `resource-limit`, and an occurrence keeps its type too.
+/// - Finds which generic definitions grow, once, over every package's definitions: one whose type
+///   parameter reaches itself, through what a copy of an instantiation needs, with a type argument
+///   that wraps what it was given, on the graph
+///   [`UnboundedInstantiation`](super::UnboundedInstantiation) builds,
+///   [`Def::grows`](super::Def::grows). It reports nothing.
 /// - Makes every value, in the model's walk, each by the type expected where it stands, a
 ///   member's type for its default and an argument's for its value, with its `!`: `null` where it
 ///   is nullable; a list's elements each against its element, and any other value where a list is
@@ -314,7 +319,21 @@ impl Analysis {
 ///   values of the applications on a generic directive and on its arguments are checked likewise
 ///   at each closed application of the directive, reported at its path; the directive's own
 ///   arguments' defaults are judged only where an application leaves them out, but for such a
-///   `null`, refused at their declaration. A copy is
+///   `null`, refused at their declaration. The instantiations a written one derives are checked
+///   likewise, through the definitions that do not grow, its own argument types and an
+///   application's among them: what a copy of it needs, its definition's members' types,
+///   `implements` entries, union members and applications' complete types, each read under its
+///   arguments, and each instantiation they hold that no supplied package writes, in turn, each
+///   rebuild and each generic type the reading walks a step of [`Limits::max_value_steps`], each
+///   type depth-checked and counted as every type is. Each occurrence of a written instantiation,
+///   or application, whose own verdict holds reports the first that fails, with its code, labelled
+///   at the type or the application that derives it, but for a value a report owns already: a
+///   written object literal's report of its copy of a default, or an application's of its copy of
+///   one, owns the value that copy counts, and each one beneath it that does not fit; a limit that
+///   stops the reading is `resource-limit` once, at the written instantiation whose reading it
+///   stopped, what was read is judged all the same, and what was not read is not judged. A derived
+///   instantiation of a definition that grows, [`Def::grows`](super::Def::grows), is not judged,
+///   nor what only it derives. A copy is
 ///   counted before it is made, each default's count kept, and a default whose copy would hold a
 ///   copy of itself is not copied: the argument, or the field, is absent, and under type arguments
 ///   what its count reached is judged as a copy is. The first time a count meets itself, that
@@ -385,13 +404,16 @@ impl Analysis {
 ///   `duplicate-implements-interface` or `duplicate-union-member` at the occurrence, labelled at
 ///   the two. Each type is judged once, both nullnesses sharing the verdict, and one a limit stops
 ///   is `resource-limit` at each occurrence of it, but at an entry whose definition's check
-///   stopped there; an instantiation only a fill derives is not judged. With them, every type
+///   stopped there. With them, every type
 ///   occurrence of a definition one of whose fields adds an argument its interface's field does
 ///   not declare, typed by the definition's type parameter bare and written nullable, with no
 ///   default: one whose type gives that parameter a non-null type makes the argument required, and
 ///   is `unexpected-required-argument` at the occurrence, labelled at the argument and at the
-///   interface's field, each type judged once, a step for each such argument; an instantiation
-///   only a fill or a substitution derives is not judged.
+///   interface's field, each type judged once, a step for each such argument. Last, both are
+///   judged at each instantiation coercion found a written one to derive, through the definitions
+///   that do not grow, by the same verdicts and on the same budget: each occurrence of a written
+///   instantiation, or application, whose own verdict holds reports the first that fails, labelled
+///   at the type or the application that derives it as well.
 /// - Gives every definition and every type the tier it requires, last, once every type is
 ///   interned: a built-in keeps its package's tag; a scalar a supplied package defines requires
 ///   its externs' greatest tier, `core` with none; an enum and a directive `core`; an object or an
@@ -760,6 +782,9 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
     &mut builder,
     &mut reporter,
   );
+  // The model's built-ins answer nothing until it is finished: `core`'s declarations do.
+  let meanings = Meanings::declared(&declarations, &builder);
+  types::grow(&mut builder, &sources, meanings);
   coerce::coerce(
     raw,
     &declarations,

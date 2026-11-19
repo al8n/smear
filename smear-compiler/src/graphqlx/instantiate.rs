@@ -155,7 +155,7 @@ use super::{
   },
   set::ROOT,
   source::SourceMap,
-  types::{Limit, Types},
+  types::{Limit, Spent, Types},
 };
 
 mod bounds;
@@ -1605,8 +1605,12 @@ impl Typing<'_> {
   }
 
   /// Reports, where `seen` is written, a type that cannot be built because it passes `limit`: an
-  /// occurrence's, or an application's, which names its directive.
+  /// occurrence's, or an application's, which names its directive. Once for each place and limit,
+  /// as every phase says a `resource-limit`.
   fn report_limit(&mut self, seen: Seen, limit: Limit) {
+    if !self.types.say_limit(seen.location, Spent::Built(limit)) {
+      return;
+    }
     let limits = self.types.limits();
     let (what, above) = match seen.written {
       Written::Named(directive) if seen.application => (

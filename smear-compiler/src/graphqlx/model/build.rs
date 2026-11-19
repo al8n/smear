@@ -339,6 +339,7 @@ impl ModelBuilder {
       repeatable: false,
       tier: Tier::Core,
       metadata: false,
+      grows: false,
       intrinsic: None,
       marker: false,
       collection: None,
@@ -463,6 +464,12 @@ impl ModelBuilder {
   /// Makes `def` compile-time metadata: a definition only compile-time metadata reaches.
   pub fn set_metadata(&mut self, def: DefId) {
     self.model.defs[def.get() as usize].metadata = true;
+  }
+
+  /// Makes `def` a definition that grows: one of its type parameters reaches itself with a type
+  /// argument that grows.
+  pub fn set_grows(&mut self, def: DefId) {
+    self.model.defs[def.get() as usize].grows = true;
   }
 
   /// Records `entries`: each definition compile-time metadata reaches that a type outside it

@@ -66,7 +66,9 @@
 //! module's own, and read the public model alone.
 //!
 //! One rule is in no set: `UnboundedInstantiation`, which is public, which `analyze` never runs,
-//! and which a backend composes into its own walk. It reads the public model alone.
+//! and which a backend composes into its own walk. It reads the public model alone, through the
+//! graph of `types::growth`, which reads the public views alone: the graph the analysis builds once
+//! after instantiation, so that the rule and `Def::grows` read one fact.
 
 mod circular_input_field;
 mod collection_arity;
@@ -132,6 +134,7 @@ use super::{
   SourceMap, TypeExprId, TypeExprKind, id::dense,
 };
 
+pub(crate) use self::orphan_extension::{Accepted, Meanings, accepted, accepts_application};
 pub use self::unbounded_instantiation::UnboundedInstantiation;
 
 /// The definition `def`'s own contribution, its first, which is no extension, and the package that

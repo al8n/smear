@@ -246,6 +246,9 @@ impl Model {
   /// none here: an application is no type occurrence, and its instantiation is
   /// [`Application::ty`](crate::graphqlx::Application::ty).
   ///
+  /// A contribution the orphan rule refuses grows nothing, so a growth only it writes is not
+  /// refused by that rule; the orphan rule reports the extension.
+  ///
   /// # Panics
   ///
   /// If `def` is not one of [`defs`](Self::defs).
