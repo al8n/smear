@@ -213,9 +213,12 @@
 //! each: left out, it is the application's own mistake, `missing-required-directive-argument` at
 //! its path, with a label at the argument, reported once whatever uses the collection has, and
 //! recorded nowhere. Nor is a whole `null` no instantiation takes recorded: it is refused at once,
-//! as the next section says. A generic directive's own arguments' defaults are judged where its
-//! applications leave them out, but for such a `null`, and recorded nowhere. When the walk has
-//! ended, each type
+//! as the next section says. Nor is anything a contribution the orphan rule refuses writes, nor an
+//! application it refuses, as `rules::accepted` answers: such a contribution adds nothing to the
+//! definition it extends, so what it writes is coerced where it is written all the same, and judged
+//! at no instantiation, written or derived. A generic directive's own arguments' defaults are
+//! judged where its applications leave them out, but for such a `null`, and recorded nowhere. When
+//! the walk has ended, each type
 //! occurrence a supplied package writes, in id order, whose type is a closed named type of a
 //! definition with recorded rows, and then each application a supplied package writes, in id
 //! order, whose type is a closed instantiation of its directive, asks that instantiation's
@@ -408,7 +411,7 @@ use super::{
   },
   raw::{FloatSpelling, Radix, RawArgument, RawKind, RawNode, RawPath, RawTree, RawValues, UNREAD},
   resolve::{ParamName, Position, Request, Resolved, Root, Scopes, Segment, Wanted},
-  rules::Meanings,
+  rules::{Accepted, Meanings, accepted, accepts_application},
   set::ROOT,
   source::SourceMap,
   types::{Counter, Limit, Spent, Stop, Types},
@@ -549,6 +552,7 @@ pub(crate) fn coerce(
     held: Vec::new(),
     searched: BTreeMap::new(),
     owner: None,
+    refusing: false,
     recorded: Vec::new(),
     checked: BTreeMap::new(),
     written: BTreeSet::new(),
@@ -564,24 +568,33 @@ pub(crate) fn coerce(
   coercion.list_fields();
   coercion.list_cycled();
   coercion.list_written();
+  // The applications and the direct members of the definition being walked that contributions
+  // the orphan rule refuses write, each sorted: what is recorded of them is nothing.
+  let mut refused_applications: Vec<ApplicationId> = Vec::new();
+  let mut refused_members: Vec<MemberId> = Vec::new();
   for index in 0..coercion.builder.def_count() {
     let def = DefId::new(index);
     // A generic definition's values that name its type parameters are recorded under it: a
     // type's, and those of the applications on a directive and on its arguments. A directive's
     // own arguments' defaults are judged where its applications leave them out.
     coercion.owner = (coercion.builder.type_param_count(def) > 0).then_some(def);
+    coercion.refused(def, &mut refused_applications, &mut refused_members);
     let count = coercion.builder.def_applications(def).len();
     for at in 0..count {
       if let Some(&application) = coercion.builder.def_applications(def).get(at) {
+        coercion.refusing = refused_applications.binary_search(&application).is_ok();
         coercion.application(application);
       }
     }
     for member in coercion.builder.def_members(def) {
+      // A member's arguments and applications are its contribution's, refused with it.
+      coercion.refusing = refused_members.binary_search(&member).is_ok();
       coercion.member(member);
       for argument in coercion.builder.member_arguments(member) {
         coercion.member(argument);
       }
     }
+    coercion.refusing = false;
   }
   coercion.owner = None;
   let count = coercion.builder.schema_applications().len();
@@ -1515,6 +1528,9 @@ struct Coercion<'c, 'p, 'x> {
   /// The generic definition whose values the walk is making, when it is in one: a type, or a
   /// directive.
   owner: Option<DefId>,
+  /// Whether the walk is in a contribution the orphan rule refuses, or in an application it
+  /// refuses: what is written there is coerced where it is written, and recorded for none.
+  refusing: bool,
   /// Each value of a generic definition whose type names its type parameters, but not a whole
   /// `null` no instantiation takes, and each argument an application in it leaves out whose type is
   /// a bare nullable type parameter of it, but not a collection's key or element, in the walk's
@@ -1699,13 +1715,47 @@ impl<'p> Coercion<'_, 'p, '_> {
     found
   }
 
+  /// Fills `applications` and `members` with what the contributions of `def` that the orphan rule
+  /// refuses write, as `rules::accepted` answers, each sorted: each application of a contribution
+  /// it refuses whole, and each it refuses in the root package's extension of a built-in, as
+  /// `rules::accepts_application` answers; and each direct member of a contribution it refuses,
+  /// whose arguments and applications are refused with it. Empty for a definition of no type
+  /// parameter, which records nothing.
+  fn refused(
+    &self,
+    def: DefId,
+    applications: &mut Vec<ApplicationId>,
+    members: &mut Vec<MemberId>,
+  ) {
+    applications.clear();
+    members.clear();
+    if self.owner.is_none() {
+      return;
+    }
+    let model = self.builder.so_far();
+    for part in model.def(def).contributions() {
+      let judged = accepted(model, self.sources, def, &part);
+      for &application in part.applications() {
+        if !accepts_application(model, self.meanings, judged, application) {
+          applications.push(application);
+        }
+      }
+      if judged == Accepted::Refused {
+        members.extend(part.members());
+      }
+    }
+    applications.sort_unstable();
+    members.sort_unstable();
+  }
+
   /// Records the value of the tree `tree`, of the type `ty`, written at `site` in the definition
   /// the walk is in, when that is a generic definition and `ty` names its type parameters: each
   /// closed instantiation of it checks the value, a type's written or a directive's applied. A
   /// whole `null` no instantiation takes is refused instead, and never recorded: its callers ask
-  /// first, as [`never_null`](Self::never_null) says.
+  /// first, as [`never_null`](Self::never_null) says. Nor is anything a contribution the orphan
+  /// rule refuses writes, nor an application it refuses, as `refusing` says.
   fn record(&mut self, tree: u32, ty: Option<TyId>, site: Site) {
-    let (Some(def), Some(ty)) = (self.owner, ty) else {
+    let (Some(def), Some(ty), false) = (self.owner, ty, self.refusing) else {
       return;
     };
     if !self.builder.ty_closed(ty) {
@@ -1723,8 +1773,9 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// closed instantiation of the definition checks it, a type's written or a directive's applied.
   /// A collection's key or element is never recorded: every instantiation makes it non-null, so
   /// [`forced`](Self::forced) finds it first, and the application's own mistake is reported once.
+  /// Nor is an argument an application the orphan rule refuses leaves out, as `refusing` says.
   fn owe(&mut self, application: ApplicationId, argument: MemberId, ty: Option<TyId>) {
-    let (Some(def), Some(ty)) = (self.owner, ty) else {
+    let (Some(def), Some(ty), false) = (self.owner, ty, self.refusing) else {
       return;
     };
     let param = matches!(

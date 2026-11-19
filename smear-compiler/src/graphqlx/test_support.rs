@@ -13,17 +13,17 @@ use std::{
   vec::Vec,
 };
 
-use tokora::diagnostic::Code;
+use tokora::diagnostic::{Code, Location};
 
 use super::{
   UnboundedInstantiation, Visitor,
   analysis::{Analysis, resolve_door},
-  id::DefId,
+  id::{ApplicationId, DefId},
   limits::Limits,
   model::Model,
   package::Package,
   resolve::{NonZeroAlias, Resolved},
-  rules::Rules,
+  rules::{Accepted, Meanings, Rules, accepted, accepts_application},
   source::SourceMap,
   text::SourceText,
 };
@@ -74,6 +74,52 @@ pub fn grown_by_the_rule(model: &Model, sources: &SourceMap) -> Vec<DefId> {
     Ok(grown) => grown.defs,
     Err(_) => Vec::new(),
   }
+}
+
+/// One extension of a definition as the orphan rule's predicate judges it: see
+/// [`judged_extensions`].
+#[derive(Debug)]
+pub struct JudgedExtension {
+  /// Where the extension names the definition it extends: where the rule reports refusing it.
+  pub location: Location,
+  /// Whether `rules::accepted` refuses it whole.
+  pub refused: bool,
+  /// Where each of its applications names its directive, which is where the rule reports refusing
+  /// one, with whether `rules::accepts_application` accepts it.
+  pub applications: Vec<(Location, bool)>,
+}
+
+/// Each extension of each definition of the finished `model`, whose files `sources` holds, as the
+/// orphan rule's predicate judges it, in definition and then contribution order: the statement of
+/// the rule the phases read before the model is finished, for the test that holds it and the
+/// rule's own reports to one answer.
+pub fn judged_extensions(model: &Model, sources: &SourceMap) -> Vec<JudgedExtension> {
+  let meanings = Meanings::of(model);
+  let mut judged: Vec<JudgedExtension> = Vec::new();
+  for def in model.defs() {
+    for part in model.def(def).contributions() {
+      if !part.is_extension() {
+        continue;
+      }
+      let answer = accepted(model, sources, def, &part);
+      let applications = part
+        .applications()
+        .iter()
+        .map(|application: &ApplicationId| {
+          (
+            model.application(*application).path_location(),
+            accepts_application(model, meanings, answer, *application),
+          )
+        })
+        .collect();
+      judged.push(JudgedExtension {
+        location: part.location(),
+        refused: answer == Accepted::Refused,
+        applications,
+      });
+    }
+  }
+  judged
 }
 
 /// What `path` names, written in the module `module` of `root` beside `dependencies`, where

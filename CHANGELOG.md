@@ -373,10 +373,11 @@ All notable changes to Smear are documented in this file.
     definition's values, the arguments it makes required and its entries and members wherever its
     definition does not grow, each reported at the written occurrence that derives it, labelled at
     the type that derives it, unless the report of a copy that holds that value owns it already; a
-    derived instantiation of a definition that grows, and what only it derives, is not. A
-    `resource-limit` is said once for each written occurrence and kind of limit, whichever phase
-    meets it there first: each phase's step budget is a kind of its own, and a limit on types one
-    kind across the phases.
+    derived instantiation of a definition that grows, and what only it derives, is not. A value
+    written in a contribution the orphan rule refuses, or in an application it refuses, is coerced
+    where it is written and judged at no instantiation, written or derived. A `resource-limit` is
+    said once for each written occurrence and kind of limit, whichever phase meets it there first:
+    each phase's step budget is a kind of its own, and a limit on types one kind across the phases.
   - **The rules.** 33 rules, each a visitor on the public trait, judge what the supplied packages
     wrote once the phases have written the model: smear's own rules on GraphQLx, under eleven
     `smear::graphqlx` codes, and the type-system rules GraphQLx shares with GraphQL in this

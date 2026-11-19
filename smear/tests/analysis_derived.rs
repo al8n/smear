@@ -1673,6 +1673,58 @@ fn an_orphan_application_on_a_field_derives_nothing_in_the_dependency() {
   );
 }
 
+/// A default another package's extension writes in a dependency's generic type, of the type `T`,
+/// is recorded for no instantiation: `"x"`, the default of `arg` on the root package's `extra` on
+/// `^::dep::Box<T>`, would be judged at the dependency's own written `Box<Int>`, and refused there.
+/// Written by the dependency itself, the same default is. Refuses a refused member's argument's
+/// value recorded under the definition the contribution extends.
+#[test]
+fn an_orphan_fields_argument_default_is_judged_at_no_instantiation() {
+  let theirs = "type Box<T> {\n  v: T\n}\ntype Holder {\n  b: Box<Int>\n}\n";
+  let ours = "type Query {\n  x: Int\n}\n";
+  an_orphan_changes_nothing_in_the_dependency(
+    theirs,
+    ours,
+    "extend type ^::dep::Box<T> {\n  extra(arg: T = \"x\"): Int\n}\n",
+  );
+  let own = format!("{theirs}extend type Box<T> {{\n  extra(arg: T = \"x\"): Int\n}}\n");
+  let analysis = analyze_beside(ours, &own, &Limits::new());
+  assert!(
+    in_dependency(&analysis)
+      .iter()
+      .any(|&(code, _): &(&'static str, Location)| code == DEFAULT),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+/// An argument another package's extension writes in an application on a dependency's generic
+/// type, of the type `T`, is recorded for no instantiation: `"x"`, the argument of the root
+/// package's `@d<T>` on `^::dep::Box<T>`, would be judged at the dependency's own written
+/// `Box<Int>`, as `d<Int>`'s, and refused there. Written by the dependency itself, the same
+/// argument is. Refuses a refused application's argument recorded under the definition the
+/// contribution extends.
+#[test]
+fn an_orphan_applications_argument_is_judged_at_no_instantiation() {
+  let theirs = "type Box<T> {\n  v: T\n}\ntype Holder {\n  b: Box<Int>\n}\n";
+  let ours = "type Query {\n  x: Int\n}\n";
+  an_orphan_changes_nothing_in_the_dependency(
+    theirs,
+    &format!("{ours}directive @d<X>(v: X) on OBJECT\n"),
+    "extend type ^::dep::Box<T> @d<T>(v: \"x\")\n",
+  );
+  let own =
+    format!("{theirs}directive @d<X>(v: X) on OBJECT\nextend type Box<T> @d<T>(v: \"x\")\n");
+  let analysis = analyze_beside(ours, &own, &Limits::new());
+  assert!(
+    in_dependency(&analysis)
+      .iter()
+      .any(|&(code, _): &(&'static str, Location)| code == ARGUMENT),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
 /// What another package writes into a dependency's definition grows nothing: the root package's
 /// `implements Loop<[T]>` on `^::dep::I<T>`, where `Loop<X>` holds an `I<X>`, would close a cycle
 /// that wraps `T`, and make `I` grow, so that the `I<Boolean>` the dependency's `Wrap<Boolean>`

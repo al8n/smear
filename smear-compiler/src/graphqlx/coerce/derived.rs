@@ -22,8 +22,11 @@
 //! arguments its type parameters' defaults fill too, past the most any occurrence of it writes:
 //! what a default fills is derived by that default. A contribution the orphan rule refuses, which
 //! another package writes into a definition, derives nothing, grows nothing and makes nothing
-//! relevant: every walk over a definition's contributions, here and in the growth graph, reads
-//! those the rule accepts alone, as `rules::accepted` answers, the rule's own test.
+//! relevant: every walk over a definition's contributions, here, in the growth graph and where
+//! coercion records a value, reads those the rule accepts alone, as `rules::accepted` answers, the
+//! rule's own test. A type written inside a refused contribution is a written occurrence like any
+//! other, judged and expanded where it is written; a refused contribution adds nothing to the
+//! definition it extends.
 //!
 //! The expansion reads only toward what can be judged. What an instantiation is judged for is a
 //! value recorded under its definition, here, and in the implementation check an `implements` entry
