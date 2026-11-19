@@ -319,8 +319,9 @@ impl Analysis {
 ///   [`Limits::max_value_steps`], each type depth-checked and counted as every type is. Each
 ///   occurrence of a written instantiation, or application, whose own verdict holds reports the
 ///   first that fails, with its code, labelled at the type or the application that derives it,
-///   but for a value a written object literal of that derived instantiation reported already as
-///   its own copy, which is the literal's alone; a limit that stops the reading is
+///   but for a value a report owns already: a written object literal's of that derived
+///   instantiation, as its own copy, or an application's, whose default's copy holds such a
+///   literal; a limit that stops the reading is
 ///   `resource-limit` once, at the written instantiation whose reading it stopped, what was read
 ///   is judged all the same, and what was not read is not judged. A derived instantiation of a
 ///   definition that grows, [`Def::grows`](super::Def::grows), is not judged, nor what only it

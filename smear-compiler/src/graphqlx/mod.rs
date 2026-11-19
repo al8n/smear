@@ -163,8 +163,9 @@
 //! writes, is judged for its entries and members, for the arguments it makes required and for its
 //! definition's values under it, where its definition does not grow: each such instantiation a
 //! written one derives, through what a copy of it needs, is judged once, and what fails is reported
-//! at each occurrence of the written one, labelled at the type that derives it, unless a written
-//! object literal of the derived instantiation reported that value already. Its bounds are
+//! at each occurrence of the written one, labelled at the type that derives it, unless an object
+//! literal of the derived instantiation, written or in the copy of a default an application
+//! reported, has its report own that value already. Its bounds are
 //! not judged, each default's being judged where it is written, and holding at the instantiation
 //! by what the implementation check holds. What stays unjudged is a derived instantiation of a
 //! definition that [grows](Def::grows), and what only such an instantiation derives:

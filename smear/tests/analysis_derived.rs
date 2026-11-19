@@ -752,3 +752,28 @@ fn a_stop_at_max_substitutions_is_the_fills_and_leaves_the_closure_judging() {
   let short = analyze_text(text, &Limits::new().with_max_substitutions(least - 1));
   assert_eq!(found(&short), [(DEFAULT, derives), (LIMIT, fill)]);
 }
+
+/// An application's report of a default it leaves out that does not fit owns what fails inside
+/// that default (W:979): `@w<String>` leaves out `a`, whose default `{}`, copied as a
+/// `Box<String>`, leaves out `v`, whose `1` does not fit. The application reports the default at
+/// its path, and the `Box<String>` its instantiation derives through `a` passes over that `1`. One
+/// report, at the path. Refuses a second report of one mistake.
+#[test]
+fn a_default_an_application_reported_owns_what_fails_inside_it() {
+  let text = "type Query @w<String> {\n  x: Int\n}\ninput Box<U> {\n  v: U = 1\n}\n\
+              directive @w<T>(a: Box<T> = {}) on OBJECT\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let path = named(schema, text, "@", "w", 0);
+  assert_eq!(found(&analysis), [(DEFAULT, path)]);
+  let report = the(&analysis, DEFAULT, path);
+  assert_eq!(
+    report.to_string(),
+    "under this application's type arguments, the default `{}` of `a` does not fit the type `a` \
+     takes"
+  );
+  assert_eq!(
+    labels(report),
+    [(after(schema, text, "Box<T> = ", "{}"), "this default")]
+  );
+}

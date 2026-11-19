@@ -233,19 +233,20 @@
 //! that does not fit is
 //! reported all the same.
 //!
-//! Then the instantiations those written ones derive, through the definitions that do not grow,
-//! are checked the same way, as the `derived` module says: what a copy of a written instantiation
+//! Then the instantiations those written ones derive, through the definitions that do not grow, are
+//! checked the same way, as the `derived` module says: what a copy of a written instantiation
 //! needs, its definition's members' types, `implements` entries, union members and the complete
 //! types of its applications, each read under its arguments, and each instantiation of a generic
 //! definition they hold that no supplied package writes, in turn, an application only an
 //! instantiation reaches among them. Each occurrence, or application, of a written instantiation
 //! whose own verdict holds reports the first that fails, with the code the same failure has at a
-//! written instantiation, labelled at the type or the application that derives it. Each mistake
-//! has one owner (W:979): a value a written object literal of that very instantiation already
-//! reported, as its own copy that does not fit, is the literal's, and the check of the derived
-//! instantiation passes over it to its next row. A derived instantiation of a definition that
-//! grows is not checked, nor what only it derives: a value written under such a type is judged
-//! where it is written.
+//! written instantiation, labelled at the type or the application that derives it. Each mistake has
+//! one owner (W:979): a value a written object literal of that very instantiation already reported,
+//! as its own copy that does not fit, is the literal's, and one an object literal of it leaves out
+//! in the copy of a default an application reported is that report's; the check of the derived
+//! instantiation passes over it to its next row. A derived instantiation of a definition that grows
+//! is not checked, nor what only it derives: a value written under such a type is judged where it
+//! is written.
 //!
 //! # The count of a copy
 //!
@@ -517,6 +518,7 @@ pub(crate) fn coerce(
     checked: BTreeMap::new(),
     written: BTreeSet::new(),
     owned: BTreeSet::new(),
+    owning: false,
     paid: 0,
     copied: 0,
     levels: BTreeMap::new(),
@@ -1480,10 +1482,15 @@ struct Coercion<'c, 'p, 'x> {
   /// where it is written. A written object literal of one of them leaves a copy that does not fit
   /// to that check; of any other type it reports the copy itself.
   written: BTreeSet<TyId>,
-  /// Each copy a written object literal of a type no occurrence writes reported as not fitting, by
-  /// the nullable form of the literal's type and the tree of the default it leaves out: the
-  /// literal's mistake, which the check of a derived instantiation passes over (W:979).
+  /// Each default whose copy does not fit that a report already owns (W:979), by the nullable form
+  /// of the type of the object literal that leaves it out and the default's tree: the first such
+  /// default a written object literal of a type no occurrence writes leaves out, which it reports,
+  /// and the first such default each object literal leaves out in the copy of a default an
+  /// application reported. The check of a derived instantiation passes over it.
   owned: BTreeSet<(TyId, u32)>,
+  /// Whether the copy being made is of a default an application reported as not fitting, whose
+  /// report owns what its object literals leave out that does not fit.
+  owning: bool,
   /// The rows of every count a copy was made of, charged or not.
   paid: u64,
   /// The rows made of copies: what `paid` is when the phase ends, since a copy and its count are
@@ -2153,7 +2160,8 @@ impl<'p> Coercion<'_, 'p, '_> {
         return false;
       }
     };
-    if !fits && !*reported {
+    let reports = !fits && !*reported;
+    if reports {
       *reported = true;
       self.unfit_default(at, left.argument, tree);
     }
@@ -2161,7 +2169,11 @@ impl<'p> Coercion<'_, 'p, '_> {
       return true;
     };
     let before = self.builder.value_count();
-    if let Some(value) = self.value(tree, ty, Mode::Copied) {
+    // The report owns what the copy's object literals leave out that does not fit (W:979).
+    self.owning = reports;
+    let made = self.value(tree, ty, Mode::Copied);
+    self.owning = false;
+    if let Some(value) = made {
       debug_assert_eq!(
         self.builder.value_count().saturating_sub(before),
         rows,
@@ -3885,6 +3897,20 @@ impl<'p> Coercion<'_, 'p, '_> {
         }
       };
       let ty = expected.ty;
+      // In the copy of a default an application reported, the first default the object leaves out
+      // that does not fit is that report's: a derived instantiation passes over it (W:979). Its
+      // count was judged and kept when the copy's count read it.
+      if !mode.written()
+        && self.owning
+        && !met
+        && self.unfit.contains(&CountKey { tree: default, ty })
+      {
+        met = true;
+        if let Some(of) = making.ty {
+          let nullable = self.nullable(of, def);
+          self.owned.insert((nullable, default));
+        }
+      }
       // In a copy nothing is asked and no count is read: the count the copy was charged for read
       // this default's count, through this same reading of the literal, and it was exact, or no
       // copy would be made. So its rows are among those already paid for.

@@ -65,18 +65,19 @@
 //!
 //! # The check, and its report
 //!
-//! Each instantiation the closure derives whose definition does not grow and records rows is
-//! judged as a written instantiation is, by the same verdict, made once and shared by both
-//! nullnesses, a step for each pair of the instantiation and a row. Each mistake has one owner
-//! (W:979): a row whose value a written object literal of that very instantiation already
-//! reported, as its own copy that does not fit, is the literal's, and the check passes over it to
-//! the next row. Each occurrence of a root, and each application of one, in id order, whose own
-//! verdict holds, reports the failing instantiation of least index its expansion reaches, as
-//! `Closure::blame` finds it: with the code the same failure has at a written instantiation,
-//! labelled at the type or the application that derives the failing instantiation and at the
-//! value or the application that fails; or, stopped by a limit, `resource-limit`. A root whose own
-//! verdict fails was reported as written, and says nothing more. A derived instantiation of a
-//! definition that grows is not judged, nor is what only it derives.
+//! Each instantiation the closure derives whose definition does not grow and records rows is judged
+//! as a written instantiation is, by the same verdict, made once and shared by both nullnesses, a
+//! step for each pair of the instantiation and a row. Each mistake has one owner (W:979): a row
+//! whose value a written object literal of that very instantiation already reported, as its own
+//! copy that does not fit, is the literal's, and one an object literal of it leaves out in the copy
+//! of a default an application reported is that report's; the check passes over it to the next row.
+//! Each occurrence of a root, and each application of one, in id order, whose own verdict holds,
+//! reports the failing instantiation of least index its expansion reaches, as `Closure::blame`
+//! finds it: with the code the same failure has at a written instantiation, labelled at the type or
+//! the application that derives the failing instantiation and at the value or the application that
+//! fails; or, stopped by a limit, `resource-limit`. A root whose own verdict fails was reported as
+//! written, and says nothing more. A derived instantiation of a definition that grows is not
+//! judged, nor is what only it derives.
 
 use std::{
   borrow::Cow,
@@ -700,9 +701,9 @@ impl Coercion<'_, '_, '_> {
 
   /// The verdict of `ty`, the nullable form of an instantiation of `def` the closure derives: made
   /// the first time it is asked, as a written instantiation's is, and kept; `Fits` when `def`
-  /// records nothing. A row whose value a written object literal of `ty` reported, as its own copy
-  /// that does not fit, is the literal's mistake: the check passes over it to the next row, so each
-  /// row is still checked once.
+  /// records nothing. A row whose value a report owns already, a written object literal's of `ty`
+  /// or an application's whose copied default holds one of `ty`, is that report's mistake: the
+  /// check passes over it to the next row, so each row is still checked once.
   fn derived_verdict(&mut self, def: DefId, ty: TyId) -> Checked {
     let start = self
       .recorded
@@ -729,8 +730,8 @@ impl Coercion<'_, '_, '_> {
     verdict
   }
 
-  /// Whether the row recorded at `row` is a value a written object literal of `ty` reported as its
-  /// own copy that does not fit.
+  /// Whether the row recorded at `row` is a value a report owns already, as `Coercion::owned` keeps
+  /// it for an object literal of `ty`.
   fn owned_row(&self, ty: TyId, row: u32) -> bool {
     match self.recorded.get(row as usize) {
       Some(Recorded {
