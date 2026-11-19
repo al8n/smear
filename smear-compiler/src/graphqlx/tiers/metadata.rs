@@ -77,11 +77,13 @@
 //! Each closure keeps one bit for each definition and one for each type, and pushes a type only
 //! when its bit was clear, the first push of each occurrence's type included: a type is walked at
 //! most once by each, however many occurrences write it, so a bare `Big` whose thousand slots
-//! defaults fill is walked once for all its uses. Each closure reads each definition's
-//! occurrences at most once. The work is linear in the definitions, their occurrences, the types
-//! and their arguments; nothing recurses, nothing is interned and nothing is reported. When
-//! `reached` holds nothing, `runtime` is not walked. Both are least sets, so the answer depends on
-//! no order.
+//! defaults fill is walked once for all its uses. An application's complete type is pushed whole,
+//! and not argument by argument, so the bare applications of one directive, which share the one
+//! complete type its defaults fill, read its arguments once between them. Each closure reads each
+//! definition's occurrences at most once. The work is linear in the definitions, their
+//! occurrences, the applications and the type arguments they write, the types and their
+//! arguments; nothing recurses, nothing is interned and nothing is reported. When `reached` holds
+//! nothing, `runtime` is not walked. Both are least sets, so the answer depends on no order.
 
 use std::{vec, vec::Vec};
 
@@ -153,22 +155,8 @@ fn reached(builder: &ModelBuilder) -> Vec<bool> {
       }
     }
   }
-  // Every type argument of every application: each written one by its own type, whether or not a
-  // phase refused the application, and each of its complete ones. An application has no type until
-  // its arguments complete, and the unresolved type has no argument.
-  for index in 0..builder.application_count() {
-    let application = ApplicationId::new(index);
-    for &argument in builder.application_type_args(application) {
-      if let Some(ty) = typed(builder, argument) {
-        push(&mut seen, &mut types, ty);
-      }
-    }
-    if let Some(ty) = builder.application_ty(application) {
-      for &argument in builder.ty_args(ty) {
-        push(&mut seen, &mut types, argument);
-      }
-    }
-  }
+  // Every type argument of every application.
+  application_roots(builder, &mut seen, &mut types);
 
   loop {
     while let Some(ty) = types.pop() {
@@ -201,6 +189,32 @@ fn reached(builder: &ModelBuilder) -> Vec<bool> {
     }
   }
   reached
+}
+
+/// Pushes onto `types` the roots every application gives, each unless `seen` says it was pushed
+/// before: the type of each type argument it writes, whether or not a phase refused the
+/// application, as for a count its directive does not take; and its complete type, its
+/// directive's instantiation, whose arguments are its complete type arguments, the slots its
+/// directive's defaults fill among them. An application has no complete type until its arguments
+/// complete, and the unresolved type has no argument.
+///
+/// The complete type is pushed whole, and not argument by argument: the applications that share
+/// it, as the bare applications of one directive do, push it once between them, and the closure
+/// reads its arguments once, when it reaches it. Its directive, which is no input kind, never joins
+/// what metadata reaches. So each application costs one push, and one for each type argument it
+/// writes, however many slots its directive's defaults fill.
+fn application_roots(builder: &ModelBuilder, seen: &mut [bool], types: &mut Vec<TyId>) {
+  for index in 0..builder.application_count() {
+    let application = ApplicationId::new(index);
+    for &argument in builder.application_type_args(application) {
+      if let Some(ty) = typed(builder, argument) {
+        push(seen, types, ty);
+      }
+    }
+    if let Some(ty) = builder.application_ty(application) {
+      push(seen, types, ty);
+    }
+  }
 }
 
 /// What is used outside metadata, by definition id, given what metadata reaches, `reached`: for
@@ -416,3 +430,6 @@ fn executable(location: DirectiveLocation) -> bool {
     | DirectiveLocation::DirectiveDefinition => false,
   }
 }
+
+#[cfg(test)]
+mod tests;
