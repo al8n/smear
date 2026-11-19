@@ -146,6 +146,37 @@ $CARGO $TOOLCHAIN hack clippy -p smear --each-feature --features parser,alloc --
   rowan,rowan_0_17,lossless-coverage,validator,introspection,proto,analysis,default,std,bytes,bstr,hipstr,smol-bytes \
   --exclude-no-default-features --exclude-all-features || status=1
 
+# Pass 3b — the same lesson for `smear-compiler`, which is one crate where it was four.
+#
+# The analyzer crate's own `--each-feature` rows were "the analyzer with each feature", because that
+# crate always held the analyzer, and the validator crate's were "the validator at each tier". In
+# one crate `--each-feature` builds each feature ALONE, so `alloc,bytes_1` compiles no analyzer and
+# `std,graphqlx` is a row only if it is asked for. The rows below keep the cells the crate
+# boundaries used to give. Pass 2 builds `alloc,graphql` and `alloc,graphqlx` already, each with
+# `--tests`; this pass adds the two on `std`, which are where the kernel's per-capability
+# attributes are proved for that tier.
+#
+# The first two commands use exclude lists, so a feature added to the manifest joins them without
+# an edit, as pass 3 does. The tier and `graphqlx` that a command names in `--features` are not in
+# its exclude list, for the reason pass 3 gives: cargo-hack rejects a feature named by both flags.
+# The commands are six, five and two rows.
+echo "== pass 3b: smear-compiler, graphqlx with graphql, with test-support and with each source feature, and the std tier =="
+# graphqlx with graphql, with test-support and with each source feature, on alloc
+# shellcheck disable=SC2086
+$CARGO $TOOLCHAIN hack clippy -p smear-compiler --each-feature --features alloc,graphqlx --tests \
+  --keep-going --exclude-features std,default,introspection,bytes,bstr,hipstr,smol-bytes \
+  --exclude-no-default-features --exclude-all-features || status=1
+# graphqlx alone and with each source feature, on std
+# shellcheck disable=SC2086
+$CARGO $TOOLCHAIN hack clippy -p smear-compiler --each-feature --features std,graphqlx --tests \
+  --keep-going --exclude-features alloc,default,graphql,introspection,test-support,bytes,bstr,hipstr,smol-bytes \
+  --exclude-all-features || status=1
+# graphql and introspection, on std
+# shellcheck disable=SC2086
+$CARGO $TOOLCHAIN hack clippy -p smear-compiler --each-feature --features std --tests \
+  --keep-going --include-features graphql,introspection \
+  --exclude-no-default-features --exclude-all-features || status=1
+
 # Pass 4 — the std tier, without alloc: `std,alloc` and every dependency feature on `std`.
 #
 # `std` does not imply `alloc`, and `std` alone is the default tier, whose row is pass 1's. This
@@ -163,7 +194,7 @@ echo "== pass 4: the std tier, without alloc =="
 # shellcheck disable=SC2086
 $CARGO $TOOLCHAIN hack clippy --each-feature --features std --ignore-unknown-features --tests \
   --keep-going --exclude-features \
-  default,bytes,bstr,hipstr,smol-bytes,rowan,graphql,graphqlx,parser,validator,proto,introspection,analysis,materialized-numbers,test-support,build \
+  default,bytes,bstr,hipstr,smol-bytes,rowan,graphql,graphqlx,parser,validator,proto,introspection,analysis,materialized-numbers,test-support \
   --exclude-no-default-features --exclude-all-features || status=1
 
 exit "$status"

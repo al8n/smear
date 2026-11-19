@@ -4,6 +4,26 @@ All notable changes to Smear are documented in this file.
 
 ## [Unreleased]
 
+- `smear-compiler`! and `smear`: `smear-schema`, `smear-semantics` and `smear-analysis` are folded
+  into `smear-compiler`, and the set is five crates from this release. Under `smear` no path and no
+  feature changes: `smear::diagnostic`, `smear::validator`, `smear::validator::schema` and
+  `smear::analysis::graphqlx` resolve as they did, with the same features.
+  - **Paths.** `smear_schema::X` is `smear_compiler::schema::X`, the doc-hidden `bucket`,
+    `hash_bytes`, `FrozenStr` and `StrBuf` included, and every build compiles `schema`. The
+    validator's `smear_compiler::X` is `smear_compiler::graphql::X`, and
+    `smear_compiler::graphql::schema` re-exports `schema`. `smear_analysis::graphqlx::X` is
+    `smear_compiler::graphqlx::X`. `smear_semantics` has no successor: the interner, duplicate
+    index and cycle kernel are a private module, and the three crates' doc-hidden `__features` go
+    with them.
+  - **Features.** `smear-schema/build` is `smear-compiler/graphql`, which compiles the draft §3
+    builder and the draft §5 validator, and `introspection` implies it. `graphqlx` compiles the
+    analyzer; its source features `bytes_1`, `bstr_1`, `hipstr_0_8` and `smol-bytes_0_2`, their
+    aliases and `test-support` keep their names, and each source feature forwards `smear-parser`'s
+    weakly. No feature implies a tier, and the parser and the lexer are in the graph only with
+    `graphql` or `graphqlx`, so `graphql-proto`, which takes the crate with no feature, gets the
+    runtime layer alone.
+  - **`smear`.** The `analysis` feature, new in this release, implies `parser` and `graphqlx` and
+    no tier, and the umbrella's source features forward to the compiler's.
 - `graphql-proto`!: `Extensions` holds its entries in an `IndexMap` and finds a key by its hash,
   with `std::hash::RandomState` under `std` and foldhash at a fixed, public seed without it,
   where it scanned. Iteration is still insertion order, `remove` keeps the remaining entries in
@@ -24,8 +44,8 @@ All notable changes to Smear are documented in this file.
   `Limits`, and a field the input leaves out takes its default. A key that names no ceiling is
   refused, so a misspelt one cannot leave a default in place. `smear/serde` forwards it, and
   implies neither `proto` nor a tier.
-- `graphql-proto` and `smear-schema`: a tier brings dependencies. `graphql-proto` depends on
-  `indexmap` with either tier and on foldhash with `alloc`, and `smear-schema` on smol-bytes 0.2
+- `graphql-proto` and `smear-compiler`: a tier brings dependencies. `graphql-proto` depends on
+  `indexmap` with either tier and on foldhash with `alloc`, and `smear-compiler` on smol-bytes 0.2
   with either tier where the target has pointer-width atomics. A build with no tier compiles none
   of them.
 - `smear-lexer`!: `BracedUnicodeEscapeError::TooManyDigits` carries a `TooManyDigits`, exported with
@@ -95,25 +115,20 @@ All notable changes to Smear are documented in this file.
   returns `ParsedComponents { document, recovery, errors, tree }`, exported from `graphql` and
   `graphqlx` beside `Parsed`. The three directive-location enums return a `spelling`
   beside the span. `Name` and `FragmentName` still return tokora's own `Components`.
-- `smear-semantics`: the interner's ranges and parts are named types. `Interner::spans` lends one
-  `ByteRange` per symbol, the half-open range of the arena's bytes that spells it, with `new`,
-  `start()`, `end()`, `len()` and `is_empty()`. `Interner::into_parts` answers an
-  `InternerParts`, whose public fields `bytes`, `spans` and `retired` are the arena, those ranges
-  and the retired map. Both are exported from `interner`.
-- `smear-schema`: `TypeRef`, the `(TypeId, &TypeDef)` pair `Schema::type_by_name` answers, is
-  exported at the crate root, where only the private `repr` module named it.
-- `smear-compiler`!: `Context::Member` and `Context::Usage` hold named payloads, exported at the
-  crate root beside `Context`, where they had the fields `owner` and `name`, and `variable` and
+- `smear-compiler`: `TypeRef`, the `(TypeId, &TypeDef)` pair `Schema::type_by_name` answers, is
+  exported at `schema`, where only the private `repr` module named it.
+- `smear-compiler`!: `Context::Member` and `Context::Usage` hold named payloads, exported at
+  `graphql` beside `Context`, where they had the fields `owner` and `name`, and `variable` and
   `expected`: `MemberContext` has `owner()` and `name()`, and `UsageContext` has `variable()` and
   `expected()`. They are built by the validator, and a caller reads them off the diagnostics it
   is handed.
-- `smear-schema` and `smear-compiler`: the public enums derive their `is_*` predicates, and each
-  one with data `unwrap_*` and `try_unwrap_*`, by value, by reference and by mutable reference.
-  `Context`, `MergeConflict`, `Refusal`, `ResponseErrorKind` and `IntrospectionError` are new to
-  it; `Context::None`, which could only return `()`, has no `unwrap_*`. `Rule` and
-  `SchemaErrorKind`, of more than sixteen variants, and the enums under `repr` derive nothing new.
-  Both crates take `derive_more` as a dependency for it, with no feature in front of it.
-- `smear-analysis`!: the model's variants hold named payloads or the one value they stand for,
+- `smear-compiler`: the public enums derive their `is_*` predicates, and each one with data
+  `unwrap_*` and `try_unwrap_*`, by value, by reference and by mutable reference. `Context`,
+  `MergeConflict`, `Refusal`, `ResponseErrorKind` and `IntrospectionError` are new to it;
+  `Context::None`, which could only return `()`, has no `unwrap_*`. `Rule` and `SchemaErrorKind`,
+  of more than sixteen variants, and the enums under `repr` derive nothing new. The crate takes
+  `derive_more` as a dependency for it, with no feature in front of it.
+- `smear-compiler`!: the model's variants hold named payloads or the one value they stand for,
   where nine had fields, exported at `graphqlx` beside the enums. `TypeExprKind::Named` and
   `TyKind::Named` carry a `NamedTypeExpr` and a `NamedTy`, each with `def()` and `args()`;
   `TypeExprKind::Param` and `TyKind::Param` a `TypeParamRef`, with `def()` and `index()`;
@@ -129,11 +144,10 @@ All notable changes to Smear are documented in this file.
   and `DefKind`, `Origin`, `Collection`, `MemberKind`, `PackageKind`, `ModuleKind`, `Namespace`,
   `RootOperation`, `LiteralKind`, `Layout`, `Tier`, `Packages` and `Site` the predicates alone.
   `DirectiveLocation` and `DiagnosticKind`, of more than sixteen variants, derive nothing new.
-  `smear-analysis` takes `derive_more` as a dependency for it, with no feature in front of it.
   The hidden test-support door follows: `ModelBuilder::set_object` takes `&[ObjectEntry]`, which
   `ObjectEntry::new` builds, and `counts` answers a `Counts { members, type_exprs, values,
   applications }` where it answered a four-tuple.
-- `smear-schema` and `smear-compiler`: an `Int` literal stands for a `Float` only while a finite
+- `smear-compiler`: an `Int` literal stands for a `Float` only while a finite
   double holds its value, as `Float`'s input coercion requires (§3.5.2). `Schema::build` and
   `Rule::ValuesOfCorrectType` refuse one of magnitude `2^1024 - 2^970` or more, the least integer
   that rounds to infinity, such as `1` and 309 zeros, where they accepted every integer; one below
@@ -148,7 +162,7 @@ All notable changes to Smear are documented in this file.
   run of digits offsets a written exponent past 655 359 is misread when handed to them as written:
   `0.`, 99 998 zeros and `1e999999` read as 1.0. The spelling keeps the first 800 significant
   digits and a final `1` for a later digit that is not zero, so it rounds as the literal does.
-- `smear-parser`, `smear-schema` and `smear-compiler`: a `Float` literal is read through
+- `smear-parser` and `smear-compiler`: a `Float` literal is read through
   `normalize_decimal_float`, and no longer by `str::parse` as written. Only a literal whose digits
   offset a written exponent past 655 359 reads differently, now as its value: `0.`, 99 998 zeros
   and `1e999999`, 10^900000, which read as 1.0, is past every double, so `Schema::build` and
@@ -315,19 +329,8 @@ All notable changes to Smear are documented in this file.
   lexers' error containers, which are a `Vec` in every configuration now. 0.0.1 released the
   `smallvec` feature, in each crate's `default`, and no alias is left in its place: a dependent
   that names it drops it from its feature list.
-- `smear-semantics` and `smear-analysis`: two new crates. `smear-semantics` holds the
-  algorithms smear's two semantic layers share: the byte-spelling interner, duplicate-name
-  detection and the graph-cycle kernel, whose `scc::components` answers, for each node of a
-  directed graph, the least node of its strongly connected component, over the same compressed
-  rows and iterative walk as `scc::on_cycle`. `smear` does not re-export it. `smear-analysis` is
-  the GraphQLx schema analyzer, reached as `smear::analysis` behind the new `analysis`
-  capability feature, which implies `parser` and `graphqlx` and no tier; the analyzer itself
-  needs `std` or `alloc`. Its source features `bytes_1`, `bstr_1`, `hipstr_0_8` and
-  `smol-bytes_0_2`, with the aliases `bytes`, `bstr`, `hipstr` and `smol-bytes`, forward
-  `smear-parser`'s and imply no tier, and `smear`'s features of the same names forward to them.
-  `smear-schema`'s builder now takes those three kernels from `smear-semantics`, behind
-  `build`, with no change in behaviour.
-- `smear-analysis`: the GraphQLx schema analyzer, at its first release.
+- `smear-compiler`: the GraphQLx schema analyzer, at its first release, as the `graphqlx` module
+  behind the `graphqlx` feature and a tier.
   - **The entrance.** `graphqlx::analyze` takes a root `Package` and its dependencies, each a
     name, a `Layout`, a `Tier`, its `SourceFile`s and optionally an `IntegerProvider`, each file's
     text any `SourceText` (`&str`, `&[u8]` or a source feature's type), within `Limits`, and
@@ -369,7 +372,7 @@ All notable changes to Smear are documented in this file.
   - **The verdict.** `Analysis::is_ok` is whether no error was reported, kept by the diagnostic
     ceiling or not, and no syntax error was counted that a parser did not lend. On every GraphQL
     document of smear's corpora, each given as the one file of a `Flat` package, it is the verdict
-    `smear-schema` gives, but for three capacity ceilings of `smear-schema`'s representation that
+    the schema builder gives, but for three capacity ceilings of the schema representation that
     GraphQLx does not have; a differential test holds that, counting each of GraphQL's codes on
     both sides, and beside the three ceilings lists by document each count it lets differ, every
     one on a document both refuse. A root package with no query root is not ok.
@@ -393,12 +396,12 @@ All notable changes to Smear are documented in this file.
     generic depth 64, instantiations 2^16, substitutions 2^20, bound steps 2^20, value steps 2^20,
     implementation steps 2^20, source bytes 2^26, diagnostics 16 384, and near-miss comparisons
     2^20, the last two limiting what the analysis says and not what it accepts.
-  - **Stability.** The crate makes no semver promise yet: a release may change any path, signature
-    or answer of it, and which programs it accepts.
+  - **Stability.** The `graphqlx` module makes no semver promise yet: a release may change any
+    path, signature or answer of it, and which programs it accepts.
   - **Tests.** A `test-support` feature, which `smear/test-support` forwards, compiles a hidden
     door to the crate-private model builder for smear's own tests; it is not API, and its
     `type_arguments` is gone, `Application::ty_args` answering what it answered.
-  - The crate's documentation is the reference for every phase, rule, code and limit.
+  - The module's documentation is the reference for every phase, rule, code and limit.
 - `smear`!, `smear-lexer`! and `smear-parser`!: the five features
   that enable an optional dependency are versioned, as tokora's are, and the
   dependency is named with its version. `bytes`, `bstr`, `hipstr`, `smol-bytes`
@@ -422,14 +425,14 @@ All notable changes to Smear are documented in this file.
   `LexerErrorData::Omitted` counting the rest, and consume the whole comment;
   the lossless error token covers the whole comment. `str` and `HipStr` sources
   are unchanged (#251).
-- `smear-schema`!: an extension of an introspection type adds directives and nothing else, which
+- `smear-compiler`!: an extension of an introspection type adds directives and nothing else, which
   is a verdict change of a published crate. A document that extends one of the eight
   `__`-prefixed introspection types with a field, an `implements` entry or an enum value built in
   0.0.1, and is refused now as the new
   `SchemaErrorKind::IntrospectionTypeExtension`, at the type the extension names, code
   `smear::schema::introspection-type-extension`. The refused extension contributes nothing, its
   directives included. An extension that adds directives alone still builds.
-- `smear-schema`: `SchemaErrorKind::UnreadableText` is no longer reachable from
+- `smear-compiler`: `SchemaErrorKind::UnreadableText` is no longer reachable from
   a parsed document. The kind is kept.
 - Builds on tokora 0.13.2 and smol-bytes 0.2. Paths through the
   `smear::lexer::tokora` re-export follow the layout tokora adopted in 0.12. The
@@ -466,7 +469,7 @@ All notable changes to Smear are documented in this file.
   byte, instead of the positionless `StringError::Other("unknown")`: the input
   ends right after it, or, in a byte source, the bytes after it are not
   well-formed UTF-8.
-- `smear-schema`!: the diagnostic contract is tokora's. `smear_schema::diagnostic`,
+- `smear-compiler`!: the diagnostic contract is tokora's. `smear_compiler::schema::diagnostic`,
   and through it `smear::diagnostic`, re-exports `tokora::diagnostic`'s `Diagnose`,
   `DiagnoseExt`, `Code`, `Severity`, `Location`, `Label`, `PathSegment`, `Labels`
   and `PathSegments` instead of declaring copies of them, so `SchemaError`, the
@@ -591,14 +594,14 @@ All notable changes to Smear are documented in this file.
   which leaves the escape `Unclosed`, so in a byte source it no longer runs past
   the string to a `}` later in the document. A `\u{` followed directly by a
   quote, a backslash or a line break no longer swallows it.
-- `smear-schema`!: the default root operation type names `Query`, `Mutation`
+- `smear-compiler`!: the default root operation type names `Query`, `Mutation`
   and `Subscription` apply only when the document has no `schema` definition
   (draft §3.3.1). Beside a `schema` definition, an object type of a default name
   that the definition does not list is an ordinary type: `schema { query: Query }`
   beside `type Mutation` has no mutation root, as in the draft's Example 42, where
   `Mutation` used to become one. An `extend schema` is not a definition, so a
   document with one and no `schema` definition still takes the defaults.
-- `smear-schema`: an `extend schema` with no schema to extend is refused as
+- `smear-compiler`: an `extend schema` with no schema to extend is refused as
   `SchemaErrorKind::SchemaExtensionWithoutSchema`, at the extension (draft
   §3.3.2: "The Schema must already be defined"). Omitting the `schema`
   definition still defines a schema when there is an object type named `Query`
@@ -606,7 +609,7 @@ All notable changes to Smear are documented in this file.
   are now in place before any extension is applied, so an `extend schema` that
   provides one of them again is `DuplicateRootOperationType`, as it is against a
   written definition's root. Code `smear::schema::schema-extension-without-schema`.
-- `smear-schema`: the input-object cycle rule is the draft's
+- `smear-compiler`: the input-object cycle rule is the draft's
   `InputObjectHasUnbreakableCycle` (§3.10), which a `@oneOf` input object can
   hold closed: it is given exactly one field, so it breaks a cycle only through
   a field that can be given a finite value. A cycle a OneOf input object holds
@@ -615,13 +618,13 @@ All notable changes to Smear are documented in this file.
   `input Filter @oneOf { not: Filter, eq: String }` still builds. A cycle through
   a OneOf input object that has such a field is no longer refused as
   `CircularNonNullInputField`. Code `smear::schema::circular-one-of-input-field`.
-- `smear-schema`: a constant value offered to a `@oneOf` input object must hold
+- `smear-compiler`: a constant value offered to a `@oneOf` input object must hold
   exactly one entry, and not a `null` one (draft §3.10.1). A default value or a
   directive argument whose literal gives a OneOf input object no field, two
   fields or one `null` field, at any depth of lists and input objects, is refused
   as `InvalidDefaultValue` or `InvalidDirectiveArgumentValue`, at the literal or
   at the `null`.
-- `smear-schema`: `@specifiedBy` on a built-in scalar is refused as
+- `smear-compiler`: `@specifiedBy` on a built-in scalar is refused as
   `SchemaErrorKind::SpecifiedByOnBuiltInScalar`, at the directive, whether a
   definition that spells the scalar out applies it or an `extend scalar` does
   (draft §3.13.4: it "must not appear on built-in scalar types"). graphql-js
@@ -629,7 +632,7 @@ All notable changes to Smear are documented in this file.
   that gives a built-in scalar a `specifiedByURL` the same way, because the door
   writes it out as the directive. Code
   `smear::schema::specified-by-on-built-in-scalar`.
-- `smear-schema`: a related position carries its own document, which
+- `smear-compiler`: a related position carries its own document, which
   `SchemaError::related_document` returns and the related label is rendered in.
   A duplicate across the builder's documents points at the first definition in
   the document it was read from, rather than at the same range of the
@@ -664,7 +667,7 @@ All notable changes to Smear are documented in this file.
   every later kind by one; the typed layer adds the `DirectiveExtension`
   wrapper, `DirectiveDefinition::directives` and `directive_extensions` on both
   document roots, and both projections build the new AST.
-- `smear-schema`!: `Schema::build` reads the directives on a directive
+- `smear-compiler`!: `Schema::build` reads the directives on a directive
   definition and `extend directive` (draft §3.13 and §3.13.6).
   `DirectiveLocation` gains `DirectiveDefinition`, the `DIRECTIVE_DEFINITION`
   location, which `DirectiveLocation::from_name` resolves, and
@@ -677,7 +680,7 @@ All notable changes to Smear are documented in this file.
   `UndefinedExtensionTarget`. A directive that reaches itself through the
   directives on its definition or its extensions, directly or through other
   directives and types, is `SelfReferentialDirective`.
-- `smear-schema`!: the meta-schema and the specified `@deprecated` follow the
+- `smear-compiler`!: the meta-schema and the specified `@deprecated` follow the
   draft (§3.13.3 and §4.2). `@deprecated(reason: String! = "No longer supported")`
   may also stand on a directive definition, and `@deprecated(reason: null)` is
   refused as `InvalidDirectiveArgumentValue` where it built as deprecated with no
@@ -712,21 +715,22 @@ All notable changes to Smear are documented in this file.
 - The introspection parity oracle compares the executor's answers with graphql-js
   17.1.0's instead of 16.11.0's, directive deprecation included, and its eight
   recorded differences are redrawn for that release.
-- All six crates gain an `alloc` feature beside `std`, and the two are
+- All five crates gain an `alloc` feature beside `std`, and the two are
   independent tiers: `std` does not imply `alloc`, and the allocating API exists
   when either is on. Every combination is a valid build: neither, the core tier;
   `alloc` alone; `std` alone, the default; and both. With neither, a crate
   compiles in every feature combination and exports only what needs no
   allocation: in `smear-lexer`, `hints`, `keywords` (with `keyword!`), `limits`
   and `punctuator`; in `smear-parser`, `combinator` (with
-  `typed_keyword_atom!`); in `smear-schema`, `diagnostic` and `builtin`;
-  `smear-compiler` re-exports `smear-schema` as `schema` and `graphql-proto`
-  exports nothing. `smear` exposes the same items through `smear::lexer`,
-  `smear::parser`, `smear::diagnostic` and `smear::validator::schema`. Each
+  `typed_keyword_atom!`); in `smear-compiler`, `schema::diagnostic` and
+  `schema::builtin`, which `graphql` also re-exports through its `schema`; and
+  `graphql-proto` exports nothing. `smear` exposes the same items through
+  `smear::lexer`, `smear::parser`, `smear::diagnostic` and
+  `smear::validator::schema`. Each
   crate's `__features` gains `ALLOC`, which `smear` asserts equal to every
   member's. The workspace no longer pins tokora's `alloc`: each crate's `alloc`
   forwards `tokora/alloc`.
-- All six crates!: a build with `default-features = false` no longer includes
+- All five crates!: a build with `default-features = false` no longer includes
   the allocating API: the dialect lexers and parsers, the schema
   representation and builder, the validator, the executor and `smear::json`. A
   capability feature (`graphql`, `graphqlx`, `parser`, `validator`, `proto`,

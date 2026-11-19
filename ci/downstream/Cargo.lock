@@ -72,8 +72,8 @@ name = "graphql-proto"
 version = "0.0.0"
 dependencies = [
  "derive_more",
+ "smear-compiler",
  "smear-parser",
- "smear-schema",
  "tokora",
 ]
 
@@ -221,19 +221,8 @@ checksum = "1bc711410fbe7399f390ca1c3b60ad0f53f80e95c5eb935e52268a0e2cd49acc"
 name = "smear"
 version = "0.0.0"
 dependencies = [
+ "smear-compiler",
  "smear-lexer",
- "smear-schema",
- "tokora",
-]
-
-[[package]]
-name = "smear-analysis"
-version = "0.0.0"
-dependencies = [
- "derive_more",
- "smear-lexer",
- "smear-parser",
- "smear-semantics",
  "tokora",
 ]
 
@@ -242,8 +231,6 @@ name = "smear-compiler"
 version = "0.0.0"
 dependencies = [
  "derive_more",
- "smear-parser",
- "smear-schema",
  "tokora",
 ]
 
@@ -254,12 +241,9 @@ dependencies = [
  "bytes",
  "graphql-proto",
  "smear",
- "smear-analysis",
  "smear-compiler",
  "smear-lexer",
  "smear-parser",
- "smear-schema",
- "smear-semantics",
 ]
 
 [[package]]
@@ -282,20 +266,6 @@ dependencies = [
  "smear-lexer",
  "tokora",
 ]
-
-[[package]]
-name = "smear-schema"
-version = "0.0.0"
-dependencies = [
- "derive_more",
- "smear-parser",
- "smear-semantics",
- "tokora",
-]
-
-[[package]]
-name = "smear-semantics"
-version = "0.0.0"
 
 [[package]]
 name = "syn"

@@ -60,7 +60,8 @@ uses-parser-graphql = []
 uses-parser-graphqlx = []
 uses-parser-rowan = []
 uses-parser-test-support = []
-uses-schema-build = ["dep:smear-schema"]
+uses-compiler-graphql = ["dep:smear-compiler"]
+uses-compiler-graphqlx = []
 uses-schema-introspection = []
 uses-compiler-introspection = []
 
@@ -74,16 +75,13 @@ smear = { path = "../../smear", default-features = false }
 # so even the second dependency's existence is composed rather than declared.
 #
 # THE POINT OF THIS BLOCK: these are the packages a consumer might legitimately name directly (a
-# syntax highlighter takes `smear-lexer`; a driver that only reads a schema takes `smear-schema`),
-# and before the equivalence assertion each of them could switch a `smear::…` path on behind a
-# consumer's back.
+# syntax highlighter takes `smear-lexer`; a driver that only reads a schema takes `smear-compiler`
+# with no capability), and before the equivalence assertion each of them could switch a `smear::…`
+# path on behind a consumer's back.
 smear-lexer = { path = "../../smear-lexer", default-features = false, optional = true }
 smear-parser = { path = "../../smear-parser", default-features = false, optional = true }
-smear-schema = { path = "../../smear-schema", default-features = false, optional = true }
-smear-semantics = { path = "../../smear-semantics", default-features = false, optional = true }
 smear-compiler = { path = "../../smear-compiler", default-features = false, optional = true }
 graphql-proto = { path = "../../graphql-proto", default-features = false, optional = true }
-smear-analysis = { path = "../../smear-analysis", default-features = false, optional = true }
 
 # The consumer's own copy of a source crate, for the one probe whose capability is a trait impl
 # rather than a path. It carries no smear feature, which is the same omission pql's `tokora` entry

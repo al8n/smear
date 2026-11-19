@@ -171,13 +171,13 @@ const MORE_THAN_DIRECTIVES: &str = "an extension of a definition of `core`, `all
                                     them";
 
 /// What GraphQL's own refusal tells the root package when it adds more than directives to an
-/// introspection type: `smear-schema`'s help, word for word.
+/// introspection type: the schema builder's help, word for word.
 const INTROSPECTION_HELP: &str = "an extension may add directives to an introspection type and \
                                   nothing else; the `__`-prefixed types are the introspection \
                                   system the specification defines.";
 
 /// The primary label of GraphQL's own refusal of an extension that adds more than directives to an
-/// introspection type: `smear-schema`'s phrase, word for word.
+/// introspection type: the schema builder's phrase, word for word.
 const INTROSPECTION_LABEL: &str = "introspection type extension adds more than directives";
 
 /// What the orphan rule tells the root package when its extension of a built-in applies `@marker`,
@@ -189,17 +189,18 @@ const MEANING: &str = "`@marker`, `@set` and `@map` say what a definition is, an
 const HOST: &str = "`@extern` binds a scalar its own package defines: give a built-in its host \
                     type with `extend schema @repr(for: …, lang: …, type: …)`";
 
-/// What GraphQL tells the author of a directive on a cycle: `smear-schema`'s help, word for word.
+/// What GraphQL tells the author of a directive on a cycle: the schema builder's help, word for
+/// word.
 const SELF_REFERENTIAL_HELP: &str = "a directive may not appear on its own definition or an \
                                      extension of it, nor on any type or directive they name.";
 
 /// What GraphQL tells the author of a directive that is not repeatable applied twice to one
-/// location: `smear-schema`'s help, word for word.
+/// location: the schema builder's help, word for word.
 const DUPLICATE_DIRECTIVE_USE_HELP: &str = "declare the directive `repeatable`, or apply it once; \
                                             a definition and its extensions are one location.";
 
 /// What GraphQL tells the author of a directive applied where its definition does not list:
-/// `smear-schema`'s help, word for word.
+/// the schema builder's help, word for word.
 const LOCATION_HELP: &str = "add the location to the directive's definition, or move the usage.";
 
 /// What the orphan rule tells the root package when it adds more than directives to a built-in its
@@ -882,7 +883,7 @@ fn the_root_operations_have_distinct_types() {
 
 #[test]
 fn a_schema_extension_extends_a_schema_that_is_defined() {
-  // `smear-schema`'s fixture: no schema definition, and no `Query` presumed, so the extension
+  // The schema builder's fixture: no schema definition, and no `Query` presumed, so the extension
   // extends nothing, although it gives the schema its query root.
   let text = "type Q {\n  ok: Int\n}\nextend schema {\n  query: Q\n}\n";
   let analysis = analyze_one(text);
@@ -1071,8 +1072,8 @@ fn long_names_in_these_rules_are_quoted_as_excerpts() {
   }
 }
 
-/// What GraphQL tells the author of a schema with no query root: `smear-schema`'s help, word for
-/// word.
+/// What GraphQL tells the author of a schema with no query root: the schema builder's help, word
+/// for word.
 const NO_QUERY_ROOT_HELP: &str =
   "define `type Query`, or name an existing object type with `schema { query: … }`.";
 
@@ -1090,7 +1091,7 @@ fn root_package_source(analysis: &Analysis) -> Location {
 
 #[test]
 fn a_schema_has_a_query_root() {
-  // `smear-schema`'s fixture: a type that is no query root, and nothing else. The schema is the
+  // The schema builder's fixture: a type that is no query root, and nothing else. The schema is the
   // root package's as a whole, so the diagnostic is at the whole of its package source, with no
   // label, and not in its file, where it would lie within the type.
   let analysis = analyze_one("type NotTheRoot {\n  ok: Int\n}");
@@ -2758,7 +2759,7 @@ fn an_extension_of_a_dependencys_type() -> Analysis {
   analyze(&root, &[geo], &Limits::new())
 }
 
-/// A root package that adds a field to `__Type`: `smear-schema`'s fixture for the kind.
+/// A root package that adds a field to `__Type`: the schema builder's fixture for the kind.
 fn a_field_added_to_a_meta_type() -> Analysis {
   analyze_one("type Query { ok: Int } extend type __Type { extra: Int }")
 }
@@ -2793,7 +2794,7 @@ fn two_type_parameters_of_one_name() -> Analysis {
   analyze_one("scalar Pair<T, T>\n")
 }
 
-// GraphQL's own refusals, each `smear-schema`'s fixture for its kind, copied as text.
+// GraphQL's own refusals, each the schema builder's fixture for its kind, copied as text.
 
 /// A field whose name begins with `__`.
 fn a_reserved_field_name() -> Analysis {

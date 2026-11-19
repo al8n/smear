@@ -205,11 +205,25 @@ jobs:
         cargo hack build -p smear --each-feature --features parser,alloc \
           --exclude-features rowan,rowan_0_17,lossless-coverage,validator,introspection,proto,analysis,default,std,bytes,bstr,hipstr,smol-bytes \
           --exclude-no-default-features --exclude-all-features
+        # Pass 3b — the same lesson for `smear-compiler`, which is one crate where it was four, as
+        # `ci/hack.sh` has it and for its reasons. A single-crate `--each-feature` builds each
+        # feature ALONE, so these keep the cells the crate boundaries used to give: `graphqlx`
+        # with `graphql`, with `test-support` and with each source feature, on `alloc`; `graphqlx`
+        # alone and with each source feature, on `std`; and `graphql` and `introspection`, on `std`.
+        cargo hack build -p smear-compiler --each-feature --features alloc,graphqlx \
+          --exclude-features std,default,introspection,bytes,bstr,hipstr,smol-bytes \
+          --exclude-no-default-features --exclude-all-features
+        cargo hack build -p smear-compiler --each-feature --features std,graphqlx \
+          --exclude-features alloc,default,graphql,introspection,test-support,bytes,bstr,hipstr,smol-bytes \
+          --exclude-all-features
+        cargo hack build -p smear-compiler --each-feature --features std \
+          --include-features graphql,introspection \
+          --exclude-no-default-features --exclude-all-features
         # Pass 4 — the std tier, without alloc: `std,alloc` and every dependency feature on `std`,
         # as `ci/hack.sh` has it and for its reasons. `rowan_0_17` and `lossless-coverage` are NOT
         # excluded: theirs are the rows that build the tower on its own, with only the tier it needs.
         cargo hack build --each-feature --features std --ignore-unknown-features \
-          --exclude-features default,bytes,bstr,hipstr,smol-bytes,rowan,graphql,graphqlx,parser,validator,proto,introspection,analysis,materialized-numbers,test-support,build \
+          --exclude-features default,bytes,bstr,hipstr,smol-bytes,rowan,graphql,graphqlx,parser,validator,proto,introspection,analysis,materialized-numbers,test-support \
           --exclude-no-default-features --exclude-all-features
 
   test:

@@ -24,7 +24,7 @@
 //! free while semantics are pinned. The third is where they are deliberately not free.
 //!
 //! `serde_json` is a dev-dependency and not a dependency, which is the distinction the serde
-//! removal turns on: the edge this workspace is removing is `smear-schema`'s `introspection`
+//! removal turns on: the edge this workspace removed was the `introspection` feature's
 //! naming it in `[dependencies]`, where it reaches a consumer's graph. Cargo drops a
 //! dev-dependency when packaging, so `cargo tree -p smear` — the thing that will check the removal
 //! claim — never sees this one.

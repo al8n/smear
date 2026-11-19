@@ -1,5 +1,5 @@
 //! The differential test: the GraphQLx analyzer gives every GraphQL document of smear's corpora the
-//! verdict GraphQL's own validator, `smear-schema`, gives it, code for code.
+//! verdict GraphQL's own schema builder, `Schema::build`, gives it, code for code.
 //!
 //! # What is compared
 //!
@@ -19,8 +19,8 @@
 //! 5. The analysis's multiset is the codes of its errors that are GraphQL's, `smear::schema::*`.
 //! 6. Each code whose count differs between the two multisets is excused by a row of the
 //!    allow-list, or it is a failure, said with the document, the code and both counts, and with
-//!    each place `smear-schema` reports it and whether a phase's error lies in an extent that holds
-//!    that place.
+//!    each place the schema builder reports it and whether a phase's error lies in an extent
+//!    that holds that place.
 //! 7. When `Schema::build` answers a schema, any error of the analysis is a failure, whatever its
 //!    code and whatever rows were used: GraphQLx would refuse a valid GraphQL document, and no row
 //!    can mask that.
@@ -36,16 +36,16 @@
 //!
 //! It holds 15 rows, its final ones, which `the_allow_list_holds_its_final_rows` holds it to:
 //!
-//! - three for every document, which stay for good: the capacity ceilings `smear-schema`'s
+//! - three for every document, which stay for good: the capacity ceilings the schema
 //!   representation has and GraphQLx has not, `type-reference-too-deep`, `too-many-field-arguments`
 //!   and `too-many-directive-arguments` (`[Z6]`);
-//! - one for one document both dialects refuse, where `smear-schema` drops a second definition of
-//!   a name unread and the analyzer reads both (`[Z40]`);
+//! - one for one document both dialects refuse, where the schema builder drops a second
+//!   definition of a name unread and the analyzer reads both (`[Z40]`);
 //! - eleven for one document each, both dialects refusing it, where the mistake lies in a
 //!   contribution that also holds a phase's error, beside which the rule is silent (`[Z31]`).
 //!
 //! Coercion, the implementation phase, and the cycles of input objects and of their defaults have
-//! none: each of their codes has `smear-schema`'s count on every document of the corpus.
+//! none: each of their codes has the schema builder's count on every document of the corpus.
 //!
 //! # The divergences with no row
 //!
@@ -58,11 +58,11 @@
 //! - a required argument of a name an earlier argument of its field has (part 1.1's fourth settled
 //!   point);
 //! - a document with more than one cycle of defaults: the coercion phase reports the first cycle a
-//!   count meets, at one of its fields, and `smear-schema` one for each walk that finds one;
+//!   count meets, at one of its fields, and the schema builder one for each walk that finds one;
 //! - a cycle of defaults through a OneOf input object's defaulted field, which is never filled:
-//!   `one-of-field-has-default` alone, beside which `smear-schema` reports the cycle too;
+//!   `one-of-field-has-default` alone, beside which the schema builder reports the cycle too;
 //! - a rule silent beside a cycle of defaults, which is a phase's error: `input In { a: In! = {} }`
-//!   is `input-object-default-value-cycle` alone, beside which `smear-schema` reports
+//!   is `input-object-default-value-cycle` alone, beside which the schema builder reports
 //!   `circular-non-null-input-field` too.
 //!
 //! An integer too long to be a finite `Float` (`[Z12]`) is no divergence: both dialects refuse it.
@@ -119,8 +119,8 @@ const fn every(code: &'static str, reason: &'static str) -> Allowed {
   }
 }
 
-/// A row that allows `code` to diverge in `document` alone, where `smear-schema` reports a mistake
-/// in a contribution that also holds a phase's error, beside which the rule is silent.
+/// A row that allows `code` to diverge in `document` alone, where the schema builder reports a
+/// mistake in a contribution that also holds a phase's error, beside which the rule is silent.
 const fn beside_a_phase(code: &'static str, document: &'static str) -> Allowed {
   Allowed {
     code,
@@ -136,10 +136,10 @@ const BESIDE_A_PHASE: &str = "[Z31]: the contribution that holds the mistake als
 
 /// Why a row of the capacity ceilings exists.
 const CEILING: &str =
-  "[Z6]: a capacity ceiling of smear-schema's representation, which GraphQLx does not have";
+  "[Z6]: a capacity ceiling of the schema representation, which GraphQLx does not have";
 
 /// Why the row of `[Z40]`'s class exists.
-const UNREAD: &str = "[Z40]: the document defines `Type1` twice, and smear-schema drops the \
+const UNREAD: &str = "[Z40]: the document defines `Type1` twice, and the schema builder drops the \
                       second definition unread where the analyzer reads both";
 
 /// The codes of the capacity ceilings, each a row for every document, in the list's order.
@@ -265,9 +265,9 @@ fn extents(model: &Model) -> Vec<Location> {
   extents
 }
 
-/// Each place `smear-schema` reports `code` among `errors`, as a line, saying whether an extent of
-/// `analysis`'s model holds that place and the primary location of an error a phase reported. Such
-/// a place is one a rule is silent at, beside the phase.
+/// Each place the schema builder reports `code` among `errors`, as a line, saying whether an extent
+/// of `analysis`'s model holds that place and the primary location of an error a phase reported.
+/// Such a place is one a rule is silent at, beside the phase.
 fn places(analysis: &Analysis, errors: &[SchemaError], code: &str) -> String {
   let model = analysis.model();
   let sources = analysis.sources();
@@ -302,7 +302,7 @@ fn places(analysis: &Analysis, errors: &[SchemaError], code: &str) -> String {
       ""
     };
     lines.push_str(&format!(
-      "\n    smear-schema reports it at {}..{}{note}",
+      "\n    the schema builder reports it at {}..{}{note}",
       span.start(),
       span.end()
     ));
@@ -370,7 +370,8 @@ impl<'r> Run<'r> {
       Err(errors) => {
         if !errors.is_exhaustive() {
           self.failures.push(format!(
-            "{name}: smear-schema's list of errors is not every refusal, as a ceiling stopped it"
+            "{name}: the schema builder's list of errors is not every refusal, as a ceiling \
+             stopped it"
           ));
         }
         errors.errors()
@@ -436,7 +437,7 @@ impl<'r> Run<'r> {
       }
       let at = places(&analysis, errors, code);
       self.failures.push(format!(
-        "{name}: `{code}` is reported {ours} times by smear-schema and {theirs} times by the \
+        "{name}: `{code}` is reported {ours} times by the schema builder and {theirs} times by the \
          analyzer, and no row allows it{at}"
       ));
     }
@@ -448,7 +449,7 @@ impl<'r> Run<'r> {
     }
     if built.is_ok() && !every_error.is_empty() {
       self.failures.push(format!(
-        "{name}: smear-schema builds it, and the analyzer refuses it with {every_error:?}"
+        "{name}: the schema builder builds it, and the analyzer refuses it with {every_error:?}"
       ));
     }
 
@@ -550,7 +551,7 @@ fn whole_corpus() -> &'static Corpus {
 /// The two dialects give every document of the corpus one verdict, but for the divergences the
 /// allow-list holds, each of which occurs.
 #[test]
-fn every_graphql_document_gets_smear_schemas_verdict() {
+fn every_graphql_document_gets_the_schema_builders_verdict() {
   let run = &whole_corpus().run;
   assert!(
     run.failures.is_empty(),
@@ -656,7 +657,7 @@ fn the_comparison_can_answer_no() {
   run.finish();
   assert_eq!(run.failures.len(), 1, "{:#?}", run.failures);
   assert!(
-    run.failures[0].contains("smear-schema builds it, and the analyzer refuses it"),
+    run.failures[0].contains("the schema builder builds it, and the analyzer refuses it"),
     "{:#?}",
     run.failures
   );
@@ -693,10 +694,10 @@ fn the_corpus_is_not_vacuous() {
   assert!(run.equal.len() >= 10, "{:?}", run.equal);
 }
 
-/// Each code a rule lists in GraphQL's family is the code of one of `smear-schema`'s kinds: a
+/// Each code a rule lists in GraphQL's family is the code of one of the schema builder's kinds: a
 /// constant mistyped by one letter fails here, by its rule's name.
 #[test]
-fn every_shared_code_a_rule_lists_is_one_of_smear_schemas() {
+fn every_shared_code_a_rule_lists_is_one_of_the_schema_builders() {
   for (rule, codes) in RULES {
     for code in *codes {
       if !code.as_str().starts_with(GRAPHQL) {
@@ -706,7 +707,7 @@ fn every_shared_code_a_rule_lists_is_one_of_smear_schemas() {
         SchemaErrorKind::ALL
           .iter()
           .any(|kind: &SchemaErrorKind| kind.code().as_str() == code.as_str()),
-        "the rule `{rule}` lists `{code}`, which is no code of smear-schema's"
+        "the rule `{rule}` lists `{code}`, which is no code of the schema builder's"
       );
     }
   }
@@ -755,7 +756,7 @@ fn a_built_in_replaced_and_extended_is_refused_with_m5s_code_in_both_dialects() 
   ] {
     let document = parsed(text).unwrap_or_else(|| panic!("GraphQL's parser refuses `{text}`"));
     let Err(errors) = Schema::build(&document) else {
-      panic!("smear-schema builds `{text}`");
+      panic!("the schema builder builds `{text}`");
     };
     let graphql: Vec<&str> = errors
       .errors()
@@ -801,8 +802,8 @@ fn every_fixture_kind_is_accounted_for() {
       allowed += 1;
     } else {
       panic!(
-        "the fixture for {kind:?} has `{code}` {ours} times in smear-schema and {theirs} in the \
-         analyzer, and no row allows it"
+        "the fixture for {kind:?} has `{code}` {ours} times in the schema builder and {theirs} in \
+         the analyzer, and no row allows it"
       );
     }
   }

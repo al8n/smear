@@ -77,15 +77,15 @@
 //! and an interface's `possibleTypes` in object order, which is the type table's. A union's
 //! members are declared, and come as declared.
 //!
-//! [`DirectiveLocation`]: smear_schema::DirectiveLocation
+//! [`DirectiveLocation`]: smear_compiler::schema::DirectiveLocation
 
 use std::string::String;
 
-use smear_parser::{graphql::ast::InputValue, lexer::string_value_pieces};
-use smear_schema::{
+use smear_compiler::schema::{
   InputValueDef, PackedType, Range32, RootOperation, Schema, Sym, Text, TypeId, TypeKind, builtin,
   is_reserved,
 };
+use smear_parser::{graphql::ast::InputValue, lexer::string_value_pieces};
 use tokora::{SimpleSpan, span::AsSpan};
 
 use crate::{

@@ -1,137 +1,44 @@
-//! GraphQL document validation.
+//! What a parsed document is compiled into: the built-once GraphQL schema, with the draft §3
+//! builder and the draft §5 validator that read it, and the GraphQLx schema analyzer.
 //!
-//! Standard GraphQL only. The `graphqlx` dialect's generics, `where` constraints, set and map
-//! literals and namespaced paths have no specification semantics to validate against, so nothing in
-//! this module knows about them.
+//! # The layers
 //!
-//! # What is here
-//!
-//! - [`schema`] — the built-once
-//!   [`Schema`] every rule reads, and the draft §3 "Type
-//!   Validation" pass that runs while building it. A server rejects a malformed SDL exactly once,
-//!   at startup, and never rediscovers it per request.
+//! - [`schema`] is the runtime layer and is always compiled: the representation a built schema
+//!   has, the diagnostic vocabulary and the specified definitions. A crate that only reads a
+//!   schema, as `graphql-proto` does, names a tier and nothing else, and gets no parser.
 #![cfg_attr(
-  all(any(feature = "std", feature = "alloc"), feature = "introspection"),
-  doc = "- [`schema::introspection`] — the second \
-         construction door, building that same schema out of a server's draft §4 introspection \
-         response. It renders the response as SDL and hands it to the same builder, so draft §3 \
-         runs there too and the two doors cannot drift apart."
+  feature = "graphql",
+  doc = "- [`graphql`] is GraphQL's compiler: draft §3 inside `Schema::build`, the introspection \
+         door behind `introspection`, and draft §5 document validation."
 )]
-//! - [`validate_executable`] — the draft §5 rules over a
-//!   parsed executable document, reported into the caller's
-//!   [`Sink`] and worked out in the caller's
-//!   [`Scratch`]. The document is the one either of `smear-parser`'s parser layers answered, or one
-//!   the caller built, and a syntax error never reaches the sink: it leaves by the layer's own.
+#![cfg_attr(
+  not(feature = "graphql"),
+  doc = "- `graphql`, behind the feature of that name, is GraphQL's compiler: draft §3 inside \
+         `Schema::build`, the introspection door behind `introspection`, and draft §5 document \
+         validation."
+)]
+#![cfg_attr(
+  all(any(feature = "std", feature = "alloc"), feature = "graphqlx"),
+  doc = "- [`graphqlx`] is GraphQLx's: packages in, a resolved model and its diagnostics out."
+)]
+#![cfg_attr(
+  not(all(any(feature = "std", feature = "alloc"), feature = "graphqlx")),
+  doc = "- `graphqlx`, behind the feature of that name and a tier, is GraphQLx's: packages in, a \
+         resolved model and its diagnostics out."
+)]
 //!
-//! The links here are bare, and they were crate-absolute until the split. While this was
-//! `smear::validator`, a module whose declaration carried an outer doc comment, they had to be:
-//! rustdoc resolves the MERGED fragments of a module's documentation in the parent's scope, so a
-//! `schema`-relative link reported "no item named `schema` in module `smear`" under
-//! `RUSTDOCFLAGS="-D warnings"`. A crate root has no parent to be merged into, and the absolute
-//! spelling then became a *redundant explicit link target*, which the same flag denies just as
-//! firmly. `graphql-proto`'s header records the identical reversal.
-//!
-//! # Validating a request
-//!
-//! ```
-//! use smear_compiler::{Budget, First, Rule, Schema, Scratch, validate_executable};
-//! use smear_parser::{
-//!   graphql::{
-//!     GraphQL,
-//!     ast::{ExecutableDocument, TypeSystemDocument},
-//!     error::GraphqlErrors,
-//!     syntactic::{GraphqlLexer, executable_document, type_system_document},
-//!   },
-//!   lexer::tokora::{Parse as _, Parser},
-//! };
-//!
-//! let schema = Schema::build(
-//!   &Parser::with_parser::<GraphqlLexer<'_, str>, TypeSystemDocument<&str>, GraphqlErrors<&str>, _, GraphQL>(
-//!     type_system_document,
-//!   )
-//!   .parse_str("type Query { hero: Character } interface Character { name: String! }")
-//!   .expect("the SDL parses"),
-//! )
-//! .expect("the SDL is a schema");
-//!
-//! // The two the caller owns, created once and reused for every request.
-//! let mut scratch = Scratch::new();
-//! let budget = Budget::default();
-//!
-//! let request = Parser::with_parser::<GraphqlLexer<'_, str>, ExecutableDocument<&str>, GraphqlErrors<&str>, _, GraphQL>(
-//!   executable_document,
-//! )
-//! .parse_str("{ hero { title } }")
-//! .expect("the query parses");
-//!
-//! let mut sink = First::new();
-//! let invalid = validate_executable(&schema, &request, &mut scratch, &budget, &mut sink)
-//!   .expect_err("`title` is not a field of `Character`");
-//! assert_eq!(invalid.emitted(), 1);
-//!
-//! let diagnostic = sink.get().expect("a diagnostic");
-//! assert_eq!(diagnostic.rule(), Rule::FieldSelections);
-//! assert_eq!(diagnostic.subject_source(), Some(&"title"));
-//! ```
-//!
-//! # The three axes
-//!
-//! - **The schema** is built once and read as `&Schema` by an unbounded number of concurrent
-//!   validations.
-//! - **The report** is one seam: [`Sink::diagnostic`] takes a
-//!   value and returns whether to keep going. [`First`],
-//!   [`Collect`], [`Count`] and
-//!   [`Ignore`] mirror `tokora`'s emitter-bundle semantics.
-//! - **The working set** is the caller's [`Scratch`], reused across
-//!   requests, and what may be *done* is the caller's [`Budget`]. The
-//!   steady state allocates nothing at all, which `tests/validator_allocation.rs` measures with a
-//!   counting allocator rather than asserting.
-//!
-//! # The shape, and why
-//!
-//! Three properties of [`Schema`] decide everything
-//! downstream:
-//!
-//! - **It is not generic over the document's source type.** The builder consumes a
-//!   `TypeSystemDocument<S>` for any `S: AsRef<[u8]>` — the bound `tokora`'s entire source lattice
-//!   satisfies — and produces one owned, source-independent value. So the SDL can be dropped the
-//!   moment the schema exists, and the schema can be `'static`, sent across threads, or handed to
-//!   a foreign caller.
-//! - **It holds no `Arc`, no atomics and no interior mutability.** Validation takes `&Schema`, so
-//!   there is no shared-ownership primitive to choose and no target tier to gate: the caller wraps
-//!   it in whatever pointer their platform has. That also forbids lazy interning and per-query
-//!   memoisation inside it, which is a constraint, not an oversight — it is what keeps a rule a
-//!   pure function of `(schema, document)`.
-//! - **Every cost a rule would otherwise pay per query is paid once, here.** Names are `u32`
-//!   symbols, field lookup is a binary search over a sym-sorted group, directive locations are a
-//!   `u32` mask, and an interface's implementors are a bitset — so draft 5.5.2.3, all four of its
-//!   subsections, is one word-`AND`.
-
+//! The two compilers run on one private kernel: a byte-spelling interner, duplicate-name detection
+//! and a graph-cycle kernel.
 #![cfg_attr(not(feature = "std"), no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(docsrs, allow(unused_attributes))]
+#![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
 // The alloc-as-std alias: the crate's files spell their allocations `std::boxed::Box`, which
-// resolves to `alloc` in a `no_std` build with `alloc` and to the real `std` in a `std` build.
-//
-// `#[allow(unused_extern_crates)]`, ON EVERY MEMBER AND NOT ONLY THE ONE THAT TRIPS TODAY. The
-// alias is a crate-wide compatibility shim whose USERS are feature-gated, and
-// `unused_extern_crates` is a lint about the item: it fires in any configuration that happens to
-// compile none of them. On this tree that is `smear-parser` with `alloc` alone, where every
-// `std::` use is inside a dialect or `rowan` module — but the construct is identical in all five
-// members and which one trips is an accident of where the uses sit. Measured: `smear-lexer` 41,
-// `smear-parser` 70, `smear-schema` 15, `smear-compiler` 8, `graphql-proto` 82.
-//
-// Not a narrower `#[cfg]`: the honest predicate would be "any feature whose module names `std::`",
-// which is a restatement of the module list and drifts the first time one is added. And not
-// deletion, because the gated modules need it.
-//
-// `unused_extern_crates` is DENIED in `[workspace.lints.rust]` so that this allow is the recorded
-// exception rather than the lint being off — a stray `extern crate` anywhere else is a hard error
-// locally, with no `RUSTFLAGS` needed. That deny is the repair for the gate, not for the code:
-// this construct reddened CI twice, and both times the local run that cleared it was narrower
-// than CI's.
+// resolves to `alloc` in a `no_std` build with `alloc` and to the real `std` in a `std` build. The
+// `#[allow]` is the exception the workspace's `unused_extern_crates = "deny"` records: the alias's
+// users are gated, and the lint fires in any configuration that compiles none of them.
 #[cfg(all(not(feature = "std"), feature = "alloc"))]
 #[allow(unused_extern_crates)]
 extern crate alloc as std;
@@ -140,68 +47,48 @@ extern crate alloc as std;
 #[allow(unused_extern_crates)]
 extern crate std;
 
-/// The built-once schema, and the draft §3 "Type Validation" pass that runs while building it.
-///
-/// The layer is the `smear-schema` crate; this is the name it has always had inside `smear` and
-/// the path every consumer already writes. Its `build` feature — which is what carries
-/// [`Schema::build`](smear_schema::Schema::build) — is a hard dependency of this crate rather
-/// than a feature of it: a validator with no builder could not produce the `Schema` its rules
-/// read.
-#[doc(inline)]
-pub use smear_schema as schema;
+// No outer doc comment on any of the three layers: each module's own header is its one doc
+// fragment, so a link in it resolves in the module where it is written.
+pub mod schema;
 
-#[cfg(any(feature = "std", feature = "alloc"))]
-mod diagnostic;
-#[cfg(any(feature = "std", feature = "alloc"))]
-mod executable;
-#[cfg(any(feature = "std", feature = "alloc"))]
-mod rule;
-#[cfg(any(feature = "std", feature = "alloc"))]
-mod scratch;
-#[cfg(any(feature = "std", feature = "alloc"))]
-mod sink;
+// On the feature alone, not on a tier: with no tier the module still holds `schema`, which is
+// what `smear::validator` has always been in that build.
+#[cfg(feature = "graphql")]
+#[cfg_attr(docsrs, doc(cfg(feature = "graphql")))]
+pub mod graphql;
 
-#[cfg(any(feature = "std", feature = "alloc"))]
-#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
-pub use diagnostic::{
-  Context, Diagnostic, DiagnosticDisplay, MemberContext, MergeConflict, UsageContext,
-};
-#[cfg(any(feature = "std", feature = "alloc"))]
-#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
-pub use executable::{Invalid, Refusal, validate_executable, validate_executable_with};
-#[cfg(any(feature = "std", feature = "alloc"))]
-#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
-pub use rule::{Rule, RuleSet};
-#[cfg(any(feature = "std", feature = "alloc"))]
-#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
-pub use schema::{Schema, SchemaBuilder, SchemaError, SchemaErrorKind, SchemaErrors};
-
-#[cfg(all(any(feature = "std", feature = "alloc"), feature = "introspection"))]
+#[cfg(all(any(feature = "std", feature = "alloc"), feature = "graphqlx"))]
 #[cfg_attr(
   docsrs,
-  doc(cfg(all(any(feature = "std", feature = "alloc"), feature = "introspection")))
+  doc(cfg(all(any(feature = "std", feature = "alloc"), feature = "graphqlx")))
 )]
-pub use schema::IntrospectionError;
-#[cfg(any(feature = "std", feature = "alloc"))]
-#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
-pub use scratch::{Budget, Scratch};
-#[cfg(any(feature = "std", feature = "alloc"))]
-#[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
-pub use sink::{Collect, Count, First, Ignore, Sink};
+pub mod graphqlx;
+
+// Private: the schema builder and the analyzer are its two callers, so it is compiled with a tier
+// and either compiler.
+#[cfg(all(
+  any(feature = "std", feature = "alloc"),
+  any(feature = "graphql", feature = "graphqlx")
+))]
+mod kernel;
 
 /// The features this crate was compiled with, as constants the umbrella asserts against.
 ///
-/// **Not public API.** `smear` re-exports this crate whole, so every `#[cfg(feature = …)]` inside
-/// it is gated by THIS crate's features — and cargo unifies a package's features across the entire
-/// graph, so a second dependency naming `smear-compiler` directly could switch a capability on behind a
-/// `smear` consumer who never asked for it. Observed, not argued: with
-/// `smear = { default-features = false, features = ["std"] }` plus a direct `smear-compiler` dependency,
-/// a path the consumer had not enabled resolved.
+/// **Not public API.** `smear` mounts this crate's modules, so every `#[cfg(feature = …)]` inside
+/// them is gated by THIS crate's features — and cargo unifies a package's features across the
+/// entire graph, so a second dependency naming `smear-compiler` directly could switch a capability
+/// on behind a `smear` consumer who never asked for it. Observed, not argued: with
+/// `smear = { default-features = false, features = ["std"] }` plus a direct dependency on the
+/// crate, a path the consumer had not enabled resolved.
 ///
 /// `smear` reads these constants and refuses to compile when one disagrees with its own matching
 /// feature, which is what makes "the umbrella's feature is the gate" true rather than advertised.
 /// The alternative — a facade module per gated path — cannot reach trait impls, which are not
 /// namespaced, and would have to mirror every nested `#[cfg]` besides.
+///
+/// Two of the umbrella's twins are not namesakes: `graphql` is asserted against `smear/validator`
+/// and `graphqlx` against `smear/analysis`, because the umbrella's own `graphql` and `graphqlx` are
+/// the dialects, which turn on a front end and no compiler.
 ///
 /// `ci/feature_reachability.py` derives this list from `cargo metadata` and fails when a feature
 /// this crate declares has no constant here or no assertion in `smear`.
@@ -209,8 +96,22 @@ pub use sink::{Collect, Count, First, Ignore, Sink};
 pub mod __features {
   /// `alloc`, as this crate resolved it.
   pub const ALLOC: bool = cfg!(feature = "alloc");
+  /// `bstr_1`, as this crate resolved it.
+  pub const BSTR_1: bool = cfg!(feature = "bstr_1");
+  /// `bytes_1`, as this crate resolved it.
+  pub const BYTES_1: bool = cfg!(feature = "bytes_1");
+  /// `graphql`, as this crate resolved it.
+  pub const GRAPHQL: bool = cfg!(feature = "graphql");
+  /// `graphqlx`, as this crate resolved it.
+  pub const GRAPHQLX: bool = cfg!(feature = "graphqlx");
+  /// `hipstr_0_8`, as this crate resolved it.
+  pub const HIPSTR_0_8: bool = cfg!(feature = "hipstr_0_8");
   /// `introspection`, as this crate resolved it.
   pub const INTROSPECTION: bool = cfg!(feature = "introspection");
+  /// `smol-bytes_0_2`, as this crate resolved it.
+  pub const SMOL_BYTES_0_2: bool = cfg!(feature = "smol-bytes_0_2");
   /// `std`, as this crate resolved it.
   pub const STD: bool = cfg!(feature = "std");
+  /// `test-support`, as this crate resolved it.
+  pub const TEST_SUPPORT: bool = cfg!(feature = "test-support");
 }

@@ -78,13 +78,9 @@ UMBRELLA = "smear"
 
 # Members whose features `smear` forwards. `smear-smoke`, `smear-noatomic` and `source-census` are
 # not re-exported by anything and have no features; the planner rejects an unexpected member rather
-# than skipping it, so a new layer cannot arrive unnoticed. `smear-semantics` is the one member
-# here that `smear` does not re-export: it asserts the crate's features all the same, through the
-# edge `validator` and `analysis` turn on.
-MEMBERS = (
-  "smear-lexer", "smear-parser", "smear-semantics", "smear-schema", "smear-compiler",
-  "graphql-proto", "smear-analysis",
-)
+# than skipping it, so a new layer cannot arrive unnoticed. `smear-compiler` is the one member whose
+# features `smear` forwards under names that are not its own: see `EQ_TWIN`.
+MEMBERS = ("smear-lexer", "smear-parser", "smear-compiler", "graphql-proto")
 
 # THE ONLY ESCAPE FROM BEING ASSERTED IS TO NAME A DIFFERENT TWIN, never to be left out.
 #
@@ -99,8 +95,15 @@ MEMBERS = (
 # So there is no skip. A pair whose umbrella twin is not its namesake declares the twin here; a pair
 # with neither is a FINDING. `plan()` asserts the table is total in both directions. A pure alias
 # (`ALIAS_VERSION`, below) is not an escape from that: it is not a pair, because it holds no state.
+#
+# `smear-schema` is part of `smear-compiler` now, and its `build` is the compiler's `graphql`. The
+# compiler's `graphql` and `graphqlx` are the two compilers, which `validator` and `analysis` turn
+# on; `smear`'s own `graphql` and `graphqlx` are the dialects, which turn on no compiler. The two
+# pairs share a name with the umbrella's features and are not their twins, so each is written out:
+# an explicit entry wins over a namesake.
 EQ_TWIN = {
-  ("smear-schema", "build"): "validator",
+  ("smear-compiler", "graphql"): "validator",
+  ("smear-compiler", "graphqlx"): "analysis",
 }
 
 # A PURE ALIAS IS NOT A PAIR. A dependency's feature is versioned — `bytes_1`, `smol-bytes_0_2` —
@@ -113,8 +116,9 @@ EQ_TWIN = {
 #
 # Derived from the manifest and not listed: an alias is a feature whose whole list is one other
 # feature of the same member, spelled as its own name plus a version suffix. The suffix is what keeps
-# `smear-schema`'s `introspection = ["build"]` and `smear-parser`'s `lossless-coverage = ["rowan_0_17"]`
-# out of it: each is a single forward and each is a capability with a witness of its own.
+# `smear-compiler`'s `introspection = ["graphql"]` and `smear-parser`'s
+# `lossless-coverage = ["rowan_0_17"]` out of it: each is a single forward and each is a capability
+# with a witness of its own.
 # `ci/feature_reachability.py` carries the same rule over the same suffix and reads this literal to
 # check that the two agree.
 ALIAS_VERSION = r"_[0-9]+(?:_[0-9]+)*"
@@ -146,22 +150,22 @@ PROBES = (
   ("parser-test-support", "smear-parser", "test-support", ("parser", "graphql", "rowan_0_17"), ()),
   # The pair the hand-written exemption removed from the fence, and the reason it matters: it is
   # impl-bearing. Its smear twin is `validator`, not a namesake — `EQ_TWIN` carries that.
-  ("schema-build", "smear-schema", "build", ("parser", "graphql"), ()),
-  ("schema-introspection", "smear-schema", "introspection",
+  ("compiler-graphql", "smear-compiler", "graphql", ("parser", "graphql"), ()),
+  ("schema-introspection", "smear-compiler", "introspection",
    ("parser", "graphql", "validator"), ()),
   ("compiler-introspection", "smear-compiler", "introspection",
    ("parser", "graphql", "validator"), ()),
+  # The other pair whose twin is not a namesake, and so one a probe must watch: its control fails
+  # on an unresolved import, `smear::analysis` being absent without `smear/analysis`.
+  ("compiler-graphqlx", "smear-compiler", "graphqlx", ("parser", "graphqlx"), ()),
 )
 
 # The smear features a member's dependency edge needs before that member is in the graph at all.
 PRESENCE = {
   "smear-lexer": (),
-  "smear-schema": (),
   "smear-parser": ("parser",),
-  "smear-semantics": ("parser", "graphql", "validator"),
-  "smear-compiler": ("parser", "graphql", "validator"),
+  "smear-compiler": (),
   "graphql-proto": ("parser", "graphql", "validator", "proto"),
-  "smear-analysis": ("parser", "graphqlx", "analysis"),
 }
 
 
@@ -259,11 +263,11 @@ def plan(workspace_manifest: pathlib.Path, fixture_manifest: pathlib.Path) -> in
     die(f"the fixture's `smear` entry must be `default-features = false` with no features; it is "
         f"features={entry.get('features')} default={entry.get('uses_default_features')}")
 
-  # A member feature can forward to OTHER member features — `smear-schema/build` activates
+  # A member feature can forward to OTHER member features — `smear-compiler/graphql` activates
   # `smear-parser/graphql` — so a leg that enables it alone puts two pairs into disagreement and the
   # build fails on whichever assertion rustc reaches first. That leg would pass a judge looking only
-  # for "an equivalence fired", while proving nothing about the pair under test. Measured: the
-  # `build` leg failed on `smear-lexer/graphql`.
+  # for "an equivalence fired", while proving nothing about the pair under test. Measured, on the
+  # pair that is now `smear-compiler/graphql`: the leg failed on `smear-lexer/graphql`.
   #
   # So every other pair the closure activates gets its umbrella twin composed into the leg's base,
   # and exactly one disagreement is left. Derived from the members' own `[features]` tables.
@@ -351,7 +355,8 @@ REASONS = {
   # The equivalence assertion is a `const _: () = { assert!(…) }` in `smear`, so a violating graph
   # fails const evaluation. E0080 alone would accept an unrelated const panic from anywhere in the
   # graph; "disagree" alone would accept ANOTHER pair's assertion firing, which is not a hypothetical
-  # — the `smear-schema/build` leg did exactly that before the legs were made to isolate one pair.
+  # — the `build` leg of the schema crate, now `smear-compiler/graphql`, did exactly that before the
+  # legs were made to isolate one pair.
   # So the label is required in the message, and the label IS the pair.
   "EQ-LEAK": ("E0080", "@label"),
   "LEAK": ("E0080", "@label"),

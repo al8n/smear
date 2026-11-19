@@ -213,13 +213,10 @@ SELECTIONS = ("miri", "census", "cross")
 
 # (selection, member) pairs deliberately outside a selection, each with the argument. An entry that
 # matches nothing — because the member is gone, or is in the selection after all — is a failure,
-# exactly like a stale feature exemption.
-EXEMPT_SELECTION: dict[tuple[str, str], str] = {
-  ("census", "smear-semantics"): "the census reads each crate root under the `smear::` path a "
-  "consumer of the umbrella writes for it, and `smear` mounts nothing of this crate, so there is "
-  "no such path to read it under. What it computes reaches a consumer only through the layers "
-  "built on it, and those are censused under their own mounts",
-}
+# exactly like a stale feature exemption. Empty today: its one entry was the kernel, which the
+# census read nowhere because `smear` mounted nothing of it, and which is a private module of
+# `smear-compiler` now.
+EXEMPT_SELECTION: dict[tuple[str, str], str] = {}
 
 # The shapes `--selftest` plants, named once so the verdict and the selftest cannot drift.
 PLANTS = {
@@ -239,7 +236,7 @@ PLANTS = {
 #
 # Derived from the table, not listed. An alias is a feature whose whole list is one other feature
 # of the same member, spelled as its own name plus a version suffix. The suffix is what keeps
-# `smear-schema`'s `introspection = ["build"]` and `smear-parser`'s
+# `smear-compiler`'s `introspection = ["graphql"]` and `smear-parser`'s
 # `lossless-coverage = ["rowan_0_17"]` out of it: each is a single forward and each is a
 # capability with a witness of its own. `ci/downstream_pairs.py` applies the same rule and
 # `audit_equivalence` checks that the two suffixes agree.
@@ -799,7 +796,7 @@ def _read_census_roots() -> set[str]:
   block = re.search(r"const DEFAULT_ROOTS:[^=]*=\s*&\[(.*?)\];", text, re.S)
   if block is None:
     raise RuntimeError(f"{path} has no `const DEFAULT_ROOTS` block this reader can find")
-  roots = re.findall(r'\(\s*"([^"]+)"\s*,\s*"[^"]*"\s*\)', block.group(1))
+  roots = re.findall(r'\(\s*"([^"]+)"\s*,\s*"[^"]*"\s*,?\s*\)', block.group(1))
   if not roots:
     raise RuntimeError(f"{path}'s DEFAULT_ROOTS block held no (path, name) pairs")
   return {root.split("/", 1)[0] for root in roots}

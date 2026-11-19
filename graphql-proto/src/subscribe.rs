@@ -218,7 +218,7 @@ use derive_more::{IsVariant, TryUnwrap, Unwrap};
 ///   },
 ///   lexer::tokora::{Parse as _, Parser},
 /// };
-/// use smear_schema::Schema;
+/// use smear_compiler::schema::Schema;
 ///
 /// # #[derive(Clone, Debug)]
 /// # enum Json { Null, Str(String), Obj }

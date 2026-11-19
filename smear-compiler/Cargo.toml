@@ -6,35 +6,150 @@ rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
 license.workspace = true
-description = "Draft §5 GraphQL document validation over a built schema, with an allocation-free steady state and a caller-owned report sink."
-keywords = ["graphql", "validation", "linter", "no-std"]
-categories = ["parsing", "web-programming", "no-std"]
+description = "The smear compilers: the built-once GraphQL schema with its draft §3 builder and §5 document validation, and the GraphQLx schema analyzer."
+keywords = ["graphql", "graphqlx", "schema", "validation", "no-std"]
+categories = ["parsing", "compilers", "web-programming", "no-std"]
 readme = "README.md"
 
-# NOT named `smear-validator`, and the design says why: the crate would validate nothing under that
-# name — it also carries the §3 build's caller, the rule vocabulary and the diagnostic rendering. A
-# name that misdescribes its contents is the defect family this program keeps hitting.
+# Named for what it holds: the compilers a parsed document goes through, GraphQL's §3 builder and
+# §5 validator and the GraphQLx analyzer, over the runtime schema layer they share.
+# `smear-validator` would name one of the three, and a name that misdescribes its contents is the
+# defect family this program keeps hitting.
+
+# ── WHY THE BUILDER IS A FEATURE AND NOT ANOTHER CRATE ──────────────────────────────────────
 #
-# `smear-schema` is taken WITH `build`, unlike `graphql-proto`'s edge, and that is the whole
-# difference between the two consumers: this crate produces a `Schema`, the protocol machine reads
-# one.
+# The design's first draft made the schema crate `repr/` alone, so that `graphql-proto` — which
+# reads a schema at execution time — would not get the parser in its graph. That confused a FEATURE
+# boundary with a CRATE boundary, and the crate boundary then hit a rule the draft never priced:
+# `Schema::build` and `Schema::from_introspection` are INHERENT `impl Schema` blocks, and an
+# inherent impl cannot cross a crate boundary. Moving `repr/` out without them is not a pure move
+# at all; the first attempt bridged it with one extension trait per body, at a `use` line in about
+# a hundred call sites and `Schema`'s fifteen fields going `#[doc(hidden)] pub`.
+#
+# So the builder stays inherent and `graphql` gates it. `graphql-proto` depends on this crate with
+# `default-features = false` and still does not pull the parser, which is the only thing the old
+# shape protected.
 
 [features]
+# `std` alone. Both compilers and the front ends they need are things a CONSUMER asks for: a schema
+# reader wants none of them, and making them default would put `smear-parser` in every graph that
+# names this crate.
 default = ["std"]
 
-alloc = ["smear-parser/alloc", "smear-schema/alloc", "tokora/alloc"]
-std = ["smear-parser/std", "smear-schema/std", "tokora/std"]
+# The tiers. With neither, this crate is `schema::diagnostic` and `schema::builtin`, and with
+# `graphql` a `graphql` module that holds `schema` alone: everything else allocates. Either tier
+# compiles the representation, which is `core` + `alloc`, and the heap code of each capability that
+# is on; `std` also flips the crate attribute. Neither tier implies the other.
+#
+# Each forwards weakly to the two front ends and to the optional source crates, so a tier never
+# turns a compiler or a source crate on.
+#
+# Both tiers turn smol-bytes on: it is the owned-text seam's buffer (`src/schema/text.rs`), which
+# only heap code uses, so the core tier compiles neither it nor `bytes`. `dep:` creates no feature
+# of its own, so a tier does not set the `smol-bytes_0_2` switch below: that one is the analyzer's
+# source feature, and only a consumer turns it on.
+alloc = [
+  "tokora/alloc",
+  "smear-lexer?/alloc",
+  "smear-parser?/alloc",
+  "dep:smol-bytes_0_2",
+  "smol-bytes_0_2?/alloc",
+  "bstr_1?/alloc",
+]
+std = [
+  "tokora/std",
+  "smear-lexer?/std",
+  "smear-parser?/std",
+  "dep:smol-bytes_0_2",
+  "smol-bytes_0_2?/std",
+  "bytes_1?/std",
+  "bstr_1?/std",
+  "hipstr_0_8?/std",
+]
 
-# The second construction door, forwarded rather than re-implemented: `Schema::from_introspection`
-# lives in `smear-schema` and this crate re-exports its error type.
-introspection = ["smear-schema/introspection"]
+# GraphQL's compiler: draft §3 "Type Validation" and the SDL door (`Schema::build`, `SchemaBuilder`,
+# `SchemaError` and the literal-shape table, in `schema`), and draft §5 document validation (the
+# `graphql` module). This is the edge that pulls `smear-parser`, because the builder consumes a
+# parsed `TypeSystemDocument`. The interner, duplicate index and cycle kernel the builder runs on
+# are the private `kernel` module, compiled with either capability.
+#
+# `schema/error.rs` IS BEHIND THIS. `SchemaError` is what the build refuses with; ungated, the
+# runtime layer would publish an error type no configuration it was compiled in could produce, and
+# `error.rs`'s own doc links point at `Schema::build`, so they would be unresolvable under
+# `-D warnings` in exactly the configuration that kept them. Gating it also keeps it out of a build
+# that only reads a schema.
+graphql = ["dep:smear-parser", "smear-parser/graphql"]
+
+# The second construction door: building a `Schema` out of a draft §4 introspection response
+# instead of out of SDL. It renders the response as SDL and hands it to the same builder, so draft
+# §3 runs there too and the two doors cannot drift apart — which is why it implies `graphql` rather
+# than duplicating it. What it gates that `graphql` does not is the `schema::introspection` module
+# and the `IntrospectionError` it re-exports.
+introspection = ["graphql"]
+
+# GraphQLx's compiler: the `graphqlx` module, the schema analyzer. It pulls the GraphQLx front end,
+# whose tree the analyzer reads, and it implies no tier: like every capability here it compiles
+# nothing that allocates until `std` or `alloc` is on as well.
+graphqlx = ["dep:smear-lexer", "dep:smear-parser", "smear-parser/graphqlx"]
+
+# The source texts the analyzer accepts beyond `str` and `[u8]`. Each versioned feature forwards
+# `smear-parser`'s of the same name, whose GraphQLx lexer and parser do the reading, and implies no
+# tier and no capability: without `graphqlx` it compiles nothing here. The unversioned name is a
+# pure alias for the current major and carries nothing else.
+#
+# The forward is WEAK. `smear` forwards its own source features to this crate unconditionally,
+# because its edge to this crate is unconditional, so a strong `smear-parser/…` here would compile
+# the parser into a `smear` built without `parser`.
+#
+# Each also turns on this crate's own edge to the source crate, because `SourceText` is implemented
+# here for that crate's type and the orphan rule puts the impl here or nowhere: no member re-exports
+# `bytes`, `bstr`, `hipstr` or `smol-bytes`, so naming the type needs the dependency.
+bytes = ["bytes_1"]
+bytes_1 = ["dep:bytes_1", "smear-parser?/bytes_1"]
+bstr = ["bstr_1"]
+bstr_1 = ["dep:bstr_1", "smear-parser?/bstr_1"]
+hipstr = ["hipstr_0_8"]
+hipstr_0_8 = ["dep:hipstr_0_8", "smear-parser?/hipstr_0_8"]
+smol-bytes = ["smol-bytes_0_2"]
+smol-bytes_0_2 = ["dep:smol-bytes_0_2", "smear-parser?/smol-bytes_0_2"]
+
+# Compiles `graphqlx::test_support`, the door through which `smear`'s integration tests build small
+# models with the crate-private model builder, and the part of the builder only that door calls
+# until the analyzer's later phases call it. Hidden and not API; `smear/test-support` forwards it,
+# and the umbrella's self dev-dependency turns it on for every `smear` test target.
+test-support = []
 
 [dependencies]
+# The derives of the public enums outside `schema/repr/`, which takes no dependency:
+# `smear-noatomic` includes it with an empty table. Links no `alloc` with the workspace's feature
+# list, so no tier turns it on.
 derive_more.workspace = true
+# Named with no capability and no tier: `schema/diagnostic.rs` re-exports `tokora::diagnostic`,
+# ungated, and `Diagnose` is tokora's. The claim `smear-noatomic` holds is about `schema/repr/`,
+# which it `#[path]`-includes and builds for `thumbv6m-none-eabi` with an empty table of its own;
+# that claim is untouched.
 tokora.workspace = true
 
-smear-parser = { workspace = true, features = ["graphql"] }
-smear-schema = { workspace = true, features = ["build"] }
+# The front ends, turned on only by a capability: `graphql` takes the parser, and `graphqlx` takes
+# the lexer and the parser. Every other mention of them above is a weak forward, so a build with
+# neither capability has neither in its graph.
+smear-lexer = { workspace = true, optional = true }
+smear-parser = { workspace = true, optional = true }
+
+# The source crates `SourceText` is implemented for, declared exactly as `smear-parser` declares
+# them and turned on only by the feature of the same name.
+bstr_1 = { workspace = true, optional = true }
+bytes_1 = { workspace = true, optional = true }
+# Not a workspace entry: there is none for `hipstr`, and `smear-parser` states the same requirement
+# inline for the same reason.
+hipstr_0_8 = { package = "hipstr", version = "0.8", default-features = false, optional = true }
+
+# One declaration for two users. The owned-text seam's shared buffer needs pointer-width
+# compare-and-swap, and both tiers turn it on; the analyzer's `smol-bytes_0_2` source feature turns
+# it on as well. A target without those atomics never resolves the edge: `src/schema/text.rs` gives
+# the seam a `Box<str>` instead, and nothing that needs the parser builds there.
+[target.'cfg(target_has_atomic = "ptr")'.dependencies]
+smol-bytes_0_2 = { workspace = true, optional = true }
 
 [lints]
 workspace = true

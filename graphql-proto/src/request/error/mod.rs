@@ -45,7 +45,7 @@
 //!
 //! **The driver's, as many as the ceilings admit.** The other three are outside this crate by its
 //! own division of labour: a syntax error is `smear-parser`'s, a validation failure is
-//! `smear-compiler`'s draft §5, and a variable coercion failure is the driver's, per
+//! the validator's draft §5, and a variable coercion failure is the driver's, per
 //! [`Values::variable`](crate::Values::variable)'s contract that values arriving there are already
 //! coerced. None of the three ever reaches an [`Executor`](crate::Executor), so none of them has a
 //! `StartError` to build a result from. Each is a [`RequestError`] instead — the driver's own
@@ -127,20 +127,20 @@
 //! # An entry built from a diagnostic
 //!
 //! [`RequestError::from_diagnose`] turns any [`Diagnose`] into an entry. The seam is the one this
-//! crate already reads through `smear-schema`, and the families that answer it —
-//! `smear-parser`'s syntax `Error`, `smear-compiler`'s `DiagnosticDisplay`, `smear-schema`'s
-//! `SchemaError` and the introspection door's `ResponseError` — need nothing new to reach a
-//! request error result. Three decisions are taken there, and recorded here:
+//! crate already reads through `smear-compiler`'s `schema` module, and the families that answer
+//! it — `smear-parser`'s syntax `Error`, the validator's `DiagnosticDisplay`, the schema
+//! builder's `SchemaError` and the introspection door's `ResponseError` — need nothing new to
+//! reach a request error result. Three decisions are taken there, and recorded here:
 //!
 //! - **The message is the diagnostic's rendering, as it renders.** Nothing is cut out of it or
 //!   added to it. The position travels in `locations`, which is where §7.1.6 puts it and the form a
 //!   client can use; a diagnostic whose sentence also spells its span says so twice, and that is
 //!   the diagnostic's choice to change, not this door's to edit.
 //! - **The locations are the primary span and then each label's**, in the diagnostic's own order.
-//!   A [`Location::entire`](smear_schema::diagnostic::Location::entire) is skipped rather than
+//!   A [`Location::entire`](smear_compiler::schema::diagnostic::Location::entire) is skipped rather than
 //!   written: it says the diagnostic has no point in the text to show, and §7.1.6 asks for a point.
 //! - **No code is invented.** §7.1.6 gives an error no `code` entry. `extensions.code` is a
-//!   convention a driver may adopt — the diagnostic's [`Code`](smear_schema::diagnostic::Code) is
+//!   convention a driver may adopt — the diagnostic's [`Code`](smear_compiler::schema::diagnostic::Code) is
 //!   right there for [`set_extensions`](RequestError::set_extensions) — and not one this crate
 //!   imposes on every driver's wire format.
 //!
@@ -216,7 +216,7 @@ use core::fmt;
 use std::boxed::Box;
 
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use smear_schema::{FrozenStr, StrBuf, diagnostic::Diagnose};
+use smear_compiler::schema::{FrozenStr, StrBuf, diagnostic::Diagnose};
 use tokora::SimpleSpan;
 
 use crate::{Ceiling, Extensions, Limits, StartError};
@@ -413,7 +413,7 @@ impl<V> RequestError<V> {
 
   /// Builds an entry from a diagnostic: its message, and the positions it points at.
   ///
-  /// Draft §5's validation diagnostics are what this is for — pass the view `smear-compiler`'s
+  /// Draft §5's validation diagnostics are what this is for — pass the view the validator's
   /// `Diagnostic::display` returns, which is its [`Diagnose`] implementor — and any other
   /// implementor is read the same way. The spans are taken as positions in the requested document,
   /// so a diagnostic about some other input belongs in an entry only if the caller resolves its
@@ -422,7 +422,7 @@ impl<V> RequestError<V> {
   /// - **The message** is the diagnostic's `Display`, as it renders. The position travels in the
   ///   entry's `locations`, in the form a client can use.
   /// - **The locations** are the primary span and then each label's, in order, skipping a
-  ///   [`Location::entire`](smear_schema::diagnostic::Location::entire), which is no point in the
+  ///   [`Location::entire`](smear_compiler::schema::diagnostic::Location::entire), which is no point in the
   ///   text.
   /// - **No `extensions`.** The diagnostic's code is the driver's to publish or not, through
   ///   [`set_extensions`](RequestError::set_extensions); `request/error/mod.rs`'s header has why
@@ -716,7 +716,7 @@ impl<V> fmt::Display for RequestErrorEntry<'_, V> {
 ///   },
 ///   lexer::tokora::{Parse as _, Parser},
 /// };
-/// use smear_schema::Schema;
+/// use smear_compiler::schema::Schema;
 ///
 /// # struct Space;
 /// # impl Values for Space {
@@ -1211,7 +1211,7 @@ impl<'r, V> Iterator for Entries<'r, V> {
 impl<V> ExactSizeIterator for Entries<'_, V> {}
 
 /// The spans a diagnostic's labels point at, in the diagnostic's order, skipping a label whose
-/// location is [`Location::entire`](smear_schema::diagnostic::Location::entire).
+/// location is [`Location::entire`](smear_compiler::schema::diagnostic::Location::entire).
 ///
 /// The walk stops at the first index with no label, which is where [`Diagnose::labels`] promises
 /// the count ends, so an implementor that broke that promise is read no further than it kept it.

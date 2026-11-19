@@ -28,21 +28,22 @@ extern crate alloc as std;
 #[allow(unused_extern_crates)]
 extern crate std;
 
-// Deliberately no outer doc comment, unlike the modules below. Rustdoc resolves the MERGED
+// Deliberately no outer doc comment, unlike most mounts below. Rustdoc resolves the MERGED
 // fragments of a module's documentation in the scope of whichever attribute came from outside, so
 // an outer comment here would reinterpret every link in the module's own header as one rooted in
 // `smear` — `unresolved link` errors under `RUSTDOCFLAGS="-D warnings"`, all of them for items
 // that are right there in the module. The module's own header supplies the summary line the crate
 // index shows.
 //
-// The contract is tokora's: `smear-schema`'s `diagnostic` module re-exports `tokora::diagnostic`
-// item by item, so `smear::diagnostic::Diagnose` IS `tokora::diagnostic::Diagnose`. It comes
-// through `smear-schema` rather than straight from tokora because that is where it was first
-// published: `schema::error` and `schema::introspection::error` implement it there, and the
-// lexer's and parser's syntax errors implement the same trait from tokora directly. The re-export
-// is what keeps `smear::diagnostic` the ungated path it has always been, and it is why
-// `smear-schema` is an unconditional dependency below rather than one behind `validator`.
-pub use smear_schema::diagnostic;
+// The contract is tokora's: `smear-compiler`'s `schema::diagnostic` module re-exports
+// `tokora::diagnostic` item by item, so `smear::diagnostic::Diagnose` IS
+// `tokora::diagnostic::Diagnose`. It comes through `smear-compiler` rather than straight from
+// tokora because that is where it was first published: `schema::error` and
+// `schema::introspection::error` implement it there, and the lexer's and parser's syntax errors
+// implement the same trait from tokora directly. The re-export is what keeps `smear::diagnostic`
+// the ungated path it has always been, and it is why `smear-compiler` is an unconditional
+// dependency rather than one behind `validator`.
+pub use smear_compiler::schema::diagnostic;
 
 /// Lexers for GraphQL and GraphQL-like DSLs.
 ///
@@ -154,52 +155,18 @@ pub use smear_parser::typed_keyword_atom;
 #[cfg_attr(docsrs, doc(cfg(all(feature = "rowan_0_17", feature = "std"))))]
 pub use smear_parser::ast_node;
 
-/// GraphQL document validation, and the built-once schema every rule reads.
-///
-#[cfg_attr(
-  any(feature = "std", feature = "alloc"),
-  doc = "Draft §3 \"Type Validation\" runs inside [`Schema::build`](validator::Schema::build), so \
-         a malformed SDL is refused once at startup rather than rediscovered per request."
-)]
-#[cfg_attr(
-  not(any(feature = "std", feature = "alloc")),
-  doc = "Draft §3 \"Type Validation\" runs inside `Schema::build`, so a malformed SDL is refused \
-         once at startup rather than rediscovered per request."
-)]
-///
-#[cfg_attr(
-  all(any(feature = "std", feature = "alloc"), feature = "introspection"),
-  doc = "A schema can also be built from a server's draft §4 introspection response — \
-         [`Schema::from_introspection`](validator::Schema::from_introspection), behind the \
-         `introspection` feature. It is a second entrance to the same value: it renders the \
-         response as SDL and hands it to the same builder, so draft §3 runs there too and the \
-         two doors cannot drift apart."
-)]
-#[cfg_attr(
-  not(all(any(feature = "std", feature = "alloc"), feature = "introspection")),
-  doc = "The `introspection` feature adds a second construction door, building the same schema \
-         out of a server's draft §4 introspection response instead of out of SDL."
-)]
-///
-/// Standard GraphQL only —
-#[cfg_attr(
-  all(any(feature = "std", feature = "alloc"), feature = "graphqlx"),
-  doc = "[`graphqlx`](parser::graphqlx) is not the draft specification's language: its \
-         schemas are analyzed by `analysis`, and it has no executable-document validator and \
-         no executor."
-)]
-#[cfg_attr(
-  not(all(any(feature = "std", feature = "alloc"), feature = "graphqlx")),
-  doc = "the GraphQLx dialect is not the draft specification's language: its schemas are \
-         analyzed by `analysis`, and it has no executable-document validator and no executor."
-)]
-///
-/// The layer is the `smear-compiler` crate; `validator` is the name it has always had inside
-/// `smear` and the path every consumer already writes.
+// GraphQL document validation, and the built-once schema every rule reads. The layer is
+// `smear-compiler`'s `graphql` module; `validator` is the name it has always had inside `smear` and
+// the path every consumer already writes.
+//
+// No outer doc comment: the module's own header is its one doc fragment, so a link in it resolves
+// in the module where it is written. That header carries what a reader of `smear::validator`
+// needs: standard GraphQL only, draft §3 inside `Schema::build`, and the introspection door behind
+// its feature.
 #[cfg(feature = "validator")]
 #[cfg_attr(docsrs, doc(cfg(feature = "validator")))]
 #[doc(inline)]
-pub use smear_compiler as validator;
+pub use smear_compiler::graphql as validator;
 
 /// Draft §6 execution, as a Sans-I/O state machine.
 ///
@@ -263,13 +230,22 @@ pub use graphql_proto as proto;
 /// Its API makes no semver promise yet: a release may change any of its paths, signatures or
 /// answers, and the CHANGELOG says each change.
 ///
-/// The layer is the `smear-analysis` crate.
+/// The layer is `smear-compiler`'s `graphqlx` module.
 #[cfg(feature = "analysis")]
 #[cfg_attr(docsrs, doc(cfg(feature = "analysis")))]
-#[doc(inline)]
-pub use smear_analysis as analysis;
+pub mod analysis {
+  // A module of this crate that holds one re-export, because the path users write has a
+  // `graphqlx` segment below `analysis`. It gates nothing the feature fence does not already hold;
+  // it only keeps the path. No outer doc comment on the re-export: the module's own header is its
+  // one doc fragment, so a link in it resolves in the module where it is written.
+  #[cfg(any(feature = "std", feature = "alloc"))]
+  #[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
+  #[doc(inline)]
+  pub use smear_compiler::graphqlx;
+}
 
-// THE ONE MODULE THIS CRATE OWNS, and it is here rather than one layer down for a stated reason.
+// THE ONE MODULE OF THIS CRATE'S OWN CODE (`analysis` above only holds a re-export), and it is
+// here rather than one layer down for a stated reason.
 //
 // `graphql-proto` refuses to write a response out because writing one means writing the driver's
 // `V`, and `Values` asks eight structural questions of which none is "write this". The
@@ -332,10 +308,10 @@ pub mod __private {
 // it was unreachable and after the split it was silent.
 //
 // WHAT THIS FENCE DOES NOT COVER, stated because a claim wider than what it holds is the defect it
-// was built against. It covers MEMBER features — every one `cargo metadata` reports across the six
-// crates smear re-exports and `smear-semantics`, which it asserts without mounting. Several `smear`
-// features ALSO forward to third-party ones: `bytes_1` forwards `tokora/bytes_1`, and
-// `impl Source for bytes::Bytes` comes from tokora, not from `smear-lexer`. Measured on this tree:
+// was built against. It covers MEMBER features — every one `cargo metadata` reports across the four
+// crates smear mounts. Several `smear` features ALSO forward to third-party ones: `bytes_1`
+// forwards `tokora/bytes_1`, and `impl Source for bytes::Bytes` comes from tokora, not from
+// `smear-lexer`. Measured on this tree:
 // a consumer with `smear/bytes_1` off and `tokora/bytes_1` enabled directly gets that impl, and
 // nothing here fires — tokora publishes no feature witnesses and this repository cannot give it
 // any. That is NOT a regression from the split: `smear/bytes` forwarded `tokora/bytes_1` on
@@ -440,63 +416,61 @@ const _: () = {
   );
 };
 
-const _: () = {
-  assert!(
-    smear_schema::__features::ALLOC == cfg!(feature = "alloc"),
-    "`smear-schema/alloc` and `smear/alloc` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/alloc` too, or stop enabling\n     `smear-schema/alloc`."
-  );
-  // `build` is the one pair whose twin is not its namesake: there is no `smear/build`, and
-  // `smear/validator` is what turns it on. It was EXEMPTED from this fence in `0c1a841`, on a
-  // reason measured over PATHS — "a consumer with `smear-schema/build` on and `smear/validator`
-  // off cannot name `SchemaBuilder`", which is true and is not the property. `build` also gates
-  // `impl Diagnose for SchemaError` (`smear-schema/src/error.rs:1001`), and an impl is not
-  // namespaced — which is the argument this whole fence was built on, applied to every pair
-  // except the one it was written in the same commit as. Measured on this tree before the fix: a
-  // consumer with `smear/{std,parser,graphql}` and `smear-schema/build` compiled a function
-  // demanding `smear::diagnostic::Diagnose` over `smear_schema::SchemaError`, with every const
-  // assertion passing.
-  assert!(
-    smear_schema::__features::BUILD == cfg!(feature = "validator"),
-    "`smear-schema/build` and `smear/validator` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` items gated by it — including `impl Diagnose for\n     SchemaError`, which is not namespaced and no re-export can hide — would then appear or\n     vanish behind a consumer who never asked. Enable `smear/validator` too, or stop enabling\n     `smear-schema/build`."
-  );
-  assert!(
-    smear_schema::__features::INTROSPECTION == cfg!(feature = "introspection"),
-    "`smear-schema/introspection` and `smear/introspection` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/introspection` too, or stop enabling\n     `smear-schema/introspection`."
-  );
-  assert!(
-    smear_schema::__features::STD == cfg!(feature = "std"),
-    "`smear-schema/std` and `smear/std` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/std` too, or stop enabling\n     `smear-schema/std`."
-  );
-};
-
-// `smear-semantics` is the one member asserted here that this crate does not mount. It sits beneath
-// `smear-schema`'s builder and beneath `smear-analysis`, so it is in the graph whenever `validator`
-// or `analysis` is, and the optional edge both turn on exists so this block can read its witnesses.
-#[cfg(any(feature = "validator", feature = "analysis"))]
-const _: () = {
-  assert!(
-    smear_semantics::__features::ALLOC == cfg!(feature = "alloc"),
-    "`smear-semantics/alloc` and `smear/alloc` disagree. Something in this dependency graph enabled\n     one without the other, and the kernels beneath `smear::validator` and `smear::analysis`\n     would then be built at a tier this consumer never asked for. Enable `smear/alloc` too, or\n     stop enabling `smear-semantics/alloc`."
-  );
-  assert!(
-    smear_semantics::__features::STD == cfg!(feature = "std"),
-    "`smear-semantics/std` and `smear/std` disagree. Something in this dependency graph enabled\n     one without the other, and the kernels beneath `smear::validator` and `smear::analysis`\n     would then be built at a tier this consumer never asked for. Enable `smear/std` too, or\n     stop enabling `smear-semantics/std`."
-  );
-};
-
-#[cfg(feature = "validator")]
+// Unconditional, because the edge is: `smear::diagnostic` comes through `smear-compiler` in every
+// build, so its witnesses are in every graph.
 const _: () = {
   assert!(
     smear_compiler::__features::ALLOC == cfg!(feature = "alloc"),
     "`smear-compiler/alloc` and `smear/alloc` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/alloc` too, or stop enabling\n     `smear-compiler/alloc`."
   );
   assert!(
+    smear_compiler::__features::BSTR_1 == cfg!(feature = "bstr_1"),
+    "`smear-compiler/bstr_1` and `smear/bstr_1` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/bstr_1` too, or stop enabling\n     `smear-compiler/bstr_1`."
+  );
+  assert!(
+    smear_compiler::__features::BYTES_1 == cfg!(feature = "bytes_1"),
+    "`smear-compiler/bytes_1` and `smear/bytes_1` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/bytes_1` too, or stop enabling\n     `smear-compiler/bytes_1`."
+  );
+  // `graphql` and `graphqlx` are the two pairs whose twins are not their namesakes. The umbrella's
+  // own `graphql` and `graphqlx` are the dialects; `smear/validator` and `smear/analysis` are what
+  // turn the two compilers on, so a pair asserted against the namesake would hold the wrong feature.
+  //
+  // `graphql` is also the impl-bearing one: it gates `impl Diagnose for SchemaError`, and an impl is
+  // not namespaced — which is the argument this whole fence was built on. Its predecessor, the
+  // `build` pair of the schema crate that `smear-compiler` absorbed, was EXEMPTED from this fence in
+  // `0c1a841`, on a reason measured over PATHS — that a consumer with `build` on and
+  // `smear/validator` off cannot name `SchemaBuilder` — which is true and is not the property: the
+  // exemption applied the fence's argument to every pair except the one it was written in the same
+  // commit as. Measured on that tree before the fix: a consumer with `smear/{std,parser,graphql}`
+  // and `build` compiled a function demanding `smear::diagnostic::Diagnose` over `SchemaError`, with
+  // every const assertion passing.
+  assert!(
+    smear_compiler::__features::GRAPHQL == cfg!(feature = "validator"),
+    "`smear-compiler/graphql` and `smear/validator` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` items gated by it — including `impl Diagnose for\n     SchemaError`, which is not namespaced and no re-export can hide — would then appear or\n     vanish behind a consumer who never asked. Enable `smear/validator` too, or stop enabling\n     `smear-compiler/graphql`. `smear/graphql` is the dialect, which turns on no compiler."
+  );
+  assert!(
+    smear_compiler::__features::GRAPHQLX == cfg!(feature = "analysis"),
+    "`smear-compiler/graphqlx` and `smear/analysis` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/analysis` too, or stop enabling\n     `smear-compiler/graphqlx`. `smear/graphqlx` is the dialect, which turns on no compiler."
+  );
+  assert!(
+    smear_compiler::__features::HIPSTR_0_8 == cfg!(feature = "hipstr_0_8"),
+    "`smear-compiler/hipstr_0_8` and `smear/hipstr_0_8` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/hipstr_0_8` too, or stop enabling\n     `smear-compiler/hipstr_0_8`."
+  );
+  assert!(
     smear_compiler::__features::INTROSPECTION == cfg!(feature = "introspection"),
     "`smear-compiler/introspection` and `smear/introspection` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/introspection` too, or stop enabling\n     `smear-compiler/introspection`."
   );
   assert!(
+    smear_compiler::__features::SMOL_BYTES_0_2 == cfg!(feature = "smol-bytes_0_2"),
+    "`smear-compiler/smol-bytes_0_2` and `smear/smol-bytes_0_2` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/smol-bytes_0_2` too, or stop enabling\n     `smear-compiler/smol-bytes_0_2`."
+  );
+  assert!(
     smear_compiler::__features::STD == cfg!(feature = "std"),
     "`smear-compiler/std` and `smear/std` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/std` too, or stop enabling\n     `smear-compiler/std`."
+  );
+  assert!(
+    smear_compiler::__features::TEST_SUPPORT == cfg!(feature = "test-support"),
+    "`smear-compiler/test-support` and `smear/test-support` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/test-support` too, or stop enabling\n     `smear-compiler/test-support`."
   );
 };
 
@@ -513,37 +487,5 @@ const _: () = {
   assert!(
     graphql_proto::__features::STD == cfg!(feature = "std"),
     "`graphql-proto/std` and `smear/std` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/std` too, or stop enabling\n     `graphql-proto/std`."
-  );
-};
-
-#[cfg(feature = "analysis")]
-const _: () = {
-  assert!(
-    smear_analysis::__features::ALLOC == cfg!(feature = "alloc"),
-    "`smear-analysis/alloc` and `smear/alloc` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/alloc` too, or stop enabling\n     `smear-analysis/alloc`."
-  );
-  assert!(
-    smear_analysis::__features::BSTR_1 == cfg!(feature = "bstr_1"),
-    "`smear-analysis/bstr_1` and `smear/bstr_1` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/bstr_1` too, or stop enabling\n     `smear-analysis/bstr_1`."
-  );
-  assert!(
-    smear_analysis::__features::BYTES_1 == cfg!(feature = "bytes_1"),
-    "`smear-analysis/bytes_1` and `smear/bytes_1` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/bytes_1` too, or stop enabling\n     `smear-analysis/bytes_1`."
-  );
-  assert!(
-    smear_analysis::__features::HIPSTR_0_8 == cfg!(feature = "hipstr_0_8"),
-    "`smear-analysis/hipstr_0_8` and `smear/hipstr_0_8` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/hipstr_0_8` too, or stop enabling\n     `smear-analysis/hipstr_0_8`."
-  );
-  assert!(
-    smear_analysis::__features::SMOL_BYTES_0_2 == cfg!(feature = "smol-bytes_0_2"),
-    "`smear-analysis/smol-bytes_0_2` and `smear/smol-bytes_0_2` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/smol-bytes_0_2` too, or stop enabling\n     `smear-analysis/smol-bytes_0_2`."
-  );
-  assert!(
-    smear_analysis::__features::STD == cfg!(feature = "std"),
-    "`smear-analysis/std` and `smear/std` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/std` too, or stop enabling\n     `smear-analysis/std`."
-  );
-  assert!(
-    smear_analysis::__features::TEST_SUPPORT == cfg!(feature = "test-support"),
-    "`smear-analysis/test-support` and `smear/test-support` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/test-support` too, or stop enabling\n     `smear-analysis/test-support`."
   );
 };

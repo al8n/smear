@@ -38,11 +38,11 @@
 
 use tokora::{SimpleSpan, span::AsSpan};
 
+use smear_compiler::schema::{Schema, TypeId, bucket, hash_bytes, is_name, is_name_tail};
 use smear_parser::graphql::ast::{
   Directive, Directives, ExecutableDocument, Field, FragmentDefinition, InputValue, Selection,
   SelectionSet,
 };
-use smear_schema::{Schema, TypeId, bucket, hash_bytes, is_name, is_name_tail};
 
 use super::{
   Values,
@@ -340,7 +340,7 @@ pub(super) struct Fault<'a> {
 /// [`Groups`].
 ///
 /// **`Schema::sym`, which was examined, cleared, and cleared on the wrong axis.** `expand` and
-/// [`applies`] probe the schema's [`NameIndex`](smear_schema::NameIndex) with *document* bytes.
+/// [`applies`] probe the schema's [`NameIndex`](smear_compiler::schema::NameIndex) with *document* bytes.
 /// The residual here used to end there: the table is populated from the **schema**, which the
 /// operator wrote, so a client chooses the lookup key and never the run it walks — the same
 /// question that condemned [`Fragments`], answered the other way.
@@ -463,7 +463,7 @@ impl Visits {
   /// restored the unbounded byte pass that the byte charges exist to close.
   ///
   /// So the saturation value is refused whatever the remainder is. That is the convention
-  /// `smear_compiler`'s `Work::take` already keeps, arrived at from the other direction: that
+  /// the validator's `Work::take` already keeps, arrived at from the other direction: that
   /// ledger counts up and poisons its total, this one counts down and refuses the amount, and both
   /// make [`u32::MAX`] a number no charge may rest on. One convention across the two crates, and
   /// not two — the byte charges that made the poison necessary were added to both ledgers, and the
@@ -1065,7 +1065,7 @@ impl Interner {
   /// one or two units the entry costs.
   ///
   /// Two changes, and the second is what makes the first cheap — the same pair
-  /// `smear_compiler`'s merge interner took, for the same reason. Every pass over the key is
+  /// the validator's merge interner took, for the same reason. Every pass over the key is
   /// charged in [`byte_units`] *before* the pass: before hashing it, before comparing it, and
   /// before copying it into the arena. And the whole 64-bit hash is stored beside each entry, so a
   /// chain step tests two integers and reads no bytes — on the bucket collision that is the

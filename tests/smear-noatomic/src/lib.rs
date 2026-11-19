@@ -2,7 +2,7 @@
 //!
 //! # What this member is for
 //!
-//! `smear-schema` claims three things about [`repr::Schema`] that a reader
+//! `smear-compiler`'s schema layer claims three things about [`repr::Schema`] that a reader
 //! has to take on trust unless something checks them:
 //!
 //! 1. it depends on nothing but `core` and `alloc`;
@@ -18,14 +18,14 @@
 //!
 //! # It compiles the originals, not a copy
 //!
-//! The module below is `#[path]`-included straight out of `smear-schema/src/repr/`.
+//! The module below is `#[path]`-included straight out of `smear-compiler/src/schema/repr/`.
 //! Nothing is duplicated, so nothing can drift: this is the same source text `smear` ships, read
 //! through a second crate root that supplies a different `std`.
 //!
-//! # The claim is about `repr/`, not about `smear-schema` as a whole
+//! # The claim is about `repr/`, not about `smear-compiler` as a whole
 //!
-//! `smear-schema`'s own `[dependencies]` table is not empty — the diagnostic vocabulary moved down
-//! with it and needs `tokora`, and its `build` feature pulls `smear-parser`. None of that reaches
+//! `smear-compiler`'s own `[dependencies]` table is not empty — its diagnostic vocabulary needs
+//! `tokora`, and its `graphql` and `graphqlx` features pull the front end. None of that reaches
 //! the directory below, which is the only thing this crate compiles and the only thing the claim
 //! was ever about: `repr/` still has exactly one outbound path, the alloc-as-std alias, and a
 //! `use` anywhere in it reaching past `core` and `alloc` fails this build.
@@ -48,7 +48,7 @@
 extern crate alloc as std;
 
 /// The schema representation, compiled from `smear`'s own files.
-#[path = "../../../smear-schema/src/repr/mod.rs"]
+#[path = "../../../smear-compiler/src/schema/repr/mod.rs"]
 pub mod repr;
 
 use repr::{

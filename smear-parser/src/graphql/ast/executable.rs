@@ -53,7 +53,7 @@ pub type FragmentDefinition<S> = crate::executable::FragmentDefinition<
 /// The variant set is the specification's, not smear's, so adding to it would mean parsing
 /// something that is not GraphQL. `#[non_exhaustive]` here would advertise an evolution freedom
 /// this type structurally does not have and charge for it where it costs most — the exhaustiveness
-/// `smear-compiler`'s draft §5 rules depend on. Smear's extension mechanism is a separate dialect:
+/// the validator's draft §5 rules depend on. Smear's extension mechanism is a separate dialect:
 /// `graphqlx`'s own `OperationType` keeps the attribute, correctly.
 ///
 /// # Not a map key reachable through `&str`
@@ -158,7 +158,7 @@ pub type NamedOperationDefinition<S, Ty = Type<Name<S>>> =
 /// The variant set is the specification's, not smear's, so adding to it would mean parsing
 /// something that is not GraphQL. `#[non_exhaustive]` here would advertise an evolution freedom
 /// this type structurally does not have and charge for it where it costs most — the exhaustiveness
-/// `smear-compiler`'s draft §5 rules depend on. Smear's extension mechanism is a separate dialect:
+/// the validator's draft §5 rules depend on. Smear's extension mechanism is a separate dialect:
 /// `graphqlx`'s own `OperationDefinition` keeps the attribute, correctly.
 #[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]
@@ -204,7 +204,7 @@ impl<S, Ty> IntoSpan<Span> for OperationDefinition<S, Ty> {
 /// The variant set is the specification's, not smear's, so adding to it would mean parsing
 /// something that is not GraphQL. `#[non_exhaustive]` here would advertise an evolution freedom
 /// this type structurally does not have and charge for it where it costs most — the exhaustiveness
-/// `smear-compiler`'s draft §5 rules depend on. Smear's extension mechanism is a separate dialect:
+/// the validator's draft §5 rules depend on. Smear's extension mechanism is a separate dialect:
 /// `graphqlx`'s own `UseOrExecutableDefinition` keeps the attribute, correctly.
 #[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]

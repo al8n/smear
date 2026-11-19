@@ -54,6 +54,7 @@
 //! 35944196326 is where the five-minute ones were first seen, at the six-hour job ceiling of a cell
 //! that ran every member at once.
 
+use smear_compiler::schema::{MAX_FIELD_ARGUMENTS, Schema};
 use smear_parser::{
   graphql::{
     GraphQL,
@@ -67,14 +68,13 @@ use smear_parser::{
   },
   lexer::tokora::{Parse as _, Parser},
 };
-use smear_schema::{MAX_FIELD_ARGUMENTS, Schema};
 
 use crate::{
   Extensions, Kind, Leaf, Node, ReqId, ResponseStream, SourceEventError, StartError,
   UnattachedExtensions, Values,
 };
 
-// Neither this crate's `std` nor `smear-schema`'s is implied by anything, so this module also
+// Neither this crate's `std` nor `smear-compiler`'s is implied by anything, so this module also
 // compiles under `--no-default-features`, where `crate::std` is `alloc` and `ToString` is not in
 // the prelude. The crate's other in-crate test modules that render a value spell it the same way.
 use std::string::{String, ToString};
@@ -499,7 +499,7 @@ fn a_repeated_response_key_charges_one_comparison_each_time() {
 ///
 /// # The plants, and they land on different rows
 ///
-/// Delete the `finalize` call from `smear_schema::hash_bytes`: `field{i}` reads 12,388 and the four
+/// Delete the `finalize` call from `smear_compiler::schema::hash_bytes`: `field{i}` reads 12,388 and the four
 /// width-6 rows read 44,687, 114,177, 360,209 and **776,036** — short names, where the fold between
 /// rounds cannot help because for eight bytes or fewer its loop body never runs. Delete
 /// `h ^= h >> 32` instead: the width-8 and width-16 rows at radices 36 and 63 read 11,943, 11,766,
@@ -579,8 +579,8 @@ fn distinct_response_keys_are_linear_however_they_are_spelled() {
   /// The query for one spelling, and everything its total costs that is **not** a comparison.
   ///
   /// Derived from the row's own names rather than written down, for the reason the collision search
-  /// in `smear_compiler::scratch` gives: a term computed from the fixture moves when the fixture
-  /// does, and a term copied out of a measurement goes stale silently.
+  /// in `smear_compiler::graphql::scratch` gives: a term computed from the fixture moves when the
+  /// fixture does, and a term copied out of a measurement goes stale silently.
   fn row(spell: impl Fn(u32) -> std::string::String) -> (std::string::String, u32) {
     use crate::collect::byte_units;
 
@@ -631,7 +631,7 @@ fn distinct_response_keys_are_linear_however_they_are_spelled() {
        {overhead} of which is the walk, the interning passes and the schema probes, so the \
        comparisons are {}. Scanning the names instead of probing them costs about {}; a total \
        between the two is the hash dropping an honest document's names into a handful of buckets, \
-       which is what the avalanche step and the fold between rounds in `smear_schema::hash_bytes` \
+       which is what the avalanche step and the fold between rounds in `smear_compiler::schema::hash_bytes` \
        exist to stop",
       work.saturating_sub(*overhead),
       u64::from(KEYS) * u64::from(KEYS) / 2
@@ -1102,7 +1102,9 @@ fn colliding_names_of(
     std::vec![std::vec::Vec::new(); mask as usize + 1];
   for candidate in 0u64.. {
     let name = std::format!("{prefix}{candidate:0width$}");
-    let at = smear_schema::bucket(smear_schema::hash_bytes(name.as_bytes()), mask) as usize;
+    let at =
+      smear_compiler::schema::bucket(smear_compiler::schema::hash_bytes(name.as_bytes()), mask)
+        as usize;
     by_bucket[at].push(name);
     if by_bucket[at].len() == count {
       return core::mem::take(&mut by_bucket[at]);
@@ -1968,7 +1970,7 @@ fn the_metered_scan_admits_what_the_whole_slice_rule_admits() {
     );
     assert_eq!(
       admitted,
-      smear_schema::is_name(spelling),
+      smear_compiler::schema::is_name(spelling),
       "the two rules disagree about {spelling:?}"
     );
   };
@@ -5468,7 +5470,7 @@ fn the_declared_factor_is_bounded_at_the_schema_and_not_at_the_ledger() {
     sdl
   }
 
-  fn build(sdl: &str) -> Result<Schema, smear_schema::SchemaErrors> {
+  fn build(sdl: &str) -> Result<Schema, smear_compiler::schema::SchemaErrors> {
     let document = Parser::with_parser::<
       GraphqlLexer<'_, str>,
       TypeSystemDocument<&str>,
@@ -5531,7 +5533,7 @@ fn the_declared_factor_is_bounded_at_the_schema_and_not_at_the_ledger() {
   build(&sdl(WIDEST)).expect("a field at the ceiling is a schema");
   let refused = build(&sdl(WIDEST + 1)).expect_err("a field past the ceiling is not a schema");
   assert!(
-    refused.contains_kind(smear_schema::SchemaErrorKind::TooManyFieldArguments),
+    refused.contains_kind(smear_compiler::schema::SchemaErrorKind::TooManyFieldArguments),
     "a field past `MAX_FIELD_ARGUMENTS` was refused for some other reason: {:?}",
     refused.kinds()
   );

@@ -45,7 +45,7 @@ pub type SelectionSet<S> = crate::selection::SelectionSet<Selection<S>, Span, Ne
 /// The variant set is the specification's, not smear's, so adding to it would mean parsing
 /// something that is not GraphQL. `#[non_exhaustive]` here would advertise an evolution freedom
 /// this type structurally does not have and charge for it where it costs most — the exhaustiveness
-/// `smear-compiler`'s draft §5 rules depend on. Smear's extension mechanism is a separate dialect:
+/// the validator's draft §5 rules depend on. Smear's extension mechanism is a separate dialect:
 /// `graphqlx`'s own `Selection` keeps the attribute, correctly.
 #[derive(Debug, Clone, PartialEq, Eq, From, IsVariant, TryUnwrap, Unwrap)]
 #[unwrap(ref, ref_mut)]

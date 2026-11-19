@@ -1,14 +1,11 @@
 # Releasing Smear
 
-Smear releases these eight crates as one versioned set:
+Smear releases these five crates as one versioned set:
 
 - `smear-lexer`
 - `smear-parser`
-- `smear-semantics`
-- `smear-schema`
 - `smear-compiler`
 - `graphql-proto`
-- `smear-analysis`
 - `smear`
 
 `smear-noatomic`, `smear-smoke`, and `source-census` are workspace checks, not
@@ -16,7 +13,7 @@ published packages. `ci/downstream` is a separately locked consumer fixture.
 
 ## Release preflight
 
-Start from the exact release commit in a clean checkout. The eight publishable
+Start from the exact release commit in a clean checkout. The five publishable
 packages must have the release version, and each internal package requirement
 must be the matching caret requirement. Run the repository checks, then:
 
@@ -36,7 +33,7 @@ path-package versions before running the fixture's locked legs.
 The workspace dry run is deliberately unlocked. During first publication,
 Cargo's temporary registry cannot verify a root lock containing unpublished
 path packages (Cargo 1.99 and 1.100 report a missing local checksum). The
-existing unlocked workspace dry run still packages the eight crates in DAG order
+existing unlocked workspace dry run still packages the five crates in DAG order
 and verifies their packaged sources.
 
 ## Locked publication after approval
@@ -64,17 +61,13 @@ each step:
 ```text
 smear-lexer
 smear-parser      after smear-lexer
-smear-semantics   no internal dependency
-smear-schema      after smear-parser and smear-semantics
-smear-compiler    after smear-parser and smear-schema
-graphql-proto     after smear-parser and smear-schema
-smear-analysis    after smear-lexer, smear-parser and smear-semantics
+smear-compiler    after smear-lexer and smear-parser
+graphql-proto     after smear-parser and smear-compiler
 smear             after every crate above
 ```
 
-`smear-compiler` and `graphql-proto` may proceed after `smear-schema`, and
-`smear-analysis` after `smear-parser` and `smear-semantics`; publish `smear`
-only after all seven are visible. For every package, compare the checksum in
+Each crate waits for the one above it, so the order is a chain; publish `smear`
+only after all four are visible. For every package, compare the checksum in
 the crates.io index with the locally recorded `.crate` checksum before moving to
 the dependent package.
 
@@ -106,7 +99,9 @@ controller accepts a version it did not publish through OIDC only at the 0.0.1
 bootstrap below, so a release that finds its own version published by hand stops
 at that crate. `smear-semantics` and `smear-analysis` joined the set after 0.0.1
 and were created by hand on 2026-11-14, each at `0.0.1` (`smear-analysis`'s is
-yanked). The next release is above 0.0.1.
+yanked); both were folded into `smear-compiler` before any release used them.
+`smear-schema` was folded in after 0.0.1 released it. The next release is above
+0.0.1.
 
 **A release after 0.0.1** has no manual step:
 
@@ -123,11 +118,12 @@ siblings of `smear`, `smear-lexer`, `smear-parser`, `smear-schema`,
 release's own evidence; the existing `smear` name needed no bootstrap.
 **`smear 0.0.1` was never to be published by hand: the controller requires
 GitHub OIDC provenance for the facade.** `BOOTSTRAP_0_0_1` in `ci/release.py`
-also names `smear-semantics` and `smear-analysis`, which were added after the
-release and took no part in it, and the table acts only at version `0.0.1`. The
-steps below, and the paragraphs after them, are that procedure as the controller
-holds it; none of them runs for a later version, and `verify`'s check of the
-crate names skips 0.0.1, whose run created them.
+holds the four of those siblings that remain in the set; `smear-schema`, which
+that run published, has since been folded into `smear-compiler` and is not in
+it. The table acts only at version `0.0.1`. The steps below, and the paragraphs
+after them, are that procedure as the controller holds it; none of them runs for
+a later version, and `verify`'s check of the crate names skips 0.0.1, whose run
+created them.
 
 The 0.0.1 run:
 
@@ -136,7 +132,7 @@ The 0.0.1 run:
    full SHA and version `0.0.1`.
 2. Let `verify` finish, then leave the `crates-io` publish job waiting for
    approval. `verify` generates the ignored root lock exactly once and exports
-   its existing bytes, preflight manifest, and eight archives as an immutable
+   its existing bytes, preflight manifest, and five archives as an immutable
    `smear-preflight-VERSION-COMMIT-RUN-ATTEMPT` artifact. Its summary records the
    artifact ID/digest and the lock, manifest, and archive SHA-256 values.
 3. Download that exact artifact ID. Verify its repository, workflow, event
@@ -149,24 +145,23 @@ The 0.0.1 run:
    bundle, Cargo target directory, and bootstrap evidence outside the checkout.
    Use Cargo `1.99.1` and the existing authenticated `gh` session for gate reads.
    Run the restricted command below. It restores the downloaded lock before
-   Cargo, reproduces all eight archives, and refuses any byte difference before
-   uploading the seven siblings. It never generates another lock or selects the
+   Cargo, reproduces all five archives, and refuses any byte difference before
+   uploading the four siblings. It never generates another lock or selects the
    facade.
-5. After all seven siblings are verified, immediately revoke and unset the
-   bootstrap credential. Configure all eight crates' trusted publishers through
+5. After all four siblings are verified, immediately revoke and unset the
+   bootstrap credential. Configure all five crates' trusted publishers through
    the crates.io website: owner `al8n`, repository `smear`, workflow `release.yml`,
-   environment `crates-io`. Enable Trusted-Publishing-only mode for all eight.
+   environment `crates-io`. Enable Trusted-Publishing-only mode for all five.
 6. Approve the **same waiting run**. Its protected job restores the original
    lock from `needs.verify.outputs`, matches the original archives, proves and
-   skips the seven manual bootstrap versions, and publishes `smear` via OIDC.
+   skips the four manual bootstrap versions, and publishes `smear` via OIDC.
    Only afterward does the separate GitHub job create the tag and release.
 
 For the manual step, create the shortest-lived scoped credential under `al8n`,
-restricted to these seven exact crate scopes: `smear-lexer`, `smear-parser`,
-`smear-semantics`, `smear-schema`, `smear-compiler`, `graphql-proto`,
-`smear-analysis`. Grant only `publish-new` and `trusted_publishing` endpoint
-permissions. The latter is needed solely for an authenticated identity read:
-crates.io's `/me` route is cookie-only, while
+restricted to these four exact crate scopes: `smear-lexer`, `smear-parser`,
+`smear-compiler`, `graphql-proto`. Grant only `publish-new` and
+`trusted_publishing` endpoint permissions. The latter is needed solely for an
+authenticated identity read: crates.io's `/me` route is cookie-only, while
 `GET /api/v1/trusted_publishing/github_configs?user_id=...` verifies that the
 credential belongs to the public `al8n` identity. The command only reads that
 endpoint; it never creates, changes, or deletes a publisher configuration.

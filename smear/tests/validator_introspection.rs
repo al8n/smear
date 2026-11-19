@@ -79,7 +79,7 @@
 //!   [`a_meta_type_that_contradicts_its_shape_is_refused`] pin the two halves.
 
 // `Schema::from_introspection`, `IntrospectionError` and `ResponseErrorKind` below all live behind
-// `#[cfg(feature = "introspection")]` in `smear-schema/src/introspection/`, not merely
+// `#[cfg(feature = "introspection")]` in `smear-compiler/src/schema/introspection/`, not merely
 // behind `validator` — the module itself is separately gated. This file carried neither gate, so
 // it was a hard `E0432`/`E0433` under any feature selection that excludes `introspection`,
 // including plain `--features validator`. `cargo test -p smear --no-run` in CI now compiles the

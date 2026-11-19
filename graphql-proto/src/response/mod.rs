@@ -64,7 +64,7 @@ use core::fmt;
 use std::collections::TryReserveError;
 
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
-use smear_schema::{DirectiveLocation, PackedType, Schema, Sym, Text, TypeId, TypeKind};
+use smear_compiler::schema::{DirectiveLocation, PackedType, Schema, Sym, Text, TypeId, TypeKind};
 
 #[cfg(all(test, feature = "std"))]
 mod tests;
@@ -944,11 +944,11 @@ fn traversals() -> u64 {
 
 /// A pass-through global allocator that tallies every allocating event on the calling thread.
 ///
-/// The shape `smear`, `smear-parser` and `smear-schema` each use in an integration target of their
-/// own; this is the first one that has to live in a crate's *library* tests, because the property
-/// it serves is measured beside [`traversals`] and that counter is private to this module. There
-/// is no shared one to import — a `#[global_allocator]` belongs to a binary, and an integration
-/// target's is not reachable from a lib test.
+/// The shape `smear`, `smear-parser` and `smear-compiler` each use in an integration target of
+/// their own; this is the first one that has to live in a crate's *library* tests, because the
+/// property it serves is measured beside [`traversals`] and that counter is private to this module.
+/// There is no shared one to import — a `#[global_allocator]` belongs to a binary, and an
+/// integration target's is not reachable from a lib test.
 ///
 /// `realloc` counts, and counts as one event. That is not incidental: geometric growth is mostly
 /// `realloc`, so an allocator that forwarded it silently would report the defect this instrument
