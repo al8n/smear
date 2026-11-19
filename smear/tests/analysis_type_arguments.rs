@@ -2364,6 +2364,37 @@ fn copies_of_a_default_holding_a_null_are_charged_for_each_node() {
   );
 }
 
+/// A copy that is a whole `null` no instantiation takes is recorded for no instantiation, whatever
+/// the budget answers: `@d<X!>` on `Box` leaves out `v`, whose default `null` fills `X!`. With the
+/// fewest steps that judge and copy it, the application alone is `invalid-default-value`; with one
+/// fewer, the count judges the `null` and the copy's row cannot be paid for, and the application
+/// alone is `resource-limit`. Neither `Box<Int>` written in `Query` reports anything, and `Query`
+/// is marked by no error. Refuses the copy recorded when its row's charge fails, which each use
+/// then reports again, `resource-limit` at it.
+#[test]
+fn a_copied_whole_null_is_recorded_for_no_instantiation_whatever_the_budget() {
+  let text = "type Query {\n  f(a: Box<Int>): Int\n  g(b: Box<Int>): Int\n}\n\
+              directive @d<T>(v: T = null) on INPUT_OBJECT\ninput Box<X> @d<X!> {\n  x: X\n}\n";
+  let enough = (0..64)
+    .find(|&steps: &u32| {
+      let analysis = analyze_text(text, &Limits::new().with_max_value_steps(steps));
+      found_of(&analysis, &[LIMIT]).is_empty()
+    })
+    .expect("a budget that judges and copies the default");
+  assert!(enough >= 2, "{enough} steps judge and copy it");
+
+  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(enough));
+  let schema = schema_file(&analysis);
+  let path = named(schema, text, "@", "d", 1);
+  assert_eq!(found(&analysis), [(DEFAULT, path)]);
+
+  let short = analyze_text(text, &Limits::new().with_max_value_steps(enough - 1));
+  let schema = schema_file(&short);
+  assert_eq!(found(&short), [(LIMIT, named(schema, text, "@", "d", 1))]);
+  let model = short.model();
+  assert!(!model.def(type_def(model, "Query")).has_errors());
+}
+
 /// A copy refused whole, its root a `null` no instantiation takes, is one unresolved row, typed and
 /// not written, as the written one is one unresolved row: on the set `Tags`, `@d<K>` leaves out
 /// `v`, whose default `null` fills `K`, the set's element, and `@e<K>(v: null)` writes it, `v`

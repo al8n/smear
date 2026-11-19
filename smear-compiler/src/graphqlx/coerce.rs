@@ -2153,21 +2153,15 @@ impl<'p> Coercion<'_, 'p, '_> {
       }
     };
     let ty = expected.ty;
-    // A default its declaration refuses, a whole `null` no instantiation takes, is that
-    // declaration's to report: its copy is judged and charged as any other, reports nothing, and is
-    // recorded for none.
-    let owned = self.owned(left.argument, tree);
-    let asked = self.ask(tree, ty, library, expected.rebuilt);
-    // Under the application's open type arguments, a copy does not fit only when it is a `null` no
-    // instantiation takes: reported below, once, and recorded for none.
-    let fitted = !matches!(
-      asked,
-      Asked::Copy(CopiedRows { fits: false, .. }) | Asked::Absent(AbsentRows { fits: false })
-    );
-    if env.is_some() && fitted && !owned {
+    // A copy that is a whole `null` no instantiation takes is recorded for none, whatever the
+    // budget answers below: it is the application's to report, once, or its declaration's.
+    if env.is_some() && !self.whole_null(tree, ty) {
       self.record(tree, ty, Site::Default);
     }
-    let (rows, fits) = match asked {
+    // A default its declaration refuses, such a `null`, is that declaration's to report: its copy
+    // is judged and charged as any other, and reports nothing.
+    let owned = self.owned(left.argument, tree);
+    let (rows, fits) = match self.ask(tree, ty, library, expected.rebuilt) {
       Asked::Copy(CopiedRows { rows, fits }) => (Some(rows), fits),
       // Absent, its copy holding a copy of itself: what its count reached is judged all the same.
       Asked::Absent(AbsentRows { fits }) => (None, fits),
