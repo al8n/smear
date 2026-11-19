@@ -2180,6 +2180,134 @@ fn null_for_a_collections_key_or_element_with_a_default_is_refused_once() {
   );
 }
 
+/// A copy of a directive's default that holds a `null` no instantiation takes does not fit, and is
+/// the application's to report, once, whatever uses its definition has: `@d<T>` on the set `Tags`
+/// leaves out `v`, whose default `null` fills `T`, the set's element, non-null in every
+/// instantiation. It is `invalid-default-value` at the application, labelled at the default, and
+/// recorded for no instantiation: `Tags<Int>` reached only through `Box<Int>`, which no check
+/// reads, and a direct `Tags<Int>` beside it add nothing. Refuses the copy recorded and judged only
+/// at each instantiation a supplied package writes, which never asks through `Box<Int>` and
+/// repeats it at each use.
+#[test]
+fn a_copied_null_default_for_a_collections_key_or_element_is_refused_once() {
+  let tags = "directive @d<X>(v: X = null) on SCALAR\nscalar Tags<T> @set @d<T>\n\
+              type Box<T> {\n  tags: Tags<T>\n}\n";
+  for query in [
+    "type Query {\n  box: Box<Int>\n}\n",
+    "type Query {\n  box: Box<Int>\n  tags: Tags<Int>\n}\n",
+  ] {
+    let text = format!("{query}{tags}");
+    let analysis = analyze_text(&text, &Limits::new());
+    let schema = schema_file(&analysis);
+    let path = named(schema, &text, "@", "d", 1);
+    assert_eq!(found(&analysis), [(DEFAULT, path)], "{text}");
+    let report = the(&analysis, DEFAULT, path);
+    assert_eq!(
+      report.to_string(),
+      "under this application's type arguments, the default `null` of `v` does not fit the type \
+       `v` takes"
+    );
+    assert_eq!(
+      labels(report),
+      [(after(schema, &text, "v: X = ", "null"), "this default")]
+    );
+  }
+}
+
+/// A `null` no instantiation takes is refused once however deep it is written: an element of the
+/// list `[X]` that `T`, the set's element, fills. Copied from `@d`'s default `[null]`, where
+/// `@d<T>` leaves `v` out, it is `invalid-default-value` at the application, labelled at the
+/// default; written, `@e<T>(v: [null])`, it is `invalid-directive-argument-value` at the `null`;
+/// and neither is recorded, so `Tags<Int>` adds nothing. A map's value is no such place:
+/// `@e<V>(v: [null])` on `Vals` holds under `Vals<Int, Int>`, and is refused under
+/// `Vals<Int, Int!>` alone, at that use. Refuses a `null` inside a list judged only at each
+/// instantiation.
+#[test]
+fn a_null_no_instantiation_takes_is_refused_once_however_deep() {
+  let copied = "type Query {\n  a: Tags<Int>\n}\n\
+                directive @d<X>(v: [X] = [null]) on SCALAR\nscalar Tags<T> @set @d<T>\n";
+  let analysis = analyze_text(copied, &Limits::new());
+  let schema = schema_file(&analysis);
+  let path = named(schema, copied, "@", "d", 1);
+  assert_eq!(found(&analysis), [(DEFAULT, path)]);
+  assert_eq!(
+    labels(the(&analysis, DEFAULT, path)),
+    [(after(schema, copied, "v: [X] = ", "[null]"), "this default")]
+  );
+
+  let written = "type Query {\n  a: Tags<Int>\n}\n\
+                 directive @e<X>(v: [X]) on SCALAR\nscalar Tags<T> @set @e<T>(v: [null])\n";
+  let analysis = analyze_text(written, &Limits::new());
+  let schema = schema_file(&analysis);
+  let null = after(schema, written, "@e<T>(v: [", "null");
+  assert_eq!(found(&analysis), [(ARGUMENT, null)]);
+  assert_eq!(
+    the(&analysis, ARGUMENT, null).to_string(),
+    "`null` is given where a non-null value is expected"
+  );
+
+  let text = "type Query {\n  a: Vals<Int, Int>\n  b: Vals<Int, Int!>\n}\n\
+              directive @e<X>(v: [X]) on SCALAR\nscalar Vals<K, V> @map @e<V>(v: [null])\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, text, "Vals<Int, Int!>", 0);
+  assert_eq!(found(&analysis), [(ARGUMENT, occurrence)]);
+  assert_eq!(
+    labels(the(&analysis, ARGUMENT, occurrence)),
+    [(after(schema, text, "@e<V>(v: ", "[null]"), "this value")]
+  );
+}
+
+/// The fields an object literal writes are read for a `null` no instantiation takes, each field's
+/// type read under its object's type arguments: in `@e<T>(v: { tail: null })` on the set `Tags`,
+/// `I<T>`'s `tail`, written `U`, is the set's element `T`; and `head`, written `[Int!]`, holds no
+/// `null` under any arguments. Each is refused at its `null`, once, and `Tags<Int>` adds nothing.
+/// Refuses an object literal's `null` judged only at each instantiation.
+#[test]
+fn an_object_literals_fields_are_read_for_a_null_no_instantiation_takes() {
+  let input = "type Query {\n  a: Tags<Int>\n}\ninput I<U> {\n  tail: U\n  head: [Int!]\n}\n\
+               directive @e<X>(v: I<X>) on SCALAR\n";
+  for (written, before) in [
+    ("scalar Tags<T> @set @e<T>(v: { tail: null })\n", "{ tail: "),
+    (
+      "scalar Tags<T> @set @e<T>(v: { tail: 1, head: [null] })\n",
+      "head: [",
+    ),
+  ] {
+    let text = format!("{input}{written}");
+    let analysis = analyze_text(&text, &Limits::new());
+    let schema = schema_file(&analysis);
+    let null = after(schema, &text, before, "null");
+    assert_eq!(found(&analysis), [(ARGUMENT, null)], "{text}");
+  }
+}
+
+/// A default of a generic input object's field that holds a `null` no instantiation takes is
+/// refused where it is written, once, and recorded for no instantiation: `In<T>`'s `a`, written
+/// `T!`, defaults to `null`, and `b`, written `[T!]`, to `[null]`; each is `invalid-default-value`
+/// at its `null`, whether nothing uses `In` or `In<Int>` does, which reports nothing more. `c`,
+/// written `T`, keeps its check at each instantiation, and `In<Int>` gives it `Int`, which takes
+/// `null`. Refuses the defaults recorded and judged only at each instantiation.
+#[test]
+fn a_generic_input_fields_null_default_no_instantiation_takes_is_refused_once() {
+  let input = "input In<T> {\n  a: T! = null\n  b: [T!] = [null]\n  c: T = null\n}\n";
+  for query in [
+    "type Query {\n  x: Int\n}\n",
+    "type Query {\n  f(x: In<Int>): Int\n}\n",
+  ] {
+    let text = format!("{query}{input}");
+    let analysis = analyze_text(&text, &Limits::new());
+    let schema = schema_file(&analysis);
+    let a = after(schema, &text, "a: T! = ", "null");
+    let b = after(schema, &text, "b: [T!] = [", "null");
+    assert_eq!(found(&analysis), [(DEFAULT, a), (DEFAULT, b)], "{text}");
+    assert_eq!(
+      the(&analysis, DEFAULT, b).to_string(),
+      "`null` is given where a non-null value is expected"
+    );
+  }
+}
+
 /// A field an object literal of a generic definition leaves out, whose type there is its input
 /// object's bare nullable type parameter, is judged by the same rule: the literal is a value its
 /// definition records, and its count at each instantiation reads the field under that
