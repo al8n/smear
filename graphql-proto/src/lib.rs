@@ -495,11 +495,11 @@ pub use execute::{
 };
 #[cfg(any(feature = "std", feature = "alloc"))]
 #[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
-pub use extensions::{Ceiling, Extensions, Full};
+pub use extensions::{Ceiling, Extensions, ExtensionsIter, Full};
 #[cfg(any(feature = "std", feature = "alloc"))]
 #[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
 pub use request::{
-  Argument, ArgumentSource, FieldRequest, ReqId, SourceField,
+  Argument, ArgumentSource, FieldRequest, NamedVariable, ReqId, SourceField,
   error::{
     RefusedEntry, RequestError, RequestErrorCeiling, RequestErrorEntry, RequestErrorResult,
     TooLarge,
@@ -535,6 +535,8 @@ pub use values::{Leaf, Values};
 pub mod __features {
   /// `alloc`, as this crate resolved it.
   pub const ALLOC: bool = cfg!(feature = "alloc");
+  /// `serde`, as this crate resolved it.
+  pub const SERDE: bool = cfg!(feature = "serde");
   /// `std`, as this crate resolved it.
   pub const STD: bool = cfg!(feature = "std");
 }

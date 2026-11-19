@@ -202,7 +202,8 @@ fn analyze_text(text: &str, limits: &Limits) -> Analysis {
 fn shown(model: &Model, id: TyId) -> String {
   let ty = model.ty(id);
   let mut text = match ty.kind() {
-    TyKind::Named { def, args, .. } => {
+    TyKind::Named(named_ty) => {
+      let (def, args) = (named_ty.def(), named_ty.args());
       let name = model.def(def).name();
       if args.is_empty() {
         String::from(name)
@@ -211,8 +212,8 @@ fn shown(model: &Model, id: TyId) -> String {
         format!("{name}<{}>", args.join(", "))
       }
     }
-    TyKind::Param { def, index, .. } => format!("{}#{index}", model.def(def).name()),
-    TyKind::List { element, .. } => format!("[{}]", shown(model, element)),
+    TyKind::Param(param) => format!("{}#{}", model.def(param.def()).name(), param.index()),
+    TyKind::List(element) => format!("[{}]", shown(model, element)),
     _ => String::from("?"),
   };
   if ty.non_null() {
@@ -315,7 +316,7 @@ fn an_extension_that_writes_a_list_writes_its_targets_count() {
     .expect("typed");
   assert!(matches!(
     model.type_expr(third).kind(),
-    TypeExprKind::Param { index: 2, .. }
+    TypeExprKind::Param(param) if param.index() == 2
   ));
   assert_eq!(
     model.ty(model.type_expr(third).ty()).kind(),
@@ -364,12 +365,12 @@ fn an_extension_with_no_list_names_none_of_its_targets_parameters() {
   let a = model.member(fields[0]).ty().expect("typed");
   assert!(matches!(
     model.type_expr(a).kind(),
-    TypeExprKind::Param { def, index: 0, .. } if def == page
+    TypeExprKind::Param(param) if param.def() == page && param.index() == 0
   ));
   let c = model.member(fields[2]).ty().expect("typed");
   assert!(matches!(
     model.type_expr(c).kind(),
-    TypeExprKind::Named { def, .. } if def == scalar
+    TypeExprKind::Named(named_expr) if named_expr.def() == scalar
   ));
 
   // With no `T` in the module, the extension's `T` names nothing: name resolution says so, and
@@ -434,7 +435,7 @@ fn a_replaced_built_in_declares_no_type_parameter() {
     .expect("typed");
   assert!(matches!(
     model.type_expr(reason).kind(),
-    TypeExprKind::Param { index: 0, .. }
+    TypeExprKind::Param(param) if param.index() == 0
   ));
   assert_eq!(
     model.ty(model.type_expr(reason).ty()).kind(),
@@ -823,13 +824,15 @@ fn types_are_interned_arguments_first_in_the_walks_order() {
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let f = field_type(model, "^::app::T", "f");
-  let TyKind::Named { args, .. } = model.ty(f).kind() else {
+  let TyKind::Named(named_ty) = model.ty(f).kind() else {
     panic!("`A<B<C>, D>` is a named type");
   };
+  let args = named_ty.args();
   let (b, d) = (args[0], args[1]);
-  let TyKind::Named { args, .. } = model.ty(b).kind() else {
+  let TyKind::Named(named_ty) = model.ty(b).kind() else {
     panic!("`B<C>` is a named type");
   };
+  let args = named_ty.args();
   let c = args[0];
   // `C`, then `B<C>`, then `D`, then `A<…>`: each argument before what holds it, left to right;
   // and every one of them before `i32`, first written after them.
@@ -882,9 +885,10 @@ fn filled_arguments_are_interned_in_index_order() {
   let model = analysis.model();
   let a = field_type(model, "^::app::Query", "a");
   assert_eq!(shown(model, a), "P<Box1<Box3<i32>>, Box2<i32>, Box3<i32>>");
-  let TyKind::Named { args, .. } = model.ty(a).kind() else {
+  let TyKind::Named(named_ty) = model.ty(a).kind() else {
     panic!("`P` is a named type");
   };
+  let args = named_ty.args();
   let (box1, box2, box3) = (args[0], args[1], args[2]);
   assert!(box3 < box1 && box1 < box2, "{box3:?} {box1:?} {box2:?}");
 }
@@ -906,9 +910,10 @@ fn a_default_fills_what_is_left_out_substituted() {
   assert_eq!(shown(model, short), "Page<User, Cursor<User>>");
   // The occurrence still writes the one argument written.
   let written = field_occurrence(model, "^::app::Query", "short");
-  let TypeExprKind::Named { args, .. } = model.type_expr(written).kind() else {
+  let TypeExprKind::Named(named_expr) = model.type_expr(written).kind() else {
     panic!("`Page<User>` names `Page`");
   };
+  let args = named_expr.args();
   assert_eq!(args.len(), 1);
 }
 
@@ -1242,9 +1247,10 @@ fn an_alias_is_the_instantiation_it_spells() {
     .map(|segment: &Sym| model.name(*segment))
     .collect();
   assert_eq!(spelled, ["NonZeroU32"]);
-  let TypeExprKind::Named { args, .. } = alias.kind() else {
+  let TypeExprKind::Named(named_expr) = alias.kind() else {
     panic!("`NonZeroU32` names `NonZero`");
   };
+  let args = named_expr.args();
   assert!(args.is_empty());
 }
 
@@ -1300,9 +1306,10 @@ fn an_alias_takes_no_argument() {
   assert_eq!(field_shown(model, "^::app::Query", "a"), "?");
   // The argument is an occurrence of its own, with its own type.
   let written = field_occurrence(model, "^::app::Query", "a");
-  let TypeExprKind::Named { args, .. } = model.type_expr(written).kind() else {
+  let TypeExprKind::Named(named_expr) = model.type_expr(written).kind() else {
     panic!("`NonZeroU32` names `NonZero`");
   };
+  let args = named_expr.args();
   assert_eq!(shown(model, model.type_expr(args[0]).ty()), "u8");
 }
 
@@ -1533,7 +1540,7 @@ fn an_instantiation_is_listed_as_each_written_closed_type() {
   assert_eq!(model.instantiations(page), [a, b]);
   // Every written closed occurrence finds its own type in its definition's list.
   let c = field_type(model, "^::app::Query", "c");
-  let TyKind::List { element, .. } = model.ty(c).kind() else {
+  let TyKind::List(element) = model.ty(c).kind() else {
     panic!("`[Page<User>!]` is a list");
   };
   assert!(model.instantiations(page).binary_search(&element).is_ok());
@@ -1641,9 +1648,10 @@ fn a_collections_key_is_non_null_however_written() {
   assert_eq!(shown(model, typed("e")), "HashMap<string!, i32!>");
   // The written argument keeps its own type.
   let written = field_occurrence(model, "^::app::Query", "a");
-  let TypeExprKind::Named { args, .. } = model.type_expr(written).kind() else {
+  let TypeExprKind::Named(named_expr) = model.type_expr(written).kind() else {
     panic!("`HashSet<string>` names `HashSet`");
   };
+  let args = named_expr.args();
   assert_eq!(shown(model, model.type_expr(args[0]).ty()), "string");
 }
 
@@ -1918,16 +1926,13 @@ fn a_bounds_interface_is_typed_as_any_occurrence() {
   let comparable = def(model, Namespace::Type, "^::app::Comparable");
   let bound = model.def(page).bounds()[0].interface();
   let ty = model.type_expr(bound).ty();
-  let TyKind::Named {
-    def: named, args, ..
-  } = model.ty(ty).kind()
-  else {
+  let TyKind::Named(named_ty) = model.ty(ty).kind() else {
     panic!("the bound names `Comparable`");
   };
-  assert_eq!(named, comparable);
+  assert_eq!(named_ty.def(), comparable);
   assert!(matches!(
-    model.ty(args[0]).kind(),
-    TyKind::Param { def: owner, index: 0, .. } if owner == page
+    model.ty(named_ty.args()[0]).kind(),
+    TyKind::Param(param) if param.def() == page && param.index() == 0
   ));
   assert!(!model.ty(ty).is_closed());
   assert!(model.instantiations(comparable).is_empty());
@@ -1978,7 +1983,8 @@ const ORDERED_ASTRO: (&str, &str) = ("s.graphqlx", "type Star {\n  near: Int\n}\
 fn structure(model: &Model, id: TyId) -> String {
   let ty = model.ty(id);
   let mut text = match ty.kind() {
-    TyKind::Named { def, args, .. } => {
+    TyKind::Named(named_ty) => {
+      let (def, args) = (named_ty.def(), named_ty.args());
       let name = model.def(def).name();
       if args.is_empty() {
         String::from(name)
@@ -1990,8 +1996,8 @@ fn structure(model: &Model, id: TyId) -> String {
         format!("{name}<{}>", args.join(", "))
       }
     }
-    TyKind::Param { def, index, .. } => format!("{}#{index}", model.def(def).name()),
-    TyKind::List { element, .. } => format!("[{}]", structure(model, element)),
+    TyKind::Param(param) => format!("{}#{}", model.def(param.def()).name(), param.index()),
+    TyKind::List(element) => format!("[{}]", structure(model, element)),
     _ => String::from("?"),
   };
   if ty.non_null() {

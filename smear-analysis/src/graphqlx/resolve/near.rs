@@ -27,6 +27,15 @@ use std::vec::Vec;
 /// the bound keeps one comparison small.
 const MAX_LEN: usize = 64;
 
+/// A name offered, and how far it is from the name wanted.
+#[derive(Clone, Copy)]
+struct Nearest<'c> {
+  /// The distance.
+  distance: usize,
+  /// The name.
+  name: &'c [u8],
+}
+
 /// One search for a near miss of a name.
 pub(super) struct Search<'c> {
   /// The name that does not resolve.
@@ -34,7 +43,7 @@ pub(super) struct Search<'c> {
   /// The greatest distance a suggestion may be at; 0 for a name not searched for.
   reach: usize,
   /// The nearest name so far, with its distance.
-  best: Option<(usize, &'c [u8])>,
+  best: Option<Nearest<'c>>,
   /// Whether the budget ran out before the search ended.
   starved: bool,
   /// The rows every comparison of the search fills, allocated by the first.
@@ -88,10 +97,16 @@ impl<'c> Search<'c> {
     };
     let nearer = match self.best {
       None => true,
-      Some((best, spelled)) => distance < best || (distance == best && candidate < spelled),
+      Some(Nearest {
+        distance: best,
+        name: spelled,
+      }) => distance < best || (distance == best && candidate < spelled),
     };
     if nearer {
-      self.best = Some((distance, candidate));
+      self.best = Some(Nearest {
+        distance,
+        name: candidate,
+      });
     }
   }
 
@@ -112,7 +127,7 @@ impl<'c> Search<'c> {
     if self.starved {
       return None;
     }
-    self.best.map(|(_, spelled): (usize, &'c [u8])| spelled)
+    self.best.map(|nearest: Nearest<'c>| nearest.name)
   }
 }
 

@@ -148,80 +148,85 @@
 //! unclosed sites whose definition the parser cannot finish at end of input — the rubble the
 //! document is left holding, or, for the one row above, the hole.
 //!
+//! **A refusal in the last column is its variant and the kinds its payload names, in field order.**
+//! `UnexpectedChild(Document, InlineString)` reads "parent `Document`, found `InlineString`";
+//! `MissingChild(Document)` names the parent and leaves out the `wanted` text the payload also
+//! carries; `MalformedToken(Name)` is the token's kind.
+//!
 //! | file | site | probe | what the site leaves out | the projection |
 //! |---|---|---|---|---|
-//! | `document.rs` | report | `"d" use "m"::{A}` | nothing — a present token is refused | `UnexpectedChild { Document, InlineString }` |
-//! | `document.rs` | report | `"d" extend scalar S @k` | nothing — a present token is refused | `UnexpectedChild { Document, InlineString }` |
-//! | `document.rs` | report | `"d" { f }` | nothing — a present token is refused | `UnexpectedChild { OperationDefinition, InlineString }` |
-//! | `document.rs` | report | `"d" use "m"::{A}` (executable root) | nothing — a present token is refused | `UnexpectedChild { ExecutableDocument, InlineString }` |
-//! | `document.rs` | report | `"d" { f }` (executable root) | nothing — a present token is refused | `UnexpectedChild { OperationDefinition, InlineString }` |
-//! | `document.rs` | report | `"d" use "m"::{A}` (SDL root) | nothing — a present token is refused | `UnexpectedChild { TypeSystemDocument, InlineString }` |
-//! | `document.rs` | report | `"d" extend scalar S @k` (SDL root) | nothing — a present token is refused | `UnexpectedChild { TypeSystemDocument, InlineString }` |
-//! | `document.rs` | report | the empty document | a constituent with an image | `MissingChild { Document }` |
-//! | `document.rs` | report | the empty document (SDL root) | a constituent with an image | `MissingChild { TypeSystemDocument }` |
-//! | `document.rs` | report | `mod {}` | a constituent with an image | `UnexpectedChild { ModDefinition, LBrace }` |
-//! | `document.rs` | report | `mod m` | a constituent with an image | `MissingChild { ModDefinition }` |
+//! | `document.rs` | report | `"d" use "m"::{A}` | nothing — a present token is refused | `UnexpectedChild(Document, InlineString)` |
+//! | `document.rs` | report | `"d" extend scalar S @k` | nothing — a present token is refused | `UnexpectedChild(Document, InlineString)` |
+//! | `document.rs` | report | `"d" { f }` | nothing — a present token is refused | `UnexpectedChild(OperationDefinition, InlineString)` |
+//! | `document.rs` | report | `"d" use "m"::{A}` (executable root) | nothing — a present token is refused | `UnexpectedChild(ExecutableDocument, InlineString)` |
+//! | `document.rs` | report | `"d" { f }` (executable root) | nothing — a present token is refused | `UnexpectedChild(OperationDefinition, InlineString)` |
+//! | `document.rs` | report | `"d" use "m"::{A}` (SDL root) | nothing — a present token is refused | `UnexpectedChild(TypeSystemDocument, InlineString)` |
+//! | `document.rs` | report | `"d" extend scalar S @k` (SDL root) | nothing — a present token is refused | `UnexpectedChild(TypeSystemDocument, InlineString)` |
+//! | `document.rs` | report | the empty document | a constituent with an image | `MissingChild(Document)` |
+//! | `document.rs` | report | the empty document (SDL root) | a constituent with an image | `MissingChild(TypeSystemDocument)` |
+//! | `document.rs` | report | `mod {}` | a constituent with an image | `UnexpectedChild(ModDefinition, LBrace)` |
+//! | `document.rs` | report | `mod m` | a constituent with an image | `MissingChild(ModDefinition)` |
 //! | `document.rs` | unclosed | `mod m {` | `}` of `ModDefinition` — **no image** | **projects** |
-//! | `document.rs` | report | `mod m {}` (executable root) | nothing — a present module is refused | `UnexpectedChild { ExecutableDocument, ModDefinition }` |
-//! | `document.rs` | report | `mod m { "d" }` | a constituent with an image — the description is rubble | `UnexpectedChild { ModDefinition, InlineString }` |
-//! | `executable.rs` | report | `query Q() { f }` (executable root) | a constituent with an image | `MissingChild { VariablesDefinition }` |
-//! | `executable.rs` | report | the empty document (executable root) | a constituent with an image | `MissingChild { ExecutableDocument }` |
-//! | `executable.rs` | unclosed | `query Q($a: Int` (executable root) | `)` of `VariablesDefinition` — **no image** | `UnexpectedChild { ExecutableDocument, Name }` |
+//! | `document.rs` | report | `mod m {}` (executable root) | nothing — a present module is refused | `UnexpectedChild(ExecutableDocument, ModDefinition)` |
+//! | `document.rs` | report | `mod m { "d" }` | a constituent with an image — the description is rubble | `UnexpectedChild(ModDefinition, InlineString)` |
+//! | `executable.rs` | report | `query Q() { f }` (executable root) | a constituent with an image | `MissingChild(VariablesDefinition)` |
+//! | `executable.rs` | report | the empty document (executable root) | a constituent with an image | `MissingChild(ExecutableDocument)` |
+//! | `executable.rs` | unclosed | `query Q($a: Int` (executable root) | `)` of `VariablesDefinition` — **no image** | `UnexpectedChild(ExecutableDocument, Name)` |
 //! | `executable.rs` | report | `type T { f query Q($a: Int }` | `)` of `VariablesDefinition` — **no image** | **a hole** — the `}` the list leaves is the root's, as an `Error` |
-//! | `use_tree.rs` | report | `use a as` | a constituent with an image | `MissingChild { UseTree }` |
-//! | `use_tree.rs` | report | `use a::* as b` | nothing — a present token is refused | `UnexpectedChild { UseTree, Name }` |
-//! | `use_tree.rs` | report | `use a::{}` | a constituent with an image | `MissingChild { UseTree }` |
-//! | `use_tree.rs` | report | `use a::{~::b}` | nothing — a present token is refused | `UnexpectedChild { Path, Tilde }` |
+//! | `use_tree.rs` | report | `use a as` | a constituent with an image | `MissingChild(UseTree)` |
+//! | `use_tree.rs` | report | `use a::* as b` | nothing — a present token is refused | `UnexpectedChild(UseTree, Name)` |
+//! | `use_tree.rs` | report | `use a::{}` | a constituent with an image | `MissingChild(UseTree)` |
+//! | `use_tree.rs` | report | `use a::{~::b}` | nothing — a present token is refused | `UnexpectedChild(Path, Tilde)` |
 //! | `use_tree.rs` | unclosed | `use a::{b` | `}` of `UseTree` — **no image** | **projects** |
-//! | `use_tree.rs` | report | `use a::` | a constituent with an image | `MissingChild { UseTree }` |
-//! | `use_tree.rs` | report | `use """m"""` | nothing — a present token is refused | `UnexpectedChild { StringValue, BlockString }` |
-//! | `use_tree.rs` | report | `use` | a constituent with an image | `MissingChild { UseDefinition }` |
-//! | `generic.rs` | report | `type T<> { f: Int }` | a constituent with an image | `MissingChild { DefinitionTypeGenerics }` |
+//! | `use_tree.rs` | report | `use a::` | a constituent with an image | `MissingChild(UseTree)` |
+//! | `use_tree.rs` | report | `use """m"""` | nothing — a present token is refused | `UnexpectedChild(StringValue, BlockString)` |
+//! | `use_tree.rs` | report | `use` | a constituent with an image | `MissingChild(UseDefinition)` |
+//! | `generic.rs` | report | `type T<> { f: Int }` | a constituent with an image | `MissingChild(DefinitionTypeGenerics)` |
 //! | `generic.rs` | unclosed | `type T<A` | `>` of `DefinitionTypeGenerics` — **no image** | **projects** |
 //! | `generic.rs` | report | `mod m { type T<A }` | `>` of `DefinitionTypeGenerics` — **no image** | **projects** |
-//! | `generic.rs` | report | `fragment <> F on T { f }` | a constituent with an image | `MissingChild { ExecutableDefinitionTypeGenerics }` |
-//! | `generic.rs` | unclosed | `extend type T<A` | `>` of `ExtensionTypeGenerics` — **no image** | `MissingChild { ObjectTypeExtension }` |
-//! | `generic.rs` | report | `mod m { extend type T<A }` | `>` of `ExtensionTypeGenerics` — **no image** | `MissingChild { ObjectTypeExtension }` |
+//! | `generic.rs` | report | `fragment <> F on T { f }` | a constituent with an image | `MissingChild(ExecutableDefinitionTypeGenerics)` |
+//! | `generic.rs` | unclosed | `extend type T<A` | `>` of `ExtensionTypeGenerics` — **no image** | `MissingChild(ObjectTypeExtension)` |
+//! | `generic.rs` | report | `mod m { extend type T<A }` | `>` of `ExtensionTypeGenerics` — **no image** | `MissingChild(ObjectTypeExtension)` |
 //! | `generic.rs` | report | `fragment on on T { f }` | nothing — a present token is refused | `SemanticRule` |
-//! | `generic.rs` | report | `type T where A: { f: Int }` | a constituent with an image | `MissingChild { WherePredicate }` |
-//! | `generic.rs` | report | `type T where { f: Int }` | a constituent with an image | `MissingChild { WhereClause }` |
-//! | `selection.rs` | report | `fragment F { f }` | a constituent with an image | `UnexpectedChild { FragmentDefinition, SelectionSet }` |
+//! | `generic.rs` | report | `type T where A: { f: Int }` | a constituent with an image | `MissingChild(WherePredicate)` |
+//! | `generic.rs` | report | `type T where { f: Int }` | a constituent with an image | `MissingChild(WhereClause)` |
+//! | `selection.rs` | report | `fragment F { f }` | a constituent with an image | `UnexpectedChild(FragmentDefinition, SelectionSet)` |
 //! | `selection.rs` | report | `fragment F T { f }` | `on` of `TypeCondition` — **no image** | **projects** |
-//! | `selection.rs` | report | `fragment F on { f }` | a constituent with an image | `MissingChild { TypeCondition }` |
-//! | `selection.rs` | report | `{ ... }` | a constituent with an image | `UnexpectedChild { SelectionSet, Spread }` |
-//! | `selection.rs` | report | `{ }` | a constituent with an image | `MissingChild { SelectionSet }` |
+//! | `selection.rs` | report | `fragment F on { f }` | a constituent with an image | `MissingChild(TypeCondition)` |
+//! | `selection.rs` | report | `{ ... }` | a constituent with an image | `UnexpectedChild(SelectionSet, Spread)` |
+//! | `selection.rs` | report | `{ }` | a constituent with an image | `MissingChild(SelectionSet)` |
 //! | `selection.rs` | unclosed | `{ f` | `}` of `SelectionSet` — **no image** | **projects** |
-//! | `definition.rs` | report | `type T { f(): Int }` | a constituent with an image | `MissingChild { ArgumentsDefinition }` |
-//! | `definition.rs` | unclosed | `type T { f(a: Int` | `)` of `ArgumentsDefinition` — **no image** | `UnexpectedChild { Document, Name }` |
-//! | `definition.rs` | report | `mod m { directive @d(a: Int }` | `)` of `ArgumentsDefinition` — **no image** | `MissingChild { DirectiveDefinition }` |
-//! | `definition.rs` | report | `type T { }` | a constituent with an image | `MissingChild { FieldsDefinition }` |
+//! | `definition.rs` | report | `type T { f(): Int }` | a constituent with an image | `MissingChild(ArgumentsDefinition)` |
+//! | `definition.rs` | unclosed | `type T { f(a: Int` | `)` of `ArgumentsDefinition` — **no image** | `UnexpectedChild(Document, Name)` |
+//! | `definition.rs` | report | `mod m { directive @d(a: Int }` | `)` of `ArgumentsDefinition` — **no image** | `MissingChild(DirectiveDefinition)` |
+//! | `definition.rs` | report | `type T { }` | a constituent with an image | `MissingChild(FieldsDefinition)` |
 //! | `definition.rs` | unclosed | `type T { f: Int` | `}` of `FieldsDefinition` — **no image** | **projects** |
-//! | `definition.rs` | report | `input I { }` | a constituent with an image | `MissingChild { InputFieldsDefinition }` |
+//! | `definition.rs` | report | `input I { }` | a constituent with an image | `MissingChild(InputFieldsDefinition)` |
 //! | `definition.rs` | unclosed | `input I { f: Int` | `}` of `InputFieldsDefinition` — **no image** | **projects** |
-//! | `definition.rs` | report | `type T implements A & { f: Int }` | a constituent with an image | `MissingChild { ImplementInterfaces }` |
-//! | `definition.rs` | report | `union U = A \|` | a constituent with an image | `MissingChild { UnionMemberTypes }` |
-//! | `definition.rs` | report | `directive @d on FOO` | nothing — a present token is refused | `MalformedToken { Name }` |
-//! | `definition.rs` | report | `directive @d on FIELD \|` | a constituent with an image | `MissingChild { DirectiveLocations }` |
+//! | `definition.rs` | report | `type T implements A & { f: Int }` | a constituent with an image | `MissingChild(ImplementInterfaces)` |
+//! | `definition.rs` | report | `union U = A \|` | a constituent with an image | `MissingChild(UnionMemberTypes)` |
+//! | `definition.rs` | report | `directive @d on FOO` | nothing — a present token is refused | `MalformedToken(Name)` |
+//! | `definition.rs` | report | `directive @d on FIELD \|` | a constituent with an image | `MissingChild(DirectiveLocations)` |
 //! | `definition.rs` | report | `enum E { true }` | nothing — a present token is refused | `SemanticRule` |
-//! | `definition.rs` | report | `enum E { }` | a constituent with an image | `MissingChild { EnumValuesDefinition }` |
+//! | `definition.rs` | report | `enum E { }` | a constituent with an image | `MissingChild(EnumValuesDefinition)` |
 //! | `definition.rs` | unclosed | `enum E { A` | `}` of `EnumValuesDefinition` — **no image** | **projects** |
-//! | `definition.rs` | report | `schema { foo: Q }` | nothing — a present token is refused | `MalformedToken { Name }` |
-//! | `definition.rs` | report | `schema { }` | a constituent with an image | `MissingChild { RootOperationTypesDefinition }` |
+//! | `definition.rs` | report | `schema { foo: Q }` | nothing — a present token is refused | `MalformedToken(Name)` |
+//! | `definition.rs` | report | `schema { }` | a constituent with an image | `MissingChild(RootOperationTypesDefinition)` |
 //! | `definition.rs` | unclosed | `schema { query: Q` | `}` of `RootOperationTypesDefinition` — **no image** | **projects** |
-//! | `definition.rs` | report | `type T where A: B` | a constituent with an image | `MissingChild { ObjectTypeDefinition }` |
-//! | `definition.rs` | report | `union U where A: B` | a constituent with an image | `MissingChild { UnionTypeDefinition }` |
+//! | `definition.rs` | report | `type T where A: B` | a constituent with an image | `MissingChild(ObjectTypeDefinition)` |
+//! | `definition.rs` | report | `union U where A: B` | a constituent with an image | `MissingChild(UnionTypeDefinition)` |
 //! | `definition.rs` | report | `directive @d FIELD` | `on` of `DirectiveDefinition` — **no image** | **projects** |
-//! | `definition.rs` | report | `directive @d on` | a constituent with an image | `MissingChild { DirectiveDefinition }` |
-//! | `definition.rs` | report | `schema @k` | a constituent with an image | `MissingChild { SchemaDefinition }` |
-//! | `extension.rs` | report | `extend scalar S` | a constituent with an image | `MissingChild { ScalarTypeExtension }` |
-//! | `extension.rs` | report | `extend type T` | a constituent with an image | `MissingChild { ObjectTypeExtension }` |
-//! | `extension.rs` | report | `extend union U` | a constituent with an image | `MissingChild { UnionTypeExtension }` |
-//! | `extension.rs` | report | `extend enum E` | a constituent with an image | `MissingChild { EnumTypeExtension }` |
-//! | `extension.rs` | report | `extend schema` | a constituent with an image | `MissingChild { SchemaExtension }` |
-//! | `extension.rs` | report | `extend directive @d` | a constituent with an image | `MissingChild { DirectiveExtension }` |
-//! | `extension.rs` | report | `mod m { extend }` | a constituent with an image — the `extend` is rubble | `UnexpectedChild { ModDefinition, Name }` |
-//! | `value.rs` | report | `type T { f(a: Int = $v): Int }` | nothing — a present token is refused | `UnexpectedChild { DefaultValue, VariableValue }` |
-//! | `value.rs` | report | `{ f(a: ) }` | a constituent with an image | `MissingChild { Argument }` |
+//! | `definition.rs` | report | `directive @d on` | a constituent with an image | `MissingChild(DirectiveDefinition)` |
+//! | `definition.rs` | report | `schema @k` | a constituent with an image | `MissingChild(SchemaDefinition)` |
+//! | `extension.rs` | report | `extend scalar S` | a constituent with an image | `MissingChild(ScalarTypeExtension)` |
+//! | `extension.rs` | report | `extend type T` | a constituent with an image | `MissingChild(ObjectTypeExtension)` |
+//! | `extension.rs` | report | `extend union U` | a constituent with an image | `MissingChild(UnionTypeExtension)` |
+//! | `extension.rs` | report | `extend enum E` | a constituent with an image | `MissingChild(EnumTypeExtension)` |
+//! | `extension.rs` | report | `extend schema` | a constituent with an image | `MissingChild(SchemaExtension)` |
+//! | `extension.rs` | report | `extend directive @d` | a constituent with an image | `MissingChild(DirectiveExtension)` |
+//! | `extension.rs` | report | `mod m { extend }` | a constituent with an image — the `extend` is rubble | `UnexpectedChild(ModDefinition, Name)` |
+//! | `value.rs` | report | `type T { f(a: Int = $v): Int }` | nothing — a present token is refused | `UnexpectedChild(DefaultValue, VariableValue)` |
+//! | `value.rs` | report | `{ f(a: ) }` | a constituent with an image | `MissingChild(Argument)` |
 //! | `value.rs` | unclosed | `{ f(a: [1` | `]` of `ListValue` — **no image** | **projects** |
 //! | `value.rs` | report | `{ f(a: [1 }` | `]` of `ListValue` — **no image** | **projects** |
 //! | `value.rs` | unclosed | `{ f(a: {b: 1` | `}` of `ObjectValue` — **no image** | **projects** |
@@ -232,7 +237,7 @@
 //! | `ty.rs` | report | `type T { f: A<B }` | `>` of `TypeGenerics` — **no image** | **projects** |
 //! | `ty.rs` | unclosed | `type T { f: [Int` | `]` of `ListType` — **no image** | **projects** |
 //! | `ty.rs` | report | `type T { f: [Int }` | `]` of `ListType` — **no image** | **projects** |
-//! | `ty.rs` | report | `type T { f: }` | a constituent with an image | `MissingChild { FieldDefinition }` |
+//! | `ty.rs` | report | `type T { f: }` | a constituent with an image | `MissingChild(FieldDefinition)` |
 //!
 //! The rows are what the named cells pin by shape, where a shape has one:
 //!
@@ -241,17 +246,17 @@
 //! | a present-but-empty required container | `MissingChild` | `a_present_but_empty_required_container_refuses` |
 //! | a variable in a constant position | `UnexpectedChild` | `a_variable_in_a_constant_position_refuses_through_both_new_containers` |
 //! | **a type or a value missing in front of a closer** | `MissingChild` over the node that wants it — the closer is left for its block, so the tree has no hole | `a_missing_constituent_refuses` |
-//! | a description in front of an extension or a `use` item | `UnexpectedChild { parent: Document, found: InlineString }` — the string stays **outside** the node, so it is rubble at document level | `a_described_use_item_refuses_as_rubble` |
-//! | **a description in front of a shorthand operation** | `UnexpectedChild { parent: OperationDefinition, found: InlineString }` — here the string is **inside** the node | `a_described_shorthand_refuses_and_its_recovery_is_not_complete` |
+//! | a description in front of an extension or a `use` item | `UnexpectedChild(Document, InlineString)` — the string stays **outside** the node, so it is rubble at document level | `a_described_use_item_refuses_as_rubble` |
+//! | **a description in front of a shorthand operation** | `UnexpectedChild(OperationDefinition, InlineString)` — here the string is **inside** the node | `a_described_shorthand_refuses_and_its_recovery_is_not_complete` |
 //! | an enum value named `true`, `false` or `null` | `SemanticRule` | `an_enum_value_named_true_refuses` |
 //! | a fragment named `on` | `SemanticRule` | `a_fragment_named_on_refuses` |
 //! | an unknown directive location | `MalformedToken` | `an_unknown_directive_location_refuses` |
 //! | a `where` clause with no block to constrain | `MissingChild` | `a_where_clause_with_nothing_to_constrain_refuses` |
-//! | a `mod` in an executable document | `UnexpectedChild { parent: ExecutableDocument, found: ModDefinition }` | `a_module_in_an_executable_document_refuses` |
+//! | a `mod` in an executable document | `UnexpectedChild(ExecutableDocument, ModDefinition)` | `a_module_in_an_executable_document_refuses` |
 //! | a block string as a `use` source | `UnexpectedChild` | `a_use_source_that_is_a_block_string_refuses` |
 //! | a root or a string source in front of a group's tree | `UnexpectedChild` at the root's sigil or at the string | `a_group_member_with_a_root_or_a_source_refuses` |
 //! | an empty `use` group | `MissingChild` | `a_present_but_empty_required_container_refuses` |
-//! | an alias on a `use` item's glob or group | `UnexpectedChild { parent: UseTree, found: Name }` at the `as` | `an_alias_on_a_glob_or_a_group_refuses` |
+//! | an alias on a `use` item's glob or group | `UnexpectedChild(UseTree, Name)` at the `as` | `an_alias_on_a_glob_or_a_group_refuses` |
 //! | **an `as` with no name after it** | refuses — the committing prefix commits | `an_as_without_its_name_refuses_and_its_recovery_is_not_complete` |
 //! | **a dangling separator**, in each of the four separated walks | `MissingChild` over the node when nothing follows it; `UnexpectedChild` at the element when a doubled separator or a stranger does | `the_separated_atoms_refuse_at_the_obstruction` |
 //! | **an unterminated closer** whose site builds its node hole-free, **a type condition or a directive definition with no `on`** | **project** — or refuse for another constituent, exactly as the text with the token restored does; they are the missing-token class below | `the_unclosed_brace_class_projects_although_the_parser_rejects_it`, `a_type_condition_without_its_on_projects_what_the_text_with_it_parses_to`, `a_directive_definition_without_its_on_projects_what_the_text_with_it_parses_to`, `every_unclosed_closer_projects_what_the_closed_text_parses_to` |
@@ -642,17 +647,18 @@ use crate::{
       Document, DocumentItem, EnumTypeDefinition, EnumTypeExtension, EnumTypeExtensionData,
       EnumValue, EnumValuesDefinition, ExecutableDefinition, ExecutableDefinitionHeader,
       ExecutableDefinitionName, ExecutableDefinitionTypeGenerics, ExecutableDocument,
-      ExtensionName, ExtensionTypeGenerics, ExtensionTypeParam, Field, FieldsDefinition,
+      ExtensionDirectives, ExtensionFields, ExtensionMembers, ExtensionName, ExtensionOperations,
+      ExtensionTypeGenerics, ExtensionTypeParam, ExtensionValues, Field, FieldsDefinition,
       FloatValue, FragmentSpread, ImplementInterfaces, InlineFragment, InlineStringValue,
       InputFieldsDefinition, InputObjectTypeDefinition, InputObjectTypeExtension,
       InputObjectTypeExtensionData, InputValue, IntValue, InterfaceTypeDefinition,
       InterfaceTypeExtension, List, Map, MapEntry, ModDefinition, Name, NamedOperationDefinition,
       Nest, Nested, NullValue, Object, ObjectField, ObjectTypeDefinition, ObjectTypeExtension,
-      OperationDefinition, OperationType, Path, PathRoot, RootOperationTypeDefinition,
+      OperationDefinition, OperationType, ParentRoot, Path, PathRoot, RootOperationTypeDefinition,
       RootOperationTypesDefinition, ScalarTypeDefinition, ScalarTypeExtension,
       ScalarTypeExtensionData, SchemaDefinition, SchemaExtension, Selection, SelectionSet, Set,
-      StringValue, Type, TypeCondition, TypeDefinition, TypeExtension, TypeGenerics, TypePath,
-      TypeSystemDefinition, TypeSystemDocument, TypeSystemExtension, TypeSystemItem,
+      SourcePrefix, StringValue, Type, TypeCondition, TypeDefinition, TypeExtension, TypeGenerics,
+      TypePath, TypeSystemDefinition, TypeSystemDocument, TypeSystemExtension, TypeSystemItem,
       UnionMemberTypes, UnionTypeDefinition, UnionTypeExtension, UnionTypeExtensionData,
       UseDefinition, UseOrExecutableDefinition, UsePrefix, UseTree, UseTreeKind,
       VariableDefinition, VariableValue, VariablesDefinition, WhereClause, WherePredicate,
@@ -665,7 +671,8 @@ use crate::{
     Recovery, Unverified, node_extent, reject_foreign_kinds_and_holes, to_range, to_span,
     verify_root_kind, verify_source, verify_source_at, verify_source_counted,
     walk::{
-      Extent, Leading, Optional, Trivia, described_extents, missing, unexpected, unexpected_token,
+      Extent, Leading, Optional, Separated, TopLevel, Trivia, described_extents, missing,
+      unexpected, unexpected_token,
     },
   },
 };
@@ -681,7 +688,8 @@ use crate::{
 
 // The undescribed cores five `Described<…>` aliases wrap, and the three `…Data` enums the object,
 // interface and schema extensions encode their alternatives in. The scalar, union, enum and input
-// object extensions' four are this dialect's own and come in through `graphqlx::ast` above.
+// object extensions' four are this dialect's own and come in through `graphqlx::ast` above, with
+// the `Extension…` payloads every one of the seven enums holds its data-carrying alternatives in.
 use crate::type_system::{
   DirectiveDefinition, EnumValueDefinition, FieldDefinition, InputValueDefinition,
   InterfaceTypeExtensionData, ObjectTypeExtensionData, SchemaExtensionData,
@@ -720,11 +728,26 @@ type Cursor<'g> = crate::lossless::project::walk::Cursor<'g, GraphQLxLang>;
 type Out<T> = Result<T, ProjectError>;
 
 /// A described definition's three answers, folded from the node's single walk.
-///
-/// The hoisted description, the definition itself — whose own span is the inner extent, already
-/// built into it — and the node's full token extent, which is both the [`Described`] wrapper's span
-/// and what the enclosing document covers.
-type Definition<'src, T> = (Option<StringValue<&'src str>>, T, TextRange);
+struct HoistedDefinition<'src, T> {
+  /// The hoisted description, if the definition had one.
+  description: Option<StringValue<&'src str>>,
+  /// The definition itself, whose own span is the inner extent, already built into it.
+  definition: T,
+  /// The node's full token extent, which is both the [`Described`] wrapper's span and what the
+  /// enclosing document covers.
+  range: TextRange,
+}
+
+/// One top-level entry of a recovering walk: what it projected to, its extent, and what it adds to
+/// the tally.
+struct RecoveredEntry<T> {
+  /// What the entry projected to.
+  node: T,
+  /// The entry's token extent.
+  range: TextRange,
+  /// What the entry adds to the tally: itself, or, for a module, everything inside it too.
+  recovery: Recovery,
+}
 
 /// The reason a [`ProjectError`] from a whole-root verification names.
 ///
@@ -738,8 +761,8 @@ type Definition<'src, T> = (Option<StringValue<&'src str>>, T, TextRange);
 /// compiles both. What the header sanctions duplicating is the `match`, not the name.
 fn unverified(error: &ProjectError) -> Unverified {
   match error.kind() {
-    ProjectErrorKind::TooDeep { limit } => Unverified::TooDeep { limit: *limit },
-    ProjectErrorKind::WrongRoot { raw } => Unverified::WrongRoot { raw: *raw },
+    ProjectErrorKind::TooDeep(limit) => Unverified::TooDeep(*limit),
+    ProjectErrorKind::WrongRoot(raw) => Unverified::WrongRoot(*raw),
     _ => Unverified::SourceMismatch,
   }
 }
@@ -849,8 +872,11 @@ pub fn project_executable_document_recovered<'src>(
   parse: &Parse,
   source: &'src str,
 ) -> Result<(ExecutableDocument<&'src str>, Recovery), Unverified> {
-  let (span, definitions, recovery) =
-    recovered_top_level(parse, K::ExecutableDocument, recoverable_entry, source)?;
+  let TopLevel {
+    span,
+    items: definitions,
+    recovery,
+  } = recovered_top_level(parse, K::ExecutableDocument, recoverable_entry, source)?;
   Ok((ExecutableDocument::new(span, definitions), recovery))
 }
 
@@ -861,7 +887,11 @@ pub fn project_executable_document_recovered<'src>(
 pub fn project_executable_document_verified<'src>(
   pair: Verified<'_, 'src>,
 ) -> (ExecutableDocument<&'src str>, Recovery) {
-  let (span, definitions, recovery) = recovered_top_level_verified(
+  let TopLevel {
+    span,
+    items: definitions,
+    recovery,
+  } = recovered_top_level_verified(
     pair.parse(),
     K::ExecutableDocument,
     recoverable_entry,
@@ -992,7 +1022,11 @@ pub fn project_type_system_document_recovered<'src>(
   parse: &Parse,
   source: &'src str,
 ) -> Result<(TypeSystemDocument<&'src str>, Recovery), Unverified> {
-  let (span, definitions, recovery) = recovered_top_level(
+  let TopLevel {
+    span,
+    items: definitions,
+    recovery,
+  } = recovered_top_level(
     parse,
     K::TypeSystemDocument,
     recoverable_type_system_entry,
@@ -1007,7 +1041,11 @@ pub fn project_type_system_document_recovered<'src>(
 pub fn project_type_system_document_verified<'src>(
   pair: Verified<'_, 'src>,
 ) -> (TypeSystemDocument<&'src str>, Recovery) {
-  let (span, definitions, recovery) = recovered_top_level_verified(
+  let TopLevel {
+    span,
+    items: definitions,
+    recovery,
+  } = recovered_top_level_verified(
     pair.parse(),
     K::TypeSystemDocument,
     recoverable_type_system_entry,
@@ -1023,7 +1061,11 @@ pub(crate) fn project_own_type_system_document<'src>(
   parse: &Parse,
   source: &'src str,
 ) -> (TypeSystemDocument<&'src str>, Recovery) {
-  let (span, definitions, recovery) = recovered_top_level_verified(
+  let TopLevel {
+    span,
+    items: definitions,
+    recovery,
+  } = recovered_top_level_verified(
     parse,
     K::TypeSystemDocument,
     recoverable_type_system_entry,
@@ -1183,9 +1225,9 @@ pub fn verify_parse(parse: &Parse, source: &str) -> Result<(), Unverified> {
 fn recovered_top_level<'src, T>(
   parse: &Parse,
   root_kind: SyntaxKind,
-  entry_of: fn(Node<'_>, &'src str) -> Out<(T, TextRange, Recovery)>,
+  entry_of: fn(Node<'_>, &'src str) -> Out<RecoveredEntry<T>>,
   source: &'src str,
-) -> Result<(SimpleSpan, Vec<T>, Recovery), Unverified> {
+) -> Result<TopLevel<T>, Unverified> {
   // Established once, over the whole root, before a single element is projected, and **returned**
   // rather than folded into the tally. The entries below compare no bytes, so this is the only
   // byte comparison this walk makes.
@@ -1206,9 +1248,9 @@ fn recovered_top_level<'src, T>(
 fn recovered_top_level_verified<'src, T>(
   parse: &Parse,
   root_kind: SyntaxKind,
-  entry_of: fn(Node<'_>, &'src str) -> Out<(T, TextRange, Recovery)>,
+  entry_of: fn(Node<'_>, &'src str) -> Out<RecoveredEntry<T>>,
   source: &'src str,
-) -> (SimpleSpan, Vec<T>, Recovery) {
+) -> TopLevel<T> {
   let root = parse_root(parse);
   let container = child_node(root, root_kind).unwrap_or(root);
 
@@ -1234,7 +1276,11 @@ fn recovered_top_level_verified<'src, T>(
     }
     NodeOrToken::Token(_) => {}
     NodeOrToken::Node(child) => match entry_of(child, source) {
-      Ok((entry, piece, inside)) => {
+      Ok(RecoveredEntry {
+        node: entry,
+        range: piece,
+        recovery: inside,
+      }) => {
         extent.cover(piece);
         definitions.push(entry);
         projected = projected.saturating_add(inside.projected());
@@ -1263,7 +1309,11 @@ fn recovered_top_level_verified<'src, T>(
       SimpleSpan::new(start, start)
     }
   };
-  (span, definitions, Recovery::new(projected, skipped))
+  TopLevel {
+    span,
+    items: definitions,
+    recovery: Recovery::new(projected, skipped),
+  }
 }
 
 /// The one document container a fail-fast door reads, with the rest of the root's shape refused.
@@ -1298,10 +1348,14 @@ fn sole_document<'g>(root: Node<'g>, kind: SyntaxKind, wanted: &'static str) -> 
 fn recoverable_entry<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<(UseOrExecutableDefinition<&'src str>, TextRange, Recovery)> {
+) -> Out<RecoveredEntry<UseOrExecutableDefinition<&'src str>>> {
   scan_holes(node)?;
   let (entry, extent) = executable_entry(node, source)?;
-  Ok((entry, extent, Recovery::new(1, 0)))
+  Ok(RecoveredEntry {
+    node: entry,
+    range: extent,
+    recovery: Recovery::new(1, 0),
+  })
 }
 
 /// [`recoverable_entry`]'s twin at the SDL root, comparing no bytes for the same reason.
@@ -1312,15 +1366,27 @@ fn recoverable_entry<'src>(
 fn recoverable_type_system_entry<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<(TypeSystemItem<&'src str>, TextRange, Recovery)> {
+) -> Out<RecoveredEntry<TypeSystemItem<&'src str>>> {
   // Compared raw: nothing has checked this node's kind yet, and a module's is all that is asked
   // of it here.
   if node.green().kind() == raw_of(K::ModDefinition) {
-    let (module, extent, inside) = recovered_mod(node, source)?;
-    return Ok((TypeSystemItem::Mod(module), extent, inside));
+    let RecoveredEntry {
+      node: module,
+      range: extent,
+      recovery: inside,
+    } = recovered_mod(node, source)?;
+    return Ok(RecoveredEntry {
+      node: TypeSystemItem::Mod(module),
+      range: extent,
+      recovery: inside,
+    });
   }
   let (entry, extent) = recoverable_item(node, source)?;
-  Ok((entry, extent, Recovery::new(1, 0)))
+  Ok(RecoveredEntry {
+    node: entry,
+    range: extent,
+    recovery: Recovery::new(1, 0),
+  })
 }
 
 /// One type-system item that is **not a module**, with the holes in its own subtree refused: the
@@ -1519,7 +1585,7 @@ impl<'g> Atoms<'g> for Cursor<'g> {
         self.extent.cover(token.text_range());
         if keyword_of(token).is_some_and(|keyword| reserved.contains(&keyword)) {
           return Err(ProjectError::new(
-            ProjectErrorKind::SemanticRule { rule },
+            ProjectErrorKind::SemanticRule(rule),
             to_range(token.text_range()),
           ));
         }
@@ -1609,7 +1675,7 @@ fn name<'src>(source: &'src str, token: Token<'_>) -> Out<Name<&'src str>> {
   let text = slice(source, token)?;
   identifier(text).map_err(|_| {
     ProjectError::new(
-      ProjectErrorKind::MalformedToken { kind: K::Name },
+      ProjectErrorKind::MalformedToken(K::Name),
       to_range(token.text_range()),
     )
   })?;
@@ -1631,7 +1697,7 @@ fn string_lit<'src>(token: Token<'_>, source: &'src str) -> Out<LitStr<&'src str
   let slice = slice(source, token)?;
   LitStr::try_from(slice).map_err(|_| {
     ProjectError::new(
-      ProjectErrorKind::MalformedToken { kind: token.kind() },
+      ProjectErrorKind::MalformedToken(token.kind()),
       to_range(token.text_range()),
     )
   })
@@ -1683,7 +1749,7 @@ fn inline_string_value<'src>(
 fn int_lit(text: &str, span: SimpleSpan) -> Out<LitInt<&str>> {
   LitInt::try_from(text).map_err(|_| {
     ProjectError::new(
-      ProjectErrorKind::MalformedToken { kind: K::Int },
+      ProjectErrorKind::MalformedToken(K::Int),
       span.start()..span.end(),
     )
   })
@@ -1698,7 +1764,7 @@ fn int_lit(text: &str, span: SimpleSpan) -> Out<LitInt<&str>> {
 fn float_lit(text: &str, span: SimpleSpan) -> Out<LitFloat<&str>> {
   LitFloat::try_from(text).map_err(|_| {
     ProjectError::new(
-      ProjectErrorKind::MalformedToken { kind: K::Float },
+      ProjectErrorKind::MalformedToken(K::Float),
       span.start()..span.end(),
     )
   })
@@ -1814,7 +1880,11 @@ fn document_entry<'src>(
   if let Some((extension, extent)) = type_system_extension(node, source)? {
     return Ok((DocumentItem::Extension(extension), extent));
   }
-  let (description, definition, outer) = definition(node, source)?;
+  let HoistedDefinition {
+    description,
+    definition,
+    range: outer,
+  } = definition(node, source)?;
   Ok((
     DocumentItem::Definition(Described::new(to_span(outer), description, definition)),
     outer,
@@ -1863,7 +1933,11 @@ fn type_system_entry<'src>(
   if let Some((extension, extent)) = type_system_extension(node, source)? {
     return Ok((TypeSystemItem::Extension(extension), extent));
   }
-  let (description, definition, outer) = type_system_definition(node, source)?;
+  let HoistedDefinition {
+    description,
+    definition,
+    range: outer,
+  } = type_system_definition(node, source)?;
   Ok((
     TypeSystemItem::Definition(Described::new(to_span(outer), description, definition)),
     outer,
@@ -1902,7 +1976,11 @@ fn executable_entry<'src>(
     let (item, extent) = use_definition(node, source)?;
     return Ok((UseOrExecutableDefinition::Use(item), extent));
   }
-  let (description, definition, outer) = executable_definition(node, source)?;
+  let HoistedDefinition {
+    description,
+    definition,
+    range: outer,
+  } = executable_definition(node, source)?;
   Ok((
     UseOrExecutableDefinition::Definition(Described::new(to_span(outer), description, definition)),
     outer,
@@ -1912,19 +1990,31 @@ fn executable_entry<'src>(
 fn executable_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, ExecutableDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, ExecutableDefinition<&'src str>>> {
   Ok(match node.kind() {
     K::OperationDefinition => {
-      let (description, operation, outer) = operation_definition(node, source)?;
-      (
+      let HoistedDefinition {
         description,
-        ExecutableDefinition::Operation(operation),
-        outer,
-      )
+        definition: operation,
+        range: outer,
+      } = operation_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: ExecutableDefinition::Operation(operation),
+        range: outer,
+      }
     }
     K::FragmentDefinition => {
-      let (description, fragment, outer) = fragment_definition(node, source)?;
-      (description, ExecutableDefinition::Fragment(fragment), outer)
+      let HoistedDefinition {
+        description,
+        definition: fragment,
+        range: outer,
+      } = fragment_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: ExecutableDefinition::Fragment(fragment),
+        range: outer,
+      }
     }
     found => return Err(unexpected(node, found, node.text_range())),
   })
@@ -1933,7 +2023,7 @@ fn executable_definition<'src>(
 fn definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, crate::graphqlx::ast::Definition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, crate::graphqlx::ast::Definition<&'src str>>> {
   use crate::graphqlx::ast::Definition as D;
 
   // The two executable kinds, then the eight type-system ones through the shared arm. One list of
@@ -1942,24 +2032,40 @@ fn definition<'src>(
   // ASTs out of the same node. Its refusal for an unknown kind is this one's, unchanged.
   Ok(match node.kind() {
     K::OperationDefinition => {
-      let (description, operation, outer) = operation_definition(node, source)?;
-      (
+      let HoistedDefinition {
         description,
-        D::Executable(ExecutableDefinition::Operation(operation)),
-        outer,
-      )
+        definition: operation,
+        range: outer,
+      } = operation_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: D::Executable(ExecutableDefinition::Operation(operation)),
+        range: outer,
+      }
     }
     K::FragmentDefinition => {
-      let (description, fragment, outer) = fragment_definition(node, source)?;
-      (
+      let HoistedDefinition {
         description,
-        D::Executable(ExecutableDefinition::Fragment(fragment)),
-        outer,
-      )
+        definition: fragment,
+        range: outer,
+      } = fragment_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: D::Executable(ExecutableDefinition::Fragment(fragment)),
+        range: outer,
+      }
     }
     _ => {
-      let (description, definition, outer) = type_system_definition(node, source)?;
-      (description, D::TypeSystem(definition), outer)
+      let HoistedDefinition {
+        description,
+        definition,
+        range: outer,
+      } = type_system_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: D::TypeSystem(definition),
+        range: outer,
+      }
     }
   })
 }
@@ -1968,67 +2074,103 @@ fn definition<'src>(
 fn type_system_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, TypeSystemDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, TypeSystemDefinition<&'src str>>> {
   Ok(match node.kind() {
     K::ScalarTypeDefinition => {
-      let (description, definition, outer) = scalar_type_definition(node, source)?;
-      (
+      let HoistedDefinition {
         description,
-        TypeSystemDefinition::Type(TypeDefinition::Scalar(definition)),
-        outer,
-      )
+        definition,
+        range: outer,
+      } = scalar_type_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: TypeSystemDefinition::Type(TypeDefinition::Scalar(definition)),
+        range: outer,
+      }
     }
     K::ObjectTypeDefinition => {
-      let (description, definition, outer) = object_type_definition(node, source)?;
-      (
+      let HoistedDefinition {
         description,
-        TypeSystemDefinition::Type(TypeDefinition::Object(definition)),
-        outer,
-      )
+        definition,
+        range: outer,
+      } = object_type_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: TypeSystemDefinition::Type(TypeDefinition::Object(definition)),
+        range: outer,
+      }
     }
     K::InterfaceTypeDefinition => {
-      let (description, definition, outer) = interface_type_definition(node, source)?;
-      (
+      let HoistedDefinition {
         description,
-        TypeSystemDefinition::Type(TypeDefinition::Interface(definition)),
-        outer,
-      )
+        definition,
+        range: outer,
+      } = interface_type_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: TypeSystemDefinition::Type(TypeDefinition::Interface(definition)),
+        range: outer,
+      }
     }
     K::UnionTypeDefinition => {
-      let (description, definition, outer) = union_type_definition(node, source)?;
-      (
+      let HoistedDefinition {
         description,
-        TypeSystemDefinition::Type(TypeDefinition::Union(definition)),
-        outer,
-      )
+        definition,
+        range: outer,
+      } = union_type_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: TypeSystemDefinition::Type(TypeDefinition::Union(definition)),
+        range: outer,
+      }
     }
     K::EnumTypeDefinition => {
-      let (description, definition, outer) = enum_type_definition(node, source)?;
-      (
+      let HoistedDefinition {
         description,
-        TypeSystemDefinition::Type(TypeDefinition::Enum(definition)),
-        outer,
-      )
+        definition,
+        range: outer,
+      } = enum_type_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: TypeSystemDefinition::Type(TypeDefinition::Enum(definition)),
+        range: outer,
+      }
     }
     K::InputObjectTypeDefinition => {
-      let (description, definition, outer) = input_object_type_definition(node, source)?;
-      (
+      let HoistedDefinition {
         description,
-        TypeSystemDefinition::Type(TypeDefinition::InputObject(definition)),
-        outer,
-      )
+        definition,
+        range: outer,
+      } = input_object_type_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: TypeSystemDefinition::Type(TypeDefinition::InputObject(definition)),
+        range: outer,
+      }
     }
     K::DirectiveDefinition => {
-      let (description, definition, outer) = directive_definition(node, source)?;
-      (
+      let HoistedDefinition {
         description,
-        TypeSystemDefinition::Directive(definition),
-        outer,
-      )
+        definition,
+        range: outer,
+      } = directive_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: TypeSystemDefinition::Directive(definition),
+        range: outer,
+      }
     }
     K::SchemaDefinition => {
-      let (description, definition, outer) = schema_definition(node, source)?;
-      (description, TypeSystemDefinition::Schema(definition), outer)
+      let HoistedDefinition {
+        description,
+        definition,
+        range: outer,
+      } = schema_definition(node, source)?;
+      HoistedDefinition {
+        description,
+        definition: TypeSystemDefinition::Schema(definition),
+        range: outer,
+      }
     }
     found => return Err(unexpected(node, found, node.text_range())),
   })
@@ -2243,7 +2385,7 @@ fn mod_definition<'src>(
 fn recovered_mod<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<(ModDefinition<&'src str>, TextRange, Recovery)> {
+) -> Out<RecoveredEntry<ModDefinition<&'src str>>> {
   let mut frames: Vec<ModFrame<'_, 'src>> = Vec::new();
   let mut frame = open_recovered_mod(node, source)?;
   // `node` itself is an item with an image.
@@ -2286,7 +2428,11 @@ fn recovered_mod<'src>(
     // token: `close_mod` has nothing left to refuse.
     let (module, extent) = close_mod(frame)?;
     let Some(mut parent) = frames.pop() else {
-      return Ok((module, extent, Recovery::new(projected, skipped)));
+      return Ok(RecoveredEntry {
+        node: module,
+        range: extent,
+        recovery: Recovery::new(projected, skipped),
+      });
     };
     parent.cursor.extent.cover(extent);
     parent.items.push(TypeSystemItem::Mod(module));
@@ -2310,7 +2456,7 @@ fn open_recovered_mod<'g, 'src>(node: Node<'g>, source: &'src str) -> Out<ModFra
     };
     if SyntaxKind::from_raw(raw).is_none() {
       return Err(ProjectError::new(
-        ProjectErrorKind::InvalidRawKind { raw },
+        ProjectErrorKind::InvalidRawKind(raw),
         to_range(at),
       ));
     }
@@ -2382,7 +2528,7 @@ struct UseGroup<'g, 'src> {
 /// What reading a tree up to its group answered.
 enum OpenedTree<'g, 'src> {
   /// The tree is finished: it binds one item or is a glob.
-  Finished(UseTree<&'src str>, TextRange),
+  Finished((UseTree<&'src str>, TextRange)),
   /// The tree's group is open, and its members are next.
   Group(UseGroup<'g, 'src>),
 }
@@ -2419,10 +2565,7 @@ fn open_use_tree<'g, 'src>(
       if cursor.opt_token(K::PathSeparator).is_none() {
         return use_alias(
           cursor,
-          UsePrefix::Source {
-            source: string,
-            segments: Vec::new(),
-          },
+          UsePrefix::Source(SourcePrefix::new(string, Vec::new())),
           source,
         );
       }
@@ -2431,19 +2574,13 @@ fn open_use_tree<'g, 'src>(
           let segments = cursor.keep(relative_path(names, source)?).into_segments();
           use_after_path(
             cursor,
-            UsePrefix::Source {
-              source: string,
-              segments,
-            },
+            UsePrefix::Source(SourcePrefix::new(string, segments)),
             source,
           )
         }
         None => use_scope(
           cursor,
-          UsePrefix::Source {
-            source: string,
-            segments: Vec::new(),
-          },
+          UsePrefix::Source(SourcePrefix::new(string, Vec::new())),
         ),
       }
     }
@@ -2485,10 +2622,10 @@ fn use_alias<'g, 'src>(
     None => None,
   };
   let extent = cursor.finish("a token")?;
-  Ok(OpenedTree::Finished(
-    UseTree::new(to_span(extent), prefix, UseTreeKind::Simple { alias }),
+  Ok(OpenedTree::Finished((
+    UseTree::new(to_span(extent), prefix, UseTreeKind::Simple(alias)),
     extent,
-  ))
+  )))
 }
 
 /// What a `::`, or a bare root, leads to: `*`, or a group's `{`. A glob is finished here; a group
@@ -2500,10 +2637,10 @@ fn use_scope<'g, 'src>(
 ) -> Out<OpenedTree<'g, 'src>> {
   if cursor.opt_token(K::Asterisk).is_some() {
     let extent = cursor.finish("a token")?;
-    return Ok(OpenedTree::Finished(
+    return Ok(OpenedTree::Finished((
       UseTree::new(to_span(extent), prefix, UseTreeKind::Glob),
       extent,
-    ));
+    )));
   }
   cursor.token(K::LBrace, "a `*` or a group's `{`")?;
   Ok(OpenedTree::Group(UseGroup {
@@ -2542,7 +2679,7 @@ fn use_tree<'src>(node: Node<'_>, source: &'src str) -> Out<(UseTree<&'src str>,
   let mut opened = open_use_tree(node, true, source)?;
   loop {
     let (tree, extent) = match opened {
-      OpenedTree::Finished(tree, extent) => (tree, extent),
+      OpenedTree::Finished((tree, extent)) => (tree, extent),
       OpenedTree::Group(mut group) => match group.cursor.opt_node(K::UseTree) {
         Some(member) => {
           groups.push(group);
@@ -2941,7 +3078,9 @@ fn path_except<'src>(
   let mut cursor = Cursor::new(node);
   let root = path_root(&mut cursor)?;
   let mut first = root.is_relative();
-  let (segments, _) = cursor.separated(
+  let Separated {
+    items: segments, ..
+  } = cursor.separated(
     |cursor| {
       if core::mem::take(&mut first) {
         match cursor.peek() {
@@ -2984,10 +3123,10 @@ fn path_root(cursor: &mut Cursor<'_>) -> Out<PathRoot> {
     separator = cursor.token(K::PathSeparator, "the `::` after a root's `..`")?;
     count = count.saturating_add(1);
   }
-  Ok(PathRoot::Parent {
-    span: root_span(sigil, separator),
+  Ok(PathRoot::Parent(ParentRoot::new(
+    root_span(sigil, separator),
     count,
-  })
+  )))
 }
 
 /// A root's span: from its first token to its last `::`.
@@ -3079,26 +3218,32 @@ type NestedTypeGenerics<'src> =
 /// header's *No node dispatch below spends a native frame per level*.
 enum TypeFrame<'g, 'src> {
   /// A `[ T ]`: one element, and the node's own tokens — brackets and `!` — already folded.
-  Wrapper {
-    /// The `ListType` node, and the owner of the finished type's span.
-    node: Node<'g>,
-    extent: Extent,
-    required: bool,
-  },
+  Wrapper(WrapperFrame<'g>),
   /// A `DefinitionTypePath`'s `< T+ >`, and the path that will wrap the arguments.
   ///
   /// The second way this dialect's types nest, and the one a reading of the bracket shape alone
   /// would miss.
-  Generics {
-    /// The `TypeGenerics` node's cursor: its fold, and the arguments not yet read.
-    cursor: Cursor<'g>,
-    params: Vec<Type<&'src str>>,
-    /// The `DefinitionTypePath` node this list belongs to, and everything it had before the list.
-    outer: Node<'g>,
-    outer_extent: Extent,
-    outer_required: bool,
-    path: Path<&'src str>,
-  },
+  Generics(GenericsFrame<'g, 'src>),
+}
+
+/// A `[ T ]` whose element is being built below: [`TypeFrame::Wrapper`]'s payload.
+struct WrapperFrame<'g> {
+  /// The `ListType` node, and the owner of the finished type's span.
+  node: Node<'g>,
+  extent: Extent,
+  required: bool,
+}
+
+/// A `DefinitionTypePath`'s argument list being built below: [`TypeFrame::Generics`]'s payload.
+struct GenericsFrame<'g, 'src> {
+  /// The `TypeGenerics` node's cursor: its fold, and the arguments not yet read.
+  cursor: Cursor<'g>,
+  params: Vec<Type<&'src str>>,
+  /// The `DefinitionTypePath` node this list belongs to, and everything it had before the list.
+  outer: Node<'g>,
+  outer_extent: Extent,
+  outer_required: bool,
+  path: Path<&'src str>,
 }
 
 /// What a [`TypeFrame`] did with the type the level below finished.
@@ -3114,9 +3259,17 @@ enum TypeFrame<'g, 'src> {
 /// constant cost in one driver frame rather than a growing one per level.
 enum ResumedType<'g, 'src> {
   /// The frame, and the next child that has to be built.
-  Descend(TypeFrame<'g, 'src>, Node<'g>),
+  Descend(TypeDescent<'g, 'src>),
   /// This frame is finished, and what it finished to.
-  Done(Type<&'src str>, TextRange),
+  Done((Type<&'src str>, TextRange)),
+}
+
+/// A frame that descends again, and the child it descends into: [`ResumedType::Descend`]'s payload.
+struct TypeDescent<'g, 'src> {
+  /// The frame, handed back to be pushed onto the worklist.
+  frame: TypeFrame<'g, 'src>,
+  /// The next child that has to be built.
+  child: Node<'g>,
 }
 
 /// Open type containers from `node` down to the first type reference that needs no frame, and
@@ -3161,14 +3314,14 @@ fn open_type_chain<'g, 'src>(
           Some(first) => first,
           None => return Err(inner.absent(Some(K::RAngle), "a type argument")),
         };
-        frames.push(TypeFrame::Generics {
+        frames.push(TypeFrame::Generics(GenericsFrame {
           cursor: inner,
           params: Vec::new(),
           outer: node,
           outer_extent: cursor.extent,
           outer_required: required,
           path,
-        });
+        }));
         node = first;
       }
       K::ListType => {
@@ -3181,11 +3334,11 @@ fn open_type_chain<'g, 'src>(
         let required =
           cursor.opt_token(K::RBracket).is_some() && cursor.opt_token(K::Bang).is_some();
         cursor.end()?;
-        frames.push(TypeFrame::Wrapper {
+        frames.push(TypeFrame::Wrapper(WrapperFrame {
           node,
           extent: cursor.extent,
           required,
-        });
+        }));
         node = wrapped;
       }
       found => return Err(unexpected(node, found, node.text_range())),
@@ -3200,38 +3353,38 @@ fn resume_type<'g, 'src>(
   piece: TextRange,
 ) -> Out<ResumedType<'g, 'src>> {
   Ok(match frame {
-    TypeFrame::Wrapper {
+    TypeFrame::Wrapper(WrapperFrame {
       node,
       mut extent,
       required,
-    } => {
+    }) => {
       extent.cover(piece);
       let extent = extent.range(node, "a token")?;
       let built = Type::List(Nest::new(ListType::new(to_span(extent), value, required)));
-      ResumedType::Done(built, extent)
+      ResumedType::Done((built, extent))
     }
-    TypeFrame::Generics {
+    TypeFrame::Generics(GenericsFrame {
       mut cursor,
       mut params,
       outer,
       mut outer_extent,
       outer_required,
       path,
-    } => {
+    }) => {
       cursor.extent.cover(piece);
       params.push(value);
       match cursor.opt_one_of(&TYPE_KINDS) {
-        Some(next) => ResumedType::Descend(
-          TypeFrame::Generics {
+        Some(next) => ResumedType::Descend(TypeDescent {
+          frame: TypeFrame::Generics(GenericsFrame {
             cursor,
             params,
             outer,
             outer_extent,
             outer_required,
             path,
-          },
-          next,
-        ),
+          }),
+          child: next,
+        }),
         None => {
           cursor.opt_token(K::RAngle);
           let inner = cursor.finish("a token")?;
@@ -3239,7 +3392,7 @@ fn resume_type<'g, 'src>(
           let outer_range = outer_extent.range(outer, "a token")?;
           let generics: NestedTypeGenerics<'src> =
             crate::ty::TypeGenerics::new(to_span(inner), params.into());
-          ResumedType::Done(
+          ResumedType::Done((
             Type::Path(DefinitionTypePath::new(
               to_span(outer_range),
               path,
@@ -3247,7 +3400,7 @@ fn resume_type<'g, 'src>(
               outer_required,
             )),
             outer_range,
-          )
+          ))
         }
       }
     }
@@ -3264,11 +3417,11 @@ fn ty<'src>(node: Node<'_>, source: &'src str) -> Out<(Type<&'src str>, TextRang
     };
     let (value, piece) = built;
     built = match resume_type(frame, value, piece)? {
-      ResumedType::Descend(frame, next) => {
+      ResumedType::Descend(TypeDescent { frame, child: next }) => {
         frames.push(frame);
         open_type_chain(&mut frames, next, source)?
       }
-      ResumedType::Done(value, range) => (value, range),
+      ResumedType::Done((value, range)) => (value, range),
     };
   }
 }
@@ -3476,14 +3629,28 @@ fn leaf<'src>(
   source: &'src str,
   kind: SyntaxKind,
   wanted: &'static str,
-) -> Out<(&'src str, SimpleSpan, TextRange)> {
+) -> Out<LeafText<'src>> {
   // One literal token and nothing else. A leaf that read the first and folded the rest was the byte
   // rule's own shape one level down: `IntValue` over `Int("1")` and `Int("2")` would have answered
   // `1` with a span across both.
   let mut cursor = Cursor::new(node);
   let token = cursor.token(kind, wanted)?;
   let extent = cursor.finish("a token")?;
-  Ok((slice(source, token)?, to_span(token.text_range()), extent))
+  Ok(LeafText {
+    text: slice(source, token)?,
+    span: to_span(token.text_range()),
+    range: extent,
+  })
+}
+
+/// A leaf's one token read for its text: the text, the token's span, and the node's extent.
+struct LeafText<'src> {
+  /// The token's text, checked against the source.
+  text: &'src str,
+  /// The token's own span.
+  span: SimpleSpan,
+  /// The node's extent.
+  range: TextRange,
 }
 
 fn string_literal<'src>(
@@ -3504,16 +3671,29 @@ fn spelled_leaf<'src>(
   node: Node<'_>,
   source: &'src str,
   wanted: &'static str,
-) -> Out<(Option<ContextualKeyword>, &'src str, SimpleSpan, TextRange)> {
+) -> Out<SpelledLeaf<'src>> {
   let mut cursor = Cursor::new(node);
   let token = cursor.spelling(wanted)?;
   let extent = cursor.finish("a token")?;
-  Ok((
-    keyword_of(token),
-    slice(source, token)?,
-    to_span(token.text_range()),
-    extent,
-  ))
+  Ok(SpelledLeaf {
+    keyword: keyword_of(token),
+    text: slice(source, token)?,
+    span: to_span(token.text_range()),
+    range: extent,
+  })
+}
+
+/// A leaf's one `Name` token read for its spelling: the keyword the spelling classifies as, the
+/// text, the token's span, and the node's extent.
+struct SpelledLeaf<'src> {
+  /// The spelling's classification through the lexer's own table, if it has one.
+  keyword: Option<ContextualKeyword>,
+  /// The token's text, checked against the source.
+  text: &'src str,
+  /// The token's own span.
+  span: SimpleSpan,
+  /// The node's extent.
+  range: TextRange,
 }
 
 fn boolean_literal<'src>(
@@ -3521,12 +3701,17 @@ fn boolean_literal<'src>(
   source: &'src str,
 ) -> Out<(BooleanValue<&'src str>, TextRange)> {
   // One `Name`, read for its spelling.
-  let (keyword, _, span, extent) = spelled_leaf(node, source, "a `true` or `false` keyword")?;
+  let SpelledLeaf {
+    keyword,
+    span,
+    range: extent,
+    ..
+  } = spelled_leaf(node, source, "a `true` or `false` keyword")?;
   match keyword {
     Some(ContextualKeyword::True) => Ok((BooleanValue::new(span, true), extent)),
     Some(ContextualKeyword::False) => Ok((BooleanValue::new(span, false), extent)),
     _ => Err(ProjectError::new(
-      ProjectErrorKind::MalformedToken { kind: K::Name },
+      ProjectErrorKind::MalformedToken(K::Name),
       to_range(node.text_range()),
     )),
   }
@@ -3758,34 +3943,42 @@ struct OpenField<'g, 'src> {
 /// into — so neither carries a slot whose empty case no input produces.
 enum OpenEntry<'g, 'src, G: ValueGrammar<'src>> {
   /// The key is being built below; the value half is where the walk goes when it comes back.
-  Key {
-    node: Node<'g>,
-    extent: Extent,
-    key: Node<'g>,
-    value: Node<'g>,
-  },
+  Key(OpenKey<'g>),
   /// The key is built and travels here while the value is built below.
-  Value {
-    node: Node<'g>,
-    extent: Extent,
-    key: G::Value,
-    value: Node<'g>,
-  },
+  Value(OpenValue<'g, 'src, G>),
+}
+
+/// A `MapEntry` whose key is being built below: [`OpenEntry::Key`]'s payload.
+struct OpenKey<'g> {
+  node: Node<'g>,
+  extent: Extent,
+  key: Node<'g>,
+  value: Node<'g>,
+}
+
+/// A `MapEntry` whose key is built and whose value is being built below: [`OpenEntry::Value`]'s
+/// payload.
+struct OpenValue<'g, 'src, G: ValueGrammar<'src>> {
+  node: Node<'g>,
+  extent: Extent,
+  key: G::Value,
+  value: Node<'g>,
 }
 
 impl<'g, 'src, G: ValueGrammar<'src>> OpenEntry<'g, 'src, G> {
   /// The `MapEntry` node, whichever half is open.
   const fn node(&self) -> Node<'g> {
     match self {
-      Self::Key { node, .. } | Self::Value { node, .. } => *node,
+      Self::Key(open) => open.node,
+      Self::Value(open) => open.node,
     }
   }
 
   /// The half the walk descends into next.
   const fn pending(&self) -> Node<'g> {
     match self {
-      Self::Key { key, .. } => *key,
-      Self::Value { value, .. } => *value,
+      Self::Key(open) => open.key,
+      Self::Value(open) => open.value,
     }
   }
 }
@@ -3809,15 +4002,25 @@ enum Built<'g, 'src, G: ValueGrammar<'src>> {
   /// the two share a shape rather than a name.
   Values(Vec<G::Value>),
   /// An `ObjectValue`'s finished fields, and the field whose value is being built below.
-  Object {
-    fields: Vec<G::Field>,
-    open: OpenField<'g, 'src>,
-  },
+  Object(BuiltObject<'g, 'src, G>),
   /// A `MapValue`'s finished entries, and the entry one of whose halves is being built below.
-  Map {
-    entries: Vec<G::Entry>,
-    open: OpenEntry<'g, 'src, G>,
-  },
+  Map(BuiltMap<'g, 'src, G>),
+}
+
+/// An `ObjectValue`'s accumulator: [`Built::Object`]'s payload.
+struct BuiltObject<'g, 'src, G: ValueGrammar<'src>> {
+  /// The fields finished so far, in document order.
+  fields: Vec<G::Field>,
+  /// The field whose value is being built below.
+  open: OpenField<'g, 'src>,
+}
+
+/// A `MapValue`'s accumulator: [`Built::Map`]'s payload.
+struct BuiltMap<'g, 'src, G: ValueGrammar<'src>> {
+  /// The entries finished so far, in document order.
+  entries: Vec<G::Entry>,
+  /// The entry one of whose halves is being built below.
+  open: OpenEntry<'g, 'src, G>,
 }
 
 /// What a [`ValueFrame`] did with the value the level below finished.
@@ -3830,9 +4033,19 @@ enum Built<'g, 'src, G: ValueGrammar<'src>> {
 enum ResumedValue<'g, 'src, G: ValueGrammar<'src>> {
   /// The node whose dispatch reaches the next value, and that value's node; the frame is back on
   /// the worklist.
-  Descend(Node<'g>, Node<'g>),
+  Descend(NextValue<'g>),
   /// This frame is finished, and what it finished to.
-  Done(G::Value, TextRange),
+  Done((G::Value, TextRange)),
+}
+
+/// The next value a frame descends into: [`ResumedValue::Descend`]'s payload.
+///
+/// Two nodes of one type, so the order is named rather than positional.
+struct NextValue<'g> {
+  /// The node whose dispatch reaches the value.
+  dispatch: Node<'g>,
+  /// The value's own node.
+  value: Node<'g>,
 }
 
 /// The next field of an object value, with the tokens passed on the way folded in.
@@ -3906,12 +4119,12 @@ fn open_map_entry<'g, 'src, G: ValueGrammar<'src>>(node: Node<'g>) -> Out<OpenEn
   cursor.token(K::FatArrow, "the `=>` between a key and a value")?;
   let value = cursor.one_of(&VALUE_KINDS, "a value")?;
   cursor.end()?;
-  Ok(OpenEntry::Key {
+  Ok(OpenEntry::Key(OpenKey {
     node,
     extent: cursor.extent,
     key,
     value,
-  })
+  }))
 }
 
 /// Open containers from `node` down to the first value that finishes without one, and answer that
@@ -3935,11 +4148,19 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
     match node.kind() {
       K::VariableValue => return G::variable(parent, node, source),
       K::IntValue => {
-        let (text, span, extent) = leaf(node, source, K::Int, "an integer literal")?;
+        let LeafText {
+          text,
+          span,
+          range: extent,
+        } = leaf(node, source, K::Int, "an integer literal")?;
         return Ok((G::int(span, int_lit(text, span)?), extent));
       }
       K::FloatValue => {
-        let (text, span, extent) = leaf(node, source, K::Float, "a float literal")?;
+        let LeafText {
+          text,
+          span,
+          range: extent,
+        } = leaf(node, source, K::Float, "a float literal")?;
         return Ok((G::float(span, float_lit(text, span)?), extent));
       }
       K::StringValue => {
@@ -3951,13 +4172,18 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
         return Ok((G::boolean(boolean), extent));
       }
       K::NullValue => {
-        let (keyword, text, span, extent) = spelled_leaf(node, source, "a `null` keyword")?;
+        let SpelledLeaf {
+          keyword,
+          text,
+          span,
+          range: extent,
+        } = spelled_leaf(node, source, "a `null` keyword")?;
         // The spelling, not just the kind: `NullValue` carries its own text into the AST, so a
         // node of this kind over any other identifier would project to a `null` the parser has no
         // way to produce. Its sibling `BooleanValue` has always checked; this one did not.
         if keyword != Some(ContextualKeyword::Null) {
           return Err(ProjectError::new(
-            ProjectErrorKind::MalformedToken { kind: K::Name },
+            ProjectErrorKind::MalformedToken(K::Name),
             to_range(node.text_range()),
           ));
         }
@@ -3997,20 +4223,20 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
             (
               open.node,
               open.pending,
-              Built::Object {
+              Built::Object(BuiltObject {
                 fields: Vec::new(),
                 open,
-              },
+              }),
             )
           }),
           _ => next_entry::<G>(&mut cursor)?.map(|open| {
             (
               open.node(),
               open.pending(),
-              Built::Map {
+              Built::Map(BuiltMap {
                 entries: Vec::new(),
                 open,
-              },
+              }),
             )
           }),
         };
@@ -4070,7 +4296,10 @@ fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
             cursor,
             built: Built::Values(values),
           });
-          ResumedValue::Descend(node, next)
+          ResumedValue::Descend(NextValue {
+            dispatch: node,
+            value: next,
+          })
         }
         None => {
           let range = close_container(&mut cursor)?;
@@ -4079,11 +4308,11 @@ fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
             K::SetValue => G::set(span, values),
             _ => G::list(span, values),
           };
-          ResumedValue::Done(built, range)
+          ResumedValue::Done((built, range))
         }
       }
     }
-    Built::Object { mut fields, open } => {
+    Built::Object(BuiltObject { mut fields, open }) => {
       let (field, range) = close_field::<G>(open, value, piece)?;
       cursor.extent.cover(range);
       fields.push(field);
@@ -4092,47 +4321,53 @@ fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
           let (parent, pending) = (next.node, next.pending);
           frames.push(ValueFrame {
             cursor,
-            built: Built::Object { fields, open: next },
+            built: Built::Object(BuiltObject { fields, open: next }),
           });
-          ResumedValue::Descend(parent, pending)
+          ResumedValue::Descend(NextValue {
+            dispatch: parent,
+            value: pending,
+          })
         }
         None => {
           let range = close_container(&mut cursor)?;
-          ResumedValue::Done(G::object(to_span(range), fields), range)
+          ResumedValue::Done((G::object(to_span(range), fields), range))
         }
       }
     }
-    Built::Map { mut entries, open } => match open {
+    Built::Map(BuiltMap { mut entries, open }) => match open {
       // The key came back. It rides on the frame while the value half is built.
-      OpenEntry::Key {
+      OpenEntry::Key(OpenKey {
         node: entry,
         extent: mut inner,
         value: value_node,
         ..
-      } => {
+      }) => {
         inner.cover(piece);
         {
           frames.push(ValueFrame {
             cursor,
-            built: Built::Map {
+            built: Built::Map(BuiltMap {
               entries,
-              open: OpenEntry::Value {
+              open: OpenEntry::Value(OpenValue {
                 node: entry,
                 extent: inner,
                 key: value,
                 value: value_node,
-              },
-            },
+              }),
+            }),
           });
-          ResumedValue::Descend(entry, value_node)
+          ResumedValue::Descend(NextValue {
+            dispatch: entry,
+            value: value_node,
+          })
         }
       }
-      OpenEntry::Value {
+      OpenEntry::Value(OpenValue {
         node: entry,
         extent: mut inner,
         key,
         ..
-      } => {
+      }) => {
         inner.cover(piece);
         let range = inner.range(entry, "a token")?;
         entries.push(G::entry(to_span(range), key, value));
@@ -4142,16 +4377,19 @@ fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
             let (parent, pending) = (next.node(), next.pending());
             frames.push(ValueFrame {
               cursor,
-              built: Built::Map {
+              built: Built::Map(BuiltMap {
                 entries,
                 open: next,
-              },
+              }),
             });
-            ResumedValue::Descend(parent, pending)
+            ResumedValue::Descend(NextValue {
+              dispatch: parent,
+              value: pending,
+            })
           }
           None => {
             let range = close_container(&mut cursor)?;
-            ResumedValue::Done(G::map(to_span(range), entries), range)
+            ResumedValue::Done((G::map(to_span(range), entries), range))
           }
         }
       }
@@ -4173,10 +4411,11 @@ fn value_tree<'src, G: ValueGrammar<'src>>(
     };
     let (value, piece) = built;
     built = match resume_value::<G>(&mut frames, frame, value, piece, source)? {
-      ResumedValue::Descend(parent, node) => {
-        open_value_chain::<G>(&mut frames, parent, node, source)?
-      }
-      ResumedValue::Done(value, range) => (value, range),
+      ResumedValue::Descend(NextValue {
+        dispatch: parent,
+        value: node,
+      }) => open_value_chain::<G>(&mut frames, parent, node, source)?,
+      ResumedValue::Done((value, range)) => (value, range),
     };
   }
 }
@@ -4229,35 +4468,43 @@ fn optional_default_value<'src>(
 /// before the descent and travels here. A `FragmentSpread` never appears: it holds no selection set
 /// and is finished where it is read.
 enum OpenSelection<'g, 'src> {
-  Field {
-    /// The `Field` node, and the owner of the finished selection's span.
-    node: Node<'g>,
-    /// The field's fold, everything but its selection set.
-    extent: Extent,
-    alias: Option<Alias<&'src str>>,
-    name: Name<&'src str>,
-    arguments: Option<Arguments<&'src str>>,
-    directives: Option<Directives<&'src str>>,
-    /// The `SelectionSet` node this field is waiting on.
-    pending: Node<'g>,
-  },
-  InlineFragment {
-    /// The `InlineFragment` node, and the owner of the finished selection's span.
-    node: Node<'g>,
-    /// The fragment's fold, everything but its selection set.
-    extent: Extent,
-    type_condition: Option<TypeCondition<&'src str>>,
-    directives: Option<Directives<&'src str>>,
-    /// The `SelectionSet` node this fragment is waiting on.
-    pending: Node<'g>,
-  },
+  Field(OpenFieldSelection<'g, 'src>),
+  InlineFragment(OpenInlineFragment<'g, 'src>),
+}
+
+/// A `Field` whose selection set is being built below: [`OpenSelection::Field`]'s payload.
+struct OpenFieldSelection<'g, 'src> {
+  /// The `Field` node, and the owner of the finished selection's span.
+  node: Node<'g>,
+  /// The field's fold, everything but its selection set.
+  extent: Extent,
+  alias: Option<Alias<&'src str>>,
+  name: Name<&'src str>,
+  arguments: Option<Arguments<&'src str>>,
+  directives: Option<Directives<&'src str>>,
+  /// The `SelectionSet` node this field is waiting on.
+  pending: Node<'g>,
+}
+
+/// An `InlineFragment` whose selection set is being built below: [`OpenSelection::InlineFragment`]'s
+/// payload.
+struct OpenInlineFragment<'g, 'src> {
+  /// The `InlineFragment` node, and the owner of the finished selection's span.
+  node: Node<'g>,
+  /// The fragment's fold, everything but its selection set.
+  extent: Extent,
+  type_condition: Option<TypeCondition<&'src str>>,
+  directives: Option<Directives<&'src str>>,
+  /// The `SelectionSet` node this fragment is waiting on.
+  pending: Node<'g>,
 }
 
 impl<'g> OpenSelection<'g, '_> {
   /// The `SelectionSet` node this selection is waiting on.
   const fn set(&self) -> Node<'g> {
     match self {
-      Self::Field { pending, .. } | Self::InlineFragment { pending, .. } => *pending,
+      Self::Field(open) => open.pending,
+      Self::InlineFragment(open) => open.pending,
     }
   }
 }
@@ -4284,7 +4531,7 @@ enum ResumedSet<'g, 'src> {
   /// The next nested selection set that has to be built; the frame is back on the worklist.
   Descend(Node<'g>),
   /// This frame is finished, and what it finished to.
-  Done(SelectionSet<&'src str>, TextRange),
+  Done((SelectionSet<&'src str>, TextRange)),
 }
 
 /// Read selections until one is waiting on a set of its own.
@@ -4395,7 +4642,7 @@ fn resume_selection<'g, 'src>(
       }
       None => {
         let (set, range) = close_selection_set(cursor, selections)?;
-        ResumedSet::Done(set, range)
+        ResumedSet::Done((set, range))
       }
     },
   )
@@ -4415,7 +4662,7 @@ fn selection_set<'src>(
     let (set, piece) = built;
     built = match resume_selection(&mut frames, frame, set, piece, source)? {
       ResumedSet::Descend(nested) => open_selection_chain(&mut frames, nested, source)?,
-      ResumedSet::Done(set, range) => (set, range),
+      ResumedSet::Done((set, range)) => (set, range),
     };
   }
 }
@@ -4444,7 +4691,7 @@ fn open_field<'g, 'src>(
   let arguments = cursor.keep_optional(optional_arguments(arguments_node, source)?);
   let directives = cursor.keep_optional(optional_directives(directives_node, source)?);
   match selection_set_node {
-    Some(set) => Ok(Ok(OpenSelection::Field {
+    Some(set) => Ok(Ok(OpenSelection::Field(OpenFieldSelection {
       node,
       extent: cursor.extent,
       alias,
@@ -4452,7 +4699,7 @@ fn open_field<'g, 'src>(
       arguments,
       directives,
       pending: set,
-    })),
+    }))),
     None => {
       let extent = cursor.range("a token")?;
       Ok(Err((
@@ -4539,13 +4786,13 @@ fn open_inline_fragment<'g, 'src>(
       .transpose()?,
   );
   let directives = cursor.keep_optional(optional_directives(directives_node, source)?);
-  Ok(OpenSelection::InlineFragment {
+  Ok(OpenSelection::InlineFragment(OpenInlineFragment {
     node,
     extent: cursor.extent,
     type_condition,
     directives,
     pending: set,
-  })
+  }))
 }
 
 /// Build the selection that was waiting on `set`, and answer its own extent.
@@ -4555,7 +4802,7 @@ fn close_selection<'src>(
   piece: TextRange,
 ) -> Out<(Selection<&'src str>, TextRange)> {
   Ok(match open {
-    OpenSelection::Field {
+    OpenSelection::Field(OpenFieldSelection {
       node,
       mut extent,
       alias,
@@ -4563,7 +4810,7 @@ fn close_selection<'src>(
       arguments,
       directives,
       ..
-    } => {
+    }) => {
       extent.cover(piece);
       let range = extent.range(node, "a token")?;
       (
@@ -4578,13 +4825,13 @@ fn close_selection<'src>(
         range,
       )
     }
-    OpenSelection::InlineFragment {
+    OpenSelection::InlineFragment(OpenInlineFragment {
       node,
       mut extent,
       type_condition,
       directives,
       ..
-    } => {
+    }) => {
       extent.cover(piece);
       let range = extent.range(node, "a token")?;
       (
@@ -4618,7 +4865,7 @@ fn operation_type(token: Token<'_>, node: Node<'_>) -> Out<OperationType> {
     _ => {
       let _ = node;
       Err(ProjectError::new(
-        ProjectErrorKind::MalformedToken { kind: token.kind() },
+        ProjectErrorKind::MalformedToken(token.kind()),
         to_range(token.text_range()),
       ))
     }
@@ -4628,7 +4875,7 @@ fn operation_type(token: Token<'_>, node: Node<'_>) -> Out<OperationType> {
 fn operation_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, OperationDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, OperationDefinition<&'src str>>> {
   // `Description? OperationType DefinitionName? VariablesDefinition? Directives? WhereClause?
   //  SelectionSet` | `SelectionSet`
   let mut cursor = Cursor::new(node);
@@ -4654,7 +4901,11 @@ fn operation_definition<'src>(
     cursor.end()?;
     let selections = cursor.keep(selection_set(set, source)?);
     let (outer, _) = described_extents(node, cursor.extent, None)?;
-    return Ok((None, OperationDefinition::Shorthand(selections), outer));
+    return Ok(HoistedDefinition {
+      description: None,
+      definition: OperationDefinition::Shorthand(selections),
+      range: outer,
+    });
   };
   let operation_type = operation_type(keyword, node)?;
   let name_node = cursor.opt_node(K::DefinitionName);
@@ -4676,9 +4927,9 @@ fn operation_definition<'src>(
   let selections = cursor.keep(constrained_before(clause, selection_set(set, source)?));
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
-  Ok((
+  Ok(HoistedDefinition {
     description,
-    OperationDefinition::Named(NamedOperationDefinition::new(
+    definition: OperationDefinition::Named(NamedOperationDefinition::new(
       to_span(inner),
       operation_type,
       name,
@@ -4686,8 +4937,8 @@ fn operation_definition<'src>(
       directives,
       selections,
     )),
-    outer,
-  ))
+    range: outer,
+  })
 }
 
 /// An operation's variable definitions, `( VariableDefinition+ )`.
@@ -4763,7 +5014,7 @@ fn variable_definition<'src>(
 fn fragment_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, crate::graphqlx::ast::FragmentDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, crate::graphqlx::ast::FragmentDefinition<&'src str>>> {
   // `Description? fragment ExecutableDefinitionTypeGenerics? ExecutableDefinitionName
   //  TypeCondition Directives? WhereClause? SelectionSet`
   let mut cursor = Cursor::new(node);
@@ -4808,17 +5059,17 @@ fn fragment_definition<'src>(
   let selections = cursor.keep(constrained_before(clause, selection_set(set, source)?));
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
-  Ok((
+  Ok(HoistedDefinition {
     description,
-    crate::graphqlx::ast::FragmentDefinition::new(
+    definition: crate::graphqlx::ast::FragmentDefinition::new(
       to_span(inner),
       header,
       condition,
       directives,
       selections,
     ),
-    outer,
-  ))
+    range: outer,
+  })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -5117,7 +5368,7 @@ fn enum_value_definition<'src>(
 fn scalar_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, ScalarTypeDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, ScalarTypeDefinition<&'src str>>> {
   // `Description? scalar DefinitionName ImplementInterfaces? Directives[Const]? WhereClause?` — the
   // clause ends the definition and constrains nothing after it, so it is the carrier's own slot
   // rather than one half of a `Constrained`.
@@ -5137,17 +5388,23 @@ fn scalar_type_definition<'src>(
   let where_clause = cursor.keep_opt(optional_where_clause(where_node, source)?);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
-  Ok((
+  Ok(HoistedDefinition {
     description,
-    ScalarTypeDefinition::new(to_span(inner), name, implements, directives, where_clause),
-    outer,
-  ))
+    definition: ScalarTypeDefinition::new(
+      to_span(inner),
+      name,
+      implements,
+      directives,
+      where_clause,
+    ),
+    range: outer,
+  })
 }
 
 fn object_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, ObjectTypeDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, ObjectTypeDefinition<&'src str>>> {
   // `Description? type DefinitionName ImplementInterfaces? Directives[Const]? WhereClause?
   //  FieldsDefinition?`
   let mut cursor = Cursor::new(node);
@@ -5173,23 +5430,23 @@ fn object_type_definition<'src>(
   let fields_definition = cursor.keep_opt(fields);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
-  Ok((
+  Ok(HoistedDefinition {
     description,
-    ObjectTypeDefinition::new(
+    definition: ObjectTypeDefinition::new(
       to_span(inner),
       name,
       implements,
       directives,
       fields_definition,
     ),
-    outer,
-  ))
+    range: outer,
+  })
 }
 
 fn interface_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, InterfaceTypeDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, InterfaceTypeDefinition<&'src str>>> {
   // `Description? interface DefinitionName ImplementInterfaces? Directives[Const]? WhereClause?
   //  FieldsDefinition?`
   let mut cursor = Cursor::new(node);
@@ -5215,23 +5472,23 @@ fn interface_type_definition<'src>(
   let fields_definition = cursor.keep_opt(fields);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
-  Ok((
+  Ok(HoistedDefinition {
     description,
-    InterfaceTypeDefinition::new(
+    definition: InterfaceTypeDefinition::new(
       to_span(inner),
       name,
       implements,
       directives,
       fields_definition,
     ),
-    outer,
-  ))
+    range: outer,
+  })
 }
 
 fn union_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, UnionTypeDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, UnionTypeDefinition<&'src str>>> {
   // `Description? union DefinitionName ImplementInterfaces? Directives[Const]? UnionMemberTypes?
   //  WhereClause?` — divergence 17 puts the clause *after* the members it constrains.
   let mut cursor = Cursor::new(node);
@@ -5257,17 +5514,23 @@ fn union_type_definition<'src>(
   let member_types = cursor.keep_opt(members);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
-  Ok((
+  Ok(HoistedDefinition {
     description,
-    UnionTypeDefinition::new(to_span(inner), name, implements, directives, member_types),
-    outer,
-  ))
+    definition: UnionTypeDefinition::new(
+      to_span(inner),
+      name,
+      implements,
+      directives,
+      member_types,
+    ),
+    range: outer,
+  })
 }
 
 fn enum_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, EnumTypeDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, EnumTypeDefinition<&'src str>>> {
   // `Description? enum DefinitionName ImplementInterfaces? Directives[Const]?
   //  EnumValuesDefinition?` — the one type definition with no `where` clause in its grammar at all.
   let mut cursor = Cursor::new(node);
@@ -5286,17 +5549,17 @@ fn enum_type_definition<'src>(
   let values = cursor.keep_opt(optional_enum_values(values_node, source)?);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
-  Ok((
+  Ok(HoistedDefinition {
     description,
-    EnumTypeDefinition::new(to_span(inner), name, implements, directives, values),
-    outer,
-  ))
+    definition: EnumTypeDefinition::new(to_span(inner), name, implements, directives, values),
+    range: outer,
+  })
 }
 
 fn input_object_type_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, InputObjectTypeDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, InputObjectTypeDefinition<&'src str>>> {
   // `Description? input DefinitionName ImplementInterfaces? Directives[Const]? WhereClause?
   //  InputFieldsDefinition?`
   let mut cursor = Cursor::new(node);
@@ -5322,23 +5585,23 @@ fn input_object_type_definition<'src>(
   let fields_definition = cursor.keep_opt(fields);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
-  Ok((
+  Ok(HoistedDefinition {
     description,
-    InputObjectTypeDefinition::new(
+    definition: InputObjectTypeDefinition::new(
       to_span(inner),
       name,
       implements,
       directives,
       fields_definition,
     ),
-    outer,
-  ))
+    range: outer,
+  })
 }
 
 fn directive_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, crate::graphqlx::ast::DirectiveDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, crate::graphqlx::ast::DirectiveDefinition<&'src str>>> {
   // `Description? directive @ DefinitionName ArgumentsDefinition? Directives[Const]? repeatable?
   //  on DirectiveLocations WhereClause?` — three keyword positions, each read by its spelling in
   // its own place, so `directive @d foo FIELD` is refused at `foo` rather than answering what
@@ -5371,9 +5634,9 @@ fn directive_definition<'src>(
   ));
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
-  Ok((
+  Ok(HoistedDefinition {
     description,
-    DirectiveDefinition::new(
+    definition: DirectiveDefinition::new(
       to_span(inner),
       name,
       arguments_definition,
@@ -5381,8 +5644,8 @@ fn directive_definition<'src>(
       repeatable,
       locations,
     ),
-    outer,
-  ))
+    range: outer,
+  })
 }
 
 /// A directive definition's `FIELD | QUERY` location list.
@@ -5393,7 +5656,7 @@ fn directive_definition<'src>(
 fn directive_locations(node: Node<'_>) -> Out<(DirectiveLocations, TextRange)> {
   // `|? Name (| Name)*` — each location a `Name` read for its spelling.
   let mut cursor = Cursor::new(node);
-  let (tokens, _) = cursor.separated(
+  let Separated { items: tokens, .. } = cursor.separated(
     |cursor| Ok(cursor.opt_spelling()),
     K::Pipe,
     Leading::Allowed,
@@ -5405,7 +5668,7 @@ fn directive_locations(node: Node<'_>) -> Out<(DirectiveLocations, TextRange)> {
       .and_then(|keyword| classify_location(keyword, to_span(token.text_range())))
       .ok_or_else(|| {
         ProjectError::new(
-          ProjectErrorKind::MalformedToken { kind: token.kind() },
+          ProjectErrorKind::MalformedToken(token.kind()),
           to_range(token.text_range()),
         )
       })?;
@@ -5418,7 +5681,7 @@ fn directive_locations(node: Node<'_>) -> Out<(DirectiveLocations, TextRange)> {
 fn schema_definition<'src>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<Definition<'src, SchemaDefinition<&'src str>>> {
+) -> Out<HoistedDefinition<'src, SchemaDefinition<&'src str>>> {
   // `Description? schema Directives[Const]? { RootOperationTypeDefinition+ }`
   let mut cursor = Cursor::new(node);
   let description_token = cursor.opt_description();
@@ -5435,11 +5698,11 @@ fn schema_definition<'src>(
 
   cursor.end()?;
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
-  Ok((
+  Ok(HoistedDefinition {
     description,
-    SchemaDefinition::new(to_span(inner), directives, roots),
-    outer,
-  ))
+    definition: SchemaDefinition::new(to_span(inner), directives, roots),
+    range: outer,
+  })
 }
 
 fn root_operation_types<'src>(
@@ -5634,10 +5897,9 @@ fn scalar_type_extension<'src>(
 ) -> Out<(ScalarTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
   let data = match (parts.implements, parts.directives) {
-    (implements, Some(directives)) => ScalarTypeExtensionData::Directives {
-      implements,
-      directives,
-    },
+    (implements, Some(directives)) => {
+      ScalarTypeExtensionData::Directives(ExtensionDirectives::new(implements, directives))
+    }
     (Some(implements), None) => ScalarTypeExtensionData::Implements(implements),
     (None, None) => {
       return Err(missing(
@@ -5658,15 +5920,12 @@ fn object_type_extension<'src>(
 ) -> Out<(ObjectTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
   let data = match (parts.implements, parts.directives, parts.fields) {
-    (implements, directives, Some(fields_definition)) => ObjectTypeExtensionData::Fields {
-      implements,
-      directives,
-      fields_definition,
-    },
-    (implements, Some(directives), None) => ObjectTypeExtensionData::Directives {
-      implements,
-      directives,
-    },
+    (implements, directives, Some(fields_definition)) => ObjectTypeExtensionData::Fields(
+      ExtensionFields::new(implements, directives, fields_definition),
+    ),
+    (implements, Some(directives), None) => {
+      ObjectTypeExtensionData::Directives(ExtensionDirectives::new(implements, directives))
+    }
     (Some(implements), None, None) => ObjectTypeExtensionData::Implements(implements),
     (None, None, None) => {
       return Err(missing(
@@ -5687,15 +5946,12 @@ fn interface_type_extension<'src>(
 ) -> Out<(InterfaceTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
   let data = match (parts.implements, parts.directives, parts.fields) {
-    (implements, directives, Some(fields_definition)) => InterfaceTypeExtensionData::Fields {
-      implements,
-      directives,
-      fields_definition,
-    },
-    (implements, Some(directives), None) => InterfaceTypeExtensionData::Directives {
-      implements,
-      directives,
-    },
+    (implements, directives, Some(fields_definition)) => InterfaceTypeExtensionData::Fields(
+      ExtensionFields::new(implements, directives, fields_definition),
+    ),
+    (implements, Some(directives), None) => {
+      InterfaceTypeExtensionData::Directives(ExtensionDirectives::new(implements, directives))
+    }
     (Some(implements), None, None) => InterfaceTypeExtensionData::Implements(implements),
     (None, None, None) => {
       return Err(missing(
@@ -5716,15 +5972,12 @@ fn union_type_extension<'src>(
 ) -> Out<(UnionTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
   let data = match (parts.implements, parts.directives, parts.members) {
-    (implements, directives, Some(member_types)) => UnionTypeExtensionData::Members {
-      implements,
-      directives,
-      member_types,
-    },
-    (implements, Some(directives), None) => UnionTypeExtensionData::Directives {
-      implements,
-      directives,
-    },
+    (implements, directives, Some(member_types)) => {
+      UnionTypeExtensionData::Members(ExtensionMembers::new(implements, directives, member_types))
+    }
+    (implements, Some(directives), None) => {
+      UnionTypeExtensionData::Directives(ExtensionDirectives::new(implements, directives))
+    }
     (Some(implements), None, None) => UnionTypeExtensionData::Implements(implements),
     (None, None, None) => {
       return Err(missing(
@@ -5745,15 +5998,12 @@ fn enum_type_extension<'src>(
 ) -> Out<(EnumTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
   let data = match (parts.implements, parts.directives, parts.values) {
-    (implements, directives, Some(enum_values_definition)) => EnumTypeExtensionData::Values {
-      implements,
-      directives,
-      enum_values_definition,
-    },
-    (implements, Some(directives), None) => EnumTypeExtensionData::Directives {
-      implements,
-      directives,
-    },
+    (implements, directives, Some(enum_values_definition)) => EnumTypeExtensionData::Values(
+      ExtensionValues::new(implements, directives, enum_values_definition),
+    ),
+    (implements, Some(directives), None) => {
+      EnumTypeExtensionData::Directives(ExtensionDirectives::new(implements, directives))
+    }
     (Some(implements), None, None) => EnumTypeExtensionData::Implements(implements),
     (None, None, None) => {
       return Err(missing(
@@ -5774,15 +6024,12 @@ fn input_object_type_extension<'src>(
 ) -> Out<(InputObjectTypeExtension<&'src str>, TextRange)> {
   let parts = extension_parts(node, source)?;
   let data = match (parts.implements, parts.directives, parts.input_fields) {
-    (implements, directives, Some(fields_definition)) => InputObjectTypeExtensionData::Fields {
-      implements,
-      directives,
-      fields_definition,
-    },
-    (implements, Some(directives), None) => InputObjectTypeExtensionData::Directives {
-      implements,
-      directives,
-    },
+    (implements, directives, Some(fields_definition)) => InputObjectTypeExtensionData::Fields(
+      ExtensionFields::new(implements, directives, fields_definition),
+    ),
+    (implements, Some(directives), None) => {
+      InputObjectTypeExtensionData::Directives(ExtensionDirectives::new(implements, directives))
+    }
     (Some(implements), None, None) => InputObjectTypeExtensionData::Implements(implements),
     (None, None, None) => {
       return Err(missing(
@@ -5816,10 +6063,9 @@ fn schema_extension<'src>(
     None => None,
   };
   let data = match (directives, roots) {
-    (directives, Some(root_operation_types_definition)) => SchemaExtensionData::Operations {
-      directives,
-      root_operation_types_definition,
-    },
+    (directives, Some(root_operation_types_definition)) => SchemaExtensionData::Operations(
+      ExtensionOperations::new(directives, root_operation_types_definition),
+    ),
     (Some(directives), None) => SchemaExtensionData::Directives(directives),
     (None, None) => {
       return Err(missing(

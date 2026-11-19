@@ -2,6 +2,8 @@
 
 use core::{fmt, marker::PhantomData, num::NonZeroUsize};
 use std::vec::Vec;
+
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use tokora::{
   SimpleSpan,
   span::{AsSpan, IntoSpan},
@@ -20,22 +22,21 @@ use tokora::{
 /// A root's span runs from its first token to its last `::`. Which roots make sense where — a
 /// `..::` at the package root, say — is analysis's to decide: the parser accepts every root in
 /// every path position.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum PathRoot<Span = SimpleSpan> {
   /// No root: the path resolves in the current module's scope.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Relative,
   /// `~::`, the own package's root module.
   Package(Span),
   /// `^::`, a dependency package; the path's first segment names the package.
   Dependency(Span),
-  /// `..::`, written `count` times; each one is the parent of the module before it.
-  Parent {
-    /// From the first `..` to the last `::`.
-    span: Span,
-    /// How many `..::` the root is written with.
-    count: NonZeroUsize,
-  },
+  /// `..::`, written its payload's `count` times; each one is the parent of the module before it.
+  Parent(ParentRoot<Span>),
 }
 
 impl<Span> PathRoot<Span> {
@@ -44,14 +45,70 @@ impl<Span> PathRoot<Span> {
   pub const fn span(&self) -> Option<&Span> {
     match self {
       Self::Relative => None,
-      Self::Package(span) | Self::Dependency(span) | Self::Parent { span, .. } => Some(span),
+      Self::Package(span) | Self::Dependency(span) => Some(span),
+      Self::Parent(root) => Some(root.span()),
     }
   }
+}
 
-  /// Returns whether the path has no root and resolves in the current module's scope.
+/// `..::`, written [`count`](Self::count) times: the parent of the module a path is written in,
+/// once per `..`.
+///
+/// [`PathRoot::Parent`]'s payload. Built with [`new`](Self::new); edited in place with the `set_*`
+/// setters or by value with the `with_*` ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ParentRoot<Span = SimpleSpan> {
+  pub(crate) span: Span,
+  pub(crate) count: NonZeroUsize,
+}
+
+impl<Span> ParentRoot<Span> {
+  /// Creates the root from its span and how many `..::` it is written with.
   #[inline]
-  pub const fn is_relative(&self) -> bool {
-    matches!(self, Self::Relative)
+  pub const fn new(span: Span, count: NonZeroUsize) -> Self {
+    Self { span, count }
+  }
+
+  /// Returns the span, from the first `..` to the last `::`.
+  #[inline]
+  pub const fn span(&self) -> &Span {
+    &self.span
+  }
+
+  /// Returns how many `..::` the root is written with.
+  #[inline]
+  pub const fn count(&self) -> NonZeroUsize {
+    self.count
+  }
+
+  /// Replaces the span.
+  #[inline]
+  pub fn set_span(&mut self, span: Span) -> &mut Self {
+    self.span = span;
+    self
+  }
+
+  /// Replaces how many `..::` the root is written with.
+  #[inline]
+  pub const fn set_count(&mut self, count: NonZeroUsize) -> &mut Self {
+    self.count = count;
+    self
+  }
+
+  /// Returns the root with its span replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_span(mut self, span: Span) -> Self {
+    self.span = span;
+    self
+  }
+
+  /// Returns the root with its count replaced.
+  #[inline]
+  #[must_use]
+  pub const fn with_count(mut self, count: NonZeroUsize) -> Self {
+    self.count = count;
+    self
   }
 }
 
@@ -63,8 +120,8 @@ impl<Span> fmt::Display for PathRoot<Span> {
       Self::Relative => Ok(()),
       Self::Package(_) => f.write_str("~::"),
       Self::Dependency(_) => f.write_str("^::"),
-      Self::Parent { count, .. } => {
-        for _ in 0..count.get() {
+      Self::Parent(root) => {
+        for _ in 0..root.count().get() {
           f.write_str("..::")?;
         }
         Ok(())
@@ -141,12 +198,27 @@ impl<Name, Span, Container> IntoSpan<Span> for Path<Name, Span, Container> {
   }
 }
 
+/// `Path` taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct PathComponents<Span, Container> {
+  /// The span covering the complete path, root included.
+  pub span: Span,
+  /// The root the path starts at.
+  pub root: PathRoot<Span>,
+  /// The path segments.
+  pub segments: Container,
+}
+
 impl<Name, Span, Container> IntoComponents for Path<Name, Span, Container> {
-  type Components = (Span, PathRoot<Span>, Container);
+  type Components = PathComponents<Span, Container>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.root, self.segments)
+    PathComponents {
+      span: self.span,
+      root: self.root,
+      segments: self.segments,
+    }
   }
 }
 

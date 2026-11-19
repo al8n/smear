@@ -26,9 +26,7 @@ use super::{
   ty::try_type_generics, unexpected_here,
 };
 use crate::{
-  combinator::{
-    ParseCtx, TokenSpannedExt, ampersand, colon, extent_since, extent_start, try_equal,
-  },
+  combinator::{ParseCtx, ampersand, colon, try_equal},
   graphqlx::{
     GraphQLx,
     ast::{
@@ -238,14 +236,14 @@ generic_parser!(
   DefinitionTypeParam<GraphqlxSlice<'inp, Src>>,
   token_bounds = [];
   {
-    let node_start = extent_start(inp)?;
+    let node_start = inp.cursor_trimmed()?;
     let name = take_name(inp)?;
     let default = match try_equal(inp)? {
       ParseAttempt::Accept(_) => Some(super::ty::ty(inp)?),
       ParseAttempt::Decline => None,
     };
     Ok(DefinitionTypeParam::new(
-      extent_since(inp, node_start),
+      inp.span_since_trimmed(&node_start),
       name,
       default,
     ))
@@ -264,7 +262,7 @@ generic_parser!(
       .at_least(1)
       .delimited_by_angles()
       .collect_with(Vec::new())
-      .token_spanned()
+      .spanned_trimmed()
       .parse_input(inp)
       .map(|Spanned { span, data }| DefinitionTypeGenerics::new(span, data))
   }
@@ -294,7 +292,7 @@ generic_parser!(
       .at_least(1)
       .delimited_by_angles()
       .collect_with(Vec::new())
-      .token_spanned()
+      .spanned_trimmed()
       .parse_input(inp)
       .map(|Spanned { span, data }| ExtensionTypeGenerics::new(span, data))
   }
@@ -312,7 +310,7 @@ generic_parser!(
       .at_least(1)
       .delimited_by_angles()
       .collect_with(Vec::new())
-      .token_spanned()
+      .spanned_trimmed()
       .parse_input(inp)
       .map(|Spanned { span, data }| ExecutableDefinitionTypeGenerics::new(span, data))
   }
@@ -360,10 +358,10 @@ generic_parser!(
   ExtensionName<GraphqlxSlice<'inp, Src>>,
   token_bounds = [];
   {
-    let node_start = extent_start(inp)?;
+    let node_start = inp.cursor_trimmed()?;
     let path = path(inp)?;
     let generics = try_extension_type_generics(inp)?;
-    Ok(ExtensionName::new(extent_since(inp, node_start), path, generics))
+    Ok(ExtensionName::new(inp.span_since_trimmed(&node_start), path, generics))
   }
 );
 
@@ -422,12 +420,12 @@ generic_parser!(
   ExecutableDefinitionName<GraphqlxSlice<'inp, Src>>,
   token_bounds = [+ DowncastRef<ContextualKeyword>];
   {
-    let node_start = extent_start(inp)?;
+    let node_start = inp.cursor_trimmed()?;
     refuse_fragment_name_on(inp)?;
     let name = take_name(inp)?;
     let generics = try_executable_definition_type_generics(inp)?;
     Ok(ExecutableDefinitionName::new(
-      extent_since(inp, node_start),
+      inp.span_since_trimmed(&node_start),
       name,
       generics,
     ))
@@ -441,10 +439,10 @@ generic_parser!(
   TypePath<GraphqlxSlice<'inp, Src>>,
   token_bounds = [];
   {
-    let node_start = extent_start(inp)?;
+    let node_start = inp.cursor_trimmed()?;
     let path = path(inp)?;
     let generics = try_type_generics(inp)?;
-    Ok(TypePath::new(extent_since(inp, node_start), path, generics))
+    Ok(TypePath::new(inp.span_since_trimmed(&node_start), path, generics))
   }
 );
 

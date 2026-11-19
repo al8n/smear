@@ -16,8 +16,8 @@
 use std::format;
 
 use crate::graphqlx::{
-  Contribution, Cx, DefKind, Diagnostic, Root, RootOperation, TypeExprKind, Visitor, code::schema,
-  diagnostic::Excerpt,
+  Contribution, Cx, DefKind, Diagnostic, NamedTypeExpr, Root, RootOperation, TypeExprKind, Visitor,
+  code::schema, diagnostic::Excerpt,
 };
 
 /// Reports each written root operation type that names a definition that is no object type.
@@ -52,7 +52,7 @@ impl Visitor for RootOperationTypeNotObject {
         continue;
       };
       let occurrence = model.type_expr(ty);
-      let TypeExprKind::Named { def, .. } = occurrence.kind() else {
+      let TypeExprKind::Named(NamedTypeExpr { def, .. }) = occurrence.kind() else {
         continue;
       };
       let definition = model.def(def);

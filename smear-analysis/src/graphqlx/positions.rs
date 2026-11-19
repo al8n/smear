@@ -139,8 +139,9 @@ use std::{
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  ApplicationId, DefId, DefKind, MemberId, MemberKind, Model, Resolution, SourceMap, TyId, TyKind,
-  TypeExprId, TypeExprKind, diagnostic::Excerpt, id::dense, rules::one_of_in,
+  ApplicationId, DefId, DefKind, MemberId, MemberKind, Model, NamedTy, NamedTypeExpr, Resolution,
+  SourceMap, TyId, TyKind, TypeExprId, TypeExprKind, TypeParamRef, diagnostic::Excerpt, id::dense,
+  rules::one_of_in, types::TyCursor,
 };
 
 /// A class of type a position takes.
@@ -236,7 +237,16 @@ pub(crate) struct Positions {
 
 /// Each place that takes a nullable type that reached a collection's key or element, nullable, by
 /// the slot and the place's index.
-type Forced = BTreeMap<(u32, usize), Mistake>;
+type Forced = BTreeMap<ForcedKey, Mistake>;
+
+/// A place that takes a nullable type, at a slot: how [`Forced`] keys its mistakes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct ForcedKey {
+  /// The slot.
+  slot: u32,
+  /// The place's index.
+  place: usize,
+}
 
 /// A place that takes a nullable type that reached a collection's key or element through the type
 /// parameter's type nullable: the mistake of the collection's definition, as
@@ -276,7 +286,11 @@ impl Positions {
     for def in model.defs() {
       graph.def(model, sources, def);
     }
-    let (witnesses, origins, forced) = graph.spread(&held);
+    let Spreading {
+      witnesses,
+      members: origins,
+      forced,
+    } = graph.spread(&held);
     Self {
       base,
       witnesses,
@@ -324,7 +338,13 @@ impl Positions {
   /// gives it, refused where it is written. One lookup.
   pub(crate) fn forced(&self, def: DefId, place: Place) -> Option<Mistake> {
     let slot = slot(&self.base, def, 0)?;
-    self.forced.get(&(slot, place.index())).copied()
+    self
+      .forced
+      .get(&ForcedKey {
+        slot,
+        place: place.index(),
+      })
+      .copied()
   }
 }
 
@@ -350,9 +370,18 @@ enum Step {
   /// To a type a value of it always holds: a list's element, a collection's argument.
   Always(u32),
   /// To an argument of an input object, held when the input object's slot, the first, is.
-  If(u32, u32),
+  If(HeldIf),
   /// To the slot of the type parameter it is.
   Param(u32),
+}
+
+/// A step to an argument of an input object: [`Step::If`]'s payload.
+#[derive(Clone, Copy)]
+struct HeldIf {
+  /// The argument's node.
+  target: u32,
+  /// The input object's slot that holds it: the step is taken when the slot is held.
+  slot: u32,
 }
 
 /// For each slot under `base`, whether a value of its definition, an input object of `model`,
@@ -410,17 +439,17 @@ fn containment(model: &Model, base: &[u32]) -> Vec<bool> {
       continue;
     };
     match model.ty(ty).kind() {
-      TyKind::Param { def, index } => {
+      TyKind::Param(TypeParamRef { def, index }) => {
         if let Some(slot) = slot(base, def, index) {
           steps.push((from, Step::Param(slot)));
         }
       }
-      TyKind::List { element } => {
+      TyKind::List(element) => {
         if let Some(to) = node_of(&mut types, &mut stack, element) {
           steps.push((from, Step::Always(to)));
         }
       }
-      TyKind::Named { def, args } => {
+      TyKind::Named(NamedTy { def, args }) => {
         let definition = model.def(def);
         let input = definition.kind() == DefKind::InputObject;
         if definition.collection().is_some() || input {
@@ -431,7 +460,7 @@ fn containment(model: &Model, base: &[u32]) -> Vec<bool> {
             if !input {
               steps.push((from, Step::Always(to)));
             } else if let Some(slot) = slot(base, def, dense(index)) {
-              steps.push((from, Step::If(slot, to)));
+              steps.push((from, Step::If(HeldIf { slot, target: to })));
             }
           }
         }
@@ -444,7 +473,7 @@ fn containment(model: &Model, base: &[u32]) -> Vec<bool> {
   let mut waits: Vec<(u32, u32, u32)> = steps
     .iter()
     .filter_map(|&(from, step): &(u32, Step)| match step {
-      Step::If(slot, to) => Some((slot, from, to)),
+      Step::If(HeldIf { slot, target: to }) => Some((slot, from, to)),
       Step::Always(_) | Step::Param(_) => None,
     })
     .collect();
@@ -465,7 +494,7 @@ fn containment(model: &Model, base: &[u32]) -> Vec<bool> {
         for &(_, step) in run(&steps, node, |step: &(u32, Step)| step.0) {
           match step {
             Step::Always(to) => queue.push(Event::Reached(to)),
-            Step::If(slot, to) => {
+            Step::If(HeldIf { slot, target: to }) => {
               if held.get(slot as usize).copied().unwrap_or(false) {
                 queue.push(Event::Reached(to));
               }
@@ -529,11 +558,64 @@ pub(crate) fn slot(base: &[u32], def: DefId, index: u32) -> Option<u32> {
 /// so that a place that is a member's whole type does not cross it: one from a list to its element
 /// or from a collection to an argument, and one from a type parameter's type written non-null to
 /// its slot.
-type Edge = (u32, u32, Location, bool);
+#[derive(Clone, Copy)]
+struct Edge {
+  /// The node it leaves.
+  from: u32,
+  /// The node it enters.
+  to: u32,
+  /// Where it is written.
+  at: Location,
+  /// Whether it is flagged.
+  flagged: bool,
+}
 
 /// A node given a place, with the witness it gains it with and the member whose type the place
 /// came from, when one did.
-type Seed = (u32, Place, Location, Option<MemberId>);
+#[derive(Clone, Copy)]
+struct Seed {
+  /// The node.
+  node: u32,
+  /// The place it is given.
+  place: Place,
+  /// The witness it gains it with.
+  witness: Location,
+  /// The member whose type the place came from, when one did.
+  member: Option<MemberId>,
+}
+
+/// An open argument of a named type of an input object: from the type's node to the argument's,
+/// with the slot it is given to.
+#[derive(Clone, Copy)]
+struct Hold {
+  /// The type's node.
+  from: u32,
+  /// The argument's node.
+  to: u32,
+  /// The slot the argument is given to.
+  slot: u32,
+}
+
+/// An open type of an application, with its count of written type arguments: how the types whose
+/// defaults' arguments were entered are keyed, and, in [`Derived`], the fills judged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct Filled {
+  /// The type.
+  ty: TyId,
+  /// How many type arguments it writes.
+  written: u32,
+}
+
+/// What [`Graph::spread`] finds: each slot's witnesses and the members its places came from, and
+/// each place that takes a nullable type that reached a collection's key or element, nullable.
+struct Spreading {
+  /// Each slot's witnesses, a place at a time.
+  witnesses: Vec<Option<Location>>,
+  /// The member each slot's places came from, a place at a time.
+  members: Vec<Option<MemberId>>,
+  /// The places that reached a collection's key or element, nullable.
+  forced: Forced,
+}
 
 /// The graph [`Positions::of`] spreads places over, dropped once they are found.
 struct Graph<'b> {
@@ -552,7 +634,7 @@ struct Graph<'b> {
   /// Each open argument of a named type of an input object: from the type's node to the
   /// argument's, with the slot it is given to, which a value of the type holds a value of when
   /// [`containment`] says so.
-  holds: Vec<(u32, u32, u32)>,
+  holds: Vec<Hold>,
   /// The places the roots give, in the order of the roots: a node, its place, the root's witness,
   /// and the member whose type the root is.
   seeds: Vec<Seed>,
@@ -564,7 +646,7 @@ struct Graph<'b> {
   operations: Vec<(u32, Location)>,
   /// Each open type of an application, with its count of written type arguments, whose arguments
   /// its defaults fill were entered: once for each, whatever the applications.
-  filled: BTreeSet<(TyId, u32)>,
+  filled: BTreeSet<Filled>,
   /// The types still to enter, each with the witness of the root it is entered for.
   stack: Vec<(TyId, Location)>,
 }
@@ -629,20 +711,30 @@ impl Graph<'_> {
     let Some(node) = self.enter(model, occurrence.ty(), at) else {
       return;
     };
-    self.seeds.push((node, place, at, Some(member)));
+    self.seeds.push(Seed {
+      node,
+      place,
+      witness: at,
+      member: Some(member),
+    });
     // A field's argument is what an operation sets.
     if place == Place::Argument {
       self.operations.push((node, at));
     }
     let complete = model.ty(occurrence.ty());
-    let TyKind::Param { def, .. } = complete.kind() else {
+    let TyKind::Param(TypeParamRef { def, .. }) = complete.kind() else {
       return;
     };
     if def != written.owner() || complete.non_null() {
       return;
     }
     if one_of && place == Place::InputField {
-      self.seeds.push((node, Place::OneOfField, at, Some(member)));
+      self.seeds.push(Seed {
+        node,
+        place: Place::OneOfField,
+        witness: at,
+        member: Some(member),
+      });
     }
     // A deprecated member a caller may leave out, which a non-null argument would make required.
     if written.default().is_some() {
@@ -667,7 +759,12 @@ impl Graph<'_> {
     self
       .deprecated
       .insert(member, model.application(*application).path_location());
-    self.seeds.push((node, required, at, Some(member)));
+    self.seeds.push(Seed {
+      node,
+      place: required,
+      witness: at,
+      member: Some(member),
+    });
   }
 
   /// Enters the arguments of `application`'s type, each from its directive's slot, with where it
@@ -684,7 +781,7 @@ impl Graph<'_> {
     if complete.is_closed() {
       return;
     }
-    let TyKind::Named { def, args } = complete.kind() else {
+    let TyKind::Named(NamedTy { def, args }) = complete.kind() else {
       return;
     };
     let written = application.type_args();
@@ -697,7 +794,12 @@ impl Graph<'_> {
         model.type_expr(*argument).location(),
       );
     }
-    if written.len() < args.len() && self.filled.insert((ty, dense(written.len()))) {
+    if written.len() < args.len()
+      && self.filled.insert(Filled {
+        ty,
+        written: dense(written.len()),
+      })
+    {
       let at = application.path_location();
       for (index, arg) in args.iter().enumerate().skip(written.len()) {
         self.argument(model, def, index, *arg, at);
@@ -712,7 +814,12 @@ impl Graph<'_> {
       return;
     };
     if let Some(from) = slot(self.base, def, dense(index)) {
-      self.edges.push((from, to, at, false));
+      self.edges.push(Edge {
+        from,
+        to,
+        at,
+        flagged: false,
+      });
     }
   }
 
@@ -725,21 +832,31 @@ impl Graph<'_> {
         continue;
       };
       match model.ty(ty).kind() {
-        TyKind::Param { def, index } => {
+        TyKind::Param(TypeParamRef { def, index }) => {
           if let Some(to) = slot(self.base, def, index) {
             // A type parameter given non-null, `T!`: the instantiation that gives it to a member's
             // whole type is refused where it is written, for its `!`, as any is, whatever the slot
             // is given; so the member's place stops here, and is no mistake of what the slot is
             // given, nor of a collection's definition whose key or element the slot is.
-            self.edges.push((from, to, at, model.ty(ty).non_null()));
+            self.edges.push(Edge {
+              from,
+              to,
+              at,
+              flagged: model.ty(ty).non_null(),
+            });
           }
         }
-        TyKind::List { element } => {
+        TyKind::List(element) => {
           if let Some(to) = self.open(model, element, at) {
-            self.edges.push((from, to, at, true));
+            self.edges.push(Edge {
+              from,
+              to,
+              at,
+              flagged: true,
+            });
           }
         }
-        TyKind::Named { def, args } => {
+        TyKind::Named(NamedTy { def, args }) => {
           let definition = model.def(def);
           let collection = definition.collection().is_some();
           // An enum hides its arguments: it takes no type parameter, as the generic-enum rule
@@ -753,13 +870,27 @@ impl Graph<'_> {
               // A value of a collection holds its arguments, which stand where it stands; a value
               // of any other scalar holds nothing.
               if collection {
-                self.edges.push((from, to, at, true));
+                self.edges.push(Edge {
+                  from,
+                  to,
+                  at,
+                  flagged: true,
+                });
               }
               // What an argument takes is the definition's slot's to say, a scalar's too.
               if let Some(given) = slot(self.base, def, dense(index)) {
-                self.edges.push((given, to, at, false));
+                self.edges.push(Edge {
+                  from: given,
+                  to,
+                  at,
+                  flagged: false,
+                });
                 if input {
-                  self.holds.push((from, to, given));
+                  self.holds.push(Hold {
+                    from,
+                    to,
+                    slot: given,
+                  });
                 }
               }
             }
@@ -790,12 +921,12 @@ impl Graph<'_> {
   /// reaches, which passes from an input object's type to the arguments a value of it holds by
   /// `held`, and answers each slot's witnesses and the members its places came from, and each
   /// place that takes a nullable type that reached a collection's key or element, nullable.
-  fn spread(mut self, held: &[bool]) -> (Vec<Option<Location>>, Vec<Option<MemberId>>, Forced) {
+  fn spread(mut self, held: &[bool]) -> Spreading {
     let nodes = (self.slots as usize).saturating_add(self.types.len());
     let size = (self.slots as usize).saturating_mul(PLACES);
     // The edges by their source, so that a node's are one run.
-    self.edges.sort_by_key(|edge: &Edge| edge.0);
-    self.holds.sort_by_key(|hold: &(u32, u32, u32)| hold.0);
+    self.edges.sort_by_key(|edge: &Edge| edge.from);
+    self.holds.sort_by_key(|hold: &Hold| hold.from);
     let mut spread = Spread {
       slots: self.slots,
       edges: &self.edges,
@@ -816,10 +947,19 @@ impl Graph<'_> {
     // Last, and root by root as well, so that a slot's witness is that of the first field
     // argument, in the order of the roots, that reaches it.
     for &(node, at) in &self.operations {
-      spread.gain((node, Place::Operation, at, None));
+      spread.gain(Seed {
+        node,
+        place: Place::Operation,
+        witness: at,
+        member: None,
+      });
       spread.drain();
     }
-    (spread.witnesses, spread.origins, spread.forced)
+    Spreading {
+      witnesses: spread.witnesses,
+      members: spread.origins,
+      forced: spread.forced,
+    }
   }
 }
 
@@ -832,7 +972,7 @@ struct Spread<'e> {
   /// The edges, by their source.
   edges: &'e [Edge],
   /// The arguments of named types of input objects, by the type's node, each with its slot.
-  holds: &'e [(u32, u32, u32)],
+  holds: &'e [Hold],
   /// For each slot, whether a value of its input object holds a value of its argument.
   held: &'e [bool],
   /// For each slot, whether it is a collection's key or element.
@@ -858,7 +998,15 @@ impl Spread<'_> {
   /// type: one that reaches it, which only the type parameter's type nullable leads to, is kept
   /// apart, its definition's mistake, with where a deprecated member applies `@deprecated`, one
   /// lookup, and passed on to nothing.
-  fn gain(&mut self, (node, place, at, origin): Seed) {
+  fn gain(
+    &mut self,
+    Seed {
+      node,
+      place,
+      witness: at,
+      member: origin,
+    }: Seed,
+  ) {
     let Some(gained) = self.gained.get_mut(node as usize) else {
       return;
     };
@@ -869,7 +1017,10 @@ impl Spread<'_> {
     if place.whole() && self.keys.get(node as usize).copied().unwrap_or(false) {
       let deprecated = origin.and_then(|member: MemberId| self.deprecated.get(&member).copied());
       self.forced.insert(
-        (node, place.index()),
+        ForcedKey {
+          slot: node,
+          place: place.index(),
+        },
         Mistake {
           at,
           member: origin,
@@ -890,7 +1041,12 @@ impl Spread<'_> {
         *from = origin;
       }
     }
-    self.queue.push((node, place, at, origin));
+    self.queue.push(Seed {
+      node,
+      place,
+      witness: at,
+      member: origin,
+    });
   }
 
   /// Passes every queued place along each edge out of its node, until none is left: but a place
@@ -902,21 +1058,48 @@ impl Spread<'_> {
     let edges = self.edges;
     let holds = self.holds;
     let held = self.held;
-    while let Some((node, place, at, origin)) = self.queue.pop() {
-      for &(_, next, written, flagged) in run(edges, node, |edge: &Edge| edge.0) {
+    while let Some(Seed {
+      node,
+      place,
+      witness: at,
+      member: origin,
+    }) = self.queue.pop()
+    {
+      for &Edge {
+        to: next,
+        at: written,
+        flagged,
+        ..
+      } in run(edges, node, |edge: &Edge| edge.from)
+      {
         if flagged && place.whole() {
           continue;
         }
         // Across an edge out of a slot, the witness is where the argument is given.
         let witness = if node < self.slots { written } else { at };
-        self.gain((next, place, witness, origin));
+        self.gain(Seed {
+          node: next,
+          place,
+          witness,
+          member: origin,
+        });
       }
       if place != Place::Operation {
         continue;
       }
-      for &(_, next, given) in run(holds, node, |hold: &(u32, u32, u32)| hold.0) {
+      for &Hold {
+        to: next,
+        slot: given,
+        ..
+      } in run(holds, node, |hold: &Hold| hold.from)
+      {
         if held.get(given as usize).copied().unwrap_or(false) {
-          self.gain((next, place, at, origin));
+          self.gain(Seed {
+            node: next,
+            place,
+            witness: at,
+            member: origin,
+          });
         }
       }
     }
@@ -969,7 +1152,7 @@ pub(crate) struct Misfit {
   pub(crate) at: Option<TypeExprId>,
   /// The collection, and the index of its type parameter, whose slot the way leaves the written
   /// occurrences by: a slot the occurrence does not write, which its default fills.
-  pub(crate) filled: Option<(DefId, u32)>,
+  pub(crate) filled: Option<TypeParamRef>,
 }
 
 /// What a written occurrence's own check answers, as [`Fits::check`] makes it.
@@ -979,7 +1162,15 @@ enum Check {
   Answer(Option<Misfit>),
   /// The child it writes on the way, and whether the step down to it passes an argument of a
   /// collection: its answer is made from the child's.
-  Child(TypeExprId, bool),
+  Child(ChildStep),
+}
+
+/// The child an occurrence writes on the way: [`Check::Child`]'s payload.
+struct ChildStep {
+  /// The child.
+  child: TypeExprId,
+  /// Whether the step down to it passes an argument of a collection.
+  through_collection: bool,
 }
 
 /// Whether types fit classes, each type and class judged once, and where, under each written
@@ -1007,10 +1198,28 @@ pub(crate) struct Fits {
   /// `None` when it fits.
   answered: BTreeMap<(TypeExprId, Class), Option<Misfit>>,
   /// The types still to judge, each with whether its children were pushed above it.
-  stack: Vec<(TyId, bool)>,
+  stack: Vec<Visit>,
   /// The occurrences whose answers wait for their child's, outermost first, each with whether the
   /// step down from it passes an argument of a collection.
-  waiting: Vec<(TypeExprId, bool)>,
+  waiting: Vec<Waiting>,
+}
+
+/// A type still to judge: [`Fits`]'s stack holds them.
+#[derive(Clone, Copy)]
+struct Visit {
+  /// The type.
+  ty: TyId,
+  /// Whether its children were pushed above it.
+  expanded: bool,
+}
+
+/// An occurrence whose answer waits for its child's.
+#[derive(Clone, Copy)]
+struct Waiting {
+  /// The occurrence.
+  occurrence: TypeExprId,
+  /// Whether the step down from it passes an argument of a collection.
+  through_collection: bool,
 }
 
 impl Fits {
@@ -1070,14 +1279,24 @@ impl Fits {
           self.answered.insert((at, class), answer);
           break answer;
         }
-        Check::Child(child, argument) => {
-          self.waiting.push((at, argument));
+        Check::Child(ChildStep {
+          child,
+          through_collection: argument,
+        }) => {
+          self.waiting.push(Waiting {
+            occurrence: at,
+            through_collection: argument,
+          });
           at = child;
         }
       }
     };
     // Up again, the deepest first, each answer from its child's.
-    while let Some((parent, argument)) = self.waiting.pop() {
+    while let Some(Waiting {
+      occurrence: parent,
+      through_collection: argument,
+    }) = self.waiting.pop()
+    {
       answer = answer.map(|below: Misfit| Misfit {
         nested: below.nested || argument,
         ..below
@@ -1098,25 +1317,35 @@ impl Fits {
       return Check::Answer(None);
     };
     let filled = match (way.under, model.ty(ty).kind()) {
-      (Under::Element, TyKind::List { .. }) => match written.kind() {
-        TypeExprKind::List { element } => return Check::Child(element, false),
+      (Under::Element, TyKind::List(_)) => match written.kind() {
+        TypeExprKind::List(element) => {
+          return Check::Child(ChildStep {
+            child: element,
+            through_collection: false,
+          });
+        }
         // The tree writes no list where the way goes down one.
         _ => None,
       },
-      (Under::Argument(index), TyKind::Named { def, args }) => {
+      (Under::Argument(index), TyKind::Named(NamedTy { def, args })) => {
         // The way down a collection goes to one of its arguments.
         if args.get(index as usize).is_none() {
           return Check::Answer(None);
         }
         let child = match written.kind() {
-          TypeExprKind::Named { args: given, .. } => given.get(index as usize).copied(),
+          TypeExprKind::Named(NamedTypeExpr { args: given, .. }) => {
+            given.get(index as usize).copied()
+          }
           _ => None,
         };
         if let Some(child) = child {
-          return Check::Child(child, true);
+          return Check::Child(ChildStep {
+            child,
+            through_collection: true,
+          });
         }
         // A slot the occurrence leaves to its default: the way leaves the tree here.
-        Some((def, index))
+        Some(TypeParamRef { def, index })
       }
       // The type itself does not fit.
       _ => None,
@@ -1137,16 +1366,29 @@ impl Fits {
       return *way;
     }
     self.stack.clear();
-    self.stack.push((ty, false));
-    while let Some((next, pushed)) = self.stack.pop() {
+    self.stack.push(Visit {
+      ty,
+      expanded: false,
+    });
+    while let Some(Visit {
+      ty: next,
+      expanded: pushed,
+    }) = self.stack.pop()
+    {
       if self.judged.contains_key(&(next, class)) {
         continue;
       }
       let way = match model.ty(next).kind() {
-        TyKind::List { element } => {
+        TyKind::List(element) => {
           if !pushed {
-            self.stack.push((next, true));
-            self.stack.push((element, false));
+            self.stack.push(Visit {
+              ty: next,
+              expanded: true,
+            });
+            self.stack.push(Visit {
+              ty: element,
+              expanded: false,
+            });
             continue;
           }
           self.kept(element, class).map(|below: Way| Way {
@@ -1154,12 +1396,16 @@ impl Fits {
             ..below
           })
         }
-        TyKind::Named { def, args } if model.def(def).collection().is_some() => {
+        TyKind::Named(NamedTy { def, args }) if model.def(def).collection().is_some() => {
           if !pushed {
-            self.stack.push((next, true));
-            self
-              .stack
-              .extend(args.iter().rev().map(|arg: &TyId| (*arg, false)));
+            self.stack.push(Visit {
+              ty: next,
+              expanded: true,
+            });
+            self.stack.extend(args.iter().rev().map(|arg: &TyId| Visit {
+              ty: *arg,
+              expanded: false,
+            }));
             continue;
           }
           // The first argument, in order, that does not fit.
@@ -1174,8 +1420,8 @@ impl Fits {
               })
             })
         }
-        TyKind::Named { def, .. } => leaf(def, model.def(def).kind(), class),
-        TyKind::Param { .. } | TyKind::Unresolved => None,
+        TyKind::Named(NamedTy { def, .. }) => leaf(def, model.def(def).kind(), class),
+        TyKind::Param(_) | TyKind::Unresolved => None,
       };
       self.judged.insert((next, class), way);
     }
@@ -1266,7 +1512,7 @@ enum Look {
 /// once for the walk, nothing passed over, its answer kept by its id, whichever default holds it.
 pub(crate) struct Derived<V> {
   /// Each type and count of written arguments judged, with the first failure found.
-  judged: BTreeMap<(TyId, u32), Option<Fill<V>>>,
+  judged: BTreeMap<Filled, Option<Fill<V>>>,
   /// Each type looked under, and how, with the first failure under it.
   under: BTreeMap<(TyId, Look), Option<Failure<V>>>,
   /// Each definition a fill of which was judged, with the greatest index of its type parameters
@@ -1276,7 +1522,7 @@ pub(crate) struct Derived<V> {
   /// and each once, read at the first fill judged.
   written: Option<Vec<TyId>>,
   /// The types being looked under, each with the index of the next of its arguments to read.
-  stack: Vec<(TyId, u32)>,
+  stack: Vec<TyCursor>,
 }
 
 impl<V> Default for Derived<V> {
@@ -1307,11 +1553,12 @@ impl<V: Copy> Derived<V> {
     written: u32,
     mut judge: impl FnMut(TyId) -> Option<V>,
   ) -> Option<Fill<V>> {
-    if let Some(kept) = self.judged.get(&(ty, written)) {
+    let key = Filled { ty, written };
+    if let Some(kept) = self.judged.get(&key) {
       return *kept;
     }
     let mut found: Option<Fill<V>> = None;
-    if let TyKind::Named { def, args } = model.ty(ty).kind()
+    if let TyKind::Named(NamedTy { def, args }) = model.ty(ty).kind()
       && args.len() > written as usize
       && self
         .refused(model, def, &mut judge)
@@ -1328,7 +1575,7 @@ impl<V: Copy> Derived<V> {
         }
       }
     }
-    self.judged.insert((ty, written), found);
+    self.judged.insert(key, found);
     found
   }
 
@@ -1387,8 +1634,8 @@ impl<V: Copy> Derived<V> {
       return answer;
     }
     self.stack.clear();
-    self.stack.push((root, 0));
-    while let Some(&(ty, next)) = self.stack.last() {
+    self.stack.push(TyCursor { ty: root, next: 0 });
+    while let Some(&TyCursor { ty, next }) = self.stack.last() {
       let Some(child) = held_at(model, ty, next) else {
         // Nothing under it fails.
         self.under.insert((ty, look), None);
@@ -1403,14 +1650,14 @@ impl<V: Copy> Derived<V> {
         }
         Some(None) => {
           if let Some(top) = self.stack.last_mut() {
-            top.1 = next.saturating_add(1);
+            top.next = next.saturating_add(1);
           }
         }
         None => match self.settle(model, child, look, &mut *judge) {
           Some(answer) => {
             self.under.insert((child, look), answer);
           }
-          None => self.stack.push((child, 0)),
+          None => self.stack.push(TyCursor { ty: child, next: 0 }),
         },
       }
     }
@@ -1430,7 +1677,7 @@ impl<V: Copy> Derived<V> {
     judge: &mut impl FnMut(TyId) -> Option<V>,
   ) -> Option<Option<Failure<V>>> {
     match model.ty(ty).kind() {
-      TyKind::Named { def, args } => {
+      TyKind::Named(NamedTy { def, args }) => {
         if look == Look::Fill && self.writes(model, ty) {
           return Some(None);
         }
@@ -1441,8 +1688,8 @@ impl<V: Copy> Derived<V> {
         }
         if args.is_empty() { Some(None) } else { None }
       }
-      TyKind::List { .. } => None,
-      TyKind::Param { .. } | TyKind::Unresolved => Some(None),
+      TyKind::List(_) => None,
+      TyKind::Param(_) | TyKind::Unresolved => Some(None),
     }
   }
 
@@ -1460,9 +1707,9 @@ impl<V: Copy> Derived<V> {
 /// The argument `index` of `ty`, of `model`, or its element: what a type holds, in order.
 fn held_at(model: &Model, ty: TyId, index: u32) -> Option<TyId> {
   match model.ty(ty).kind() {
-    TyKind::Named { args, .. } => args.get(index as usize).copied(),
-    TyKind::List { element } => (index == 0).then_some(element),
-    TyKind::Param { .. } | TyKind::Unresolved => None,
+    TyKind::Named(NamedTy { args, .. }) => args.get(index as usize).copied(),
+    TyKind::List(element) => (index == 0).then_some(element),
+    TyKind::Param(_) | TyKind::Unresolved => None,
   }
 }
 
@@ -1475,11 +1722,11 @@ fn written_types(model: &Model) -> Vec<TyId> {
   let mut written: Vec<TyId> = Vec::new();
   for id in model.type_exprs() {
     let occurrence = model.type_expr(id);
-    let TypeExprKind::Named { args: given, .. } = occurrence.kind() else {
+    let TypeExprKind::Named(NamedTypeExpr { args: given, .. }) = occurrence.kind() else {
       continue;
     };
     let ty = occurrence.ty();
-    let TyKind::Named { args, .. } = model.ty(ty).kind() else {
+    let TyKind::Named(NamedTy { args, .. }) = model.ty(ty).kind() else {
       continue;
     };
     if args.is_empty() {
@@ -1512,6 +1759,16 @@ pub(crate) struct Taking {
   pub(crate) filled: Option<Location>,
 }
 
+/// The slot of a type that a default fills, and the type that fill derives: what [`taking`] asks
+/// about when it is not the argument of the type itself.
+#[derive(Clone, Copy)]
+pub(crate) struct DerivedFill {
+  /// The slot of the type a default fills.
+  pub(crate) slot: u32,
+  /// The type that fill derives.
+  pub(crate) ty: TyId,
+}
+
 /// Who takes the argument at `slot` of the type `ty`, of `model`, of an occurrence or an
 /// application that writes the type arguments `written` and is written at `whole`; or, when
 /// `derived` is the slot of `ty` a default fills and the type that fill derives, the argument at
@@ -1522,9 +1779,9 @@ pub(crate) fn taking(
   written: &[TypeExprId],
   whole: Location,
   slot: u32,
-  derived: Option<(u32, TyId)>,
+  derived: Option<DerivedFill>,
 ) -> Option<Taking> {
-  let TyKind::Named { def, args } = model.ty(ty).kind() else {
+  let TyKind::Named(NamedTy { def, args }) = model.ty(ty).kind() else {
     return None;
   };
   let definition = Excerpt(model.def(def).name().as_bytes());
@@ -1533,7 +1790,11 @@ pub(crate) fn taking(
   } else {
     ""
   };
-  let Some((filled, derived)) = derived else {
+  let Some(DerivedFill {
+    slot: filled,
+    ty: derived,
+  }) = derived
+  else {
     let argument = *args.get(slot as usize)?;
     return Some(match written.get(slot as usize) {
       Some(given) => Taking {
@@ -1557,10 +1818,10 @@ pub(crate) fn taking(
       },
     });
   };
-  let TyKind::Named {
+  let TyKind::Named(NamedTy {
     def: derived_def,
     args: derived_args,
-  } = model.ty(derived).kind()
+  }) = model.ty(derived).kind()
   else {
     return None;
   };

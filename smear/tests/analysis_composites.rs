@@ -203,8 +203,8 @@ fn shown(model: &Model, id: ValueId) -> String {
     ValueKind::Float(float) => format!("Float {}", float.text()),
     ValueKind::String(text) => format!("String {text:?}"),
     ValueKind::Bytes(bytes) => format!("Bytes {bytes:?}"),
-    ValueKind::Enum { .. } => format!("Enum {}", spelled(model, value.path())),
-    ValueKind::Type { def, .. } => format!("Type {}", model.def(def).name()),
+    ValueKind::Enum(_) => format!("Enum {}", spelled(model, value.path())),
+    ValueKind::Type(def) => format!("Type {}", model.def(def).name()),
     ValueKind::List(items) => format!("List [{}]", joined(model, items)),
     ValueKind::Set(items) => format!("Set {{{}}}", joined(model, items)),
     ValueKind::Map(entries) => {
@@ -1222,7 +1222,7 @@ fn nested_defaults_are_counted_before_they_are_copied() {
   }
   let model = analysis.model();
   assert!(arguments_of(model, "T").is_empty());
-  let (_, _, values, _) = test_support::counts(model);
+  let test_support::Counts { values, .. } = test_support::counts(model);
   assert!(values < 3000, "{values} values");
 }
 
@@ -1318,9 +1318,10 @@ fn a_set_literal_is_a_set_and_a_map_literal_a_map() {
   let model = analysis.model();
   let tags = default(model, "H", "tags");
   assert_eq!(shown(model, tags), "Set {String \"a\", String \"b\"}");
-  let TyKind::Named { args, .. } = model.ty(model.value(tags).ty()).kind() else {
+  let TyKind::Named(named) = model.ty(model.value(tags).ty()).kind() else {
     panic!("`tags` has no named type");
   };
+  let args = named.args();
   let ValueKind::Set(elements) = model.value(tags).kind() else {
     panic!("`tags` is no set");
   };
@@ -1916,7 +1917,7 @@ fn reversing_files_and_dependencies_changes_no_composite_value_and_no_diagnostic
     let analysis = analyze(&root, &dependencies, &Limits::new());
     let model = analysis.model();
     let mut text = String::new();
-    let (_, _, count, _) = test_support::counts(model);
+    let test_support::Counts { values: count, .. } = test_support::counts(model);
     for index in 0..count {
       let value = model.value(ValueId::new(index));
       text.push_str(&format!(
@@ -1974,7 +1975,7 @@ fn a_type_ref_value_names_a_definition() {
   let model = analysis.model();
   let named = |value: ValueId| -> DefId {
     match model.value(value).kind() {
-      ValueKind::Type { def, .. } => def,
+      ValueKind::Type(def) => def,
       other => panic!("value {} is no type value: {other:?}", value.get()),
     }
   };
@@ -1990,9 +1991,10 @@ fn a_type_ref_value_names_a_definition() {
   let int = model
     .type_expr(model.member(query_x).ty().expect("a type"))
     .ty();
-  let TyKind::Named { def: i32_def, .. } = model.ty(int).kind() else {
+  let TyKind::Named(int_named) = model.ty(int).kind() else {
     panic!("`Int` names no definition");
   };
+  let i32_def = int_named.def();
   let applications: Vec<Vec<ApplicationArgument>> = model
     .def(type_def(model, "T"))
     .applications()
@@ -2099,7 +2101,7 @@ fn an_ok_analysis_keeps_a_literal_only_where_nothing_is_coerced() {
       ValueKind::Unresolved => panic!("value {} is unresolved", id.get()),
       ValueKind::Literal(_) => {
         let ty = model.ty(value.ty());
-        let custom = matches!(ty.kind(), TyKind::Named { def, .. } if def == any);
+        let custom = matches!(ty.kind(), TyKind::Named(named) if named.def() == any);
         assert!(
           custom || !ty.is_closed(),
           "value {} is kept as written",

@@ -27,9 +27,9 @@
 //!   parse: same green tree, same diagnostics, same verdict. The `Parse` is lifetime-free and
 //!   carries no trace of which type produced it, so a door that read one source type differently
 //!   shows up here and nowhere else.
-//! - **The refusal.** A byte source that is not UTF-8 produces `Err(Refused::NonUtf8Source {
-//!   valid_up_to, source_len })` and **no** `Parse` at all — not an empty tree, and not a panic.
-//!   Deleting the door's up-front check is the plant: these cells then abort with `the graphql
+//! - **The refusal.** A byte source that is not UTF-8 produces `Err(Refused::NonUtf8Source(_))`,
+//!   whose payload carries `valid_up_to` and `source_len`, and **no** `Parse` at all — not an empty
+//!   tree, and not a panic. Deleting the door's up-front check is the plant: these cells then abort with `the graphql
 //!   lossless event stream was refused: the bound source is not valid UTF-8 (first invalid
 //!   sequence at byte 13). No production in this crate emits a stream this door refuses`, which is
 //!   round 8 of al8n/smear#193's assertion being made false by a caller's input. `Refused`'s own
@@ -50,7 +50,7 @@
 //!   under ceilings tight enough to reach the point where the byte side first diverged, which was
 //!   `max_produce_events = 7` and `max_tokens = 6` for GraphQL.
 
-use smear::parser::lossless::{Refused, runner::Parse as ParseOf};
+use smear::parser::lossless::{NonUtf8Source, Refused, SourceTooLong, runner::Parse as ParseOf};
 
 /// One document that exercises both halves of the mixed root.
 const DOC: &str = "type T { f(a: Int = 1): [String!]! @d } query Q($v: Int) { f(a: $v) { g } }";
@@ -140,10 +140,7 @@ fn refused<L: rowan::Language>(label: &str, got: Result<ParseOf<L>, Refused>) {
     Ok(_) => panic!("{label}: a source that is not UTF-8 produced a `Parse`"),
     Err(refusal) => assert_eq!(
       refusal,
-      Refused::NonUtf8Source {
-        valid_up_to: BAD_VALID_UP_TO,
-        source_len: BAD.len(),
-      },
+      Refused::NonUtf8Source(NonUtf8Source::new(BAD_VALID_UP_TO, BAD.len())),
       "{label}: the refusal does not carry both numbers"
     ),
   }
@@ -484,8 +481,8 @@ macro_rules! dialect {
 
       /// A byte source that is not UTF-8 is refused at every sibling, with both numbers.
       ///
-      /// `Err(Refused::NonUtf8Source { valid_up_to, source_len })` and **no** `Parse` — see
-      /// [`Refused`] for the two findings that shape replaced.
+      /// `Err(Refused::NonUtf8Source(_))` with `valid_up_to` and `source_len`, and **no** `Parse` —
+      /// see [`Refused`] for the two findings that shape replaced.
       #[test]
       fn every_sibling_refuses_a_non_utf8_source_with_both_numbers() {
         refused("parse_document", door::parse_document_from(BAD));
@@ -650,10 +647,7 @@ fn a_source_longer_than_a_green_tree_can_address_is_classified_as_refused() {
   match MAX.checked_add(1) {
     Some(over) => assert_eq!(
       Refused::for_source_len(over),
-      Some(Refused::SourceTooLong {
-        source_len: over,
-        max: MAX,
-      }),
+      Some(Refused::SourceTooLong(SourceTooLong::new(over, MAX))),
       "{over} bytes is past the bound and must be refused, with both numbers"
     ),
     None => {
@@ -755,10 +749,7 @@ fn a_refused_source_produces_no_parse_for_anything_downstream() {
     project_type_system_document_recovered, verify_parse,
   };
 
-  const WANT: Refused = Refused::NonUtf8Source {
-    valid_up_to: BAD_VALID_UP_TO,
-    source_len: BAD.len(),
-  };
+  const WANT: Refused = Refused::NonUtf8Source(NonUtf8Source::new(BAD_VALID_UP_TO, BAD.len()));
 
   // No `Parse` from any of the six, and both numbers on every one.
   for (label, got) in [

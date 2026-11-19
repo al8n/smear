@@ -63,6 +63,7 @@ use core::fmt;
 
 use std::collections::TryReserveError;
 
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use smear_schema::{DirectiveLocation, PackedType, Schema, Sym, Text, TypeId, TypeKind};
 
 #[cfg(all(test, feature = "std"))]
@@ -70,6 +71,18 @@ mod tests;
 
 /// The sentinel for "no such slot".
 pub(super) const NONE: u32 = u32::MAX;
+
+/// A run of `len` entries of one of the executor's flat tables, starting at `start`: a name's bytes
+/// in the interner's arena, or one response key's group in the `merged` and `locations` vectors.
+///
+/// A start and a length, never an end, so the run is `table[start..start + len]`.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct FlatRun {
+  /// Where the run begins in its table.
+  pub(super) start: u32,
+  /// How many entries it holds.
+  pub(super) len: u32,
+}
 
 /// One position in the response.
 #[derive(Debug)]
@@ -168,25 +181,7 @@ pub(super) enum State<V> {
   /// transition is the release: there is no separate call to forget.
   Expanded,
   /// An object whose value is still readable, because a child of it has yet to be offered.
-  Object {
-    /// The value the driver resolved, handed back as the parent value of every child request.
-    value: V,
-    /// How many future reads of `value` remain: children enqueued by `expand` and not yet departed
-    /// from Ready.
-    ///
-    /// The count is *inside* the variant on purpose. A slot holding no object pays nothing for it,
-    /// and — the property that matters more — a stale count is unrepresentable, because `discard`
-    /// and `reset` overwrite the whole state and the number dies with the value it was counting
-    /// reads of. A parallel table would have to be kept in step with two paths that already forget
-    /// things for a living.
-    ///
-    /// Its *meaning* is "outstanding future reads", and that is what a later phase extends. Phase 6
-    /// making list completion resumable adds registered-but-uncreated readers to the meaning; it
-    /// does not redefine it. Carry the meaning, not the formula.
-    pending: u32,
-    /// The concrete object type, after `ResolveAbstractType` where the position was abstract.
-    ty: TypeId,
-  },
+  Object(PendingObject<V>),
   /// A field under one of draft §4's meta-fields, collected and not yet answered: the field of
   /// `entity` the slot's metadata names — or, for `__schema` and `__type` on the query root type,
   /// the field of the schema itself.
@@ -205,6 +200,28 @@ pub(super) enum State<V> {
   MetaLeaf(MetaLeaf),
 }
 
+/// [`State::Object`]'s payload: an object's value, and how many reads of it are still to come.
+#[derive(Debug)]
+pub(super) struct PendingObject<V> {
+  /// The value the driver resolved, handed back as the parent value of every child request.
+  pub(super) value: V,
+  /// How many future reads of `value` remain: children enqueued by `expand` and not yet departed
+  /// from Ready.
+  ///
+  /// The count is *inside* the variant's payload on purpose. A slot holding no object pays nothing
+  /// for it, and — the property that matters more — a stale count is unrepresentable, because
+  /// `discard` and `reset` overwrite the whole state and the number dies with the value it was
+  /// counting reads of. A parallel table would have to be kept in step with two paths that already
+  /// forget things for a living.
+  ///
+  /// Its *meaning* is "outstanding future reads", and that is what a later phase extends. Phase 6
+  /// making list completion resumable adds registered-but-uncreated readers to the meaning; it
+  /// does not redefine it. Carry the meaning, not the formula.
+  pub(super) pending: u32,
+  /// The concrete object type, after `ResolveAbstractType` where the position was abstract.
+  pub(super) ty: TypeId,
+}
+
 /// The entity of the schema a draft §4 meta object stands for.
 ///
 /// Indices rather than borrows, for the reason [`Slot`] holds no lifetime: a field is its owner and
@@ -217,25 +234,27 @@ pub(super) enum Entity {
   Schema,
   /// `__Type`, wrappers and all.
   Type(TypeRef),
-  /// `__Field`: a position in `owner`'s field group, which [`Schema::fields_of`] returns.
-  Field {
-    /// The object or interface type.
-    owner: TypeId,
-    /// The field's position in the group.
-    at: u32,
-  },
+  /// `__Field`: a position in an object or interface type's field group, which
+  /// [`Schema::fields_of`] returns.
+  Field(TypeMember),
   /// `__InputValue`: a row of the schema's input-value table — an argument of a field or a
   /// directive, or a field of an input object.
   InputValue(u32),
-  /// `__EnumValue`: a position in `owner`'s value group, which [`Schema::enum_values_of`] returns.
-  EnumValue {
-    /// The enum type.
-    owner: TypeId,
-    /// The value's position in the group.
-    at: u32,
-  },
+  /// `__EnumValue`: a position in an enum type's value group, which [`Schema::enum_values_of`]
+  /// returns.
+  EnumValue(TypeMember),
   /// `__Directive`: a row of the schema's directive table.
   Directive(u32),
+}
+
+/// A member of a type, by its position in the type's group: what [`Entity::Field`] and
+/// [`Entity::EnumValue`] carry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct TypeMember {
+  /// The type: an object or interface type for a field, an enum type for an enum value.
+  pub(super) owner: TypeId,
+  /// The member's position in the owner's group — its field group or its value group.
+  pub(super) at: u32,
 }
 
 /// A type reference as `__Type` walks it: the named type, and the [`PackedType`] wrapper word
@@ -377,7 +396,9 @@ pub(super) enum Key {
 }
 
 /// One segment of a draft §7.1.2 response path.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum Segment<'r> {
   /// A field's response key — its alias when it has one, otherwise its name.
   Field(&'r str),
@@ -426,6 +447,14 @@ pub const INLINE_SEGMENTS: usize = 32;
 /// One character rather than `...`, because [`Display`](fmt::Display) joins segments with `.` and
 /// an ASCII elision beside that separator is four dots a reader has to count.
 const ELIDED: &str = "…";
+
+/// What [`Path::window`] fills: the innermost segments, and whether the chain went on past them.
+struct Window<'w, 'r> {
+  /// The innermost segments, innermost first — at most [`INLINE_SEGMENTS`] of them.
+  segments: &'w [Segment<'r>],
+  /// Whether the chain ran on past the window, so the outermost segments were dropped.
+  elided: bool,
+}
 
 /// A draft §7.1.2 response path, outermost segment first.
 ///
@@ -516,7 +545,7 @@ const ELIDED: &str = "…";
 pub struct Path<'r, V> {
   slots: &'r [Slot<V>],
   names: &'r str,
-  name_spans: &'r [(u32, u32)],
+  name_spans: &'r [FlatRun],
   slot: u32,
 }
 
@@ -538,7 +567,7 @@ impl<'r, V> Path<'r, V> {
   pub(super) const fn new(
     slots: &'r [Slot<V>],
     names: &'r str,
-    name_spans: &'r [(u32, u32)],
+    name_spans: &'r [FlatRun],
     slot: u32,
   ) -> Self {
     Self {
@@ -654,9 +683,9 @@ impl<'r, V> Path<'r, V> {
 
   /// Fills `into` with the innermost segments and says whether the chain ran on past them.
   ///
-  /// The returned slice is innermost first — the direction the links point — so a formatter
-  /// reverses it, and a `true` beside it means the segments *above* the slice were dropped. Both
-  /// formatters below share this so that the two renderings are one walk read two ways.
+  /// The window's segments are innermost first — the direction the links point — so a formatter
+  /// reverses them, and [`elided`](Window::elided) means the segments *above* them were dropped.
+  /// Both formatters below share this so that the two renderings are one walk read two ways.
   ///
   /// At most [`INLINE_SEGMENTS`] + 1 links however deep the path is: the window's worth, and one
   /// more to ask whether there was another. Nothing here allocates and nothing here can fail, which
@@ -666,7 +695,7 @@ impl<'r, V> Path<'r, V> {
   /// Bounded by the window and not by [`len`](Path::len), deliberately: a *strategy* may be chosen
   /// from a number the executor recorded, and what is **written** may not be. Nothing rendered below
   /// comes from anywhere but the chain itself, the elision included.
-  fn window<'w>(&self, into: &'w mut [Segment<'r>; INLINE_SEGMENTS]) -> (&'w [Segment<'r>], bool) {
+  fn window<'w>(&self, into: &'w mut [Segment<'r>; INLINE_SEGMENTS]) -> Window<'w, 'r> {
     let mut ancestors = self.ancestors();
     let mut filled = 0;
     while filled < INLINE_SEGMENTS {
@@ -676,8 +705,11 @@ impl<'r, V> Path<'r, V> {
       into[filled] = segment;
       filled += 1;
     }
-    // `Ancestors` is fused, so this is `None` when the loop above ran out rather than filled up.
-    (&into[..filled], ancestors.next().is_some())
+    Window {
+      segments: &into[..filled],
+      // `Ancestors` is fused, so this is `None` when the loop above ran out rather than filled up.
+      elided: ancestors.next().is_some(),
+    }
   }
 
   /// Walks the chain into `buf` and turns it around.
@@ -722,14 +754,14 @@ impl<V> fmt::Debug for Path<'_, V> {
   /// and not an implementation note.
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let mut storage = [Segment::Index(0); INLINE_SEGMENTS];
-    let (window, elided) = self.window(&mut storage);
+    let Window { segments, elided } = self.window(&mut storage);
     let mut list = f.debug_list();
     if elided {
       // `format_args!` rather than a `&str`, so the marker is not rendered as the quoted string a
       // segment never is.
       list.entry(&format_args!("{ELIDED}"));
     }
-    for segment in window.iter().rev() {
+    for segment in segments.iter().rev() {
       list.entry(segment);
     }
     list.finish()
@@ -744,11 +776,11 @@ impl<V> fmt::Display for Path<'_, V> {
   /// and not an implementation note.
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     let mut storage = [Segment::Index(0); INLINE_SEGMENTS];
-    let (window, elided) = self.window(&mut storage);
+    let Window { segments, elided } = self.window(&mut storage);
     if elided {
       f.write_str(ELIDED)?;
     }
-    for (position, segment) in window.iter().rev().enumerate() {
+    for (position, segment) in segments.iter().rev().enumerate() {
       // The marker occupies the first position when there is one, so it is what the leading
       // separator is measured against.
       if elided || position > 0 {
@@ -985,8 +1017,11 @@ fn allocate() {
 }
 
 /// Returns how many allocating events this thread has caused.
+///
+/// Crate-visible, so that a test anywhere in this crate reads this one instrument: the test binary
+/// has one global allocator, and this is it.
 #[cfg(all(test, feature = "std"))]
-fn allocations() -> u64 {
+pub(crate) fn allocations() -> u64 {
   ALLOCATED.with(core::cell::Cell::get)
 }
 
@@ -1038,8 +1073,13 @@ fn allow_allocations() {
 /// rather than fall into a catch-all that writes a response the executor did not produce. The three
 /// introspection variants were added that way, and every exhaustive matcher in this repository was
 /// made to name them.
+#[derive(IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum Node<'r, V> {
   /// The `null` literal.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Null,
   /// A serialised leaf.
   Leaf(&'r V),
@@ -1102,7 +1142,7 @@ pub struct Children<'r, V> {
   schema: &'r Schema,
   slots: &'r [Slot<V>],
   names: &'r str,
-  name_spans: &'r [(u32, u32)],
+  name_spans: &'r [FlatRun],
   next: u32,
 }
 
@@ -1160,8 +1200,8 @@ impl<V> fmt::Debug for Children<'_, V> {
 /// response keys it could not read became the same readable one. The arena is a `str` now, and
 /// refuses at admission instead; see [`Interner`](super::collect::Interner).
 #[inline]
-fn interned<'r>(names: &'r str, name_spans: &[(u32, u32)], id: u32) -> &'r str {
-  let (start, len) = name_spans[id as usize];
+fn interned<'r>(names: &'r str, name_spans: &[FlatRun], id: u32) -> &'r str {
+  let FlatRun { start, len } = name_spans[id as usize];
   &names[start as usize..(start + len) as usize]
 }
 
@@ -1174,7 +1214,7 @@ pub(super) fn node<'r, V>(
   schema: &'r Schema,
   slots: &'r [Slot<V>],
   names: &'r str,
-  name_spans: &'r [(u32, u32)],
+  name_spans: &'r [FlatRun],
   index: u32,
 ) -> Node<'r, V> {
   let slot = &slots[index as usize];
@@ -1212,7 +1252,7 @@ pub(super) fn node<'r, V>(
     // Every object state renders the same way, because rendering never read the value or the
     // resolved type — only `first_child`. `Expanded` is that fact made into a state, and a meta
     // object is in it by the time any call returns.
-    State::Object { .. } | State::Expanded | State::MetaObject(_) => Node::Object(Children {
+    State::Object(_) | State::Expanded | State::MetaObject(_) => Node::Object(Children {
       schema,
       slots,
       names,

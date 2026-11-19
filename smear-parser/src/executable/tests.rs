@@ -4,8 +4,8 @@ use tokora::{
 };
 
 use super::{
-  Described, Document, FragmentDefinition, NamedOperationDefinition, VariableDefinition,
-  VariablesDefinition,
+  Described, Document, DocumentComponents, FragmentDefinition, NamedOperationDefinition,
+  VariableDefinition, VariableDefinitionComponents, VariablesDefinition,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,7 +31,13 @@ fn carriers_support_custom_spans() {
   assert_eq!(variable.as_span(), &CustomSpan(1));
   assert_eq!(
     variable.into_components(),
-    (CustomSpan(1), "$id", "ID!", Some("= 1"), Some("@skip"))
+    VariableDefinitionComponents {
+      span: CustomSpan(1),
+      variable: "$id",
+      ty: "ID!",
+      default_value: Some("= 1"),
+      directives: Some("@skip")
+    }
   );
 
   let described = Described::<_, _, CustomSpan>::new(CustomSpan(2), Some("desc"), "node");
@@ -64,7 +70,10 @@ fn carriers_support_custom_spans() {
   assert_eq!(document.as_span(), &CustomSpan(6));
   assert_eq!(
     document.into_components(),
-    (CustomSpan(6), ["query { id }"])
+    DocumentComponents {
+      span: CustomSpan(6),
+      definitions: ["query { id }"]
+    }
   );
 }
 

@@ -2,6 +2,7 @@
 
 use core::iter::FusedIterator;
 
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
@@ -17,7 +18,7 @@ use super::{
 };
 
 /// What kind of definition a definition is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum DefKind {
   /// A scalar: a primitive, a custom scalar, or a scalar a host type stands for.
@@ -51,7 +52,7 @@ impl DefKind {
 }
 
 /// Where a definition comes from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum Origin {
   /// A supplied package's own definition.
@@ -71,86 +72,123 @@ pub enum Origin {
 ///
 /// # Examples
 ///
-/// An integer primitive is built with its constructor, and matched with a pattern that ends with
-/// `..`, because its fields may grow:
+/// An integer primitive is built with its constructor, and read through its payload's accessors:
 ///
 /// ```
 /// use smear_analysis::graphqlx::Primitive;
 ///
 /// let int = Primitive::signed(32);
 /// match int {
-///   Primitive::Int { signed, width, .. } => assert!(signed && width == 32),
+///   Primitive::Int(int) => assert!(int.is_signed() && int.width() == 32),
 ///   _ => unreachable!(),
 /// }
 /// ```
 ///
-/// A struct expression is refused outside smear:
+/// Outside smear, a struct expression is refused: [`IntPrimitive`]'s fields are private, so
+/// [`Primitive::signed`] and [`Primitive::unsigned`] are the only ways to build one.
 ///
-/// ```compile_fail,E0639
-/// use smear_analysis::graphqlx::Primitive;
+/// ```compile_fail,E0451
+/// use smear_analysis::graphqlx::{IntPrimitive, Primitive};
 ///
-/// let int = Primitive::Int { signed: true, width: 32 };
+/// let int = Primitive::Int(IntPrimitive { signed: true, width: 32 });
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum Primitive {
   /// `bool`.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Bool,
   /// `f32`.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   F32,
   /// `f64`.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   F64,
   /// `iN` or `uN`. Built with [`Primitive::signed`] and [`Primitive::unsigned`].
-  #[non_exhaustive]
-  Int {
-    /// Whether it is `iN`, signed, rather than `uN`.
-    signed: bool,
-    /// Its width in bits: `N`.
-    width: u32,
-  },
+  Int(IntPrimitive),
 }
 
 impl Primitive {
   /// `iN`: the signed integer `width` bits wide.
   #[inline]
   pub const fn signed(width: u32) -> Self {
-    Self::Int {
-      signed: true,
-      width,
-    }
+    Self::Int(IntPrimitive::new(true, width))
   }
 
   /// `uN`: the unsigned integer `width` bits wide.
   #[inline]
   pub const fn unsigned(width: u32) -> Self {
-    Self::Int {
-      signed: false,
-      width,
-    }
+    Self::Int(IntPrimitive::new(false, width))
   }
 
   /// Its place among `core`'s materialised definitions: `bool`, `f32`, `f64`, then the signed
   /// widths ascending, then the unsigned widths ascending. Two primitives share it only when they
   /// are one.
-  pub(crate) const fn rank(self) -> (u8, u32) {
+  pub(crate) const fn rank(self) -> Rank {
     match self {
-      Self::Bool => (0, 0),
-      Self::F32 => (1, 0),
-      Self::F64 => (2, 0),
-      Self::Int {
+      Self::Bool => Rank { kind: 0, width: 0 },
+      Self::F32 => Rank { kind: 1, width: 0 },
+      Self::F64 => Rank { kind: 2, width: 0 },
+      Self::Int(IntPrimitive {
         signed: true,
         width,
-      } => (3, width),
-      Self::Int {
+      }) => Rank { kind: 3, width },
+      Self::Int(IntPrimitive {
         signed: false,
         width,
-      } => (4, width),
+      }) => Rank { kind: 4, width },
     }
   }
 }
 
-/// The collection a definition stands for: what `@set` or `@map` makes of it.
+/// A primitive's place among `core`'s materialised definitions: [`Primitive::rank`]'s answer. It
+/// orders as the definitions' ids do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct Rank {
+  /// Which kind of primitive: `bool` is 0, `f32` 1, `f64` 2, a signed integer 3 and an unsigned
+  /// integer 4.
+  pub(crate) kind: u8,
+  /// The width of an integer, and 0 for the others.
+  pub(crate) width: u32,
+}
+
+/// An integer primitive, `iN` or `uN`: [`Primitive::Int`]'s payload. Built with
+/// [`Primitive::signed`] and [`Primitive::unsigned`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct IntPrimitive {
+  pub(crate) signed: bool,
+  pub(crate) width: u32,
+}
+
+impl IntPrimitive {
+  /// The integer `width` bits wide, signed when `signed`.
+  ///
+  /// Crate-private: [`Primitive::signed`] and [`Primitive::unsigned`] are the public doors.
+  #[inline]
+  pub(crate) const fn new(signed: bool, width: u32) -> Self {
+    Self { signed, width }
+  }
+
+  /// Whether it is `iN`, signed, rather than `uN`.
+  #[inline]
+  pub const fn is_signed(&self) -> bool {
+    self.signed
+  }
+
+  /// Its width in bits: `N`.
+  #[inline]
+  pub const fn width(&self) -> u32 {
+    self.width
+  }
+}
+
+/// The collection a definition stands for: what `@set` or `@map` makes of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum Collection {
   /// A set, through `@set`.

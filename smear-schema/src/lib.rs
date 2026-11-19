@@ -11,7 +11,8 @@
 //! will generate from one, and neither has any use for a front end. So the builder and the
 //! introspection door sit behind `build`, which is what pulls `smear-parser` — and a consumer who
 //! only reads a schema depends on this crate with `default-features = false` and `alloc`, and gets
-//! `core` + `alloc` with `tokora` as the one dependency.
+//! `core` + `alloc` with `tokora` as its dependency, and smol-bytes beside it on a target with
+//! pointer-width atomics, for the owned text this crate shares with `graphql-proto`.
 //!
 //! That is a FEATURE boundary and not a crate boundary, and the distinction is the whole reason
 //! this crate is shaped this way: [`Schema::build`] and `Schema::from_introspection` are
@@ -119,6 +120,8 @@ mod builder;
 mod error;
 #[cfg(any(feature = "std", feature = "alloc"))]
 mod repr;
+#[cfg(any(feature = "std", feature = "alloc"))]
+mod text;
 
 /// The literal-shape coercion table, shared with the executable rules.
 ///
@@ -148,6 +151,17 @@ pub use introspection::IntrospectionError;
 #[doc(hidden)]
 pub use repr::name::{bucket, hash_bytes};
 
+/// Owned text, cheap to clone where the target has pointer-width atomics and a plain box where it
+/// has not: `text.rs`'s header has the two arms and why the choice is made once, here.
+///
+/// `#[doc(hidden)]`, and so are the two types' inherent methods: a seam between this crate and
+/// `graphql-proto`, like the hash above, and not a promise to anyone outside the workspace. The
+/// methods carry the attribute themselves because the source census reads a `pub use` whatever
+/// it says, and skips an `impl` block that is hidden.
+#[cfg(any(feature = "std", feature = "alloc"))]
+#[doc(hidden)]
+pub use text::{FrozenStr, StrBuf};
+
 #[cfg(all(any(feature = "std", feature = "alloc"), feature = "build"))]
 #[cfg_attr(
   docsrs,
@@ -169,8 +183,8 @@ pub use repr::{
   DefaultKind, Deprecation, DirectiveDef, DirectiveLocation, DirectiveLocations, DirectiveMeta,
   EnumValueMeta, FieldDef, FieldMeta, InputValueDef, InputValueMeta, MAX_DIRECTIVE_ARGUMENTS,
   MAX_FIELD_ARGUMENTS, MAX_SYMBOLS, MAX_WRAPPERS, NameIndex, PackedType, Range32, RootOperation,
-  Schema, Sym, Text, TypeDef, TypeFlags, TypeId, TypeKind, TypeMeta, is_name, is_name_tail,
-  is_reserved,
+  Schema, Sym, Text, TypeDef, TypeFlags, TypeId, TypeKind, TypeMeta, TypeRef, is_name,
+  is_name_tail, is_reserved,
 };
 
 /// The features this crate was compiled with, as constants the umbrella asserts against.

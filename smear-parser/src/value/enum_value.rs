@@ -38,12 +38,24 @@ impl<S, Span, Lang: ?Sized> IntoSpan<Span> for EnumValue<S, Span, Lang> {
   }
 }
 
+/// `EnumValue` taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct EnumValueComponents<S, Span> {
+  /// The span covering the enum literal.
+  pub span: Span,
+  /// The enum literal's source spelling.
+  pub source: S,
+}
+
 impl<S, Span, Lang: ?Sized> IntoComponents for EnumValue<S, Span, Lang> {
-  type Components = (Span, S);
+  type Components = EnumValueComponents<S, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.source)
+    EnumValueComponents {
+      span: self.span,
+      source: self.source,
+    }
   }
 }
 

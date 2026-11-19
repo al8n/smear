@@ -35,6 +35,8 @@
 //! the service by name. A `Float` may be an `f64`, a `rust_decimal::Decimal` or a string in a
 //! column buffer, and only the service knows which.
 
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
+
 /// The leaf type a value is being serialised against, for [`Values::coerce_leaf`].
 ///
 /// The five built-in scalars get their own variants rather than arriving as
@@ -42,18 +44,30 @@
 /// and checked, not a chain of string comparisons on a hot path. Draft §3.5.5 makes built-in-ness
 /// a property of the *name*, so a schema that spells `scalar String` out still arrives here as
 /// [`Leaf::String`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum Leaf<'a> {
   /// The built-in `Int`: a signed 32-bit integer (draft §3.5.1).
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Int,
   /// The built-in `Float`: a finite double-precision value (draft §3.5.2).
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Float,
   /// The built-in `String` (draft §3.5.3).
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   String,
   /// The built-in `Boolean` (draft §3.5.4).
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Boolean,
   /// The built-in `ID`, which serialises as a string (draft §3.5.5).
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Id,
   /// A scalar the schema declared, by name. Only the service knows how to serialise one.
   Scalar(&'a str),
@@ -73,12 +87,6 @@ impl Leaf<'_> {
       Self::Id => "ID",
       Self::Scalar(name) | Self::Enum(name) => name,
     }
-  }
-
-  /// Returns whether the leaf is an enum rather than a scalar.
-  #[inline]
-  pub const fn is_enum(&self) -> bool {
-    matches!(self, Self::Enum(_))
   }
 }
 

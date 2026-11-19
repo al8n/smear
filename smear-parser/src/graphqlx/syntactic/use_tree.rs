@@ -36,12 +36,12 @@ use super::{
   leading_path_separator, name, path_root, peek_kind, try_name, unexpected_here,
 };
 use crate::{
-  combinator::{ParseCtx, TokenSpannedExt, asterisk, try_double_colon},
+  combinator::{ParseCtx, asterisk, try_double_colon},
   graphqlx::{
     GraphQLx,
     ast::{
-      InlineStringValue, Name, Nested, Path, PathRoot, UseDefinition, UsePrefix, UseTree,
-      UseTreeKind,
+      InlineStringValue, Name, Nested, Path, PathRoot, SourcePrefix, UseDefinition, UsePrefix,
+      UseTree, UseTreeKind,
     },
     error::{Expectation, GraphqlxError as DialectGraphqlxError},
   },
@@ -74,12 +74,16 @@ macro_rules! use_parser {
 
 /// The trees a group holds, and the span of its braces.
 #[allow(type_alias_bounds)]
-type Group<'inp, Src: Source<usize> + ?Sized> =
+type Group<'inp, Src: Source<usize> + ?Sized + 'inp> =
   (SimpleSpan, Nested<UseTree<GraphqlxSlice<'inp, Src>>>);
 
 /// The glob or the group a `::` led to, and where it ends.
-#[allow(type_alias_bounds)]
-type Scope<'inp, Src: Source<usize> + ?Sized> = (usize, UseTreeKind<GraphqlxSlice<'inp, Src>>);
+struct Scope<'inp, Src: Source<usize> + ?Sized + 'inp> {
+  /// Where the glob or the group ends.
+  end: usize,
+  /// The glob or the group.
+  kind: UseTreeKind<GraphqlxSlice<'inp, Src>>,
+}
 
 fn contextual_keyword<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
@@ -159,12 +163,18 @@ where
       Some(SyntacticTokenKind::Identifier) => segments.push(name(inp)?),
       Some(SyntacticTokenKind::Asterisk) => {
         let glob = asterisk(inp)?;
-        return Ok(Some((glob.span().end(), UseTreeKind::Glob)));
+        return Ok(Some(Scope {
+          end: glob.span().end(),
+          kind: UseTreeKind::Glob,
+        }));
       }
       // The `{` is confirmed here, before the group is entered.
       Some(SyntacticTokenKind::LBrace) => {
         let (span, trees) = group(inp)?;
-        return Ok(Some((span.end(), UseTreeKind::Group(trees))));
+        return Ok(Some(Scope {
+          end: span.end(),
+          kind: UseTreeKind::Group(trees),
+        }));
       }
       _ => return unexpected_here(inp, Expectation::NameGlobOrGroup),
     }
@@ -191,7 +201,7 @@ where
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   match scope {
-    Some((end, kind)) => Ok(UseTree::new(SimpleSpan::new(start, end), prefix, kind)),
+    Some(Scope { end, kind }) => Ok(UseTree::new(SimpleSpan::new(start, end), prefix, kind)),
     None => {
       let alias = optional_alias(inp)?;
       let end = alias
@@ -200,7 +210,7 @@ where
       Ok(UseTree::new(
         SimpleSpan::new(start, end),
         prefix,
-        UseTreeKind::Simple { alias },
+        UseTreeKind::Simple(alias),
       ))
     }
   }
@@ -296,7 +306,7 @@ where
     .map_or_else(|| source.span().end(), |segment| segment.span().end());
   finish_tree(
     start,
-    UsePrefix::Source { source, segments },
+    UsePrefix::Source(SourcePrefix::new(source, segments)),
     prefix_end,
     scope,
     inp,
@@ -366,7 +376,7 @@ where
     // `Nested`, as a selection set collects into: the container is where a deep tree's release
     // lives.
     .collect_with(Nested::empty())
-    .token_spanned()
+    .spanned_trimmed()
     .parse_input(inp)
     .map(|Spanned { span, data }| (span, data))
 }

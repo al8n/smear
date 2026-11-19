@@ -40,12 +40,27 @@ impl<Name, Args, Span> IntoSpan<Span> for Directive<Name, Args, Span> {
   }
 }
 
+/// `Directive` taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DirectiveComponents<Name, Args, Span> {
+  /// The span covering the entire directive.
+  pub span: Span,
+  /// The directive name.
+  pub name: Name,
+  /// The directive arguments when the parsed collection was nonempty.
+  pub arguments: Option<Args>,
+}
+
 impl<Name, Args, Span> IntoComponents for Directive<Name, Args, Span> {
-  type Components = (Span, Name, Option<Args>);
+  type Components = DirectiveComponents<Name, Args, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.arguments)
+    DirectiveComponents {
+      span: self.span,
+      name: self.name,
+      arguments: self.arguments,
+    }
   }
 }
 
@@ -112,12 +127,24 @@ impl<Directive, Container, Span> IntoSpan<Span> for Directives<Directive, Contai
   }
 }
 
+/// `Directives` taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DirectivesComponents<Container, Span> {
+  /// The collection span.
+  pub span: Span,
+  /// The parsed directives.
+  pub directives: Container,
+}
+
 impl<Directive, Container, Span> IntoComponents for Directives<Directive, Container, Span> {
-  type Components = (Span, Container);
+  type Components = DirectivesComponents<Container, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.directives)
+    DirectivesComponents {
+      span: self.span,
+      directives: self.directives,
+    }
   }
 }
 

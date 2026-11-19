@@ -29,11 +29,32 @@
 //! # Two disciplines, borrowed from `smear/tests/lossless_isolation.rs`
 //!
 //! A grep returning zero is not evidence of absence until the pattern has matched something, so
-//! every forbidden pattern runs with a **positive control** in a tree where it legitimately occurs
-//! — the lossless substrate, whose defence against a stop is the poison boundary and the document
-//! root's own verdict rather than the read's return type. And the scan **panics** on a directory
-//! that does not exist or holds no `.rs` file, so a mistyped path can never be the thing that made
-//! a count zero.
+//! every forbidden pattern is matched against a **fixture** holding one occurrence of each, and a
+//! pattern that matches nothing there fails. And the scan **panics** on a directory that does not
+//! exist or holds no `.rs` file, so a mistyped path can never be the thing that made a count zero.
+//!
+//! The census keeps no tree-level positive control, because no tree is left for one: no non-test
+//! source in this crate holds a blind read, test files are excluded by design, and tokora's
+//! sources are not in the checkout. The fixture proves every pattern matches the shape it watches,
+//! and `the_watched_trees_read_through_the_terminal_aware_primitives` reads the real watched
+//! trees and must find at least 70 terminal-aware reads, which is the proof that the scan reads
+//! real files.
+//!
+//! # The one blind read on the span path
+//!
+//! A node's span opens at the next token's start, and the only way to learn it is to look at the
+//! token. tokora's `InputRef::cursor_trimmed` (0.13.2) peeks one token blind, so it folds a
+//! terminal stop into "no next token", and it sits outside every watched tree. Three things make
+//! it acceptable:
+//!
+//! * **It decides nothing.** Its answer is an offset, anchored at the current offset when there is
+//!   no next token. Nothing branches on it; no production takes a different shape because of what
+//!   it returned.
+//! * **The head it looks at has already been read terminal-aware.** Every dispatching production
+//!   in both dialects peeks its own head, with `peek_head_map` or `peek_kind`, before it takes the
+//!   start. A stop at that head has raised before the start is taken.
+//! * **A committed read follows it in every caller**, which is terminal-aware, so a stop reaches
+//!   the caller from there, with a span anchored at the same offset either way.
 //!
 //! # Under Miri
 //!
@@ -43,8 +64,8 @@
 //! disk line by line and never running the parser, so an interpreter has none of this crate's code
 //! to check in them. A measurement found them — alone under `cargo miri test -p smear-parser
 //! --test syntactic_terminal_reads -- --exact`, Stacked Borrows, aarch64-apple-darwin, 2026-09-25,
-//! each was past five minutes — and the positive control, which scans one small tree, runs:
-//! `the_forbidden_patterns_match_rust_that_exists` took 3.8 s.
+//! each was past five minutes — and `the_forbidden_patterns_match_rust_that_exists`, which scans no
+//! tree and only matches its fixture, runs: it took 3.8 s when it also scanned one small tree.
 
 #![cfg(all(
   any(feature = "std", feature = "alloc"),
@@ -187,49 +208,24 @@ const BLIND: &[(&str, &str)] = &[
 /// the value being right one layer earlier costs nothing and removes the question. None of those
 /// defences moved.
 ///
-/// `src/combinator/token` is here for the same reason at one more remove: it is shared by both
-/// dialects, so a blind read in it is a blind read in every production that uses the atom.
+/// `src/combinator` is here for the same reason at one more remove: the whole combinator tree is
+/// shared by both dialects, so a blind read in it is a blind read in every production that uses
+/// the atom.
 const SYNTACTIC: &[&str] = &[
   "src/graphql/syntactic",
   "src/graphqlx/syntactic",
   "src/lossless",
   "src/graphql/lossless",
   "src/graphqlx/lossless",
-  "src/combinator/token",
+  "src/combinator",
 ];
-
-/// The positive control: the one module that legitimately keeps a blind read, so a zero above is a
-/// fact about the watched trees rather than about this scan.
-///
-/// # Why `extent_start` stays blind, and it is the only one
-///
-/// `combinator/extent.rs`'s `extent_start` peeks one token to learn where the node about to be
-/// parsed *begins*. Three things make it the exception:
-///
-/// * **It decides nothing.** Its answer is an offset, not a grammar fact, and its `None` arm is a
-///   documented anchor — "at end of input there is no next token, and the answer is the current
-///   offset". Nothing branches on it; no production takes a different shape because of what it
-///   returned.
-/// * **The head it looks at has already been read terminal-aware.** Its own module docs record
-///   that "every dispatching production in both dialects already peeks its own head before this
-///   runs", and since smear issue #177's rounds 2 and 3 those peeks are `peek_head_map` and
-///   `peek_kind`. A stop at that head has raised before this function is reached.
-/// * **Each of its 39 callers follows it with a committed read**, which is terminal-aware, so a
-///   stop reaches the caller from there — with a span this helper would have anchored at the same
-///   offset either way. The module already records that no production in either dialect succeeds
-///   without consuming a token.
-///
-/// Against that, making it terminal-aware puts a `From<UnexpectedEot>` bound on a span helper that
-/// is generic over `Completeness`, and propagates it through thirty-nine signatures, for a value
-/// that routes nothing.
-const CONTROL: &str = "src/combinator";
 
 /// A synthetic source holding one occurrence of every forbidden pattern.
 ///
-/// The tree control above can only prove the **one** pattern it still contains. This proves the
-/// other seven match text of the shape they claim to watch — which is the half that would rot
-/// silently, because a typo in a pattern nobody's tree contains any more reads exactly like a clean
-/// tree. It is deliberately not valid Rust: what is under test is the matcher, not a parse.
+/// No watched tree holds a blind read, so this is what proves every one of the nine patterns
+/// matches text of the shape it claims to watch — the check that would rot silently, because a typo
+/// in a pattern nobody's tree contains any more reads exactly like a clean tree. It is
+/// deliberately not valid Rust: what is under test is the matcher, not a parse.
 const FIXTURE: &str = r#"
   fn f(inp: &mut InputRef<'_, '_, L, Ctx, Lang>) {
   let a = inp.next()?;
@@ -252,8 +248,8 @@ const FIXTURE: &str = r#"
             runs the parser, so an interpreter has none of this crate's code to check. Found by \
             the five-minute detector's measurement: over five minutes under `cargo miri test` on \
             aarch64-apple-darwin (Stacked Borrows, 2026-09-25). \
-            `the_forbidden_patterns_match_rust_that_exists`, the positive control, scans one small \
-            tree and runs. The file's header carries the measurement. Declared in \
+            `the_forbidden_patterns_match_rust_that_exists` scans no tree, only its fixture, and \
+            runs. The file's header carries the measurement. Declared in \
             `ci/miri_scope.py`'s ignore table, which is what stops this from being a coverage cut \
             nobody chose."
 )]
@@ -289,8 +285,8 @@ fn no_syntactic_read_folds_a_terminal_stop_into_an_absent_outcome() {
 
 #[test]
 fn the_forbidden_patterns_match_rust_that_exists() {
-  // Half one: every pattern matches the shape it claims to watch. A typo in a pattern that no
-  // tree contains any more is invisible to the census above and visible here.
+  // Every pattern matches the shape it claims to watch. A typo in a pattern that no tree contains
+  // any more is invisible to the census above and visible here.
   let missed: Vec<&str> = BLIND
     .iter()
     .map(|(p, _)| *p)
@@ -300,17 +296,6 @@ fn the_forbidden_patterns_match_rust_that_exists() {
     missed.is_empty(),
     "these patterns matched nothing in the fixture, so their zero in the census means nothing: \
      {missed:?}"
-  );
-
-  // Half two: the scan reads real files and finds a real blind read in the one module that keeps
-  // one. If `extent_start` is ever repaired too, this fails and says so rather than going quietly
-  // green over a census with no control left.
-  let hits = occurrences(CONTROL, ".peek::<");
-  assert!(
-    hits.iter().any(|(f, _, _)| f.ends_with("extent.rs")),
-    "`{CONTROL}/extent.rs` no longer holds the raw head peek this census's tree-level control \
-     rests on. Either `extent_start` was repaired too — in which case fold it into the watched set \
-     and retire this half — or the scan stopped reading it. Found: {hits:?}"
   );
 }
 

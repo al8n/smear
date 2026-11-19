@@ -69,32 +69,52 @@ fn digit(byte: u8, radix: Radix) -> Option<u32> {
   (value < base(radix)).then_some(value)
 }
 
+/// An integer literal split into its sign and the rest: [`sign`]'s and [`body`]'s answer.
+struct SignedDigits<'a> {
+  /// Whether it is written with `-`.
+  negative: bool,
+  /// The rest: what follows the sign, or, for [`body`], what follows the radix's prefix too.
+  digits: &'a [u8],
+}
+
 /// `text` without its sign: whether it is written with `-`, and the rest.
-fn sign(text: &[u8]) -> (bool, &[u8]) {
+fn sign(text: &[u8]) -> SignedDigits<'_> {
   match text.split_first() {
-    Some((b'-', rest)) => (true, rest),
-    _ => (false, text),
+    Some((b'-', rest)) => SignedDigits {
+      negative: true,
+      digits: rest,
+    },
+    _ => SignedDigits {
+      negative: false,
+      digits: text,
+    },
   }
 }
 
 /// The digits of `text`, an integer literal of `radix`: its sign, and what follows its radix's
 /// prefix, `0x`, `0o` or `0b`, none for a decimal one. `None` when the prefix is not there.
-fn body(text: &[u8], radix: Radix) -> Option<(bool, &[u8])> {
-  let (negative, rest) = sign(text);
+fn body(text: &[u8], radix: Radix) -> Option<SignedDigits<'_>> {
+  let SignedDigits {
+    negative,
+    digits: rest,
+  } = sign(text);
   let prefix: &[u8] = match radix {
     Radix::Decimal => b"",
     Radix::Hex => b"0x",
     Radix::Octal => b"0o",
     Radix::Binary => b"0b",
   };
-  Some((negative, rest.strip_prefix(prefix)?))
+  Some(SignedDigits {
+    negative,
+    digits: rest.strip_prefix(prefix)?,
+  })
 }
 
 /// Scans `text`, an integer literal of `radix` as the lexer spells it: an optional `-`, its
 /// radix's prefix, then digits and `_`. `None` when the prefix is missing, when no digit is
 /// written, or when a byte is neither a digit of the radix nor `_`.
 pub(super) fn scan(text: &[u8], radix: Radix) -> Option<Scanned> {
-  let (negative, digits) = body(text, radix)?;
+  let SignedDigits { negative, digits } = body(text, radix)?;
   let mut any = false;
   let mut significant: u64 = 0;
   for &byte in digits {
@@ -158,7 +178,7 @@ pub(super) fn magnitude(
   out: &mut Vec<u8>,
   limbs: &mut Vec<u32>,
 ) {
-  let Some((_, digits)) = body(text, radix) else {
+  let Some(SignedDigits { digits, .. }) = body(text, radix) else {
     return;
   };
   let start = out.len();
@@ -306,13 +326,13 @@ pub(super) fn decimal_float(text: &[u8]) -> Option<Float> {
   let mut buffer = [0; NORMALIZED_FLOAT_LEN];
   let spelled = match normalize_decimal_float(text, &mut buffer)? {
     DecimalFloat::Spelled(spelled) => spelled,
-    DecimalFloat::Zero { negative } => {
+    DecimalFloat::Zero(sign) => {
       return Some(Float {
-        value: Some(if negative { -0.0 } else { 0.0 }),
-        single: Some(if negative { -0.0 } else { 0.0 }),
+        value: Some(if sign.is_negative() { -0.0 } else { 0.0 }),
+        single: Some(if sign.is_negative() { -0.0 } else { 0.0 }),
       });
     }
-    DecimalFloat::Overflow { .. } => {
+    DecimalFloat::Overflow(_) => {
       return Some(Float {
         value: None,
         single: None,
@@ -336,7 +356,10 @@ pub(super) fn decimal_float(text: &[u8]) -> Option<Float> {
 /// less four for each digit of the fraction part, all in saturating `i64`. `None` for a text with
 /// no `p`, or with a byte after it that is no decimal digit, `_` or a sign.
 pub(super) fn hex_float(text: &[u8]) -> Option<Float> {
-  let (negative, rest) = sign(text);
+  let SignedDigits {
+    negative,
+    digits: rest,
+  } = sign(text);
   let rest = rest.strip_prefix(b"0x".as_slice())?;
   let at = rest
     .iter()

@@ -45,7 +45,7 @@
 use std::{collections::BTreeMap, vec::Vec};
 
 use crate::graphqlx::{
-  DefId, DefKind, MemberId, Model, TyId, TyKind, id::dense, positions::Positions,
+  DefId, DefKind, MemberId, Model, NamedTy, TyId, TyKind, id::dense, positions::Positions,
 };
 
 /// Which input objects can hold a `TypeRef`, each with the field it can reach first, and the
@@ -61,7 +61,16 @@ pub(crate) struct Reach {
   /// Each type asked about, with its answer.
   asked: BTreeMap<TyId, Answer>,
   /// The types still to answer, each with whether its children were pushed above it.
-  stack: Vec<(TyId, bool)>,
+  stack: Vec<Visit>,
+}
+
+/// A type still to answer: [`Reach`]'s stack holds them.
+#[derive(Clone, Copy)]
+struct Visit {
+  /// The type.
+  ty: TyId,
+  /// Whether its children were pushed above it.
+  expanded: bool,
 }
 
 /// What [`Reach`] answers for a type, made once from its children's answers.
@@ -122,11 +131,11 @@ impl Reach {
         continue;
       };
       match model.ty(ty).kind() {
-        TyKind::List { element } => {
+        TyKind::List(element) => {
           let to = node_of(&mut types, &mut stack, element);
           edges.push((from, to));
         }
-        TyKind::Named { def, args } => {
+        TyKind::Named(NamedTy { def, args }) => {
           let definition = model.def(def);
           if definition.collection().is_some() {
             for arg in args {
@@ -145,7 +154,7 @@ impl Reach {
             }
           }
         }
-        TyKind::Param { .. } | TyKind::Unresolved => {}
+        TyKind::Param(_) | TyKind::Unresolved => {}
       }
     }
     // The edges reversed, by their target, and the walk back from the seeds.
@@ -222,22 +231,35 @@ impl Reach {
       return *answer;
     }
     self.stack.clear();
-    self.stack.push((ty, false));
-    while let Some((next, pushed)) = self.stack.pop() {
+    self.stack.push(Visit {
+      ty,
+      expanded: false,
+    });
+    while let Some(Visit {
+      ty: next,
+      expanded: pushed,
+    }) = self.stack.pop()
+    {
       if self.asked.contains_key(&next) {
         continue;
       }
       let answer = match model.ty(next).kind() {
-        TyKind::List { element } => {
+        TyKind::List(element) => {
           if !pushed {
-            self.stack.push((next, true));
-            self.stack.push((element, false));
+            self.stack.push(Visit {
+              ty: next,
+              expanded: true,
+            });
+            self.stack.push(Visit {
+              ty: element,
+              expanded: false,
+            });
             continue;
           }
           // A list holds what its element holds, and names what its element names.
           self.asked.get(&element).copied().unwrap_or_default()
         }
-        TyKind::Named { def, args } => {
+        TyKind::Named(NamedTy { def, args }) => {
           let definition = model.def(def);
           let input = definition.kind() == DefKind::InputObject;
           let field = if input && let Some(field) = self.tainted.get(&def) {
@@ -247,10 +269,16 @@ impl Reach {
             // input object that a value of it holds.
             let held = |index: usize| -> bool { !input || positions.holds(def, dense(index)) };
             if !pushed {
-              self.stack.push((next, true));
+              self.stack.push(Visit {
+                ty: next,
+                expanded: true,
+              });
               for (index, arg) in args.iter().enumerate().rev() {
                 if held(index) {
-                  self.stack.push((*arg, false));
+                  self.stack.push(Visit {
+                    ty: *arg,
+                    expanded: false,
+                  });
                 }
               }
               continue;
@@ -270,7 +298,7 @@ impl Reach {
             named: Some(def),
           }
         }
-        TyKind::Param { .. } | TyKind::Unresolved => Answer::default(),
+        TyKind::Param(_) | TyKind::Unresolved => Answer::default(),
       };
       self.asked.insert(next, answer);
     }
@@ -283,9 +311,9 @@ fn holds_type_ref(model: &Model, ty: TyId, type_ref: DefId) -> bool {
   let mut ty = ty;
   loop {
     match model.ty(ty).kind() {
-      TyKind::List { element } => ty = element,
-      TyKind::Named { def, .. } => return def == type_ref,
-      TyKind::Param { .. } | TyKind::Unresolved => return false,
+      TyKind::List(element) => ty = element,
+      TyKind::Named(NamedTy { def, .. }) => return def == type_ref,
+      TyKind::Param(_) | TyKind::Unresolved => return false,
     }
   }
 }

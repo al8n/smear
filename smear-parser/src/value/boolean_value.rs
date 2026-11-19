@@ -35,12 +35,24 @@ impl<S: ?Sized, Span, Lang: ?Sized> IntoSpan<Span> for BooleanValue<S, Span, Lan
   }
 }
 
+/// `BooleanValue` taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BooleanValueComponents<Span> {
+  /// The span of the boolean value.
+  pub span: Span,
+  /// The boolean value.
+  pub value: bool,
+}
+
 impl<S: ?Sized, Span, Lang: ?Sized> IntoComponents for BooleanValue<S, Span, Lang> {
-  type Components = (Span, bool);
+  type Components = BooleanValueComponents<Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.value)
+    BooleanValueComponents {
+      span: self.span,
+      value: self.value,
+    }
   }
 }
 

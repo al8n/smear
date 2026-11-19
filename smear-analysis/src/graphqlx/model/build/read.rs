@@ -12,7 +12,7 @@ use crate::graphqlx::{
     dense,
   },
   model::{
-    ApplicationArgument, Collection, DefKind, Origin, Resolution, TypeBound,
+    ApplicationArgument, Collection, DefKind, Origin, Resolution, TypeBound, TypeParamRef,
     satisfy::{Keys, Steps, Wanted},
     table::{
       DefRow, ExternRow, KIND_LIST, KIND_NAMED, KIND_PARAM, MemberRow, PackageRow, TyRow, UNSET_TY,
@@ -42,8 +42,8 @@ pub(crate) enum Stored {
 pub(crate) enum Shape {
   /// A named type of this definition.
   Named(DefId),
-  /// One of `def`'s type parameters, the one at `index`.
-  Param { def: DefId, index: u32 },
+  /// One of a definition's type parameters.
+  Param(TypeParamRef),
   /// A list of this element.
   List(TyId),
   /// The one unresolved type.
@@ -56,13 +56,35 @@ pub(crate) enum Written {
   /// A definition: `core`'s `NonZero` for an alias such as `NonZeroU32`, which `non_zero_of`
   /// tells apart.
   Named(DefId),
-  /// One of `def`'s type parameters: the one at `index`, which an extension's name past its
-  /// target's parameters leaves past them.
-  Param { def: DefId, index: u32 },
+  /// One of a definition's type parameters, whose position an extension's name past its target's
+  /// parameters leaves past them.
+  Param(TypeParamRef),
   /// A list of its element.
   List(TypeExprId),
   /// A path that did not resolve.
   Unresolved,
+}
+
+/// One type parameter, as a phase after lowering reads it.
+#[derive(Clone, Copy)]
+pub(crate) struct WrittenParam {
+  /// Its name.
+  pub(crate) name: Sym,
+  /// Where its name is written.
+  pub(crate) at: Location,
+  /// The occurrence its default is, if it has one.
+  pub(crate) default: Option<TypeExprId>,
+}
+
+/// One directive application, as a phase after lowering reads it.
+#[derive(Clone, Copy)]
+pub(crate) struct Applied {
+  /// The directive it resolved to.
+  pub(crate) directive: Resolution<DefId>,
+  /// How many type arguments it writes.
+  pub(crate) written: u32,
+  /// Where its directive's path is written.
+  pub(crate) at: Location,
 }
 
 /// One type occurrence, as a phase after lowering reads it.
@@ -217,18 +239,18 @@ impl ModelBuilder {
 
   /// `def`'s type parameter at `index`: its name, where its name is written, and the occurrence
   /// its default is, if it has one.
-  pub(crate) fn type_param(
-    &self,
-    def: DefId,
-    index: u32,
-  ) -> Option<(Sym, Location, Option<TypeExprId>)> {
+  pub(crate) fn type_param(&self, def: DefId, index: u32) -> Option<WrittenParam> {
     let row = self.model.defs.get(def.get() as usize)?;
     if index >= row.type_params.len {
       return None;
     }
     let at = row.type_params.start.checked_add(index)?;
     let param = self.model.type_params.get(at as usize)?;
-    Some((param.name, param.location, param.default))
+    Some(WrittenParam {
+      name: param.name,
+      at: param.location,
+      default: param.default,
+    })
   }
 
   /// How many directive applications the model holds.
@@ -238,9 +260,13 @@ impl ModelBuilder {
 
   /// The application `id`: the directive it resolved to, how many type arguments it writes, and
   /// where its directive's path is written.
-  pub(crate) fn applied(&self, id: ApplicationId) -> Option<(Resolution<DefId>, u32, Location)> {
+  pub(crate) fn applied(&self, id: ApplicationId) -> Option<Applied> {
     let row = self.model.applications.get(id.get() as usize)?;
-    Some((row.directive, row.type_args.len, row.path.location))
+    Some(Applied {
+      directive: row.directive,
+      written: row.type_args.len,
+      at: row.path.location,
+    })
   }
 
   /// The type of the application `id`, once a phase gave it one: its directive's instantiation,
@@ -358,10 +384,10 @@ impl ModelBuilder {
     let row = self.model.type_exprs.get(id.get() as usize)?;
     let written = match row.shape {
       KIND_NAMED => Written::Named(row.def),
-      KIND_PARAM => Written::Param {
+      KIND_PARAM => Written::Param(TypeParamRef {
         def: row.def,
         index: row.index,
-      },
+      }),
       KIND_LIST => Written::List(row.element),
       _ => Written::Unresolved,
     };
@@ -415,10 +441,10 @@ impl ModelBuilder {
     let row = self.model.tys.get(ty.get() as usize)?;
     Some(match row.shape {
       KIND_NAMED => Shape::Named(row.def),
-      KIND_PARAM => Shape::Param {
+      KIND_PARAM => Shape::Param(TypeParamRef {
         def: row.def,
         index: row.index,
-      },
+      }),
       KIND_LIST => Shape::List(row.element),
       _ => Shape::Unresolved,
     })

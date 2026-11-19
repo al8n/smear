@@ -507,6 +507,10 @@ const _: () = {
     "`graphql-proto/alloc` and `smear/alloc` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/alloc` too, or stop enabling\n     `graphql-proto/alloc`."
   );
   assert!(
+    graphql_proto::__features::SERDE == cfg!(feature = "serde"),
+    "`graphql-proto/serde` and `smear/serde` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::proto::Limits`'s `Serialize` and `Deserialize` — impls,\n     which no re-export can hide — would then appear or vanish behind a consumer who never\n     asked. Enable `smear/serde` too, or stop enabling `graphql-proto/serde`."
+  );
+  assert!(
     graphql_proto::__features::STD == cfg!(feature = "std"),
     "`graphql-proto/std` and `smear/std` disagree. Something in this dependency graph enabled\n     one without the other, and `smear::…` paths gated by it would then appear or vanish\n     behind a consumer who never asked. Enable `smear/std` too, or stop enabling\n     `graphql-proto/std`."
   );

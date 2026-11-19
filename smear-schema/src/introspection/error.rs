@@ -23,10 +23,12 @@
 
 use std::{boxed::Box, format, string::String};
 
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
+
 use super::{
   super::error::SchemaErrors,
   decode::Owner,
-  json::{Mark, line_column},
+  json::{LineColumn, Mark, line_column},
 };
 use crate::diagnostic::{Code, Diagnose, Label, Location, PathSegment, Severity};
 
@@ -35,7 +37,7 @@ use crate::diagnostic::{Code, Diagnose, Label, Location, PathSegment, Severity};
 /// The set is closed by what a *translation* can go wrong at, not by the specification: everything
 /// the specification says about a schema is checked one layer down, by the same draft §3 pass the
 /// SDL door runs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum ResponseErrorKind {
   /// The bytes are not JSON, or nest deeper than the reader will go.
@@ -318,7 +320,7 @@ impl ResponseError {
     self.resume = None;
     let Pending { owner, at } = core::mem::take(&mut self.pending);
     if let Some(at) = at {
-      let (line, column) = line_column(response, at);
+      let LineColumn { line, column } = line_column(response, at);
       self.subject = format!("{} at line {line} column {column}", self.subject).into_boxed_str();
     }
     if !matches!(owner, Owner::Unowned) {
@@ -448,7 +450,9 @@ impl core::error::Error for ResponseError {}
 /// Why [`Schema::from_introspection`] refused.
 ///
 /// [`Schema::from_introspection`]: crate::Schema::from_introspection
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum IntrospectionError {
   /// The response is not a draft §4 introspection result.

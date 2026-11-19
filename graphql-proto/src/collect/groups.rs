@@ -1,3 +1,4 @@
+use std::vec::Vec;
 use tokora::SimpleSpan;
 
 use super::Group;
@@ -7,7 +8,7 @@ use super::Group;
 /// Cleared, never shrunk, like the rest of [`Scratch`](super::Scratch).
 #[derive(Default)]
 pub(super) struct Groups {
-  inner: std::vec::Vec<Group>,
+  inner: Vec<Group>,
 }
 
 impl Groups {
@@ -50,7 +51,7 @@ impl Groups {
 /// included — can reach the vector through it. That is the mechanism; see the module for why the
 /// alternative guards do not work here.
 pub(super) struct Appending<'g> {
-  inner: &'g mut std::vec::Vec<Group>,
+  inner: &'g mut Vec<Group>,
 }
 
 impl Appending<'_> {

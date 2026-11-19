@@ -33,9 +33,7 @@ use super::{
   value::default_value,
 };
 use crate::{
-  combinator::{
-    ParseCtx, TokenSpannedExt, extent_end, extent_since, extent_start, try_colon, try_dollar,
-  },
+  combinator::{ParseCtx, try_colon, try_dollar},
   graphqlx::{
     GraphQLx,
     ast::{
@@ -347,13 +345,13 @@ where
 {
   take_dollar
     .ignore_then(take_name)
-    .token_spanned()
+    .spanned_trimmed()
     .map(|Spanned { span, data }| VariableValue::new(span, data))
     .then_ignore(take_colon)
     .then(ty)
     .then(default_value)
     .then(const_directives)
-    .token_spanned()
+    .spanned_trimmed()
     .map(
       |Spanned {
          span,
@@ -378,14 +376,14 @@ executable_parser!(
   DescribedVariableDefinition<GraphqlxSlice<'inp, Src>>,
   [GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,],
   {
-    let node_start = extent_start(inp)?;
+    let node_start = inp.cursor_trimmed()?;
     let description = match try_description(inp)? {
       ParseAttempt::Accept(description) => Some(description),
       ParseAttempt::Decline => None,
     };
     let definition = variable_definition_core(inp)?;
     Ok(DescribedVariableDefinition::new(
-      extent_since(inp, node_start),
+      inp.span_since_trimmed(&node_start),
       description,
       definition,
     ))
@@ -443,14 +441,14 @@ executable_parser!(
   {
     // The **committed** end, not `inp.offset()`: `offset()` reports the end of the newest *lexed*
     // token, so a caller that left a peek in the cache would anchor this absent collection past
-    // the token that follows it. See `crate::combinator::extent`.
-    let start = extent_end(inp);
+    // the token that follows it. See tokora's `InputRef::span_since_trimmed`.
+    let start = inp.span().end();
     let parsed = (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| variable_definition(inp))
       .repeated_while::<_, U1>(decide_variable_definition_tail::<Src, Ctx>)
       .at_least(1)
       .delimited_by_parens()
       .collect_with(Vec::new())
-      .token_spanned()
+      .spanned_trimmed()
       .peek_then_try::<_, U1>(decide_variables_definition_opener::<Src, Ctx>)
       .try_parse_input(inp)?;
     Ok(match parsed {
@@ -750,7 +748,7 @@ executable_parser!(
   DescribedExecutableDefinition<GraphqlxSlice<'inp, Src>>,
   [GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,],
   {
-    let node_start = extent_start(inp)?;
+    let node_start = inp.cursor_trimmed()?;
     let description = match try_description(inp)? {
       ParseAttempt::Accept(description) => Some(description),
       ParseAttempt::Decline => None,
@@ -760,7 +758,7 @@ executable_parser!(
     }
     let definition = executable_definition_core(inp)?;
     Ok(DescribedExecutableDefinition::new(
-      extent_since(inp, node_start),
+      inp.span_since_trimmed(&node_start),
       description,
       definition,
     ))
@@ -852,7 +850,7 @@ executable_parser!(
       .map(
         |definitions: Vec<UseOrExecutableDefinition<GraphqlxSlice<'inp, Src>>>| definitions,
       )
-      .token_spanned()
+      .spanned_trimmed()
       .parse_input(inp)?;
     Ok(ExecutableDocument::new(span, definitions))
   }

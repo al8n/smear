@@ -5,31 +5,63 @@
 //! Two places, and neither is this file's own reading of the specification. The block-string cases
 //! are draft §2.9.4's worked example and graphql-js's `blockString-test` cases, which an
 //! independent Python port of `BlockStringValue()` reproduced byte for byte before any of this was
-//! written. And every literal the lexer accepts is also cooked by the `Cow` conversions in the
-//! modules beside this one — the ones `string_lexer/tests.rs` holds to `apollo-parser` — so
-//! [`the_byte_decoder_agrees_with_the_cow_conversions`] makes those two answer the same question
-//! over the same spellings, and a drift in either is caught by the other.
+//! written. And the `Cow` conversions in the modules beside this one run these same walks over a
+//! lexed literal, which `string_lexer/tests.rs` holds to `apollo-parser`, a reading that shares no
+//! code with this one. [`the_byte_decoder_agrees_with_the_cow_conversions`] then pins that the two
+//! doors into the walks, the spelling here and the lexed carrier there, reach the same value.
 
-use std::{borrow::Cow, string::String, vec::Vec};
+use core::fmt;
+use std::{borrow::Cow, format, string::String, vec::Vec};
 
 use super::{
-  super::LitStr, StringValueError, decode_string_value, string_value_len, string_value_pieces,
+  super::LitStr, StringValueError, decode_string_value, decode_string_value_to_string,
+  string_value_len, string_value_pieces, string_value_pieces_from_str,
 };
 
 /// Decodes a spelling, or panics with the refusal.
+///
+/// Through both decoding doors, which must agree: the generic one, and the `String` one, which
+/// gives a fresh `String` the value's length and no more, or the 8 bytes a `String` allocates at
+/// least when the value is shorter.
 fn decoded(spelling: &str) -> String {
   let mut out = String::new();
   decode_string_value(spelling.as_bytes(), &mut out)
     .unwrap_or_else(|error| panic!("`{spelling}` denotes a value: {error}"));
+  let mut reserved = String::new();
+  decode_string_value_to_string(spelling.as_bytes(), &mut reserved)
+    .unwrap_or_else(|error| panic!("`{spelling}` denotes a value: {error}"));
+  assert_eq!(reserved, out, "the two doors disagree on `{spelling}`");
+  if reserved.len() >= 8 {
+    assert_eq!(
+      reserved.capacity(),
+      reserved.len(),
+      "the `String` door reserved past the value of `{spelling}`"
+    );
+  } else {
+    assert!(
+      reserved.capacity() <= 8,
+      "the `String` door reserved past the value of `{spelling}`"
+    );
+  }
   out
 }
 
-/// The refusal a spelling produces.
+/// The refusal a spelling produces, the same from every door, which writes and reserves nothing.
 fn refused(spelling: &[u8]) -> StringValueError {
   let mut out = String::from("kept");
   let error = decode_string_value(spelling, &mut out).expect_err("the spelling denotes no value");
   assert_eq!(out, "kept", "a refusal appended something");
   assert_eq!(string_value_len(spelling), Err(error));
+  let mut reserved = String::from("kept");
+  assert_eq!(
+    decode_string_value_to_string(spelling, &mut reserved),
+    Err(error)
+  );
+  assert_eq!(
+    reserved, "kept",
+    "a refusal appended something to a `String`"
+  );
+  assert_eq!(reserved.capacity(), "kept".len(), "a refusal reserved room");
   error
 }
 
@@ -126,46 +158,105 @@ fn a_block_string_is_block_string_value() {
 
 /// Every literal the lexer accepts decodes the way its `Cow` conversion cooks it.
 ///
-/// The conversions read the line facts the lexer measured, and this decoder reads nothing but the
-/// spelling, so the two reach the value by different routes and agree only if both are right.
+/// The two run the same walks, so what this pins is the two doors into them. The decoder takes the
+/// delimiters off the spelling and refuses a backslash that begins no escape; the conversion takes
+/// them off a lexed carrier and copies such a backslash through. On a literal the lexer accepted
+/// the two must not differ.
 #[test]
 fn the_byte_decoder_agrees_with_the_cow_conversions() {
-  const CORPUS: &[&str] = &[
-    r#""""#,
-    r#""A""#,
-    r#""a\"b""#,
-    r#""a\\b""#,
-    r#""a\/b""#,
-    r#""\b\f\n\r\t""#,
-    // The fixed-width `\u` escapes, with `\u{5c}` spelling their backslash.
-    "\"\u{5c}u0041\"",
-    "\"\u{5c}u00e9\"",
-    "\"\u{5c}ud83d\u{5c}ude00\"",
-    "\"\u{e9}\u{1f600}\"",
-    r#""\u{1F600}""#,
-    r#""caf\u{e9} \u{1f600}""#,
-    "\"caf\u{e9}\"",
-    r#""""""""#,
-    r#""""plain""""#,
-    "\"\"\"\n    Hello,\n      World!\n\n    Yours,\n      GraphQL.\n    \"\"\"",
-    "\"\"\"\n    Hello,\n      World!\n\n    Yours,\n      GraphQL.\n\"\"\"",
-    "\"\"\"\n  a\n    \n  b\n\"\"\"",
-    "\"\"\"\n    a\n  \n    b\n\"\"\"",
-    "\"\"\"a\n\"\"\"",
-    "\"\"\"\na\n\"\"\"",
-    "\"\"\"\ncontent\n\n\"\"\"",
-    "\"\"\"a\n  b\n    c\n\"\"\"",
-    "\"\"\"\n\t\ta\n\t\t\tb\n\"\"\"",
-    "\"\"\"  keeps first line indent\n  and dedents this\n\"\"\"",
-    "\"\"\"\r\n  a\r\n  b\r\n\"\"\"",
-    "\"\"\"a\r\nb\rc\n\"\"\"",
-    "\"\"\"\n   \n  \n\"\"\"",
-    r#""""a\"""b""""#,
-    r#""""a\nb""""#,
-  ];
-
   for literal in CORPUS {
     assert_eq!(decoded(literal), cooked(literal), "`{literal}`");
+  }
+}
+
+/// Literals the lexer accepts, spelling every escape and every block-string shape: the corpus the
+/// doors into the walks are compared over.
+const CORPUS: &[&str] = &[
+  r#""""#,
+  r#""A""#,
+  r#""a\"b""#,
+  r#""a\\b""#,
+  r#""a\/b""#,
+  r#""\b\f\n\r\t""#,
+  // The fixed-width `\u` escapes, with `\u{5c}` spelling their backslash.
+  "\"\u{5c}u0041\"",
+  "\"\u{5c}u00e9\"",
+  "\"\u{5c}ud83d\u{5c}ude00\"",
+  "\"\u{e9}\u{1f600}\"",
+  r#""\u{1F600}""#,
+  r#""caf\u{e9} \u{1f600}""#,
+  "\"caf\u{e9}\"",
+  r#""""""""#,
+  r#""""plain""""#,
+  "\"\"\"\n    Hello,\n      World!\n\n    Yours,\n      GraphQL.\n    \"\"\"",
+  "\"\"\"\n    Hello,\n      World!\n\n    Yours,\n      GraphQL.\n\"\"\"",
+  "\"\"\"\n  a\n    \n  b\n\"\"\"",
+  "\"\"\"\n    a\n  \n    b\n\"\"\"",
+  "\"\"\"a\n\"\"\"",
+  "\"\"\"\na\n\"\"\"",
+  "\"\"\"\ncontent\n\n\"\"\"",
+  "\"\"\"a\n  b\n    c\n\"\"\"",
+  "\"\"\"\n\t\ta\n\t\t\tb\n\"\"\"",
+  "\"\"\"  keeps first line indent\n  and dedents this\n\"\"\"",
+  "\"\"\"\r\n  a\r\n  b\r\n\"\"\"",
+  "\"\"\"a\r\nb\rc\n\"\"\"",
+  "\"\"\"\n   \n  \n\"\"\"",
+  r#""""a\"""b""""#,
+  r#""""a\nb""""#,
+];
+
+/// Every piece a door hands out for a spelling, in order, and the door's answer.
+type Handed = (Vec<String>, Result<(), StringValueError>);
+
+/// What [`string_value_pieces`] hands out for `spelling`.
+fn through_bytes(spelling: &str) -> Handed {
+  let mut pieces = Vec::new();
+  let answer = string_value_pieces(spelling.as_bytes(), |piece| {
+    pieces.push(String::from(piece));
+    Ok(())
+  });
+  (pieces, answer)
+}
+
+/// What [`string_value_pieces_from_str`] hands out for `spelling`.
+fn through_text(spelling: &str) -> Handed {
+  let mut pieces = Vec::new();
+  let answer = string_value_pieces_from_str(spelling, |piece| {
+    pieces.push(String::from(piece));
+    Ok(())
+  });
+  (pieces, answer)
+}
+
+/// The text door hands out what the byte door does: the same pieces in the same order, and the
+/// same answer.
+///
+/// The two doors run one walk and differ only in the UTF-8 check the text door leaves to `&str`.
+/// What each does on its own is cut the delimiters off and pick the reading, and a cut one byte
+/// out, or the other reading, would hand out other pieces. The refused spellings are compared
+/// pieces and all, because a refusal of the spelling comes after the pieces before it.
+#[test]
+fn the_text_door_hands_out_what_the_byte_door_does() {
+  // No delimiters, or a backslash that begins no escape, after the pieces before it.
+  const REFUSED: &[&str] = &[
+    "",
+    "abc",
+    "\"",
+    "\"\"\"",
+    "\"\"\"abc\"",
+    r#""ab\q""#,
+    r#""a\nb\qc""#,
+  ];
+
+  for spelling in CORPUS {
+    let (pieces, answer) = through_bytes(spelling);
+    assert_eq!(answer, Ok(()), "`{spelling}` denotes a value");
+    assert_eq!(through_text(spelling), (pieces, answer), "`{spelling}`");
+  }
+  for spelling in REFUSED {
+    let (pieces, answer) = through_bytes(spelling);
+    assert!(answer.is_err(), "`{spelling}` denotes no value");
+    assert_eq!(through_text(spelling), (pieces, answer), "`{spelling}`");
   }
 }
 
@@ -177,10 +268,61 @@ fn a_piece_is_whole_text() {
     "\"\"\"\n  \u{e9}\u{e9}\n  \\\"\"\"\u{2603}\n\"\"\"",
   ] {
     let mut pieces: Vec<String> = Vec::new();
-    string_value_pieces(spelling.as_bytes(), |piece| pieces.push(piece.into()))
-      .expect("the spelling denotes a value");
+    string_value_pieces(spelling.as_bytes(), |piece| {
+      pieces.push(piece.into());
+      Ok(())
+    })
+    .expect("the spelling denotes a value");
     assert!(pieces.len() > 1, "`{spelling}` came back as one piece");
     assert_eq!(pieces.concat(), decoded(spelling));
+  }
+}
+
+/// A refused piece stops the walk: the answer is `Sink`, and no piece after the refused one is
+/// handed out.
+///
+/// Counted at the callback, because that is the only place the difference shows. A walk that went
+/// on past the refusal, into a callback that ignored the rest, would write nothing more either, and
+/// would still decode every escape left in the literal.
+#[test]
+fn a_refused_piece_stops_the_walk() {
+  // A spelling, and how many pieces its value is handed out as.
+  const CASES: &[(&str, usize)] = &[
+    // `a`, a line feed, `b`, a line feed and `c`, two of them escapes.
+    (r#""a\nb\nc""#, 5),
+    // `x`, a line feed and `y`, from a block string.
+    ("\"\"\"\n  x\n  y\n\"\"\"", 3),
+  ];
+
+  for &(spelling, pieces) in CASES {
+    let mut handed = 0;
+    string_value_pieces(spelling.as_bytes(), |_| {
+      handed += 1;
+      Ok(())
+    })
+    .expect("the spelling denotes a value");
+    assert_eq!(handed, pieces, "`{spelling}` taken whole");
+
+    for refused in 1..=pieces {
+      let mut handed = 0;
+      let walked = string_value_pieces(spelling.as_bytes(), |_| {
+        handed += 1;
+        if handed == refused {
+          Err(fmt::Error)
+        } else {
+          Ok(())
+        }
+      });
+      assert_eq!(
+        walked,
+        Err(StringValueError::Sink),
+        "`{spelling}`, refusing piece {refused}"
+      );
+      assert_eq!(
+        handed, refused,
+        "`{spelling}` handed out a piece after piece {refused} was refused"
+      );
+    }
   }
 }
 
@@ -237,11 +379,184 @@ fn a_value_that_is_not_utf8_is_refused() {
   }
 }
 
-/// `decode_string_value` appends, and reserves the decoded length rather than the spelling's.
+/// `decode_string_value` appends to what the writer already holds.
 #[test]
 fn decoding_appends_to_what_is_there() {
   let mut out = String::from("> ");
   decode_string_value(br#""a\u{1F600}b""#, &mut out).expect("a value");
   decode_string_value(b"\"\"\"\n  c\n\"\"\"", &mut out).expect("a value");
   assert_eq!(out, "> a\u{1f600}bc");
+}
+
+/// The `String` door reserves the value's length before it writes, so on a fresh `String` a long
+/// run and the escape after it land in one allocation of exactly the value's length.
+///
+/// This is the shape that doubles a `String` handed to the generic door: the run is written as one
+/// piece, the `String` grows to fit it, and the escape's one byte then outgrows that room. Through
+/// the `String` door a fresh `String` holds room for the value alone. A `String` that already has
+/// room or text is `String::reserve`'s to grow, so there the test pins the value and that the room
+/// holds it, and leaves how much more to the standard library.
+#[test]
+fn the_string_door_reserves_a_fresh_string_once_and_exactly() {
+  const RUN: usize = 4096;
+  let spelling = format!("\"{}\\n\"", "a".repeat(RUN));
+  let value = format!("{}\n", "a".repeat(RUN));
+
+  let mut fresh = String::new();
+  decode_string_value_to_string(spelling.as_bytes(), &mut fresh).expect("a value");
+  assert_eq!(fresh, value);
+  assert_eq!(fresh.capacity(), value.len(), "a fresh `String`");
+
+  let mut scratch = String::with_capacity(RUN);
+  decode_string_value_to_string(spelling.as_bytes(), &mut scratch).expect("a value");
+  assert_eq!(scratch, value);
+  assert!(
+    scratch.capacity() >= value.len(),
+    "a scratch `String` with room for the run alone"
+  );
+
+  let mut held = String::from("> ");
+  decode_string_value_to_string(spelling.as_bytes(), &mut held).expect("a value");
+  assert_eq!(held, format!("> {value}"));
+  assert!(
+    held.capacity() >= held.len(),
+    "a `String` that already held text"
+  );
+}
+
+/// One scratch `String`, cleared and decoded into once per value, is not reallocated for each value
+/// that is longer than the one before.
+///
+/// The analysis decodes every description into a single scratch `String` it reuses. An exact
+/// reservation grows that `String` to precisely each value's length, so a run of values that each
+/// run a byte longer than the last reallocates it every time; the amortized one doubles it, so the
+/// same run changes its capacity a few times.
+#[test]
+fn a_reused_string_is_not_reallocated_for_every_longer_value() {
+  const FIRST: usize = 4096;
+  const COUNT: usize = 1000;
+
+  let mut scratch = String::new();
+  let mut capacity = scratch.capacity();
+  let mut changes = 0usize;
+  for step in 0..COUNT {
+    let run = FIRST + step;
+    let spelling = format!("\"{}\\n\"", "a".repeat(run));
+    scratch.clear();
+    decode_string_value_to_string(spelling.as_bytes(), &mut scratch).expect("a value");
+    assert_eq!(scratch.len(), run + 1, "the value of step {step}");
+    assert!(scratch.ends_with("a\n"), "the value of step {step}");
+    if scratch.capacity() != capacity {
+      capacity = scratch.capacity();
+      changes += 1;
+    }
+  }
+  assert!(
+    changes <= 4,
+    "{COUNT} values of {FIRST} to {} bytes changed the scratch `String`'s capacity {changes} times",
+    FIRST + COUNT - 1
+  );
+}
+
+/// A writer with room for `room` bytes: it refuses the first write that would pass them, and
+/// counts every write it is asked for after that one.
+struct Cramped {
+  written: String,
+  room: usize,
+  refused: bool,
+  asked_after: usize,
+}
+
+impl Cramped {
+  fn new(room: usize) -> Self {
+    Self {
+      written: String::new(),
+      room,
+      refused: false,
+      asked_after: 0,
+    }
+  }
+}
+
+impl fmt::Write for Cramped {
+  fn write_str(&mut self, s: &str) -> fmt::Result {
+    if self.refused {
+      self.asked_after += 1;
+      return Err(fmt::Error);
+    }
+    if self.written.len() + s.len() > self.room {
+      self.refused = true;
+      return Err(fmt::Error);
+    }
+    self.written.push_str(s);
+    Ok(())
+  }
+}
+
+/// A writer that refuses midway holds a prefix of the value and the answer is `Sink`, and the walk
+/// stops there rather than writing on into a writer that failed.
+#[test]
+fn a_writer_that_refuses_midway_holds_a_prefix_and_answers_sink() {
+  // The spelling, the writer's room in bytes, and the prefix it holds after the refusal.
+  const CASES: &[(&str, usize, &str)] = &[
+    // An inline value's pieces are `ab`, a line feed and `cd`, and the third does not fit.
+    (r#""ab\ncd""#, 3, "ab\n"),
+    // An escape's character is a piece of its own, and this one needs four bytes.
+    (r#""ab\u{1F600}cd""#, 5, "ab"),
+    // A block value's pieces are `x`, a line feed and `y`, and the second does not fit.
+    ("\"\"\"\n  x\n  y\n\"\"\"", 1, "x"),
+    // With no room the first piece is refused, and nothing is written.
+    (r#""ab""#, 0, ""),
+  ];
+
+  for &(spelling, room, prefix) in CASES {
+    let mut out = Cramped::new(room);
+    assert_eq!(
+      decode_string_value(spelling.as_bytes(), &mut out),
+      Err(StringValueError::Sink),
+      "`{spelling}` into {room} bytes"
+    );
+    assert_eq!(out.written, prefix, "`{spelling}` into {room} bytes");
+    assert_eq!(
+      out.asked_after, 0,
+      "`{spelling}` was written on after the refusal"
+    );
+  }
+
+  // A refusal of the spelling is met before a byte is written, so a writer with no room never
+  // hears of it.
+  let mut out = Cramped::new(0);
+  assert_eq!(
+    decode_string_value(b"\"ab\\q\"", &mut out),
+    Err(StringValueError::InvalidEscape(3))
+  );
+  assert!(!out.refused, "a refused spelling was written");
+}
+
+/// A spelling that displays as its value, through the `Formatter` it is handed.
+struct Displayed(&'static [u8]);
+
+impl fmt::Display for Displayed {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    decode_string_value(self.0, f).map_err(|_| fmt::Error)
+  }
+}
+
+/// Any `fmt::Write` takes the value: a `String`, a `&mut dyn fmt::Write`, and the `Formatter` a
+/// `Display` implementation is handed.
+#[test]
+fn every_kind_of_writer_takes_the_value() {
+  const SPELLING: &[u8] = br#""a\u{1F600}\tb""#;
+  const VALUE: &str = "a\u{1f600}\tb";
+
+  let mut string = String::new();
+  decode_string_value(SPELLING, &mut string).expect("a value");
+  assert_eq!(string, VALUE);
+
+  let mut behind = String::new();
+  let dynamic: &mut dyn fmt::Write = &mut behind;
+  decode_string_value(SPELLING, dynamic).expect("a value");
+  assert_eq!(behind, VALUE);
+
+  assert_eq!(format!("{}", Displayed(SPELLING)), VALUE);
 }

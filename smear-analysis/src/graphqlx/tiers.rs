@@ -40,7 +40,7 @@ use crate::graphqlx::{
   declare::Declarations,
   id::{ApplicationId, DefId, MemberId, TyId, TypeExprId, dense},
   instantiate::binding,
-  model::{DefKind, ModelBuilder, Occurrence, Origin, Resolution, Shape},
+  model::{Applied, DefKind, ModelBuilder, Occurrence, Origin, Resolution, Shape},
   package::Tier,
 };
 
@@ -56,7 +56,10 @@ pub(crate) fn tiers(declarations: &Declarations<'_, '_>, builder: &mut ModelBuil
   let mut fixed: Vec<bool> = vec![false; nodes];
   for index in 0..builder.def_count() {
     let def = DefId::new(index);
-    let (tier, holds) = initial(builder, def, heap);
+    let InitialTier {
+      tier,
+      reached: holds,
+    } = initial(builder, def, heap);
     if let Some(slot) = tiers.get_mut(index as usize) {
       *slot = tier;
     }
@@ -73,10 +76,10 @@ pub(crate) fn tiers(declarations: &Declarations<'_, '_>, builder: &mut ModelBuil
   }
 
   // The edges, each from a node to one whose tier is at least its own, by their first node.
-  let mut pairs: Vec<(u32, u32)> = Vec::new();
+  let mut pairs: Vec<Edge> = Vec::new();
   edges(builder, defs, &mut pairs);
   let mut offsets: Vec<u32> = vec![0; nodes.saturating_add(1)];
-  for &(from, _) in &pairs {
+  for &Edge { from, .. } in &pairs {
     if let Some(count) = offsets.get_mut((from as usize).saturating_add(1)) {
       *count = count.saturating_add(1);
     }
@@ -89,7 +92,7 @@ pub(crate) fn tiers(declarations: &Declarations<'_, '_>, builder: &mut ModelBuil
   }
   let mut next: Vec<u32> = offsets.clone();
   let mut targets: Vec<u32> = vec![0; pairs.len()];
-  for &(from, to) in &pairs {
+  for &Edge { from, to } in &pairs {
     if let Some(slot) = next.get_mut(from as usize) {
       if let Some(target) = targets.get_mut(*slot as usize) {
         *target = to;
@@ -148,17 +151,40 @@ pub(crate) fn tiers(declarations: &Declarations<'_, '_>, builder: &mut ModelBuil
   }
 }
 
+/// The tier a definition starts at, and whether edges reach it: [`initial`]'s answer.
+struct InitialTier {
+  /// The tier it starts at.
+  tier: Tier,
+  /// Whether edges reach it.
+  reached: bool,
+}
+
+/// An edge of the graph of tiers: each from its first node into its second.
+#[derive(Clone, Copy)]
+struct Edge {
+  /// The node it leaves.
+  from: u32,
+  /// The node it enters.
+  to: u32,
+}
+
 /// The tier `def` starts at, and whether edges reach it: a built-in's tag; a supplied package's
 /// scalar's externs' greatest tier, `core` with none, and `core` for its enum and its directive,
 /// none of which edges reach; and for its object, interface, input object or union, `alloc` when
 /// one of its positions applies `heap`, `core`'s `@heap`, and `core` otherwise, its types' edges
 /// reaching it.
-fn initial(builder: &ModelBuilder, def: DefId, heap: Option<DefId>) -> (Tier, bool) {
+fn initial(builder: &ModelBuilder, def: DefId, heap: Option<DefId>) -> InitialTier {
   if builder.def_origin(def) != Some(Origin::User) {
-    return (builder.def_tier(def).unwrap_or(Tier::Core), false);
+    return InitialTier {
+      tier: builder.def_tier(def).unwrap_or(Tier::Core),
+      reached: false,
+    };
   }
   match builder.def_kind(def) {
-    Some(DefKind::Scalar) => (builder.def_extern_tier(def).unwrap_or(Tier::Core), false),
+    Some(DefKind::Scalar) => InitialTier {
+      tier: builder.def_extern_tier(def).unwrap_or(Tier::Core),
+      reached: false,
+    },
     Some(DefKind::Object | DefKind::Interface | DefKind::InputObject | DefKind::Union) => {
       let mut on_heap = false;
       for member in builder.def_members(def) {
@@ -168,9 +194,15 @@ fn initial(builder: &ModelBuilder, def: DefId, heap: Option<DefId>) -> (Tier, bo
         }
       }
       let tier = if on_heap { Tier::Alloc } else { Tier::Core };
-      (tier, true)
+      InitialTier {
+        tier,
+        reached: true,
+      }
     }
-    _ => (Tier::Core, false),
+    _ => InitialTier {
+      tier: Tier::Core,
+      reached: false,
+    },
   }
 }
 
@@ -185,7 +217,7 @@ fn applies(builder: &ModelBuilder, member: MemberId, heap: Option<DefId>) -> boo
     .any(|application: &ApplicationId| {
       matches!(
         builder.applied(*application),
-        Some((Resolution::Resolved(directive), _, _)) if directive == heap
+        Some(Applied { directive: Resolution::Resolved(directive), .. }) if directive == heap
       )
     })
 }
@@ -195,18 +227,27 @@ fn applies(builder: &ModelBuilder, member: MemberId, heap: Option<DefId>) -> boo
 /// interface, an input object or a union a supplied package defines from the type of each of its
 /// positions, a field's arguments among them, and of each of its union members. A definition `d`
 /// is the node `d`, and a type `t` the node `defs + t`.
-fn edges(builder: &ModelBuilder, defs: usize, pairs: &mut Vec<(u32, u32)>) {
+fn edges(builder: &ModelBuilder, defs: usize, pairs: &mut Vec<Edge>) {
   let node = |ty: TyId| -> u32 { dense(defs.saturating_add(ty.get() as usize)) };
   for index in 0..builder.ty_count() {
     let ty = TyId::new(index);
     match builder.ty_shape(ty) {
       Some(Shape::Named(def)) => {
-        pairs.push((def.get(), node(ty)));
+        pairs.push(Edge {
+          from: def.get(),
+          to: node(ty),
+        });
         for &argument in builder.ty_args(ty) {
-          pairs.push((node(argument), node(ty)));
+          pairs.push(Edge {
+            from: node(argument),
+            to: node(ty),
+          });
         }
       }
-      Some(Shape::List(element)) => pairs.push((node(element), node(ty))),
+      Some(Shape::List(element)) => pairs.push(Edge {
+        from: node(element),
+        to: node(ty),
+      }),
       _ => {}
     }
   }
@@ -225,11 +266,17 @@ fn edges(builder: &ModelBuilder, defs: usize, pairs: &mut Vec<(u32, u32)>) {
       Some(DefKind::Object | DefKind::Interface | DefKind::InputObject) => {
         for member in builder.def_members(def) {
           if let Some(ty) = builder.member_ty(member).and_then(typed) {
-            pairs.push((node(ty), index));
+            pairs.push(Edge {
+              from: node(ty),
+              to: index,
+            });
           }
           for argument in builder.member_arguments(member) {
             if let Some(ty) = builder.member_ty(argument).and_then(typed) {
-              pairs.push((node(ty), index));
+              pairs.push(Edge {
+                from: node(ty),
+                to: index,
+              });
             }
           }
         }
@@ -237,7 +284,10 @@ fn edges(builder: &ModelBuilder, defs: usize, pairs: &mut Vec<(u32, u32)>) {
       Some(DefKind::Union) => {
         for &member in builder.def_union_members(def) {
           if let Some(ty) = typed(member) {
-            pairs.push((node(ty), index));
+            pairs.push(Edge {
+              from: node(ty),
+              to: index,
+            });
           }
         }
       }

@@ -38,12 +38,24 @@ impl<S, Span, Lang: ?Sized> IntoSpan<Span> for NullValue<S, Span, Lang> {
   }
 }
 
+/// `NullValue` taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct NullValueComponents<S, Span> {
+  /// The span covering the null literal.
+  pub span: Span,
+  /// The null literal's source spelling.
+  pub source: S,
+}
+
 impl<S, Span, Lang: ?Sized> IntoComponents for NullValue<S, Span, Lang> {
-  type Components = (Span, S);
+  type Components = NullValueComponents<S, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.source)
+    NullValueComponents {
+      span: self.span,
+      source: self.source,
+    }
   }
 }
 

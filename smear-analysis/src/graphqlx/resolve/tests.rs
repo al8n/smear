@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, format, string::String, vec::Vec};
 
 use tokora::diagnostic::Location;
 
-use super::{Position, Request, Resolved, Root, Scopes, Segment, Wanted, params};
+use super::{ParamName, Position, Request, Resolved, Root, Scopes, Segment, Wanted, params};
 use crate::graphqlx::{
   declare::ModuleEntry,
   diagnostic::Reporter,
@@ -55,9 +55,18 @@ fn a_parameter_table_is_sorted_by_spelling_and_keeps_the_first_index_of_each() {
   assert_eq!(
     params(&written),
     [
-      (b"A".as_slice(), 3),
-      (b"T".as_slice(), 0),
-      (b"U".as_slice(), 1)
+      ParamName {
+        spelling: b"A".as_slice(),
+        index: 3
+      },
+      ParamName {
+        spelling: b"T".as_slice(),
+        index: 0
+      },
+      ParamName {
+        spelling: b"U".as_slice(),
+        index: 1
+      }
     ]
   );
   assert!(params(&[]).is_empty());

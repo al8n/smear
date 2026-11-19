@@ -32,21 +32,7 @@ pub enum HexExponentHint {
 }
 
 /// The hint about what is expected for the next character
-#[derive(
-  Copy,
-  Clone,
-  Debug,
-  Display,
-  Eq,
-  PartialEq,
-  Ord,
-  PartialOrd,
-  Hash,
-  From,
-  IsVariant,
-  Unwrap,
-  TryUnwrap,
-)]
+#[derive(Copy, Clone, Debug, Display, Eq, PartialEq, Ord, PartialOrd, Hash, From, IsVariant)]
 #[non_exhaustive]
 pub enum DecimalHint {
   /// Expect the next character to be digit.
@@ -56,21 +42,7 @@ pub enum DecimalHint {
 
 /// The hint about what is expected for the next character
 /// in a hexadecimal literal.
-#[derive(
-  Copy,
-  Clone,
-  Debug,
-  Display,
-  Eq,
-  PartialEq,
-  Ord,
-  PartialOrd,
-  Hash,
-  From,
-  IsVariant,
-  Unwrap,
-  TryUnwrap,
-)]
+#[derive(Copy, Clone, Debug, Display, Eq, PartialEq, Ord, PartialOrd, Hash, From, IsVariant)]
 #[non_exhaustive]
 pub enum HexHint {
   /// Expect the next character to be a hex digit.
@@ -80,21 +52,7 @@ pub enum HexHint {
 
 /// The hint about what is expected for the next character
 /// in a octal literal.
-#[derive(
-  Copy,
-  Clone,
-  Debug,
-  Display,
-  Eq,
-  PartialEq,
-  Ord,
-  PartialOrd,
-  Hash,
-  From,
-  IsVariant,
-  Unwrap,
-  TryUnwrap,
-)]
+#[derive(Copy, Clone, Debug, Display, Eq, PartialEq, Ord, PartialOrd, Hash, From, IsVariant)]
 #[non_exhaustive]
 pub enum OctalHint {
   /// Expect the next character to be an octal digit.
@@ -104,21 +62,7 @@ pub enum OctalHint {
 
 /// The hint about what is expected for the next character
 /// in a binary literal.
-#[derive(
-  Copy,
-  Clone,
-  Debug,
-  Display,
-  Eq,
-  PartialEq,
-  Ord,
-  PartialOrd,
-  Hash,
-  From,
-  IsVariant,
-  Unwrap,
-  TryUnwrap,
-)]
+#[derive(Copy, Clone, Debug, Display, Eq, PartialEq, Ord, PartialOrd, Hash, From, IsVariant)]
 #[non_exhaustive]
 pub enum BinaryHint {
   /// Expect the next character to be a binary digit.
@@ -143,16 +87,22 @@ pub enum BinaryHint {
   Unwrap,
   TryUnwrap,
 )]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum FloatHint {
   /// Expect the next character to be fractional digits.
   #[display("fractional digits")]
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Fractional,
   /// Expect the next character to be an exponent part.
   #[display("{_0}")]
   Exponent(ExponentHint),
   /// Expect the next character to be a digit.
   #[display("digit")]
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Digit,
 }
 
@@ -172,16 +122,22 @@ pub enum FloatHint {
   Unwrap,
   TryUnwrap,
 )]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum HexFloatHint {
   /// Expect the next character to be fractional digits.
   #[display("fractional digits")]
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Fractional,
   /// Expect the next character to be a hex exponent part.
   #[display("{_0}")]
   Exponent(HexExponentHint),
   /// Expect the next character to be a hex digit.
   #[display("digit")]
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Digit,
 }
 
@@ -198,7 +154,7 @@ pub enum UnpairedSurrogateHint {
 }
 
 /// An unterminated string hint.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Display, IsVariant)]
 #[non_exhaustive]
 pub enum LitStrDelimiterHint {
   /// A double quote character.
@@ -214,7 +170,7 @@ pub enum LitStrDelimiterHint {
 }
 
 /// A hint about what line terminator was found.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Display, IsVariant)]
 #[non_exhaustive]
 pub enum LineTerminatorHint {
   /// A line feed character.
@@ -229,7 +185,7 @@ pub enum LineTerminatorHint {
 }
 
 /// A hint about what line terminator was found.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Display)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash, Display, IsVariant)]
 #[non_exhaustive]
 pub enum WhiteSpaceHint {
   /// A space character.

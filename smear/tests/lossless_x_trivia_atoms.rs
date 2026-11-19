@@ -17,8 +17,8 @@
 #![cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 
 use smear::parser::graphqlx::lossless::trivia::test_support::{
-  self as atoms, Keyword, Kind, eat_if_brace_of, expect_brace_of, peek_keyword_of, peek_kind_of,
-  peek_second_kind_of, try_eat_bang_of,
+  self as atoms, Driven, Keyword, Kind, eat_if_brace_of, expect_brace_of, peek_keyword_of,
+  peek_kind_of, peek_second_kind_of, try_eat_bang_of,
 };
 
 /// Every case pairs a compact input with a trivia-laden one that must behave identically.
@@ -37,7 +37,10 @@ fn peek_kind_sees_past_leading_trivia() {
 
 #[test]
 fn expect_accepts_a_token_behind_trivia_and_commits_the_trivia() {
-  let (ok, text) = expect_brace_of("  # hi\n{");
+  let Driven {
+    result: ok,
+    committed: text,
+  } = expect_brace_of("  # hi\n{");
   assert!(ok, "expect must match the brace behind trivia");
   assert_eq!(
     text, "  # hi\n{",
@@ -47,7 +50,10 @@ fn expect_accepts_a_token_behind_trivia_and_commits_the_trivia() {
 
 #[test]
 fn eat_if_declines_without_consuming_trivia_twice() {
-  let (ate, text) = eat_if_brace_of("  a");
+  let Driven {
+    result: ate,
+    committed: text,
+  } = eat_if_brace_of("  a");
   assert!(!ate, "eat_if must decline when the token does not match");
   assert_eq!(
     text, "  ",
@@ -78,7 +84,10 @@ fn is_trivia_covers_every_graphqlx_ignored_token_and_commits_it() {
     "# a comment\n", // Comment, and the terminator that closes it
   ] {
     let src = format!("{lead}{{");
-    let (ok, text) = expect_brace_of(&src);
+    let Driven {
+      result: ok,
+      committed: text,
+    } = expect_brace_of(&src);
     assert!(ok, "{lead:?} must be crossed as trivia");
     assert_eq!(text, src, "{lead:?} must be committed, byte for byte");
   }
@@ -103,7 +112,7 @@ fn is_trivia_covers_nothing_significant() {
       Some(Kind::LBrace),
       "{lead:?} is significant and must stop the skip"
     );
-    let (ok, _) = expect_brace_of(&src);
+    let Driven { result: ok, .. } = expect_brace_of(&src);
     assert!(!ok, "{lead:?} is significant and must make expect fail");
   }
 }
@@ -162,7 +171,10 @@ fn peek_kind_reports_none_at_end_of_input() {
 /// `eat_if` on a match consumes exactly the token and the trivia before it.
 #[test]
 fn eat_if_accepts_a_token_behind_trivia() {
-  let (ate, text) = eat_if_brace_of(" ,{ ");
+  let Driven {
+    result: ate,
+    committed: text,
+  } = eat_if_brace_of(" ,{ ");
   assert!(ate, "eat_if must accept the brace behind trivia");
   assert_eq!(
     text, " ,{",
@@ -220,18 +232,27 @@ fn peek_as_reads_the_keyword_spelling_behind_trivia() {
 /// tree once, attached to the enclosing node rather than to the node that was never opened.
 #[test]
 fn try_eat_accepts_or_declines_and_commits_the_trivia_either_way() {
-  let (accepted, text) = try_eat_bang_of(" \t!");
+  let Driven {
+    result: accepted,
+    committed: text,
+  } = try_eat_bang_of(" \t!");
   assert!(accepted, "try_eat must accept the bang behind trivia");
   assert_eq!(text, " \t!", "the trivia and the token are both committed");
 
-  let (accepted, text) = try_eat_bang_of(" \ta");
+  let Driven {
+    result: accepted,
+    committed: text,
+  } = try_eat_bang_of(" \ta");
   assert!(!accepted, "try_eat must decline on a mismatch");
   assert_eq!(
     text, " \t",
     "a declined try_eat still commits the trivia it crossed, exactly once"
   );
 
-  let (accepted, text) = try_eat_bang_of("  ");
+  let Driven {
+    result: accepted,
+    committed: text,
+  } = try_eat_bang_of("  ");
   assert!(!accepted, "try_eat must decline at end of input");
   assert_eq!(text, "  ", "and still commit the trivia it crossed");
 }
@@ -252,7 +273,7 @@ fn try_eat_accepts_or_declines_and_commits_the_trivia_either_way() {
 #[test]
 fn peek_second_kind_sees_the_token_after_the_head_and_consumes_nothing() {
   // No trivia between the two.
-  assert_eq!(peek_second_kind_of("A:").0, Some(Kind::Colon));
+  assert_eq!(peek_second_kind_of("A:").result, Some(Kind::Colon));
   // Trivia between the two, in every shape the ignored set admits. A fixed two-token raw window
   // answers with the trivia kind here; this atom must not.
   for src in [
@@ -264,36 +285,39 @@ fn peek_second_kind_sees_the_token_after_the_head_and_consumes_nothing() {
     "A ,\n # c\n\t,:",
   ] {
     assert_eq!(
-      peek_second_kind_of(src).0,
+      peek_second_kind_of(src).result,
       Some(Kind::Colon),
       "peek_second_kind must cross the trivia between the two tokens: {src:?}"
     );
   }
   // The discriminating pairs the `where` continuation actually asks about.
-  assert_eq!(peek_second_kind_of("A::B").0, Some(Kind::PathSeparator));
-  assert_eq!(peek_second_kind_of("A<T>").0, Some(Kind::LAngle));
   assert_eq!(
-    peek_second_kind_of("type X").0,
+    peek_second_kind_of("A::B").result,
+    Some(Kind::PathSeparator)
+  );
+  assert_eq!(peek_second_kind_of("A<T>").result, Some(Kind::LAngle));
+  assert_eq!(
+    peek_second_kind_of("type X").result,
     Some(Kind::Identifier),
     "the decline case: a definition keyword followed by its name, not by a colon"
   );
 
   // Nothing survives the look-ahead. The head's LEADING trivia is committed (every atom does
   // that); the head itself and everything after it are rolled back.
-  assert_eq!(peek_second_kind_of("  A:B").1, "  ");
-  assert_eq!(peek_second_kind_of("A:B").1, "");
+  assert_eq!(peek_second_kind_of("  A:B").committed, "  ");
+  assert_eq!(peek_second_kind_of("A:B").committed, "");
   assert_eq!(peek_kind_of("  A:B"), Some(Kind::Identifier));
 
   // Ends of input, at both distances.
-  assert_eq!(peek_second_kind_of("A").0, None, "no second token");
+  assert_eq!(peek_second_kind_of("A").result, None, "no second token");
   assert_eq!(
-    peek_second_kind_of("A  # c\n").0,
+    peek_second_kind_of("A  # c\n").result,
     None,
     "only trivia after the head"
   );
-  assert_eq!(peek_second_kind_of("").0, None, "no head at all");
+  assert_eq!(peek_second_kind_of("").result, None, "no head at all");
   assert_eq!(
-    peek_second_kind_of("   ").1,
+    peek_second_kind_of("   ").committed,
     "   ",
     "and its trivia is still committed"
   );
@@ -303,11 +327,11 @@ fn peek_second_kind_sees_the_token_after_the_head_and_consumes_nothing() {
 fn the_driver_module_exposes_all_six_atoms() {
   let six: [fn(&'static str) -> bool; 6] = [
     |s| atoms::peek_kind_of(s).is_some(),
-    |s| atoms::peek_second_kind_of(s).0.is_some(),
+    |s| atoms::peek_second_kind_of(s).result.is_some(),
     |s| atoms::peek_keyword_of(s).is_some(),
-    |s| atoms::expect_brace_of(s).0,
-    |s| atoms::eat_if_brace_of(s).0,
-    |s| atoms::try_eat_bang_of(s).0,
+    |s| atoms::expect_brace_of(s).result,
+    |s| atoms::eat_if_brace_of(s).result,
+    |s| atoms::try_eat_bang_of(s).result,
   ];
   // `{}` matches the two brace drivers and the second-kind one, and not the bang or keyword ones.
   let answers: Vec<bool> = six.iter().map(|driver| driver("{}")).collect();

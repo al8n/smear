@@ -10,9 +10,25 @@ use crate::{
   utf8::IllFormedUtf8,
 };
 
+#[cfg(any(feature = "graphql", feature = "graphqlx"))]
+use super::super::SkipRefusal;
 use super::{
   super::SealedWrapper, BlockLineExtras, LitBlockStr, LitComplexBlockStr, LitPlainBlockStr,
 };
+
+/// What [`find_block_close_simd`] found in a block-string body: how far it read, where the body
+/// closes and how many `\"""` escapes came before.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BlockScan {
+  /// How many bytes of the body the scan consumed. For a body with no close it is where the
+  /// unterminated literal ends; nothing reads it when the body closes.
+  read: usize,
+  /// The byte offset, within the body, of the start of the closing `"""`, or `None` if the body
+  /// has none.
+  close: Option<usize>,
+  /// How many `\"""` escape sequences the scan passed.
+  escaped: usize,
+}
 
 /// `&[u8]`-source variant of [`super::str::find_block_close_simd`]. The
 /// algorithm is byte-for-byte identical: finding the close works on raw bytes,
@@ -22,18 +38,28 @@ use super::{
 /// [`IllFormedUtf8`] on both paths. See the str-side function for the full spec
 /// citation and edge-case discussion.
 #[inline]
-fn find_block_close_simd(body: &[u8]) -> (usize, Option<usize>, usize) {
+fn find_block_close_simd(body: &[u8]) -> BlockScan {
   let mut pos = 0usize;
   let mut escaped = 0usize;
 
   while pos < body.len() {
     let q_off = match memspan::skip::skip_until(&body[pos..], b'"') {
       Some(n) => pos + n,
-      None => return (body.len(), None, escaped),
+      None => {
+        return BlockScan {
+          read: body.len(),
+          close: None,
+          escaped,
+        };
+      }
     };
 
     if q_off + 3 > body.len() {
-      return (body.len(), None, escaped);
+      return BlockScan {
+        read: body.len(),
+        close: None,
+        escaped,
+      };
     }
 
     if body[q_off + 1] != b'"' || body[q_off + 2] != b'"' {
@@ -47,10 +73,18 @@ fn find_block_close_simd(body: &[u8]) -> (usize, Option<usize>, usize) {
       continue;
     }
 
-    return (pos, Some(q_off), escaped);
+    return BlockScan {
+      read: pos,
+      close: Some(q_off),
+      escaped,
+    };
   }
 
-  (pos, None, escaped)
+  BlockScan {
+    read: pos,
+    close: None,
+    escaped,
+  }
 }
 
 #[derive(Logos, Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
@@ -117,7 +151,11 @@ where
   let remainder_bytes = remainder.as_ref();
 
   // SIMD scan, identical shape to the str-side variant.
-  let (_, close_off, num_escaped_triple_quotes) = find_block_close_simd(remainder_bytes);
+  let BlockScan {
+    close: close_off,
+    escaped: num_escaped_triple_quotes,
+    ..
+  } = find_block_close_simd(remainder_bytes);
 
   match close_off {
     Some(start) => {
@@ -200,9 +238,13 @@ where
 #[inline]
 pub(crate) fn skip_block_str_from_bytes<const CHECK_UTF8: bool>(
   src: &[u8],
-) -> Result<LitBlockStr<usize>, (usize, StringErrors<u8>)> {
+) -> Result<LitBlockStr<usize>, SkipRefusal> {
   // SIMD scan, identical shape to the str-side variant.
-  let (read, close_off, num_escaped_triple_quotes) = find_block_close_simd(src);
+  let BlockScan {
+    read,
+    close: close_off,
+    escaped: num_escaped_triple_quotes,
+  } = find_block_close_simd(src);
 
   match close_off {
     Some(start) => {
@@ -210,7 +252,10 @@ pub(crate) fn skip_block_str_from_bytes<const CHECK_UTF8: bool>(
 
       // The payload is dead, so nothing is built for the refusal.
       if CHECK_UTF8 && IllFormedUtf8::new(content).next().is_some() {
-        return Err((start + 3, StringErrors::default()));
+        return Err(SkipRefusal {
+          consumed: start + 3,
+          errors: StringErrors::default(),
+        });
       }
 
       let extras = line_facts(content);
@@ -244,10 +289,10 @@ pub(crate) fn skip_block_str_from_bytes<const CHECK_UTF8: bool>(
         .into(),
       )
     }
-    None => Err((
-      read,
-      LexemeErrors::new().into_unterminated(StringError::unterminated_block_string()),
-    )),
+    None => Err(SkipRefusal {
+      consumed: read,
+      errors: LexemeErrors::new().into_unterminated(StringError::unterminated_block_string()),
+    }),
   }
 }
 

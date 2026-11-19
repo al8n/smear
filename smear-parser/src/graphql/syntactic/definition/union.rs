@@ -1,7 +1,7 @@
 //! SDL union type-definition parsing.
 
 use super::*;
-use crate::combinator::{extent_end, pipe, try_pipe};
+use crate::combinator::{pipe, try_pipe};
 
 fn take_equal<'inp, Src, Ctx>(
   inp: &mut GraphqlInput<'inp, '_, Src, Ctx>,
@@ -97,7 +97,7 @@ where
     ParseAttempt::Decline => None,
   };
   Ok(UnionTypeDefinition::new(
-    SimpleSpan::new(start, extent_end(inp)),
+    SimpleSpan::new(start, inp.span().end()),
     name,
     directives,
     member_types,

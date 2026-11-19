@@ -4,13 +4,15 @@ use tokora::{
 };
 
 use super::{
-  Constrained, DefinitionName, DefinitionTypeGenerics, DefinitionTypeParam, EnumTypeExtension,
-  EnumTypeExtensionData, ExecutableDefinitionHeader, ExecutableDefinitionName,
-  ExecutableDefinitionTypeGenerics, ExtensionName, ExtensionTypeGenerics, ExtensionTypeParam,
+  Constrained, ConstrainedComponents, DefinitionName, DefinitionTypeGenerics,
+  DefinitionTypeGenericsComponents, DefinitionTypeParam, EnumTypeExtension, EnumTypeExtensionData,
+  ExecutableDefinitionHeader, ExecutableDefinitionName, ExecutableDefinitionTypeGenerics,
+  ExtensionMembers, ExtensionName, ExtensionTypeGenerics, ExtensionTypeParam, ExtensionValues,
   InputObjectTypeDefinition, InputObjectTypeExtensionData, ScalarTypeDefinition,
-  ScalarTypeExtension, ScalarTypeExtensionData, TypePath, UnionTypeExtensionData, WhereClause,
-  WherePredicate,
+  ScalarTypeDefinitionComponents, ScalarTypeExtension, ScalarTypeExtensionData, TypePath,
+  UnionTypeExtensionData, WhereClause, WherePredicate,
 };
+use crate::type_system::{ExtensionDirectives, ExtensionFields};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct CustomSpan(u8);
@@ -27,7 +29,13 @@ fn generic_declarations_preserve_custom_spans_and_components() {
   assert_eq!(generics.params(), std::slice::from_ref(&parameter));
   assert_eq!(generics.params(), std::slice::from_ref(&parameter));
   assert_eq!(generics.as_span(), &CustomSpan(2));
-  assert_eq!(generics.into_components(), (CustomSpan(2), [parameter]));
+  assert_eq!(
+    generics.into_components(),
+    DefinitionTypeGenericsComponents {
+      span: CustomSpan(2),
+      params: [parameter]
+    }
+  );
 
   let extension_parameter = ExtensionTypeParam::new(CustomSpan(3), "T");
   let extension_generics = ExtensionTypeGenerics::new(CustomSpan(4), [extension_parameter.clone()]);
@@ -75,11 +83,11 @@ fn type_paths_where_clauses_and_constraints_are_composable() {
   assert_eq!(constrained.target(), &"{ value }");
   assert_eq!(
     constrained.into_components(),
-    (
-      CustomSpan(6),
-      Some(WhereClause::new(CustomSpan(5), [predicate])),
-      "{ value }"
-    )
+    ConstrainedComponents {
+      span: CustomSpan(6),
+      where_clause: Some(WhereClause::new(CustomSpan(5), [predicate])),
+      target: "{ value }"
+    }
   );
 }
 
@@ -97,13 +105,13 @@ fn the_four_kinds_carry_their_interfaces_beside_their_directives() {
   assert_eq!(scalar.where_clause(), Some(&"where T: Key"));
   assert_eq!(
     scalar.into_components(),
-    (
-      CustomSpan(1),
-      "Url",
-      Some("Node"),
-      None,
-      Some("where T: Key")
-    )
+    ScalarTypeDefinitionComponents {
+      span: CustomSpan(1),
+      name: "Url",
+      implements: Some("Node"),
+      directives: None,
+      where_clause: Some("where T: Key")
+    }
   );
 
   let input = InputObjectTypeDefinition::new(
@@ -124,10 +132,7 @@ fn the_four_kinds_carry_their_interfaces_beside_their_directives() {
   let extension = ScalarTypeExtension::new(
     CustomSpan(3),
     "Url",
-    ScalarTypeExtensionData::Directives {
-      implements: Some("Node"),
-      directives: "@d",
-    },
+    ScalarTypeExtensionData::Directives(ExtensionDirectives::new(Some("Node"), "@d")),
   );
   assert_eq!(extension.implements(), Some(&"Node"));
   assert_eq!(extension.directives(), Some(&"@d"));
@@ -135,21 +140,64 @@ fn the_four_kinds_carry_their_interfaces_beside_their_directives() {
   let values = EnumTypeExtension::new(
     CustomSpan(4),
     "Colour",
-    EnumTypeExtensionData::<&str, &str, &str>::Values {
-      implements: None,
-      directives: Some("@d"),
-      enum_values_definition: "{ RED }",
-    },
+    EnumTypeExtensionData::<&str, &str, &str>::Values(ExtensionValues::new(
+      None,
+      Some("@d"),
+      "{ RED }",
+    )),
   );
   assert!(values.implements().is_none());
   assert_eq!(values.enum_values_definition(), Some(&"{ RED }"));
 
   let members = UnionTypeExtensionData::<&str, &str, &str>::Implements("Node");
   assert!(members.member_types().is_none());
-  let fields = InputObjectTypeExtensionData::<&str, &str, &str>::Directives {
-    implements: Some("Node"),
-    directives: "@d",
-  };
+  let fields = InputObjectTypeExtensionData::<&str, &str, &str>::Directives(
+    ExtensionDirectives::new(Some("Node"), "@d"),
+  );
   assert!(fields.fields_definition().is_none());
   assert_eq!(fields.implements(), Some(&"Node"));
+}
+
+#[test]
+fn an_extension_payload_is_built_read_and_edited_through_its_accessors() {
+  let directives = ExtensionDirectives::new(Some("Node"), "@d");
+  assert_eq!(directives.implements(), Some(&"Node"));
+  assert_eq!(directives.directives(), &"@d");
+  let mut edited = directives.with_implements(None).with_directives("@e");
+  assert_eq!(edited.implements(), None);
+  assert_eq!(edited.directives(), &"@e");
+  edited.set_implements(Some("Edge")).set_directives("@f");
+  assert_eq!(edited, ExtensionDirectives::new(Some("Edge"), "@f"));
+
+  let fields = ExtensionFields::<&str, &str, &str>::new(None, Some("@d"), "{ id }");
+  assert_eq!(fields.directives(), Some(&"@d"));
+  assert_eq!(fields.fields_definition(), &"{ id }");
+  assert_eq!(
+    fields
+      .with_fields_definition("{ name }")
+      .fields_definition(),
+    &"{ name }"
+  );
+
+  let values = ExtensionValues::<&str, &str, &str>::new(Some("Node"), None, "{ RED }");
+  assert_eq!(values.enum_values_definition(), &"{ RED }");
+  let members = ExtensionMembers::<&str, &str, &str>::new(None, None, "= A | B");
+  assert_eq!(members.member_types(), &"= A | B");
+}
+
+#[test]
+fn an_extension_data_enum_unwraps_its_payload_and_reports_its_variant() {
+  let data = EnumTypeExtensionData::<&str, &str, &str>::Values(ExtensionValues::new(
+    None,
+    Some("@d"),
+    "{ RED }",
+  ));
+  assert!(data.is_values());
+  assert!(!data.is_directives());
+  assert_eq!(
+    data.unwrap_values_ref().enum_values_definition(),
+    &"{ RED }"
+  );
+  assert!(data.try_unwrap_directives_ref().is_err());
+  assert_eq!(data.unwrap_values().directives(), Some(&"@d"));
 }

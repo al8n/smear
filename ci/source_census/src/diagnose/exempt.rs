@@ -354,7 +354,7 @@ pub const EXEMPTIONS: &[Exemption] = &[
     element: None,
     issue: Some(126),
     reason: "How the draft §7.2.1 writer refuses: a sink that would not take the bytes, a `Float` \
-             that is not finite, a `\\u` escape naming a surrogate, a malformed escape, and an \
+             that is not finite, a string literal with a malformed escape or no delimiters, and an \
              allocator that would not give a §7.1.2 response path room. Phase D \
              of al8n/smear#126 is *the §7 writer together with proto's adoption*, so this is that \
              phase's third row rather than a new debt beside it — and it has to be decided with \
@@ -567,11 +567,14 @@ pub const EXEMPTIONS: &[Exemption] = &[
     kind: Kind::Verdict,
     element: None,
     issue: None,
-    reason: "Why `decode_string_value` and its two siblings refused a `StringValue` spelling a \
-             caller handed them. A decoder outcome rather than a parse position: none of the three \
-             refusals is reachable from a spelling the parsers lexed — the lexer refuses each \
-             first, as a `LexerError` that answers the contract — and the one offset it carries \
-             is into the caller's spelling, not into any document, which is `MintError`'s class.",
+    reason: "Why `decode_string_value` and its four siblings refused a `StringValue` spelling a \
+             caller handed them, or why the writer a caller handed `decode_string_value`, or the \
+             callback it handed a piece walk, stopped taking the value. A decoder \
+             outcome rather than a parse position: none of the three refusals of a spelling is \
+             reachable from a spelling the parsers lexed — the lexer refuses each first, as a \
+             `LexerError` that answers the contract — `Sink` is the caller's own writer or \
+             callback failing, and the one offset it carries is into the caller's spelling, not \
+             into any document, which is `MintError`'s class.",
   },
   // ── Phase E's four refusals about a value the caller built ──────────────────────────────────
   Exemption {

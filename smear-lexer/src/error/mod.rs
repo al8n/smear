@@ -1,3 +1,5 @@
+use derive_more::IsVariant;
+
 pub use kind::SyntaxErrorKind;
 pub use string::*;
 pub use traits::*;
@@ -76,7 +78,7 @@ impl<T> LexemeErrors<T> {
 /// No `#[non_exhaustive]`. The conversion succeeds exactly when the list holds one error, so a
 /// failure is a list with none or with more than one: these two variants are every failing
 /// length, not a vocabulary that grows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error, IsVariant)]
 pub enum LengthError {
   /// The error list contains more than one error.
   #[error("too many errors")]

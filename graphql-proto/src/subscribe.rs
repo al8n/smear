@@ -179,6 +179,8 @@
 
 use core::fmt;
 
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
+
 /// Draft §7.1.2's *response stream*: the third of draft §7.1's three result kinds, as a state.
 ///
 /// `subscribe.rs`'s module header has why this is a state rather than a container, what the driver
@@ -296,7 +298,7 @@ use core::fmt;
 /// assert_eq!(executor.response_stream(), Some(ResponseStream::Completed));
 /// assert!(executor.handle_source_event(&mut space, Json::Obj).is_err());
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 pub enum ResponseStream {
   /// Draft §6.2.3.1 `CreateSourceEventStream` has chosen the source field and coerced its
   /// arguments, and the driver has not yet reported a source stream.
@@ -388,7 +390,9 @@ impl fmt::Display for ResponseStream {
 /// [`NotStreaming`](SourceEventError::NotStreaming) says *no further event will be accepted* —
 /// [`response_stream`](crate::Executor::response_stream) says where the stream is, so the driver
 /// can tell "§6.2.3.1 is not finished" from "the stream has ended" without guessing.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum SourceEventError<V> {
   /// No further source event will be accepted.

@@ -5,7 +5,7 @@
 //! writes its own with, and walk them as a consumer walks an analysis. It is not API, and it
 //! changes with the builder.
 
-pub use super::model::ModelBuilder;
+pub use super::model::{Counts, ModelBuilder};
 
 use std::{
   format,
@@ -21,7 +21,7 @@ use super::{
   limits::Limits,
   model::Model,
   package::Package,
-  resolve::Resolved,
+  resolve::{NonZeroAlias, Resolved},
   rules::Rules,
   text::SourceText,
 };
@@ -49,10 +49,10 @@ pub fn conclude<V: Visitor + ?Sized>(model: Model, limits: &Limits, rules: &mut 
 /// test reads.
 pub const RULES: &[(&str, &[Code])] = Rules::TABLE;
 
-/// How many members, type occurrences, values and applications `model` holds, in that order: the
-/// lengths of the four tables whose ids the public model answers no whole range of, for the tests
-/// that check a walk reaches every row of each.
-pub fn counts(model: &Model) -> (u32, u32, u32, u32) {
+/// How many members, type occurrences, values and applications `model` holds: the lengths of the
+/// four tables whose ids the public model answers no whole range of, for the tests that check a
+/// walk reaches every row of each.
+pub fn counts(model: &Model) -> Counts {
   model.counts()
 }
 
@@ -86,10 +86,10 @@ pub fn resolve<S: SourceText>(
   let (model, answer) = resolve_door(root, dependencies, module, &spelled, path)?;
   match answer {
     Resolved::Def(def) => Some(model.canonical_name(def).to_string()),
-    Resolved::NonZero {
+    Resolved::NonZero(NonZeroAlias {
       non_zero,
       primitive,
-    } => Some(format!(
+    }) => Some(format!(
       "{}<{}>",
       model.canonical_name(non_zero),
       model.canonical_name(primitive)

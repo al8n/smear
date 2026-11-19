@@ -71,6 +71,7 @@ checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
 name = "graphql-proto"
 version = "0.0.0"
 dependencies = [
+ "derive_more",
  "smear-parser",
  "smear-schema",
  "tokora",
@@ -229,6 +230,7 @@ dependencies = [
 name = "smear-analysis"
 version = "0.0.0"
 dependencies = [
+ "derive_more",
  "smear-lexer",
  "smear-parser",
  "smear-semantics",
@@ -239,6 +241,7 @@ dependencies = [
 name = "smear-compiler"
 version = "0.0.0"
 dependencies = [
+ "derive_more",
  "smear-parser",
  "smear-schema",
  "tokora",
@@ -284,6 +287,7 @@ dependencies = [
 name = "smear-schema"
 version = "0.0.0"
 dependencies = [
+ "derive_more",
  "smear-parser",
  "smear-semantics",
  "tokora",
@@ -337,9 +341,9 @@ dependencies = [
 
 [[package]]
 name = "tokora"
-version = "0.13.1"
+version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9a76ef510012ae64b721ed1afc6668d82d7793be0436eb99f8c7ea20bf23060"
+checksum = "ebda3cea5b9be8d2070e89bd5a8084f27acbf653d477dbb4f3b68c6e2b388087"
 dependencies = [
  "ascii",
  "deranged",

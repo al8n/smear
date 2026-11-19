@@ -197,10 +197,7 @@ fn every_path_root_is_read_and_a_leading_separator_is_refused() {
     ),
     (
       "..:: .. ::Core",
-      ast::PathRoot::Parent {
-        span: SimpleSpan::new(0, 10),
-        count: twice,
-      },
+      ast::PathRoot::Parent(ast::ParentRoot::new(SimpleSpan::new(0, 10), twice)),
       14,
     ),
   ] {
@@ -658,7 +655,7 @@ fn use_trees_cover_roots_paths_sources_globs_groups_and_aliases() {
     };
     assert!(first.root().is_relative());
     assert!("Thing".equivalent(first.segments()[0].source()));
-    let ast::UseTreeKind::Simple { alias: Some(alias) } = trees[0].kind() else {
+    let ast::UseTreeKind::Simple(Some(alias)) = trees[0].kind() else {
       panic!("expected an alias");
     };
     assert!("Local".equivalent(alias.source()));
@@ -668,10 +665,7 @@ fn use_trees_cover_roots_paths_sources_globs_groups_and_aliases() {
       panic!("a group member's prefix is a path");
     };
     assert!("as".equivalent(named_as.segments()[0].source()));
-    assert!(matches!(
-      trees[2].kind(),
-      ast::UseTreeKind::Simple { alias: None }
-    ));
+    assert!(matches!(trees[2].kind(), ast::UseTreeKind::Simple(None)));
   }
   accept_all!(
     ast::UseDefinition::graphqlx,
@@ -680,12 +674,16 @@ fn use_trees_cover_roots_paths_sources_globs_groups_and_aliases() {
   );
 
   fn check_source<S: AsRef<[u8]>>(definition: ast::UseDefinition<S>) {
-    let ast::UsePrefix::Source { source, segments } = definition.tree().prefix() else {
+    let ast::UsePrefix::Source(prefix) = definition.tree().prefix() else {
       panic!("expected a string source");
     };
-    assert!(b"\"./media\"".as_slice().equivalent(source.source()));
-    assert_eq!(segments.len(), 2);
-    let ast::UseTreeKind::Simple { alias: Some(alias) } = definition.tree().kind() else {
+    assert!(
+      b"\"./media\""
+        .as_slice()
+        .equivalent(prefix.source().source())
+    );
+    assert_eq!(prefix.segments().len(), 2);
+    let ast::UseTreeKind::Simple(Some(alias)) = definition.tree().kind() else {
       panic!("expected an alias");
     };
     assert!("Img".equivalent(alias.source()));
@@ -707,10 +705,10 @@ fn use_trees_cover_roots_paths_sources_globs_groups_and_aliases() {
   accept_all!(ast::UseDefinition::graphqlx, "use ~::*", check_root_glob);
 
   fn check_parent_group<S: AsRef<[u8]>>(tree: ast::UseTree<S>) {
-    let ast::UsePrefix::Root(ast::PathRoot::Parent { count, .. }) = tree.prefix() else {
+    let ast::UsePrefix::Root(ast::PathRoot::Parent(root)) = tree.prefix() else {
       panic!("expected a parent root");
     };
-    assert_eq!(count.get(), 2);
+    assert_eq!(root.count().get(), 2);
     let ast::UseTreeKind::Group(trees) = tree.kind() else {
       panic!("expected a group");
     };

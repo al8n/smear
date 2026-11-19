@@ -70,6 +70,9 @@
 
 use core::{fmt, num::NonZeroU32};
 
+use std::vec::Vec;
+
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use tokora::{SimpleSpan, span::AsSpan};
 
 use smear_parser::graphql::ast::{
@@ -78,21 +81,157 @@ use smear_parser::graphql::ast::{
 };
 use smear_schema::{PackedType, RootOperation, Schema, Sym, TypeId, TypeKind, builtin};
 
+use crate::request::NamedVariable;
+
 use super::{
   Argument, ArgumentSource, Error, Extensions, FieldRequest, Leaf, Node, ReqId, ResponseStream,
   SourceEventError, SourceField, Values,
   collect::{
-    Admission, Allowance, Compared, Fragments, Interner, Scratch, Unstored, Visits, collect_fields,
-    metered_variable_key, scan_eq, variable_key,
+    Admission, Allowance, Compared, Fragments, Grouped, Interner, InternerMark, Scratch, Unstored,
+    Visits, collect_fields, metered_variable_key, scan_eq, variable_key,
   },
-  error::{ConditionFault, Raw, Row},
+  error::{
+    AbstractNotPossible, AbstractNotPossibleUnnamed, AbstractUnresolved, ArgumentRef,
+    ArgumentVariableMissing, ConditionFault, FieldBudget, FieldCoordinate, LeafCoercion, Raw, Row,
+    RuntimeTypeBudget,
+  },
   request::name_bytes,
-  response::{Entity, Key, NONE, Slot, State, node},
+  response::{Entity, FlatRun, Key, NONE, PendingObject, Slot, State, node},
 };
 
 mod introspect;
+
 #[cfg(test)]
 mod tests;
+
+/// Enough concurrency that a driver never has to think about the knob, low enough that a runaway
+/// document cannot make the executor hand out unbounded work.
+const DEFAULT_IN_FLIGHT: NonZeroU32 = NonZeroU32::new(256).expect("256 is not zero");
+
+/// Larger than any response a schema designer meant to return, small enough to be a bound.
+///
+/// A million positions is far past a page of results and past most bulk exports; a response that
+/// genuinely needs more is a service that should say so by raising this. It is a ceiling on a
+/// pathological answer, not a tuning knob — which is why it is generous. A driver whose value type
+/// is large, or that runs where memory is tight, should lower it: the cost of a position is one
+/// slot plus one metadata row, and a slot holds the driver's own `V` inline.
+const DEFAULT_RESPONSE_SLOTS: NonZeroU32 = NonZeroU32::new(1 << 20).expect("2^20 is not zero");
+
+/// Four entries per position, which is generous for a document that merges and unreachable for one
+/// that does not: a group of one costs two entries — one merged selection and one location — so an
+/// ordinary response spends this at twice the rate it spends positions and still runs out of
+/// positions first.
+const DEFAULT_RESPONSE_METADATA: NonZeroU32 = NonZeroU32::new(1 << 22).expect("2^22 is not zero");
+
+/// Sixteen million units of draft §6.3 collection work.
+///
+/// # The unit is not a selection any more, and this number was chosen when it was
+///
+/// al8n/smear#113 set `2^24` against a budget of one unit per selection *examined*, and against
+/// that unit the old sentence here — "a document large enough to spend it has to *be* large, and
+/// the parser and the network have opinions about that long before this does" — was arithmetic:
+/// selections cost bytes, so the ceiling was a ceiling on document size and the network reached it
+/// first. al8n/smear#143 widened the unit to charge every entry a name lookup compares, and left
+/// both the constant and that sentence alone. A comparison count is not linear in document size, so
+/// the argument stopped describing the thing it was attached to — which is the failure mode worth
+/// naming: **the unit moved and the rationale did not.**
+///
+/// # What the number means now, measured rather than argued (al8n/smear#172, al8n/smear#196)
+///
+/// Since [`hash_bytes`](smear_schema::hash_bytes) gained its avalanche step and its fold between
+/// rounds, 4,096 distinct response keys cost 1.73–1.77 units each — one selection plus about three
+/// quarters of a comparison, summed over every table size the interner grows through — across
+/// thirty-three families that cross the radix a counter is written in against the width it is
+/// padded to, which is what decides where a spelling's varying bytes sit relative to a chunk
+/// boundary. "Every ordinary naming scheme tried" is what the previous sentence said, and it was
+/// true of the five that were tried and false of the ones that were not; the axis is here so that
+/// the claim is about a population. They scale at ×1.99 to ×2.02 per doubling out to 65,536 keys,
+/// where `field{i}` measures 114,764 units and `h{i:0>8}` 114,496. So this ceiling admits something
+/// over nine million response keys, and no honest document reaches it:
+/// [`max_response_slots`](Limits::max_response_slots) refuses at 2^20 positions first. Measured
+/// against `Limits::default()`, `k{i}`, `field{i}`, `h{i:0>8}` and
+/// `user{i:0>4}Name` documents are all served to 1,048,575 keys and all refused at 1,048,576 —
+/// which is the slot ceiling, not this one.
+///
+/// **Before the finalizer that boundary was a lottery on how a client spelled its aliases.** The
+/// same four schemes were served to 1,048,575, 968,252, 880,714 and 976,545 keys respectively: this
+/// ceiling bit first for three of the four, at a point set by which bytes of a name happened to
+/// distinguish it. Uniformity is what the finalizer bought here; the *bound* was never at stake,
+/// since a constructed pile-up spends this budget either way.
+///
+/// # What draft §6.4.1's argument charge costs against this number
+///
+/// The unit widened again after the paragraphs above were written, and this one is here so that
+/// the same failure — the unit moving and the rationale not — does not happen a third time. Every
+/// argument a request *writes* is charged its bytes at every position its field is coerced at. An
+/// honest document does not notice: a written argument name is a handful of bytes, so one unit
+/// each, against a response the slot ceiling already caps at `2^20` positions. A document that
+/// writes eleven arguments at every one of a million positions would reach this ceiling, and it
+/// has to *be* tens of megabytes to say so, which is the original argument holding for the one
+/// factor it was ever true of.
+///
+/// **The other factor of that scan is not charged here and must not be.** `declared` is the
+/// schema's; at one unit per declared argument per position this ceiling refuses a full-occupancy
+/// response at about thirteen of them, and public schemas write ten-argument fields. It is bounded
+/// at schema build by [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) instead, which is
+/// what keeps this number a statement about the client's document and not about the operator's SDL.
+///
+/// # Tightening it is a separate decision, and deliberately not taken here
+///
+/// A ceiling eight million keys past what any other ceiling admits is not doing much work, and
+/// lowering it is only safe now: with the fold unfinished, `2^19` refused an honestly named
+/// `h{i:0>8}` document at 5,777 keys — 75 kilobytes — which is a false refusal of legitimate input.
+/// But *what* it should be is a question about the population the default is derived over, and no
+/// measurement here answers it. The argument charge does not move that question: it is the same
+/// ledger over a population the same size, and the measurement that would settle the number has to
+/// cover both.
+const DEFAULT_SELECTION_VISITS: NonZeroU32 = NonZeroU32::new(1 << 24).expect("2^24 is not zero");
+
+/// Sixteen megabytes: room for every distinct name a large document and schema can name, plus a
+/// great many driver messages, and three orders of magnitude below where a `u32` offset stops
+/// working.
+const DEFAULT_INTERNED_BYTES: NonZeroU32 = NonZeroU32::new(1 << 24).expect("2^24 is not zero");
+
+/// Entries in one draft §7.1.7 `extensions` map.
+///
+/// Small on purpose, and it is not the shape of the other ceilings here. Those bound populations
+/// the *document* or the *response* grows into, and are sized so that no realistic request meets
+/// them. This bounds protocol metadata a service writes about itself — tracing, cost, cache hints,
+/// a deprecation notice — which is a handful of keys chosen by the implementer at design time, not
+/// a quantity that scales with anything. A service that genuinely needs more says so.
+const DEFAULT_EXTENSION_ENTRIES: NonZeroU32 = NonZeroU32::new(64).expect("64 is not zero");
+
+/// Key bytes across one draft §7.1.7 `extensions` map, which with the entry count bounds the scan.
+const DEFAULT_EXTENSION_KEY_BYTES: NonZeroU32 = NonZeroU32::new(4096).expect("4096 is not zero");
+
+/// Entries in one draft §7.1.3 request error result.
+///
+/// Sized from the reference implementation's own stops, so that a driver porting them is never
+/// refused by this one first. `graphql-js` 16.11.0's `validate` stops at `maxErrors`, 100 unless
+/// the caller says otherwise — its documentation: "Attackers can send pathologically invalid
+/// queries to induce a DoS attack, so by default `maxErrors` set to 100 errors" — and then appends
+/// one more error saying so, for 101. `execute` coerces variables under `maxCoercionErrors`, 50,
+/// and its overflow error makes 51. 128 is the next power of two above both.
+const DEFAULT_REQUEST_ERRORS: NonZeroU32 = NonZeroU32::new(128).expect("128 is not zero");
+
+/// Bytes of message in one driver-supplied request error.
+///
+/// A specified message is a sentence over the names it quotes, and the names are the document's:
+/// draft §2.1.9 puts no length on a `Name`. So the length a message reaches is the client's to
+/// choose, and the ceiling says how much of its own document a client can have quoted back at it —
+/// four kibibytes is room for any sentence and the names it needs, and refuses one whose bulk is a
+/// name the client made long on purpose. Matching `max_extension_key_bytes` is not a coincidence:
+/// both are text a service writes about a request rather than text a response is made of.
+const DEFAULT_REQUEST_ERROR_MESSAGE_BYTES: NonZeroU32 =
+  NonZeroU32::new(4096).expect("4096 is not zero");
+
+/// Draft §7.1.6 `locations` on one driver-supplied request error.
+///
+/// One or two is the ordinary count — a node, or a node and the one it conflicts with — and the
+/// count is the document's to grow: `graphql-js` 16.11.0's `UniqueArgumentNamesRule` reports every
+/// duplicate of an argument as one error's `nodes`. Sixty-four spans is a kibibyte on a 64-bit
+/// target, which is the size of the bound and not a guess at a distribution.
+const DEFAULT_REQUEST_ERROR_LOCATIONS: NonZeroU32 = NonZeroU32::new(64).expect("64 is not zero");
 
 /// What the executor will not do, whatever the document or the driver asks.
 ///
@@ -132,8 +271,8 @@ mod tests;
 /// | collection work | selections **examined**, name-table entries **compared**, the fragment index's pass, the directives and arguments a request **writes** at a selection, and the bytes of every name it writes there, as one | [`max_selection_visits`](Limits::max_selection_visits) | `walk` per selection; `Interner::intern` and `Fragments::get` per entry compared, before comparing it; `Fragments::build` per definition and fragment; `included` per directive on a selection it **examines** and `condition_is_true` per argument at a `@skip`/`@include` usage it **compares**, each in front of that one comparison rather than over the list, since both scans short-circuit; **`coerce_arguments`** per written argument the scan **examines**, once however many of §6.4.1's `declared` scans reach it, and both readers of a variable **spelling** — `coerce_arguments` and `condition_is_true` — through `metered_variable_key`, a unit at a time as draft §2.1.9's pass examines the bytes; and draft §4's meta walk per schema member a meta list reads and per possible-object word an interface's `possibleTypes` scans, and per pass over the bytes of a `__type` name it decodes and looks up | charging appends instead of visits; charging visits without their lookups, which is a budget on one factor of a product; leaving *any* uncharged way into a name table, which a claim about callers cannot prevent and a signature can; **charging one name where the position reads two**, which is what the argument key's charge did while the variable written for it went to the driver unmeasured; **charging a whole list in front of a scan that short-circuits**, which refuses a valid operation for work the taken branch never performs — a *list* is not the only such scan, and the variable spelling's own admission pass is one, so a charge over its whole length turned an unreadable name into a resource refusal; and §6.4.1's scan, whose *other* factor is the schema's and is bounded at build by [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) rather than here; and a meta list that `includeDeprecated` empties, which creates no position for a ceiling to count while reading the schema's whole width — once per alias the client writes |
 /// | collection depth | — | **removed, not bounded** | `walk` runs on an explicit stack | a recursive walk, which a flat fragment chain drove to `SIGABRT` |
 /// | interned text | bytes | [`max_interned_bytes`](Limits::max_interned_bytes) | `Interner::intern` | driver messages, one per failed position, at any length |
-/// | draft §7.1.7 `extensions`, and §7.1.6's per-error map | entries **and** key bytes, as two ceilings | [`max_extension_entries`](Limits::max_extension_entries), [`max_extension_key_bytes`](Limits::max_extension_key_bytes) | `Extensions::insert`, before the key is boxed; and **each of the three retainers** — [`set_extensions`](Executor::set_extensions), [`RequestErrorResult::set_extensions`](super::RequestErrorResult::set_extensions) and [`handle_field_error_with`](Executor::handle_field_error_with), all of which re-derive an accepted map's spine from its entries | bounding either alone: one ceiling leaves a single gigabyte key, the other leaves unbounded empty-keyed entries, because a zero-length key is a legal key. And bounding both while retaining the caller's allocation: `remove` refunds the budget and returns no slot, so an emptied map reports nothing and holds everything it grew to. And a **second** retainer of the same container that re-checks only the two reported quantities, since §7.1.7 admits the entry in a §7.1.3 result too — and a third, since §7.1.6 admits one on every error |
-/// | draft §7.1.3's driver-supplied request errors | entries, message bytes **and** spans per entry, as three ceilings | [`max_request_errors`](Limits::max_request_errors), [`max_request_error_message_bytes`](Limits::max_request_error_message_bytes), [`max_request_error_locations`](Limits::max_request_error_locations) | [`RequestError::new`](super::RequestError::new) and [`from_diagnose`](super::RequestError::from_diagnose), before the message is boxed or a span is copied; and **the result that lists the entry** — [`RequestErrorResult::from_driver`](super::RequestErrorResult::from_driver) and [`push`](super::RequestErrorResult::push), which re-check every quantity the entry reports against the result's own ceilings, the extension pair included for the entry's own §7.1.6 map, and re-derive that map's spine | bounding the count alone: one message a gigabyte long, or one entry with a million spans. Bounding the lengths alone: an unbounded list of short entries. Trusting the entry's construction: an entry is built under whatever `Limits` the driver passed, so a result that did not re-check would retain what a laxer budget let it grow to. And letting `Vec` double the list's spine: a ceiling of a hundred would hold a hundred and twenty-eight slots |
+/// | draft §7.1.7 `extensions`, and §7.1.6's per-error map | entries **and** key bytes, as two ceilings | [`max_extension_entries`](Limits::max_extension_entries), [`max_extension_key_bytes`](Limits::max_extension_key_bytes) | `Extensions::insert`, before the key is copied; and **each of the three retainers** — [`set_extensions`](Executor::set_extensions), [`RequestErrorResult::set_extensions`](super::RequestErrorResult::set_extensions) and [`handle_field_error_with`](Executor::handle_field_error_with), all of which re-derive an accepted map's allocations from its entries | bounding either alone: one ceiling leaves a single gigabyte key, the other leaves unbounded empty-keyed entries, because a zero-length key is a legal key. And bounding both while retaining the caller's allocation: `remove` refunds the budget and returns no room, so an emptied map reports nothing and holds everything it grew to. And a **second** retainer of the same container that re-checks only the two reported quantities, since §7.1.7 admits the entry in a §7.1.3 result too — and a third, since §7.1.6 admits one on every error |
+/// | draft §7.1.3's driver-supplied request errors | entries, message bytes **and** spans per entry, as three ceilings | [`max_request_errors`](Limits::max_request_errors), [`max_request_error_message_bytes`](Limits::max_request_error_message_bytes), [`max_request_error_locations`](Limits::max_request_error_locations) | [`RequestError::new`](super::RequestError::new) and [`from_diagnose`](super::RequestError::from_diagnose), before the message or a span is copied; and **the result that lists the entry** — [`RequestErrorResult::from_driver`](super::RequestErrorResult::from_driver) and [`push`](super::RequestErrorResult::push), which re-check every quantity the entry reports against the result's own ceilings, the extension pair included for the entry's own §7.1.6 map, and re-derive that map's allocations | bounding the count alone: one message a gigabyte long, or one entry with a million spans. Bounding the lengths alone: an unbounded list of short entries. Trusting the entry's construction: an entry is built under whatever `Limits` the driver passed, so a result that did not re-check would retain what a laxer budget let it grow to. And letting `Vec` double the list's spine: a ceiling of a hundred would hold a hundred and twenty-eight slots |
 /// | error rows | rows | derived: at most one per position | — | a position able to fail twice, or an argument coercion raising more than once |
 /// | list nesting | — | [`MAX_WRAPPERS`](smear_schema::MAX_WRAPPERS) = 15, by the schema | `complete`'s list arm strips one wrapper per level | — |
 ///
@@ -180,7 +319,7 @@ mod tests;
 /// | slots, metadata, interned text | their ceilings | tree walks, `Response` | next `start`/drop | `reset`; suffix-`restore` only | a creator that bypasses the sole creator |
 /// | error rows | one per position | `Response::errors` | next `start`/drop | `reset` | a position able to fail twice |
 /// | **draft §7.1.6 per-error `extensions`** | at most one map per error row, each within the two extension ceilings and re-derived on acceptance as §7.1.7's is — so `max_response_slots × (max_extension_entries + max_extension_key_bytes)`, every factor a ceiling | `Error::extensions` | next `start`/drop | `reset`, which drops them by name; suffix-`restore` with the rows that index them | a `reset` that empties the rows and forgets the maps they index, which hold `V`s no row reaches any more; a `restore` that truncates the rows over maps it leaves behind; and a map retained with the capacity a *different* `Limits` let it grow to |
-/// | draft §7.1.7 `extensions` | its two ceilings, per the row above — **not** the `Option`, which bounds the number of maps and not a map's size, and **not** the entries alone, which bound what the map reports and not the spine it holds | `Response::extensions` | next `start`/drop | `reset`; `take_extensions` | a `reset` that empties the tables and forgets the held `V`s that are in none of them; and a map retained with the capacity a *different* `Limits` let it grow to |
+/// | draft §7.1.7 `extensions` | its two ceilings, per the row above — **not** the `Option`, which bounds the number of maps and not a map's size, and **not** the entries alone, which bound what the map reports and not the allocations it holds | `Response::extensions` | next `start`/drop | `reset`; `take_extensions` | a `reset` that empties the tables and forgets the held `V`s that are in none of them; and a map retained with the capacity a *different* `Limits` let it grow to |
 /// | in-flight entries | `max_in_flight` | `release` by id | answered, retired, or reset | slab free chain; epoch voids stale ids | an id honoured across epochs |
 /// | visit budget | `max_selection_visits` | `walk` | end of operation | **never** — work done is spent | a refund |
 /// | collection scratch | `max_response_metadata`, charged before each push | `expand`, this call only | cleared at the next collection | cleared, never shrunk — capacity is reused | a staged population charged against a *different* ceiling than the one that refuses it |
@@ -227,7 +366,7 @@ mod tests;
 /// | `merged`, `locations` | `expand`'s commit, and `fail_at` for a lone span | [`max_response_metadata`](Limits::max_response_metadata) |
 /// | `interner` — arena, spans, chain, buckets | `Interner::insert` | [`max_interned_bytes`](Limits::max_interned_bytes): a GraphQL name is at least one byte, so entries cannot outrun the arena, and the bucket table is a power of two at a load factor of a half |
 /// | `errors` | `fail`, `fail_at` | derived: at most one row per position, so `max_response_slots` |
-/// | `error_extensions` | [`handle_field_error_with`](Executor::handle_field_error_with), one map per error it records with one | derived: at most one map per error row, so `max_response_slots`; each map's own spine is re-derived to [`max_extension_entries`](Limits::max_extension_entries) on the way in, and dropped by the `reset` that clears this |
+/// | `error_extensions` | [`handle_field_error_with`](Executor::handle_field_error_with), one map per error it records with one | derived: at most one map per error row, so `max_response_slots`; each map's own allocations are re-derived to [`max_extension_entries`](Limits::max_extension_entries) on the way in, and dropped by the `reset` that clears this |
 /// | `inflight` | `poll_resolve`, which withholds at the ceiling and reuses freed entries | [`max_in_flight`](Limits::max_in_flight) |
 /// | `scratch.fields`, `scratch.groups` | `walk`, charged **before** each push against the ceiling the staging is *for* — rule 3 | `max_response_metadata` |
 /// | `scratch.keys` | `walk`, grown one entry at a time to reach an interner id | `max_interned_bytes`, since only an admitted insertion mints an id |
@@ -326,8 +465,8 @@ mod tests;
 ///    still bounded by the ceilings — which is what makes a steady-state response allocate nothing.
 ///    Draft §7.1.7's map was the one member grown somewhere else: `Extensions` carries the ceilings
 ///    a *caller* chose, `Extensions::insert` charges those, and the executor then retained the
-///    result under its own. `set_extensions` re-derives the spine on acceptance, and that is the
-///    whole difference.
+///    result under its own. `set_extensions` re-derives the map's allocations on acceptance, and
+///    that is the whole difference.
 ///
 ///    **The clause "or a fixed input" is a repair, and it was paid for the same way the rest of
 ///    this table was.** The rule shipped saying a growth site not charged by this executor's own
@@ -511,147 +650,102 @@ mod tests;
 /// assert_eq!(pool_of_eight.max_in_flight().get(), 8);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+// A field the input leaves out takes its default, so a misspelt key must be an error: dropped
+// silently it would leave the ceiling the caller meant to tighten at its default.
+#[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct Limits {
+  #[cfg_attr(feature = "serde", serde(default = "default_max_inflight"))]
   pub(crate) max_in_flight: NonZeroU32,
+  #[cfg_attr(feature = "serde", serde(default = "default_max_response_slots"))]
   pub(crate) max_response_slots: NonZeroU32,
+  #[cfg_attr(feature = "serde", serde(default = "default_max_response_metadata"))]
   pub(crate) max_response_metadata: NonZeroU32,
+  #[cfg_attr(feature = "serde", serde(default = "default_max_selection_visits"))]
   pub(crate) max_selection_visits: NonZeroU32,
+  #[cfg_attr(feature = "serde", serde(default = "default_max_interned_bytes"))]
   pub(crate) max_interned_bytes: NonZeroU32,
+  #[cfg_attr(feature = "serde", serde(default = "default_max_extension_entries"))]
   pub(crate) max_extension_entries: NonZeroU32,
+  #[cfg_attr(feature = "serde", serde(default = "default_max_extension_key_bytes"))]
   pub(crate) max_extension_key_bytes: NonZeroU32,
+  #[cfg_attr(feature = "serde", serde(default = "default_max_request_errors"))]
   pub(crate) max_request_errors: NonZeroU32,
+  #[cfg_attr(
+    feature = "serde",
+    serde(default = "default_max_request_error_message_bytes")
+  )]
   pub(crate) max_request_error_message_bytes: NonZeroU32,
+  #[cfg_attr(
+    feature = "serde",
+    serde(default = "default_max_request_error_locations")
+  )]
   pub(crate) max_request_error_locations: NonZeroU32,
 }
 
-/// Enough concurrency that a driver never has to think about the knob, low enough that a runaway
-/// document cannot make the executor hand out unbounded work.
-const DEFAULT_IN_FLIGHT: NonZeroU32 = NonZeroU32::new(256).expect("256 is not zero");
+// The ten defaults a deserialised `Limits` falls back to, one per field. Gated on `serde` like the
+// attributes that name them: with the feature off nothing calls them, and an ungated one is
+// `dead_code`, which CI denies.
 
-/// Larger than any response a schema designer meant to return, small enough to be a bound.
-///
-/// A million positions is far past a page of results and past most bulk exports; a response that
-/// genuinely needs more is a service that should say so by raising this. It is a ceiling on a
-/// pathological answer, not a tuning knob — which is why it is generous. A driver whose value type
-/// is large, or that runs where memory is tight, should lower it: the cost of a position is one
-/// slot plus one metadata row, and a slot holds the driver's own `V` inline.
-const DEFAULT_RESPONSE_SLOTS: NonZeroU32 = NonZeroU32::new(1 << 20).expect("2^20 is not zero");
+#[cfg(feature = "serde")]
+#[inline(always)]
+const fn default_max_inflight() -> NonZeroU32 {
+  DEFAULT_IN_FLIGHT
+}
 
-/// Four entries per position, which is generous for a document that merges and unreachable for one
-/// that does not: a group of one costs two entries — one merged selection and one location — so an
-/// ordinary response spends this at twice the rate it spends positions and still runs out of
-/// positions first.
-const DEFAULT_RESPONSE_METADATA: NonZeroU32 = NonZeroU32::new(1 << 22).expect("2^22 is not zero");
+#[cfg(feature = "serde")]
+#[inline(always)]
+const fn default_max_response_slots() -> NonZeroU32 {
+  DEFAULT_RESPONSE_SLOTS
+}
 
-/// Sixteen million units of draft §6.3 collection work.
-///
-/// # The unit is not a selection any more, and this number was chosen when it was
-///
-/// al8n/smear#113 set `2^24` against a budget of one unit per selection *examined*, and against
-/// that unit the old sentence here — "a document large enough to spend it has to *be* large, and
-/// the parser and the network have opinions about that long before this does" — was arithmetic:
-/// selections cost bytes, so the ceiling was a ceiling on document size and the network reached it
-/// first. al8n/smear#143 widened the unit to charge every entry a name lookup compares, and left
-/// both the constant and that sentence alone. A comparison count is not linear in document size, so
-/// the argument stopped describing the thing it was attached to — which is the failure mode worth
-/// naming: **the unit moved and the rationale did not.**
-///
-/// # What the number means now, measured rather than argued (al8n/smear#172, al8n/smear#196)
-///
-/// Since [`hash_bytes`](smear_schema::hash_bytes) gained its avalanche step and its fold between
-/// rounds, 4,096 distinct response keys cost 1.73–1.77 units each — one selection plus about three
-/// quarters of a comparison, summed over every table size the interner grows through — across
-/// thirty-three families that cross the radix a counter is written in against the width it is
-/// padded to, which is what decides where a spelling's varying bytes sit relative to a chunk
-/// boundary. "Every ordinary naming scheme tried" is what the previous sentence said, and it was
-/// true of the five that were tried and false of the ones that were not; the axis is here so that
-/// the claim is about a population. They scale at ×1.99 to ×2.02 per doubling out to 65,536 keys,
-/// where `field{i}` measures 114,764 units and `h{i:0>8}` 114,496. So this ceiling admits something
-/// over nine million response keys, and no honest document reaches it:
-/// [`max_response_slots`](Limits::max_response_slots) refuses at 2^20 positions first. Measured
-/// against `Limits::default()`, `k{i}`, `field{i}`, `h{i:0>8}` and
-/// `user{i:0>4}Name` documents are all served to 1,048,575 keys and all refused at 1,048,576 —
-/// which is the slot ceiling, not this one.
-///
-/// **Before the finalizer that boundary was a lottery on how a client spelled its aliases.** The
-/// same four schemes were served to 1,048,575, 968,252, 880,714 and 976,545 keys respectively: this
-/// ceiling bit first for three of the four, at a point set by which bytes of a name happened to
-/// distinguish it. Uniformity is what the finalizer bought here; the *bound* was never at stake,
-/// since a constructed pile-up spends this budget either way.
-///
-/// # What draft §6.4.1's argument charge costs against this number
-///
-/// The unit widened again after the paragraphs above were written, and this one is here so that
-/// the same failure — the unit moving and the rationale not — does not happen a third time. Every
-/// argument a request *writes* is charged its bytes at every position its field is coerced at. An
-/// honest document does not notice: a written argument name is a handful of bytes, so one unit
-/// each, against a response the slot ceiling already caps at `2^20` positions. A document that
-/// writes eleven arguments at every one of a million positions would reach this ceiling, and it
-/// has to *be* tens of megabytes to say so, which is the original argument holding for the one
-/// factor it was ever true of.
-///
-/// **The other factor of that scan is not charged here and must not be.** `declared` is the
-/// schema's; at one unit per declared argument per position this ceiling refuses a full-occupancy
-/// response at about thirteen of them, and public schemas write ten-argument fields. It is bounded
-/// at schema build by [`MAX_FIELD_ARGUMENTS`](smear_schema::MAX_FIELD_ARGUMENTS) instead, which is
-/// what keeps this number a statement about the client's document and not about the operator's SDL.
-///
-/// # Tightening it is a separate decision, and deliberately not taken here
-///
-/// A ceiling eight million keys past what any other ceiling admits is not doing much work, and
-/// lowering it is only safe now: with the fold unfinished, `2^19` refused an honestly named
-/// `h{i:0>8}` document at 5,777 keys — 75 kilobytes — which is a false refusal of legitimate input.
-/// But *what* it should be is a question about the population the default is derived over, and no
-/// measurement here answers it. The argument charge does not move that question: it is the same
-/// ledger over a population the same size, and the measurement that would settle the number has to
-/// cover both.
-const DEFAULT_SELECTION_VISITS: NonZeroU32 = NonZeroU32::new(1 << 24).expect("2^24 is not zero");
+#[cfg(feature = "serde")]
+#[inline(always)]
+const fn default_max_response_metadata() -> NonZeroU32 {
+  DEFAULT_RESPONSE_METADATA
+}
 
-/// Sixteen megabytes: room for every distinct name a large document and schema can name, plus a
-/// great many driver messages, and three orders of magnitude below where a `u32` offset stops
-/// working.
-const DEFAULT_INTERNED_BYTES: NonZeroU32 = NonZeroU32::new(1 << 24).expect("2^24 is not zero");
+#[cfg(feature = "serde")]
+#[inline(always)]
+const fn default_max_selection_visits() -> NonZeroU32 {
+  DEFAULT_SELECTION_VISITS
+}
 
-/// Entries in one draft §7.1.7 `extensions` map.
-///
-/// Small on purpose, and it is not the shape of the other ceilings here. Those bound populations
-/// the *document* or the *response* grows into, and are sized so that no realistic request meets
-/// them. This bounds protocol metadata a service writes about itself — tracing, cost, cache hints,
-/// a deprecation notice — which is a handful of keys chosen by the implementer at design time, not
-/// a quantity that scales with anything. A service that genuinely needs more says so.
-const DEFAULT_EXTENSION_ENTRIES: NonZeroU32 = NonZeroU32::new(64).expect("64 is not zero");
+#[cfg(feature = "serde")]
+#[inline(always)]
+const fn default_max_interned_bytes() -> NonZeroU32 {
+  DEFAULT_INTERNED_BYTES
+}
 
-/// Key bytes across one draft §7.1.7 `extensions` map, which with the entry count bounds the scan.
-const DEFAULT_EXTENSION_KEY_BYTES: NonZeroU32 = NonZeroU32::new(4096).expect("4096 is not zero");
+#[cfg(feature = "serde")]
+#[inline(always)]
+const fn default_max_extension_entries() -> NonZeroU32 {
+  DEFAULT_EXTENSION_ENTRIES
+}
 
-/// Entries in one draft §7.1.3 request error result.
-///
-/// Sized from the reference implementation's own stops, so that a driver porting them is never
-/// refused by this one first. `graphql-js` 16.11.0's `validate` stops at `maxErrors`, 100 unless
-/// the caller says otherwise — its documentation: "Attackers can send pathologically invalid
-/// queries to induce a DoS attack, so by default `maxErrors` set to 100 errors" — and then appends
-/// one more error saying so, for 101. `execute` coerces variables under `maxCoercionErrors`, 50,
-/// and its overflow error makes 51. 128 is the next power of two above both.
-const DEFAULT_REQUEST_ERRORS: NonZeroU32 = NonZeroU32::new(128).expect("128 is not zero");
+#[cfg(feature = "serde")]
+#[inline(always)]
+const fn default_max_extension_key_bytes() -> NonZeroU32 {
+  DEFAULT_EXTENSION_KEY_BYTES
+}
 
-/// Bytes of message in one driver-supplied request error.
-///
-/// A specified message is a sentence over the names it quotes, and the names are the document's:
-/// draft §2.1.9 puts no length on a `Name`. So the length a message reaches is the client's to
-/// choose, and the ceiling says how much of its own document a client can have quoted back at it —
-/// four kibibytes is room for any sentence and the names it needs, and refuses one whose bulk is a
-/// name the client made long on purpose. Matching `max_extension_key_bytes` is not a coincidence:
-/// both are text a service writes about a request rather than text a response is made of.
-const DEFAULT_REQUEST_ERROR_MESSAGE_BYTES: NonZeroU32 =
-  NonZeroU32::new(4096).expect("4096 is not zero");
+#[cfg(feature = "serde")]
+#[inline(always)]
+const fn default_max_request_errors() -> NonZeroU32 {
+  DEFAULT_REQUEST_ERRORS
+}
 
-/// Draft §7.1.6 `locations` on one driver-supplied request error.
-///
-/// One or two is the ordinary count — a node, or a node and the one it conflicts with — and the
-/// count is the document's to grow: `graphql-js` 16.11.0's `UniqueArgumentNamesRule` reports every
-/// duplicate of an argument as one error's `nodes`. Sixty-four spans is a kibibyte on a 64-bit
-/// target, which is the size of the bound and not a guess at a distribution.
-const DEFAULT_REQUEST_ERROR_LOCATIONS: NonZeroU32 = NonZeroU32::new(64).expect("64 is not zero");
+#[cfg(feature = "serde")]
+#[inline(always)]
+const fn default_max_request_error_message_bytes() -> NonZeroU32 {
+  DEFAULT_REQUEST_ERROR_MESSAGE_BYTES
+}
+
+#[cfg(feature = "serde")]
+#[inline(always)]
+const fn default_max_request_error_locations() -> NonZeroU32 {
+  DEFAULT_REQUEST_ERROR_LOCATIONS
+}
 
 impl Default for Limits {
   #[inline]
@@ -936,10 +1030,10 @@ impl Limits {
   /// under a laxer `Limits` is refused rather than trusted, because a ceiling a caller can pick is
   /// advice.
   ///
-  /// It bounds the map's **entry slots** and not only its entries. `Extensions::remove` refunds
-  /// this budget without returning the slot to the allocator, so `set_extensions` re-derives an
-  /// accepted map's spine from its entries whenever it is holding more than this — otherwise a map
-  /// grown under the laxer `Limits` and emptied back down would pass every check here and be
+  /// It bounds the map's **allocations** and not only its entries. `Extensions::remove` refunds
+  /// this budget without returning any room to the allocator, so `set_extensions` re-derives an
+  /// accepted map's allocations from its entries whenever it has held more than this — otherwise a
+  /// map grown under the laxer `Limits` and emptied back down would pass every check here and be
   /// retained at its high-water mark. The entries themselves are untouched; see that method.
   ///
   /// One of a **pair**, and neither half bounds anything alone: see
@@ -954,9 +1048,9 @@ impl Limits {
   ///
   /// The third is draft §7.1.6's per-error entry:
   /// [`handle_field_error_with`](Executor::handle_field_error_with) re-checks a map against this
-  /// executor's two ceilings and re-derives its spine exactly as `set_extensions` does. It retains
-  /// one map per driver-reported error rather than one per response, so what the pair bounds there
-  /// is a **product** — at most one map per error row and one row per position, so
+  /// executor's two ceilings and re-derives its allocations exactly as `set_extensions` does. It
+  /// retains one map per driver-reported error rather than one per response, so what the pair
+  /// bounds there is a **product** — at most one map per error row and one row per position, so
   /// `max_response_slots × (max_extension_entries + max_extension_key_bytes)` at the very worst.
   /// Every factor is one of this executor's ceilings, which is what makes the product a bound
   /// rather than the shape the [`Limits`] section *A budget on one factor of a product bounds
@@ -972,8 +1066,12 @@ impl Limits {
   ///
   /// The other half of the pair. Entries alone would leave one key free to be a gigabyte; key bytes
   /// alone would leave an unbounded number of entries under empty keys, since a zero-length key is
-  /// a legal key. Together they also bound the map's linear scan, whose whole-life worst case is
-  /// `max_extension_entries × max_extension_key_bytes` byte comparisons.
+  /// a legal key. Together they also bound what finding a key costs. A lookup compares its key only
+  /// against the entries its hash collides with, and where a client can make every hash collide —
+  /// a build without the standard library hashes at a fixed, public seed — building a map up to its
+  /// ceilings still costs at most twice `max_extension_entries × max_extension_key_bytes` byte
+  /// comparisons, the order of what the linear scan it used before it hashed cost. [`Extensions`]
+  /// says why the seed is fixed and what a removal costs there.
   ///
   /// **Not** [`max_interned_bytes`](Limits::max_interned_bytes), and the separation is deliberate:
   /// that arena is a response budget shared with field names and driver error messages, so
@@ -1016,7 +1114,7 @@ impl Limits {
   /// Every factor is a ceiling, which is what makes the product a bound rather than the shape the
   /// [`Limits`] section *A budget on one factor of a product bounds nothing* warns about. At the
   /// defaults it is 1.125 MiB of message, span and key bytes — on a 64-bit target, where a span is
-  /// sixteen bytes — plus 8,192 extension entry slots, and the values in those maps are the
+  /// sixteen bytes — plus room for 8,192 extension entries, and the values in those maps are the
   /// driver's, as below.
   ///
   /// **No executor charges it, or either of the two after it.** They bound what a result retains,
@@ -1030,13 +1128,13 @@ impl Limits {
   /// How many bytes of `message` one driver-supplied [`RequestError`](super::RequestError) may
   /// carry.
   ///
-  /// Checked by [`RequestError::new`](super::RequestError::new) **before** the message is boxed —
+  /// Checked by [`RequestError::new`](super::RequestError::new) **before** the message is copied —
   /// the text arrives borrowed, so a refusal allocates nothing, which is the difference
   /// [`Extensions::insert`] draws between a ceiling and a receipt — and by
   /// [`RequestError::from_diagnose`](super::RequestError::from_diagnose) after measuring a
   /// rendering it has not yet kept. The result that lists the entry checks it again, against its
-  /// own value. Bytes and not characters, because what is retained is a `Box<str>` and its length
-  /// is what this bounds.
+  /// own value. Bytes and not characters, because what is retained is the message's UTF-8 and its
+  /// length is what this bounds.
   ///
   /// The length factor of the product [`max_request_errors`](Limits::max_request_errors) states.
   #[inline]
@@ -1174,7 +1272,7 @@ struct Mark {
   meta: usize,
   merged: usize,
   locations: usize,
-  interner: (usize, usize),
+  interner: InternerMark,
   /// Error rows, because a row names the slot it happened at.
   ///
   /// Not present until a restore could reach a path that had already failed. `expand`'s two restore
@@ -1275,7 +1373,7 @@ struct Retained {
   locations: usize,
   /// The interner's arena, table and chain, in entries and bytes. Bounded by
   /// [`Limits::max_interned_bytes`].
-  interner: (usize, usize),
+  interner: crate::collect::InternerSize,
   /// Error rows. Derived: at most one per position.
   errors: usize,
   /// Draft §7.1.6's per-error maps. Derived: at most one per error row, so at most one per
@@ -1343,13 +1441,11 @@ enum Coercion {
   Coerced,
   /// One of §6.4.1's own field errors was raised, and the field is already nulled.
   FieldError,
-  /// A ceiling refused before the coercion finished. The field is already nulled, and this is the
-  /// ceiling that refused — read here rather than at the caller, because a `reset` on the way out
-  /// builds a new ledger and the number would be gone.
-  Refused {
-    /// [`max_selection_visits`](Limits::max_selection_visits), as it stood.
-    limit: u32,
-  },
+  /// The [`max_selection_visits`](Limits::max_selection_visits) ceiling, as it stood when it
+  /// refused before the coercion finished. The field is already nulled, and the ceiling is read
+  /// here rather than at the caller because a `reset` on the way out builds a new ledger and the
+  /// number would be gone.
+  Refused(u32),
 }
 
 /// Why [`Executor::start`] refused.
@@ -1388,28 +1484,42 @@ enum Coercion {
 /// this type still lists exactly the one error `start` raised, because that is all the executor
 /// raises. [`RequestErrorResult`](super::RequestErrorResult)'s header has the two kinds of entry
 /// and who raises each.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum StartError {
   /// The document holds no operation at all.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   NoOperation,
   /// A name was given and no operation carries it.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   UnknownOperation,
   /// No name was given and the document holds more than one operation.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   AmbiguousOperation,
   /// The schema declares no `query` root type.
   ///
   /// Draft §5.2.1.1 makes an operation whose root type the schema does not declare a validation
   /// failure, so a validated document never reaches this or [`NoMutationRoot`](Self::NoMutationRoot);
   /// both are here because `start` is total over the schemas it is handed.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   NoQueryRoot,
   /// The schema declares no `mutation` root type.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   NoMutationRoot,
   /// The schema declares no `subscription` root type.
   ///
   /// Draft §6.2.3.1 step 1 asks for it and step 2 asserts it is an Object type; §5.2.1.1 makes an
   /// operation whose root type the schema does not declare a validation failure, so this is here
   /// on the same terms as the two above — `start` is total over the schemas it is handed.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   NoSubscriptionRoot,
   /// Draft §6.2.3.1 step 5: the subscription's root selection set does not name exactly one field
   /// with an event stream.
@@ -1430,6 +1540,8 @@ pub enum StartError {
   /// `@include` in the root selection set precisely so that it can decide this without runtime
   /// variables. So a validated document does not reach this either; it is here because `start` is
   /// total over the documents it is handed.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   NoSourceField,
   /// Collecting the subscription's root selection set raised an error, so draft §6.2.3.1 had no
   /// `collectedFieldsMap` to count.
@@ -1451,6 +1563,8 @@ pub enum StartError {
   /// `request/error/mod.rs` states. The driver-supplied [`RequestError`](super::RequestError) is
   /// for the request errors raised where no executor exists, not for detail about this one, and the
   /// same line leaves [`NoMutationRoot`](Self::NoMutationRoot)'s span uncarried.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   SourceSelectionRefused,
   /// Draft §6.2.3.1 step 8: `CoerceArgumentValues` rejected an argument of the source field.
   ///
@@ -1470,9 +1584,11 @@ pub enum StartError {
   /// Which argument, and which of §6.4.1's three failures, is not carried — see
   /// [`SourceSelectionRefused`](Self::SourceSelectionRefused) for why, and note that upstream does
   /// carry it. This is an unmet "should" of §7.1.6's `locations`, recorded as one.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   SourceFieldArguments,
-  /// Coercing the source field's arguments took the operation past
-  /// [`max_selection_visits`](Limits::max_selection_visits).
+  /// The [`max_selection_visits`](Limits::max_selection_visits) ceiling that refused: coercing the
+  /// source field's arguments took the operation past it.
   ///
   /// **Separate from [`SourceFieldArguments`](Self::SourceFieldArguments) because the party at
   /// fault is a different one.** That variant says the request does not satisfy an argument the
@@ -1490,10 +1606,7 @@ pub enum StartError {
   ///
   /// The remedy is a larger ceiling or a shorter argument list, and never a change to the
   /// arguments' *values*.
-  SourceFieldArgumentBudget {
-    /// The ceiling that refused.
-    limit: u32,
-  },
+  SourceFieldArgumentBudget(u32),
   /// The document holds more definitions than
   /// [`max_selection_visits`](Limits::max_selection_visits) left the draft §6.1 lookup room to
   /// read.
@@ -1507,6 +1620,8 @@ pub enum StartError {
   /// **A named lookup that finds its operation early is not refused for the definitions behind
   /// it**: the charge is taken per definition read rather than for the slice, so the walk stops
   /// where the answer does.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   OperationLookupRefused,
   /// A draft §7.1.2 response stream is still open, so beginning another operation would orphan the
   /// source stream behind it.
@@ -1525,6 +1640,8 @@ pub enum StartError {
   /// Raised from [`Creating`](super::ResponseStream::Creating) as well as
   /// [`Streaming`](super::ResponseStream::Streaming), because `is_open` is one question and a
   /// driver that has already called its resolver is in the first of them.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   ResponseStreamOpen,
 }
 
@@ -1551,7 +1668,7 @@ impl fmt::Display for StartError {
       Self::SourceFieldArguments => {
         f.write_str("the subscription's source field has an argument the request does not satisfy")
       }
-      Self::SourceFieldArgumentBudget { limit } => write!(
+      Self::SourceFieldArgumentBudget(limit) => write!(
         f,
         "reading the subscription's source field's written arguments would take the operation \
          past `max_selection_visits` ({limit})"
@@ -1574,7 +1691,9 @@ impl core::error::Error for StartError {}
 /// The map is returned in every variant rather than dropped, for the reason a refused
 /// [`Extensions::insert`] returns its value: an entry may be a wasm or FFI handle, and a refusal
 /// that closes one has done more than refuse.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum SetExtensionsError<V> {
   /// No operation is running: [`Executor::start`] has not been called, or the last one refused.
@@ -1635,6 +1754,9 @@ impl<V: fmt::Debug> core::error::Error for SetExtensionsError<V> {}
 /// without a map. A driver that ignores the `Err` therefore loses nothing the response was owed:
 /// an error there was a field for is recorded either way, and the map's values are back in its
 /// hands.
+#[derive(IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum UnattachedExtensions<V> {
   /// The map is larger than this executor's
@@ -1696,19 +1818,19 @@ struct Meta<'a, S> {
   /// The field draft §6.4 takes the name and arguments from — `fields[0]` of the group. `None`
   /// only for the root, which has no field.
   field: Option<&'a Field<S>>,
-  /// The whole group, as a range into the executor's flat `merged` vector. Draft §6.4's
+  /// The whole group, as a run of the executor's flat `merged` vector. Draft §6.4's
   /// `MergeSelectionSets` reads it when the value comes back.
-  merged: (u32, u32),
-  /// The same group's spans, as a range into the executor's flat `locations` vector — draft
-  /// §7.1.2's `locations` for any error raised at this position.
+  merged: FlatRun,
+  /// The same group's spans, as a run of the executor's flat `locations` vector — draft §7.1.2's
+  /// `locations` for any error raised at this position.
   ///
-  /// A second range rather than a reuse of `merged`, because [`Row`] must be readable from
+  /// A second run rather than a reuse of `merged`, because [`Row`] must be readable from
   /// [`Error`](super::Error), which is deliberately not generic over the source type `S` and so
   /// cannot hold a `Field<S>`. The two vectors carry the same group in the same order but are
   /// **not** indexed alike: `fail_at` appends a lone span for the errors draft §6.4.1 points at an
   /// argument rather than at the field, so `locations` also holds entries `merged` has no member
   /// for.
-  locations: (u32, u32),
+  locations: FlatRun,
   /// The object type the field was selected on, for a `Type.field` message.
   parent_type: TypeId,
   /// The field's name as a schema symbol.
@@ -1837,23 +1959,7 @@ enum Phase<'a, S> {
   /// Draft §6.2.2 `ExecuteMutation`, whose top-level fields are withheld.
   Mutation,
   /// Draft §6.2.3 `Subscribe`.
-  Subscription {
-    /// Draft §7.1.2's response stream, as a state — see [`Stage`], which is the public
-    /// [`ResponseStream`] plus the one state §7.1.2 does not name.
-    stage: Stage,
-    /// The operation's root selection set, re-collected once per event by §6.2.3.2.
-    set: &'a SelectionSet<S>,
-    /// The root Subscription type.
-    root: TypeId,
-    /// The source field's position while §6.2.3.1 is still running, and [`NONE`] afterwards.
-    ///
-    /// It indexes a response tree that only exists during
-    /// [`Creating`](ResponseStream::Creating) — the tree `start` built to collect the root
-    /// selection set, which the transition into [`Streaming`](ResponseStream::Streaming) resets
-    /// away. Holding [`NONE`] outside that state is what makes a stale index unrepresentable
-    /// rather than merely unlikely.
-    source: u32,
-  },
+  Subscription(Subscribing<'a, S>),
 }
 
 impl<S> Clone for Phase<'_, S> {
@@ -1879,20 +1985,58 @@ impl<S> fmt::Debug for Phase<'_, S> {
       Self::Idle => f.write_str("Idle"),
       Self::Query => f.write_str("Query"),
       Self::Mutation => f.write_str("Mutation"),
-      Self::Subscription { stage, source, .. } => f
-        .debug_struct("Subscription")
-        .field("stage", stage)
-        .field("source", source)
-        .finish_non_exhaustive(),
+      Self::Subscription(subscribing) => f.debug_tuple("Subscription").field(subscribing).finish(),
     }
+  }
+}
+
+/// [`Phase::Subscription`]'s payload: what draft §6.2.3 keeps between one source event and the
+/// next.
+///
+/// Its `Clone`, `Copy` and `Debug` are written out for [`Phase`]'s reason: a derive would bound
+/// `S`, and the only `S` here is behind a `&'a`.
+struct Subscribing<'a, S> {
+  /// Draft §7.1.2's response stream, as a state — see [`Stage`], which is the public
+  /// [`ResponseStream`] plus the one state §7.1.2 does not name.
+  stage: Stage,
+  /// The operation's root selection set, re-collected once per event by §6.2.3.2.
+  set: &'a SelectionSet<S>,
+  /// The root Subscription type.
+  root: TypeId,
+  /// The source field's position while §6.2.3.1 is still running, and [`NONE`] afterwards.
+  ///
+  /// It indexes a response tree that only exists during
+  /// [`Creating`](ResponseStream::Creating) — the tree `start` built to collect the root
+  /// selection set, which the transition into [`Streaming`](ResponseStream::Streaming) resets
+  /// away. Holding [`NONE`] outside that state is what makes a stale index unrepresentable
+  /// rather than merely unlikely.
+  source: u32,
+}
+
+impl<S> Clone for Subscribing<'_, S> {
+  #[inline]
+  fn clone(&self) -> Self {
+    *self
+  }
+}
+
+impl<S> Copy for Subscribing<'_, S> {}
+
+impl<S> fmt::Debug for Subscribing<'_, S> {
+  /// The response stream's state and the source field's position, and no borrow of the document,
+  /// for [`Phase`]'s `Debug`'s reason.
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.debug_struct("Subscribing")
+      .field("stage", &self.stage)
+      .field("source", &self.source)
+      .finish_non_exhaustive()
   }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Slotted {
-  Free {
-    next: u32,
-  },
+  /// Free, and this is the next free entry's index, or [`NONE`] at the end of the free list.
+  Free(u32),
   /// Outstanding, and its value still matters.
   Live,
   /// Outstanding, and draft §6.4.4 has already discarded the position it would fill.
@@ -2030,7 +2174,7 @@ where
   schema_field: Option<Sym>,
   type_field: Option<Sym>,
 
-  slots: std::vec::Vec<Slot<V::Value>>,
+  slots: Vec<Slot<V::Value>>,
   /// The greatest [`Slot::depth`] any position in `slots` carries.
   ///
   /// A high-water mark and not a scan, for the reason [`Slot::depth`] is a field and not a walk:
@@ -2047,9 +2191,9 @@ where
   /// turn by [`Limits::max_response_slots`] like the slab it is a fact about. `Response::depth`
   /// says the same thing to a caller.
   max_depth: u32,
-  meta: std::vec::Vec<Meta<'a, S>>,
-  merged: std::vec::Vec<&'a Field<S>>,
-  locations: std::vec::Vec<SimpleSpan>,
+  meta: Vec<Meta<'a, S>>,
+  merged: Vec<&'a Field<S>>,
+  locations: Vec<SimpleSpan>,
   interner: Interner,
   /// Definitions the draft §6.1 operation lookup has read, over the executor's whole life.
   ///
@@ -2060,7 +2204,7 @@ where
   /// lookup read nothing.
   #[cfg(test)]
   operation_definitions_walked: u64,
-  errors: std::vec::Vec<Row>,
+  errors: Vec<Row>,
   /// Draft §7.1.6's per-error `extensions` maps, which a [`Row`] indexes by position.
   ///
   /// # A side table, so the error that carries no map pays for none
@@ -2079,10 +2223,10 @@ where
   /// is still read and is kept with it. `restore` truncates this with the rows, which a refused
   /// expansion cannot in fact reach, for the reason [`Mark`] gives.
   ///
-  /// Each map arrived re-checked against this executor's two extension ceilings and with its spine
-  /// re-derived, so what this holds is bounded by `max_response_slots` maps of bounded size —
-  /// [`Limits::max_extension_entries`] states the product.
-  error_extensions: std::vec::Vec<Extensions<V::Value>>,
+  /// Each map arrived re-checked against this executor's two extension ceilings and with its
+  /// allocations re-derived, so what this holds is bounded by `max_response_slots` maps of bounded
+  /// size — [`Limits::max_extension_entries`] states the product.
+  error_extensions: Vec<Extensions<V::Value>>,
   /// The draft §7.1.7 *Extensions* entry for this operation, or `None` when the response has none.
   ///
   /// # `proto` owns the top level, the driver owns every value under it
@@ -2107,7 +2251,7 @@ where
   /// names.
   extensions: Option<Extensions<V::Value>>,
 
-  inflight: std::vec::Vec<Entry>,
+  inflight: Vec<Entry>,
   epoch: u64,
   free: u32,
   live: u32,
@@ -2184,7 +2328,7 @@ where
 
   /// Everything one draft §6.3 collection reuses from the last. See `collect::Scratch`.
   scratch: Scratch<'a, S>,
-  scratch_sets: std::vec::Vec<&'a SelectionSet<S>>,
+  scratch_sets: Vec<&'a SelectionSet<S>>,
   /// What is left of [`Limits::max_selection_visits`] for this operation.
   visits: Visits,
   /// Draft §6.4.1's surviving arguments, for the one request `poll_resolve` is offering.
@@ -2201,7 +2345,7 @@ where
   ///
   /// It has exactly one reader, and [`retire_arguments`](Self::retire_arguments) is what that
   /// buys.
-  scratch_args: std::vec::Vec<Argument<'a, S, V::Value>>,
+  scratch_args: Vec<Argument<'a, S, V::Value>>,
   /// How deep into each written argument's spelling draft §6.4.1's scan has already been charged,
   /// in [`byte_units`](crate::collect::byte_units), parallel to the entries the scan has admitted.
   ///
@@ -2216,7 +2360,7 @@ where
   ///
   /// Cleared with `scratch_args` at every coercion, so it is one field's population and never an
   /// operation's.
-  arg_prefix: std::vec::Vec<u32>,
+  arg_prefix: Vec<u32>,
 }
 
 impl<'a, S, V> Executor<'a, S, V>
@@ -2253,18 +2397,18 @@ where
       typename: schema.sym(builtin::TYPENAME_FIELD.as_bytes()),
       schema_field: schema.sym(builtin::SCHEMA_FIELD.as_bytes()),
       type_field: schema.sym(builtin::TYPE_FIELD.as_bytes()),
-      slots: std::vec::Vec::new(),
+      slots: Vec::new(),
       max_depth: 0,
-      meta: std::vec::Vec::new(),
-      merged: std::vec::Vec::new(),
-      locations: std::vec::Vec::new(),
+      meta: Vec::new(),
+      merged: Vec::new(),
+      locations: Vec::new(),
       interner: Interner::new(limits.max_interned_bytes.get()),
       #[cfg(test)]
       operation_definitions_walked: 0,
-      errors: std::vec::Vec::new(),
-      error_extensions: std::vec::Vec::new(),
+      errors: Vec::new(),
+      error_extensions: Vec::new(),
       extensions: None,
-      inflight: std::vec::Vec::new(),
+      inflight: Vec::new(),
       epoch: 0,
       free: NONE,
       live: 0,
@@ -2275,13 +2419,13 @@ where
       phase: Phase::Idle,
       started: false,
       delivered: false,
-      scratch_sets: std::vec::Vec::new(),
+      scratch_sets: Vec::new(),
       deferred: NONE,
       serial_next: NONE,
       serial_steps: 0,
       visits: Visits::new(limits.max_selection_visits.get()),
-      scratch_args: std::vec::Vec::new(),
-      arg_prefix: std::vec::Vec::new(),
+      scratch_args: Vec::new(),
+      arg_prefix: Vec::new(),
     }
   }
 
@@ -2367,7 +2511,7 @@ where
     // Before the reset, because the reset is what would destroy the evidence. `on_entry` above is
     // the discharge every entry point owes; this refusal performs no state change of its own, so
     // "settle the previous call before doing anything else" still holds over it.
-    if let Phase::Subscription { stage, .. } = self.phase
+    if let Phase::Subscription(Subscribing { stage, .. }) = self.phase
       && stage.published().is_open()
     {
       return Err(StartError::ResponseStreamOpen);
@@ -2472,9 +2616,9 @@ where
         self.reset();
         return Err(StartError::SourceFieldArguments);
       }
-      Coercion::Refused { limit } => {
+      Coercion::Refused(limit) => {
         self.reset();
-        return Err(StartError::SourceFieldArgumentBudget { limit });
+        return Err(StartError::SourceFieldArgumentBudget(limit));
       }
     }
     // The root still holds the `initialValue` and `scratch_args` holds step 8's answer, and both
@@ -2489,12 +2633,12 @@ where
     // and accepting two collected entries leaves it holding two children — both tripped the new
     // line rather than the checks that own them, so the step 5 count's own gate went green under a
     // fault it exists to catch. Put the guard where the value is read, once.
-    self.phase = Phase::Subscription {
+    self.phase = Phase::Subscription(Subscribing {
       stage: Stage::Creating,
       set,
       root,
       source,
-    };
+    });
     Ok(())
   }
 
@@ -2545,18 +2689,18 @@ where
       0,
       Key::Root,
       root_ty,
-      State::Object {
+      State::Object(PendingObject {
         value,
         ty: root_type,
         // `expand` writes the real count on its way out, and does so for the root through the very
         // same path it uses for every other object — which is why the root needed no special case.
         pending: 0,
-      },
+      }),
     ));
     self.meta.push(Meta {
       field: None,
-      merged: (0, 0),
-      locations: (0, 0),
+      merged: FlatRun { start: 0, len: 0 },
+      locations: FlatRun { start: 0, len: 0 },
       parent_type: root_type,
       field_sym: self.schema.type_def(root_type).name(),
     });
@@ -2637,12 +2781,12 @@ where
     self.child_departed(parent, true);
 
     let meta = &self.meta[slot as usize];
-    let (start, len) = meta.merged;
+    let FlatRun { start, len } = meta.merged;
     let field = meta
       .field
       .expect("only the root has no field, and it is never ready");
     let parent_value = match &self.slots[parent as usize].state {
-      State::Object { value, .. } => value,
+      State::Object(PendingObject { value, .. }) => value,
       // Enumerated rather than a `_`, and that is a decision. A wildcard here would have absorbed
       // `Expanded` silently and handed the driver a `parent_value` from a different object; the
       // compiler naming every variant is what makes a future one impossible to mishandle by
@@ -2797,15 +2941,15 @@ where
   /// [`start`](Executor::start) — and an id whose position §6.4.4 has already discarded. There is
   /// no field left to fail, so there is nothing to attach the map to.
   ///
-  /// # On acceptance the allocation is re-derived
+  /// # On acceptance the allocations are re-derived
   ///
   /// As [`set_extensions`](Executor::set_extensions) does, and for its reason: the two ceilings
-  /// bound what a map *reports*, and its spine is a high-water mark of every entry it ever held —
-  /// [`Extensions::remove`] refunds the budget and returns no slot. So an accepted map's spine is
-  /// re-derived from the entries it carries whenever it is over `max_extension_entries`, which
-  /// leaves every observable of the map alone and bounds what this executor retains. A map built
-  /// under this executor's own ceilings can need it too, because a `Vec` grows by doubling past a
-  /// ceiling that is not a power of two.
+  /// bound what a map *reports*, and its allocations follow the most entries it ever held —
+  /// [`Extensions::remove`] refunds the budget and returns no room. So an accepted map's
+  /// allocations are re-derived from the entries it carries whenever it has held more than
+  /// `max_extension_entries`, which leaves every observable of the map alone and bounds what this
+  /// executor retains. A map built under this executor's own ceilings never needs it: it cannot
+  /// have held more than they allow, and what it holds is within a constant multiple of that.
   ///
   /// # Which errors can carry one, and for how long
   ///
@@ -2966,20 +3110,21 @@ where
   /// # On acceptance the allocation is re-derived, and that is not a refusal
   ///
   /// **The ceilings above bound what the map reports; this bounds what it holds.** `len` and
-  /// `key_bytes` are the map's content, and an [`Extensions`]'s spine capacity is derived from
-  /// neither — it is the high-water mark of every entry the map has ever held, and
-  /// [`Extensions::remove`] refunds the key bytes without returning the slot. A map grown to a
-  /// million entries under a lax [`Limits`] and emptied passes both checks above while holding a
-  /// million entry slots, and this executor would then keep that allocation until the next
-  /// [`start`](Executor::start), a [`take_extensions`](Executor::take_extensions), or drop.
+  /// `key_bytes` are the map's content, and an [`Extensions`]'s allocations are derived from
+  /// neither — they follow the most entries the map has ever held, and [`Extensions::remove`]
+  /// refunds the key bytes without returning any room. A map grown to a million entries under a
+  /// lax [`Limits`] and emptied passes both checks above while holding room for a million, and this
+  /// executor would then keep that allocation until the next [`start`](Executor::start), a
+  /// [`take_extensions`](Executor::take_extensions), or drop.
   ///
-  /// So an accepted map's spine is re-derived from the entries it actually carries whenever it is
-  /// over [`max_extension_entries`](Limits::max_extension_entries). The entries, their order, their
-  /// keys and their values are untouched — nothing is cloned, nothing is dropped, and this is
-  /// invisible to every observable the type has. It is deliberately **not** a fourth
-  /// [`SetExtensionsError`]: a grown-and-emptied map is a valid `extensions` map, its capacity is
-  /// not visible through this crate's public API, and a caller handed one back could not shrink it
-  /// even if it were. Refusing it would fail a legal program on a property its author cannot see.
+  /// So an accepted map's allocations are re-derived from the entries it actually carries whenever
+  /// it has held more than [`max_extension_entries`](Limits::max_extension_entries). The entries,
+  /// their order, their keys and their values are untouched — nothing is cloned, nothing is
+  /// dropped, and this is invisible to every observable the type has. It is deliberately **not** a
+  /// fourth [`SetExtensionsError`]: a grown-and-emptied map is a valid `extensions` map, its
+  /// capacity is not visible through this crate's public API, and a caller handed one back could
+  /// not shrink it even if it were. Refusing it would fail a legal program on a property its author
+  /// cannot see.
   ///
   /// The general rule, which is the half worth carrying to the next resource: **a ceiling bounds a
   /// retained buffer only if every growth of that buffer passed through it.** Everything else this
@@ -3097,7 +3242,7 @@ where
       !self
         .slots
         .iter()
-        .any(|slot| matches!(slot.state, State::Object { .. })),
+        .any(|slot| matches!(slot.state, State::Object(_))),
       "a response was delivered with an object value still held: some enqueue or departure path \
        is not accounted"
     );
@@ -3119,19 +3264,19 @@ where
     //
     // The `Response` below borrows the slots, so nothing here may `reset` — and nothing needs to.
     // An event's populations die at the next `start` or drop exactly as a query's do.
-    if let Phase::Subscription {
+    if let Phase::Subscription(Subscribing {
       stage: Stage::Owed(ending),
       set,
       root,
       ..
-    } = self.phase
+    }) = self.phase
     {
-      self.phase = Phase::Subscription {
+      self.phase = Phase::Subscription(Subscribing {
         stage: ending.ended(),
         set,
         root,
         source: NONE,
-      };
+      });
     }
     self.delivered = true;
     Some(Response {
@@ -3168,7 +3313,7 @@ where
   pub const fn response_stream(&self) -> Option<ResponseStream> {
     match self.phase {
       Phase::Idle | Phase::Query | Phase::Mutation => None,
-      Phase::Subscription { stage, .. } => Some(stage.published()),
+      Phase::Subscription(Subscribing { stage, .. }) => Some(stage.published()),
     }
   }
 
@@ -3198,20 +3343,20 @@ where
   /// is `Creating` for exactly that reason.
   #[inline]
   pub fn source_field(&self) -> Option<SourceField<'_, 'a, S, V::Value>> {
-    let Phase::Subscription {
+    let Phase::Subscription(Subscribing {
       stage: Stage::Creating,
       source,
       ..
-    } = self.phase
+    }) = self.phase
     else {
       return None;
     };
     let meta = &self.meta[source as usize];
-    let (start, len) = meta.merged;
+    let FlatRun { start, len } = meta.merged;
     let field = meta
       .field
       .expect("draft §6.2.3.1's source field is a collected field and has a node");
-    let State::Object { value, .. } = &self.slots[0].state else {
+    let State::Object(PendingObject { value, .. }) = &self.slots[0].state else {
       // Enumerated by its opposite for the reason the offer path enumerates every variant: the root
       // holds the `initialValue` for as long as `Creating` lasts, because `expand` enqueued exactly
       // one child and nothing has departed. `create_source_event_stream` asserts it on the way in.
@@ -3255,22 +3400,22 @@ where
   /// state to say so.
   pub fn handle_source_stream(&mut self) -> bool {
     self.on_entry();
-    let Phase::Subscription {
+    let Phase::Subscription(Subscribing {
       stage: Stage::Creating,
       set,
       root,
       ..
-    } = self.phase
+    }) = self.phase
     else {
       return false;
     };
     self.reset();
-    self.phase = Phase::Subscription {
+    self.phase = Phase::Subscription(Subscribing {
       stage: Stage::Streaming,
       set,
       root,
       source: NONE,
-    };
+    });
     true
   }
 
@@ -3324,12 +3469,12 @@ where
     event: V::Value,
   ) -> Result<(), SourceEventError<V::Value>> {
     self.on_entry();
-    let Phase::Subscription {
+    let Phase::Subscription(Subscribing {
       stage: Stage::Streaming,
       set,
       root,
       ..
-    } = self.phase
+    }) = self.phase
     else {
       return Err(SourceEventError::NotStreaming(event));
     };
@@ -3340,12 +3485,12 @@ where
       return Err(SourceEventError::Outstanding(event));
     }
     self.reset();
-    self.phase = Phase::Subscription {
+    self.phase = Phase::Subscription(Subscribing {
       stage: Stage::Streaming,
       set,
       root,
       source: NONE,
-    };
+    });
     self.started = true;
     // `ExecuteSubscriptionEvent` is `ExecuteRootSelectionSet` over the same operation, so this is
     // the very call `start` makes — one execution, indistinguishable from a query's from here on.
@@ -3403,12 +3548,12 @@ where
   /// owes no result.
   pub fn handle_source_complete(&mut self) -> bool {
     self.on_entry();
-    let Phase::Subscription {
+    let Phase::Subscription(Subscribing {
       stage: Stage::Streaming,
       set,
       root,
       ..
-    } = self.phase
+    }) = self.phase
     else {
       return false;
     };
@@ -3421,12 +3566,12 @@ where
       self.reset();
       Stage::Completed
     };
-    self.phase = Phase::Subscription {
+    self.phase = Phase::Subscription(Subscribing {
       stage,
       set,
       root,
       source: NONE,
-    };
+    });
     true
   }
 
@@ -3460,12 +3605,12 @@ where
   /// response stream reads [`Failed`](ResponseStream::Failed) once it has.
   pub fn handle_source_error(&mut self) -> bool {
     self.on_entry();
-    let Phase::Subscription {
+    let Phase::Subscription(Subscribing {
       stage: Stage::Streaming,
       set,
       root,
       ..
-    } = self.phase
+    }) = self.phase
     else {
       return false;
     };
@@ -3475,12 +3620,12 @@ where
       self.reset();
       Stage::Failed
     };
-    self.phase = Phase::Subscription {
+    self.phase = Phase::Subscription(Subscribing {
       stage,
       set,
       root,
       source: NONE,
-    };
+    });
     true
   }
 
@@ -3532,9 +3677,9 @@ where
   /// two.
   pub fn unsubscribe(&mut self) -> bool {
     self.on_entry();
-    let Phase::Subscription {
+    let Phase::Subscription(Subscribing {
       stage, set, root, ..
-    } = self.phase
+    }) = self.phase
     else {
       return false;
     };
@@ -3542,12 +3687,12 @@ where
       return false;
     }
     self.reset();
-    self.phase = Phase::Subscription {
+    self.phase = Phase::Subscription(Subscribing {
       stage: Stage::Cancelled,
       set,
       root,
       source: NONE,
-    };
+    });
     true
   }
 
@@ -3574,7 +3719,7 @@ where
       // §6.4.4 takes it from here.
       if ctx.is_null(&value) {
         let (parent, field) = self.owner(slot);
-        self.fail(slot, Raw::NullInNonNull { parent, field });
+        self.fail(slot, Raw::NullInNonNull(FieldCoordinate { parent, field }));
         return;
       }
       ty.nullable()
@@ -3590,7 +3735,7 @@ where
     if let Some(item) = ty.list_item() {
       let Some(len) = ctx.list_len(&value) else {
         let (parent, field) = self.owner(slot);
-        self.fail(slot, Raw::NotAList { parent, field });
+        self.fail(slot, Raw::NotAList(FieldCoordinate { parent, field }));
         return;
       };
       self.slots[slot as usize].state = State::List;
@@ -3619,11 +3764,11 @@ where
           let limit = self.limits.max_response_slots.get();
           self.fail(
             slot,
-            Raw::ResponseBudget {
+            Raw::ResponseBudget(FieldBudget {
               parent,
               field,
               limit,
-            },
+            }),
           );
           return;
         };
@@ -3670,11 +3815,11 @@ where
           let leaf = self.schema.type_def(base).name();
           self.fail(
             slot,
-            Raw::LeafCoercion {
+            Raw::LeafCoercion(LeafCoercion {
               leaf,
               parent,
               field,
-            },
+            }),
           );
         }
       }
@@ -3688,11 +3833,11 @@ where
         let (parent, field) = self.owner(slot);
         self.fail(
           slot,
-          Raw::AbstractUnresolved {
+          Raw::AbstractUnresolved(AbstractUnresolved {
             abstract_ty: base,
             parent,
             field,
-          },
+          }),
         );
         return;
       };
@@ -3716,12 +3861,12 @@ where
         let limit = self.visits.limit();
         self.fail(
           slot,
-          Raw::RuntimeTypeBudget {
+          Raw::RuntimeTypeBudget(RuntimeTypeBudget {
             abstract_ty: base,
             parent,
             field,
             limit,
-          },
+          }),
         );
         return;
       }
@@ -3747,14 +3892,14 @@ where
           // render the arena's cap whatever had refused, so a visit budget exhausted by the probe
           // run reported itself as a full arena.
           let raw = match self.interner.intern(name, &mut self.visits) {
-            Ok(runtime) => Raw::AbstractNotPossible {
+            Ok(runtime) => Raw::AbstractNotPossible(AbstractNotPossible {
               abstract_ty: base,
               runtime,
-            },
-            Err(unstored) => Raw::AbstractNotPossibleUnnamed {
+            }),
+            Err(unstored) => Raw::AbstractNotPossibleUnnamed(AbstractNotPossibleUnnamed {
               abstract_ty: base,
               unstored,
-            },
+            }),
           };
           self.fail(slot, raw);
           return;
@@ -3764,15 +3909,15 @@ where
       base
     };
 
-    self.slots[slot as usize].state = State::Object {
+    self.slots[slot as usize].state = State::Object(PendingObject {
       value,
       ty: object,
       pending: 0,
-    };
+    });
 
     // `MergeSelectionSets`: every field that shared this response key contributes its
     // sub-selections, and §6.3 collects over the concatenation.
-    let (start, len) = self.meta[slot as usize].merged;
+    let FlatRun { start, len } = self.meta[slot as usize].merged;
     self.scratch_sets.clear();
     for field in &self.merged[start as usize..(start + len) as usize] {
       if let Some(set) = field.selection_set() {
@@ -3814,7 +3959,7 @@ where
     // is no abstract type to resolve — and the entity it stands for is what its fields are answered
     // from.
     let (object_type, meta_object) = match &self.slots[slot as usize].state {
-      State::Object { ty, .. } => (*ty, None),
+      State::Object(PendingObject { ty, .. }) => (*ty, None),
       State::MetaObject(entity) => (self.slots[slot as usize].ty.base_id(), Some(*entity)),
       // Enumerated for the reason the offer path is. `Expanded` cannot appear because a slot
       // expands once; the rest are the not-an-object cases this always returned on.
@@ -3876,21 +4021,16 @@ where
         // so the position is attached here, where `owner` is in reach. Rendering then goes through
         // exactly the path a commit-side refusal does — including the root's, which must not say
         // `Query.Query`.
-        (Raw::MetadataBudget { limit }, _) => {
+        (Raw::MetadataBudget(limit), _) => {
           let (parent, field) = self.owner(slot);
-          Raw::SelectionBudget {
+          Raw::SelectionBudget(FieldBudget {
             parent,
             field,
             limit,
-          }
+          })
         }
-        (
-          Raw::DirectiveCondition {
-            fault: ConditionFault::VariableMissing { .. },
-          },
-          Some(bytes),
-        ) => Raw::DirectiveCondition {
-          fault: ConditionFault::VariableMissing {
+        (Raw::DirectiveCondition(ConditionFault::VariableMissing(_)), Some(bytes)) => {
+          Raw::DirectiveCondition(ConditionFault::VariableMissing(
             // `.ok()` on purpose, and the only kind of site where discarding the refusal is right:
             // the spelling is decoration on a finding that does not depend on it, so both ceilings
             // shorten the same sentence and the reader is not told about a resource at all. The
@@ -3900,10 +4040,9 @@ where
             // `None` rather than through a ceiling. It used to be interned raw and rendered as
             // `""` on the way out, so the honest branch printed `$` with nothing after it — see
             // al8n/smear#139.
-            variable: variable_key(bytes)
-              .and_then(|name| self.interner.intern(name, &mut self.visits).ok()),
-          },
-        },
+            variable_key(bytes).and_then(|name| self.interner.intern(name, &mut self.visits).ok()),
+          ))
+        }
         (raw, _) => raw,
       };
       self.fail_at(slot, raw, fault.location);
@@ -3924,7 +4063,7 @@ where
     let mut exhausted: Option<(Exhausted, SimpleSpan)> = None;
     for group in scratch.groups() {
       let selections = &scratch.fields[group.start as usize..(group.start + group.len) as usize];
-      let first = selections[0].1;
+      let first = selections[0].field;
       // The probe hashes the field's *document* spelling, and this runs once per object position.
       // The response key collection interned is the **alias** when there is one, so `{ a: <a
       // megabyte of name> }` charges a byte or two at collection and hashes a megabyte here, per
@@ -3933,9 +4072,7 @@ where
       // budget's, which is exactly what `Exhausted::Unstored` renders.
       if !self.visits.take_bytes(name_bytes(first).len()) {
         exhausted = Some((
-          Exhausted::Unstored(Unstored::Budget {
-            limit: self.visits.limit(),
-          }),
+          Exhausted::Unstored(Unstored::Budget(self.visits.limit())),
           group.first,
         ));
         break;
@@ -3981,7 +4118,7 @@ where
         exhausted = Some((Exhausted::Selections, group.first));
         break;
       }
-      for &(_, field) in selections {
+      for &Grouped { field, .. } in selections {
         self.merged.push(field);
         self.locations.push(*field.span());
       }
@@ -4034,8 +4171,14 @@ where
       };
       self.meta[child as usize] = Meta {
         field: Some(first),
-        merged: (start, group.len),
-        locations: (located, group.len),
+        merged: FlatRun {
+          start,
+          len: group.len,
+        },
+        locations: FlatRun {
+          start: located,
+          len: group.len,
+        },
         parent_type: object_type,
         field_sym: sym,
       };
@@ -4067,25 +4210,25 @@ where
       self.restore(slot, mark);
       let (parent, field) = self.owner(slot);
       let raw = match which {
-        Exhausted::Positions => Raw::ResponseBudget {
+        Exhausted::Positions => Raw::ResponseBudget(FieldBudget {
           parent,
           field,
           limit: self.limits.max_response_slots.get(),
-        },
-        Exhausted::Selections => Raw::SelectionBudget {
+        }),
+        Exhausted::Selections => Raw::SelectionBudget(FieldBudget {
           parent,
           field,
           limit: self.limits.max_response_metadata.get(),
-        },
+        }),
         // The ceiling arrived with the refusal, so there is no second place for the number to come
         // from and no way to take it from the wrong one.
-        Exhausted::Unstored(Unstored::Arena { limit }) => Raw::NameStorage { limit },
-        Exhausted::Unstored(Unstored::Budget { limit }) => Raw::CollectionBudget { limit },
+        Exhausted::Unstored(Unstored::Arena(limit)) => Raw::NameStorage(limit),
+        Exhausted::Unstored(Unstored::Budget(limit)) => Raw::CollectionBudget(limit),
       };
       // `fail_at` rather than `fail`, and the span is the refused selection's own.
       //
-      // `fail` reads the slot's stored locations range, and the *root's* range is empty by
-      // construction — `start` builds it as `(0, 0)` because the root has no field to have a span.
+      // `fail` reads the slot's stored locations run, and the *root's* run is empty by
+      // construction — `start` builds it empty because the root has no field to have a span.
       // So a budget tripped at the top level reached the driver with `locations()` empty, against
       // this crate's own contract that every observable error has at least one. Pointing at the
       // selection that was refused fixes the root and sharpens every other budget error with it:
@@ -4269,17 +4412,17 @@ where
         let limit = self.visits.limit();
         self.fail(
           slot,
-          Raw::ArgumentBudget {
+          Raw::ArgumentBudget(FieldBudget {
             parent: parent_type,
             field: field_sym,
             limit,
-          },
+          }),
         );
         // One of the two resource exits in this function — the other is the variable
         // spelling's, below. Both are reached only with work still unattempted. The three
         // §6.4.1 field errors further down are not resource exits, and telling them apart is
         // the whole reason this returns a `Coercion` and not a `bool`.
-        return Coercion::Refused { limit };
+        return Coercion::Refused(limit);
       }
       let ty = argument.ty();
       let non_null = ty.is_non_null();
@@ -4344,13 +4487,13 @@ where
               let limit = self.visits.limit();
               self.fail(
                 slot,
-                Raw::ArgumentBudget {
+                Raw::ArgumentBudget(FieldBudget {
                   parent: parent_type,
                   field: field_sym,
                   limit,
-                },
+                }),
               );
-              return Coercion::Refused { limit };
+              return Coercion::Refused(limit);
             }
             // A variable *was* written, so this is step 5.d and not step 5.b: the outer `Some`
             // keeps the error `ArgumentVariableMissing` rather than `ArgumentMissing`, which is
@@ -4405,22 +4548,22 @@ where
             let variable = name.and_then(|name| self.interner.intern(name, &mut self.visits).ok());
             self.fail_at(
               slot,
-              Raw::ArgumentVariableMissing {
+              Raw::ArgumentVariableMissing(ArgumentVariableMissing {
                 field: field_sym,
                 argument: argument.name(),
                 ty,
                 variable,
-              },
+              }),
               location,
             );
           }
           None => self.fail_at(
             slot,
-            Raw::ArgumentMissing {
+            Raw::ArgumentMissing(ArgumentRef {
               field: field_sym,
               argument: argument.name(),
               ty,
-            },
+            }),
             *node.span(),
           ),
         }
@@ -4431,11 +4574,11 @@ where
       if is_null && non_null {
         self.fail_at(
           slot,
-          Raw::ArgumentNull {
+          Raw::ArgumentNull(ArgumentRef {
             field: field_sym,
             argument: argument.name(),
             ty,
-          },
+          }),
           value_span.unwrap_or(*node.span()),
         );
         return Coercion::FieldError;
@@ -4444,10 +4587,10 @@ where
       let source = match (variable, supplied.map(|argument| argument.value())) {
         // The inner `Some` is the reader: `has_value` is true, so the key was readable and the
         // driver answered about it. An unreadable one never reaches here — it left at step 5.d.
-        (Some((Some(variable), Some(value))), _) => ArgumentSource::Variable {
+        (Some((Some(variable), Some(value))), _) => ArgumentSource::Variable(NamedVariable {
           name: variable,
           value,
-        },
+        }),
         (None, Some(literal)) => ArgumentSource::Literal(literal),
         // `has_value` is true, so one of the arms above always matches: a variable with no value
         // returned at the step 5.d branch above — whether the driver said so or the spelling was
@@ -4517,8 +4660,8 @@ where
     // discarded, because the two doors are two different knobs and an operator told the wrong one
     // resizes an arena that was never the constraint.
     match self.interner.intern(message, &mut self.visits) {
-      Ok(message) => Raw::Resolver { message },
-      Err(unstored) => Raw::ResolverUnstorable { unstored },
+      Ok(message) => Raw::Resolver(message),
+      Err(unstored) => Raw::ResolverUnstorable(unstored),
     }
   }
 
@@ -4540,7 +4683,7 @@ where
     // The root is the one position whose stored range is empty, and it can fail at most once per
     // operation, so the fallback below overshoots the ceiling by at most a single entry.
     let stored = self.meta[slot as usize].locations;
-    if !self.metadata_room(1) && stored.1 > 0 {
+    if !self.metadata_room(1) && stored.len > 0 {
       self.record(slot, raw, stored, NONE);
       return;
     }
@@ -4549,7 +4692,7 @@ where
       return;
     };
     self.locations.push(location);
-    self.record(slot, raw, (start, 1), NONE);
+    self.record(slot, raw, FlatRun { start, len: 1 }, NONE);
   }
 
   /// Whether `more` metadata entries fit under [`Limits::max_response_metadata`].
@@ -4563,7 +4706,7 @@ where
     used + more <= u64::from(self.limits.max_response_metadata.get())
   }
 
-  fn record(&mut self, slot: u32, raw: Raw, locations: (u32, u32), extensions: u32) {
+  fn record(&mut self, slot: u32, raw: Raw, locations: FlatRun, extensions: u32) {
     self.errors.push(Row {
       raw,
       slot,
@@ -5189,7 +5332,7 @@ where
   /// one, and the empty-selection early return — is what catches it, and catches the root with it,
   /// because `start` expands the root through the same path.
   fn settle_pending(&mut self, slot: u32, enqueued: u32) {
-    if let State::Object { pending, .. } = &mut self.slots[slot as usize].state {
+    if let State::Object(PendingObject { pending, .. }) = &mut self.slots[slot as usize].state {
       *pending = enqueued;
     }
     if enqueued == 0 {
@@ -5231,10 +5374,10 @@ where
     self.settle_deferred();
     if !matches!(
       self.phase,
-      Phase::Subscription {
+      Phase::Subscription(Subscribing {
         stage: Stage::Creating,
         ..
-      }
+      })
     ) {
       self.retire_arguments();
     }
@@ -5256,7 +5399,7 @@ where
   /// The transition **is** the release — `Expanded` holds no `V` — which is why there is no
   /// `release_object` to forget to call. Writing the state is the whole operation.
   fn expire(&mut self, slot: u32) {
-    if matches!(self.slots[slot as usize].state, State::Object { .. }) {
+    if matches!(self.slots[slot as usize].state, State::Object(_)) {
       self.slots[slot as usize].state = State::Expanded;
     }
   }
@@ -5267,7 +5410,8 @@ where
   /// true when it does not. Decrement-if-`Object` makes it total: a parent discarded by the very
   /// propagation that removed this child is already `Null` and has nothing to account.
   fn child_departed(&mut self, parent: u32, defer: bool) {
-    let State::Object { pending, .. } = &mut self.slots[parent as usize].state else {
+    let State::Object(PendingObject { pending, .. }) = &mut self.slots[parent as usize].state
+    else {
       return;
     };
     *pending = pending.saturating_sub(1);
@@ -5465,7 +5609,7 @@ where
     self.live += 1;
     if self.free != NONE {
       let index = self.free;
-      let Slotted::Free { next } = self.inflight[index as usize].state else {
+      let Slotted::Free(next) = self.inflight[index as usize].state else {
         unreachable!("the free chain only holds free entries");
       };
       self.free = next;
@@ -5529,14 +5673,14 @@ where
         self.release_entry(id.index);
         None
       }
-      Slotted::Free { .. } => None,
+      Slotted::Free(_) => None,
     }
   }
 
   fn release_entry(&mut self, index: u32) {
     let entry = &mut self.inflight[index as usize];
     entry.generation = entry.generation.wrapping_add(1);
-    entry.state = Slotted::Free { next: self.free };
+    entry.state = Slotted::Free(self.free);
     self.free = index;
   }
 
@@ -5574,7 +5718,7 @@ pub struct Response<'r, V> {
   slots: &'r [Slot<V>],
   depth: u32,
   names: &'r str,
-  name_spans: &'r [(u32, u32)],
+  name_spans: &'r [FlatRun],
   locations: &'r [SimpleSpan],
   errors: &'r [Row],
   /// Draft §7.1.6's per-error maps, which the rows in `errors` index.

@@ -82,7 +82,10 @@ use smear::parser::{
     },
     syntactic::{GraphqlLexer, document, executable_document, type_system_document},
   },
-  lossless::ast::CastNode,
+  lossless::{
+    ast::CastNode,
+    project::{MissingChild, UnexpectedChild},
+  },
 };
 use tokora::{Parse as _, Parser};
 
@@ -753,10 +756,7 @@ fn a_structure_the_bytes_do_not_imply_is_refused_rather_than_re_derived() {
   // walk reads `Definition+` and `end` refuses the stranger under the node that holds it.
   assert_eq!(
     kind,
-    ProjectErrorKind::UnexpectedChild {
-      parent: K::Document,
-      found: K::Description,
-    },
+    ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(K::Document, K::Description)),
     "the walk names the loose node where it sits"
   );
 
@@ -997,7 +997,7 @@ fn the_lost_node_class_refuses() {
   );
   let kind = refuse(&src);
   assert!(
-    matches!(kind, ProjectErrorKind::UnexpectedChild { .. }),
+    matches!(kind, ProjectErrorKind::UnexpectedChild(_)),
     "expected an UnexpectedChild refusal, got {kind:?}"
   );
 }
@@ -1009,10 +1009,7 @@ fn the_recovered_in_place_class_refuses() {
   let kind = refuse("type T { x: ! }");
   assert_eq!(
     kind,
-    ProjectErrorKind::UnexpectedChild {
-      parent: K::FieldDefinition,
-      found: K::Error,
-    },
+    ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(K::FieldDefinition, K::Error)),
     "the hole must be named where it sits"
   );
 }
@@ -1034,10 +1031,7 @@ fn a_variable_in_a_constant_position_refuses() {
   let kind = refuse(src);
   assert_eq!(
     kind,
-    ProjectErrorKind::UnexpectedChild {
-      parent: K::Argument,
-      found: K::Variable,
-    }
+    ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(K::Argument, K::Variable))
   );
 }
 
@@ -1050,9 +1044,7 @@ fn a_fragment_named_on_refuses() {
   let kind = refuse(&src);
   assert_eq!(
     kind,
-    ProjectErrorKind::SemanticRule {
-      rule: "a fragment may not be named `on`",
-    },
+    ProjectErrorKind::SemanticRule("a fragment may not be named `on`"),
     "the exclusion `FragmentName::new` is kept crate-private to protect has to be re-checked \
      here, because the tree records it only as a diagnostic"
   );
@@ -1108,10 +1100,7 @@ fn a_gap_token_is_a_hole_the_scan_sees() {
       .expect_err("a gap is a region with no AST image");
     assert_eq!(
       refusal.kind(),
-      &ProjectErrorKind::UnexpectedChild {
-        parent,
-        found: K::Gap,
-      },
+      &ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(parent, K::Gap)),
       "{what}"
     );
     assert_eq!(refusal.span(), &at, "{what}: the gap's own range");
@@ -1209,10 +1198,7 @@ fn a_missing_constituent_refuses() {
     .clone();
   assert_eq!(
     kind,
-    ProjectErrorKind::MissingChild {
-      parent: K::FieldDefinition,
-      wanted: "a type reference",
-    }
+    ProjectErrorKind::MissingChild(MissingChild::new(K::FieldDefinition, "a type reference"))
   );
 }
 
@@ -1248,7 +1234,7 @@ fn a_token_that_will_not_cook_refuses() {
     .expect_err("an unterminated string literal does not cook")
     .kind()
     .clone();
-  assert_eq!(kind, ProjectErrorKind::MalformedToken { kind: K::String });
+  assert_eq!(kind, ProjectErrorKind::MalformedToken(K::String));
 }
 
 #[test]
@@ -1269,12 +1255,12 @@ fn every_refusal_kind_has_a_witness() {
   let witnesses: Vec<Refusal> = vec![
     Refusal {
       what: "rubble under the document",
-      kind: |k| matches!(k, ProjectErrorKind::UnexpectedChild { .. }),
+      kind: |k| matches!(k, ProjectErrorKind::UnexpectedChild(_)),
       error: refuse(&src_junk),
     },
     Refusal {
       what: "a fragment named `on`",
-      kind: |k| matches!(k, ProjectErrorKind::SemanticRule { .. }),
+      kind: |k| matches!(k, ProjectErrorKind::SemanticRule(_)),
       error: refuse(&src_on),
     },
     Refusal {
@@ -1614,9 +1600,7 @@ fn a_tree_deeper_than_the_ceiling_is_refused_rather_than_descended() {
     verify_source::<K>(green, "").expect_err("`verify_source` descended a tree past the ceiling");
   assert_eq!(
     *refused.kind(),
-    ProjectErrorKind::TooDeep {
-      limit: MAX_GREEN_DEPTH
-    },
+    ProjectErrorKind::TooDeep(MAX_GREEN_DEPTH),
     "{refused}"
   );
   let counted = verify_source_counted::<K>(green, "")
@@ -1624,9 +1608,7 @@ fn a_tree_deeper_than_the_ceiling_is_refused_rather_than_descended() {
     .expect_err("`verify_source_counted` descended a tree past the ceiling");
   assert_eq!(
     *counted.kind(),
-    ProjectErrorKind::TooDeep {
-      limit: MAX_GREEN_DEPTH
-    },
+    ProjectErrorKind::TooDeep(MAX_GREEN_DEPTH),
     "{counted}"
   );
 
@@ -1635,9 +1617,7 @@ fn a_tree_deeper_than_the_ceiling_is_refused_rather_than_descended() {
     .expect_err("`reject_holes` descended a tree past the ceiling");
   assert_eq!(
     *holes.kind(),
-    ProjectErrorKind::TooDeep {
-      limit: MAX_GREEN_DEPTH
-    },
+    ProjectErrorKind::TooDeep(MAX_GREEN_DEPTH),
     "{holes}"
   );
 
@@ -1649,9 +1629,7 @@ fn a_tree_deeper_than_the_ceiling_is_refused_rather_than_descended() {
     .expect_err("`node_extent` manufactured an extent for a tree past the ceiling");
   assert_eq!(
     *extent.kind(),
-    ProjectErrorKind::TooDeep {
-      limit: MAX_GREEN_DEPTH
-    },
+    ProjectErrorKind::TooDeep(MAX_GREEN_DEPTH),
     "{extent}"
   );
   // And the shallow twin still answers exactly: an all-trivia run is `None`, not a range.
@@ -1676,10 +1654,7 @@ fn a_tree_deeper_than_the_ceiling_is_refused_rather_than_descended() {
   // `None` and a stale pair wearing the budget's refusal.
   assert_ne!(
     Unverified::SourceMismatch.to_string(),
-    Unverified::TooDeep {
-      limit: MAX_GREEN_DEPTH
-    }
-    .to_string(),
+    Unverified::TooDeep(MAX_GREEN_DEPTH).to_string(),
     "the two reasons render as one sentence"
   );
 
@@ -1748,9 +1723,7 @@ fn the_ceiling_is_reached_on_a_stack_too_small_to_hold_it() {
   std::thread::Builder::new()
     .stack_size(STACK)
     .spawn(move || {
-      let too_deep = ProjectErrorKind::TooDeep {
-        limit: MAX_GREEN_DEPTH,
-      };
+      let too_deep = ProjectErrorKind::TooDeep(MAX_GREEN_DEPTH);
       let node = Node::<GraphQLLang>::new(&green, rowan::TextSize::new(0));
       assert_eq!(
         *verify_source::<K>(&green, "")
@@ -1981,7 +1954,7 @@ fn a_present_but_empty_required_container_refuses() {
     );
     assert_eq!(
       refuse(src),
-      ProjectErrorKind::MissingChild { parent, wanted },
+      ProjectErrorKind::MissingChild(MissingChild::new(parent, wanted)),
       "{src}"
     );
   }
@@ -2022,10 +1995,7 @@ fn a_present_directive_run_with_no_directive_refuses() {
   let (node, text) = field_with_directives(|_| {}, "query Q{f}");
   assert_eq!(
     refuse_tree(node, text),
-    ProjectErrorKind::MissingChild {
-      parent: K::Directives,
-      wanted: "a directive",
-    },
+    ProjectErrorKind::MissingChild(MissingChild::new(K::Directives, "a directive")),
     "a present run with no directive is the refusal, not an empty carrier"
   );
 
@@ -2040,10 +2010,7 @@ fn a_present_directive_run_with_no_directive_refuses() {
   tree.close();
   assert_eq!(
     refuse_tree(tree.finish(), "scalar S"),
-    ProjectErrorKind::MissingChild {
-      parent: K::Directives,
-      wanted: "a directive",
-    },
+    ProjectErrorKind::MissingChild(MissingChild::new(K::Directives, "a directive")),
     "both flavours, or the fix is half a fix"
   );
 
@@ -2057,10 +2024,7 @@ fn a_present_directive_run_with_no_directive_refuses() {
   );
   assert_eq!(
     refuse_tree(node, text),
-    ProjectErrorKind::UnexpectedChild {
-      parent: K::Directives,
-      found: K::At,
-    },
+    ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(K::Directives, K::At)),
     "the stray `@` is refused where it stands"
   );
 }
@@ -2100,10 +2064,7 @@ fn a_typed_door_scans_its_own_subtree_for_holes() {
     tree.close();
     tree.close();
   };
-  let hole = ProjectErrorKind::UnexpectedChild {
-    parent: K::ListType,
-    found: K::Error,
-  };
+  let hole = ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(K::ListType, K::Error));
 
   let mut tree = Tree::new();
   tree.open(K::Document);
@@ -2154,10 +2115,7 @@ fn a_typed_door_scans_its_own_subtree_for_holes() {
   let node = ExecutableDocumentNode::cast_node(tree.finish()).expect("an ExecutableDocument root");
   assert_eq!(
     node.to_ast(text).map(|_| ()).expect_err("refuses").kind(),
-    &ProjectErrorKind::UnexpectedChild {
-      parent: K::ListValue,
-      found: K::Error,
-    },
+    &ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(K::ListValue, K::Error)),
     "the executable door"
   );
 }
@@ -2251,10 +2209,7 @@ fn the_root_shape_is_asserted_rather_than_searched() {
       .map(|_| ())
       .expect_err("rubble is not a document")
       .kind(),
-    &ProjectErrorKind::UnexpectedChild {
-      parent: K::Root,
-      found: K::OperationType,
-    }
+    &ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(K::Root, K::OperationType))
   );
 
   // The positive half of the check itself, at all three doors.
@@ -2311,10 +2266,7 @@ fn a_type_condition_whose_type_precedes_its_on_refuses_rather_than_panicking() {
   // here would take the harness with it rather than being caught by this assertion.
   assert_eq!(
     refuse_tree(node, text),
-    ProjectErrorKind::UnexpectedChild {
-      parent: K::FragmentDefinition,
-      found: K::Name,
-    },
+    ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(K::FragmentDefinition, K::Name)),
     "the fragment definition's site"
   );
 
@@ -2342,10 +2294,7 @@ fn a_type_condition_whose_type_precedes_its_on_refuses_rather_than_panicking() {
   assert_eq!(node.text().to_string(), text);
   assert_eq!(
     refuse_tree(node, text),
-    ProjectErrorKind::UnexpectedChild {
-      parent: K::InlineFragment,
-      found: K::NamedType,
-    },
+    ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(K::InlineFragment, K::NamedType)),
     "the inline fragment's site: with no `on` in front of it the type is not in the sequence"
   );
 }
@@ -2408,10 +2357,7 @@ fn a_described_shorthand_refuses_and_its_recovery_is_not_complete() {
   assert!(oracle(src).is_err(), "and the syntactic parser refuses it");
   assert_eq!(
     refuse(src),
-    ProjectErrorKind::UnexpectedChild {
-      parent: K::OperationDefinition,
-      found: K::Description,
-    }
+    ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(K::OperationDefinition, K::Description))
   );
   let parse = parse_executable_document(src);
   let (document, recovery) =
@@ -2445,10 +2391,7 @@ fn a_described_extension_refuses() {
     assert!(oracle(src).is_err(), "{src}");
     assert_eq!(
       refuse(src),
-      ProjectErrorKind::UnexpectedChild {
-        parent,
-        found: K::Description,
-      },
+      ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(parent, K::Description)),
       "{src}"
     );
     let (_, recovery) =
@@ -2494,10 +2437,7 @@ fn a_fragment_name_split_into_two_tokens_refuses() {
   );
   assert_eq!(
     refuse_tree(node, text),
-    ProjectErrorKind::UnexpectedChild {
-      parent: K::FragmentDefinition,
-      found: K::Name,
-    },
+    ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(K::FragmentDefinition, K::Name)),
     "the second name is refused where it sits"
   );
 }
@@ -2527,10 +2467,7 @@ fn a_fourth_name_token_refuses() {
   assert_eq!(node.text().to_string(), text);
   assert_eq!(
     refuse_tree(node, text),
-    ProjectErrorKind::UnexpectedChild {
-      parent: K::DirectiveDefinition,
-      found: K::Name,
-    }
+    ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(K::DirectiveDefinition, K::Name))
   );
 
   // And the shape `Names` was sized for: an extension's third name is its target, so a fourth used
@@ -2556,10 +2493,7 @@ fn a_fourth_name_token_refuses() {
   assert_eq!(node.text().to_string(), text);
   assert_eq!(
     refuse_tree(node, text),
-    ProjectErrorKind::UnexpectedChild {
-      parent: K::ObjectTypeExtension,
-      found: K::Name,
-    }
+    ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(K::ObjectTypeExtension, K::Name))
   );
 }
 
@@ -2632,7 +2566,7 @@ fn a_duplicate_of_an_expected_once_child_refuses() {
     assert_eq!(node.text().to_string(), text, "{what}");
     let kind = refuse_tree(node, text);
     assert!(
-      matches!(kind, ProjectErrorKind::UnexpectedChild { found: f, .. } if f == found),
+      matches!(kind, ProjectErrorKind::UnexpectedChild(e) if *e.found() == found),
       "{what}: {kind:?}"
     );
   }
@@ -2655,10 +2589,7 @@ fn a_stray_token_a_shape_does_not_spell_refuses() {
   assert_eq!(node.text().to_string(), text);
   assert_eq!(
     refuse_tree(node, text),
-    ProjectErrorKind::UnexpectedChild {
-      parent: K::ScalarTypeDefinition,
-      found: K::Colon,
-    }
+    ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(K::ScalarTypeDefinition, K::Colon))
   );
 }
 
@@ -2697,10 +2628,7 @@ fn a_keyword_slot_is_read_by_spelling() {
     let built = node.text().to_string();
     assert_eq!(
       refuse_tree(node, &built),
-      ProjectErrorKind::UnexpectedChild {
-        parent: K::DirectiveDefinition,
-        found: K::Name,
-      },
+      ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(K::DirectiveDefinition, K::Name)),
       "{text}"
     );
   }
@@ -2792,10 +2720,7 @@ fn every_definition_kind_refuses_a_foreign_child() {
     let (node, text) = definition_with_foreign(kind, head, foreign);
     assert_eq!(
       refuse_tree(node, &text),
-      ProjectErrorKind::UnexpectedChild {
-        parent: kind,
-        found: foreign,
-      },
+      ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(kind, foreign)),
       "{kind:?} holding a {foreign:?}"
     );
   }
@@ -2841,10 +2766,7 @@ fn every_extension_kind_refuses_a_foreign_tail() {
     let (node, text) = definition_with_foreign(kind, head, foreign);
     assert_eq!(
       refuse_tree(node, &text),
-      ProjectErrorKind::UnexpectedChild {
-        parent: kind,
-        found: foreign,
-      },
+      ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(kind, foreign)),
       "{kind:?} holding a {foreign:?}"
     );
   }
@@ -2951,7 +2873,7 @@ fn the_separated_atoms_refuse_at_the_obstruction() {
     });
     let refused = refuse_tree(node, &text);
     assert!(
-      matches!(refused, ProjectErrorKind::MissingChild { parent: p, .. } if p == parent),
+      matches!(refused, ProjectErrorKind::MissingChild(e) if *e.parent() == parent),
       "{parent:?} `{text}`: {refused:?}"
     );
     // A doubled separator.
@@ -2962,17 +2884,14 @@ fn the_separated_atoms_refuse_at_the_obstruction() {
     });
     assert_eq!(
       refuse_tree(node, &text),
-      ProjectErrorKind::UnexpectedChild {
-        parent,
-        found: kind,
-      },
+      ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(parent, kind)),
       "{parent:?} `{text}`"
     );
     // Nothing at all after the opener.
     let (node, text) = separated_in(parent, |_| {});
     let refused = refuse_tree(node, &text);
     assert!(
-      matches!(refused, ProjectErrorKind::MissingChild { parent: p, .. } if p == parent),
+      matches!(refused, ProjectErrorKind::MissingChild(e) if *e.parent() == parent),
       "{parent:?} `{text}`: {refused:?}"
     );
   }
@@ -3016,10 +2935,7 @@ fn a_one_of_slot_group_refuses_its_second_member() {
   assert_eq!(node.text().to_string(), text);
   assert_eq!(
     refuse_tree(node, text),
-    ProjectErrorKind::UnexpectedChild {
-      parent: K::ObjectField,
-      found: K::IntValue,
-    }
+    ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(K::ObjectField, K::IntValue))
   );
 }
 
@@ -3044,7 +2960,7 @@ fn a_name_token_spelled_as_a_number_refuses() {
   assert_eq!(node.text().to_string(), text);
   assert_eq!(
     refuse_tree(node, text),
-    ProjectErrorKind::MalformedToken { kind: K::Name }
+    ProjectErrorKind::MalformedToken(K::Name)
   );
 
   // A keyword passes: this dialect's keywords are contextual, so the door reads `query` as an
@@ -3077,7 +2993,7 @@ fn a_numeric_spelling_the_scanner_will_not_read_back_refuses() {
     assert_eq!(tree.text().to_string(), text, "{what}");
     assert_eq!(
       refuse_tree(tree, &text),
-      ProjectErrorKind::MalformedToken { kind: token },
+      ProjectErrorKind::MalformedToken(token),
       "{what}"
     );
   }
@@ -3099,12 +3015,12 @@ fn a_null_value_over_another_identifier_refuses() {
   let (node, text) = scalar_with_literal(K::NullValue, K::Name, "X");
   assert_eq!(
     refuse_tree(node, &text),
-    ProjectErrorKind::MalformedToken { kind: K::Name }
+    ProjectErrorKind::MalformedToken(K::Name)
   );
   let (node, text) = scalar_with_literal(K::BooleanValue, K::Name, "X");
   assert_eq!(
     refuse_tree(node, &text),
-    ProjectErrorKind::MalformedToken { kind: K::Name }
+    ProjectErrorKind::MalformedToken(K::Name)
   );
 }
 
@@ -3113,7 +3029,7 @@ fn a_string_leaf_without_its_quotes_refuses() {
   let (node, text) = scalar_with_literal(K::StringValue, K::String, "abc");
   assert_eq!(
     refuse_tree(node, &text),
-    ProjectErrorKind::MalformedToken { kind: K::String }
+    ProjectErrorKind::MalformedToken(K::String)
   );
 }
 
@@ -3138,10 +3054,7 @@ fn a_leaf_with_two_literal_tokens_refuses() {
   assert_eq!(node.text().to_string(), text);
   assert_eq!(
     refuse_tree(node, text),
-    ProjectErrorKind::UnexpectedChild {
-      parent: K::IntValue,
-      found: K::Int,
-    }
+    ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(K::IntValue, K::Int))
   );
   assert_eq!(
     project(&parse_document(text), text).expect("projects"),
@@ -3205,9 +3118,7 @@ fn an_enum_value_named_true_refuses() {
   .1;
   assert_eq!(
     refuse(&src),
-    ProjectErrorKind::SemanticRule {
-      rule: "an enum value may not be `true`, `false` or `null`",
-    }
+    ProjectErrorKind::SemanticRule("an enum value may not be `true`, `false` or `null`")
   );
 }
 
@@ -3246,9 +3157,8 @@ fn every_derived_rule_position_refuses_its_spelling_in_a_hand_built_tree() {
   // reads `... on` as an inline fragment's head, and the value dispatch reads `true`, `false` and
   // `null` as a boolean and a null. Those two are invisible to the mutation law, so they are pinned
   // here, over trees built by hand.
-  let rule_enum = ProjectErrorKind::SemanticRule {
-    rule: "an enum value may not be `true`, `false` or `null`",
-  };
+  let rule_enum =
+    ProjectErrorKind::SemanticRule("an enum value may not be `true`, `false` or `null`");
   for spelling in ["true", "false", "null"] {
     let (node, text) = executable_value(
       |tree| {
@@ -3280,9 +3190,7 @@ fn every_derived_rule_position_refuses_its_spelling_in_a_hand_built_tree() {
   assert_eq!(node.text().to_string(), text);
   assert_eq!(
     refuse_tree(node, text),
-    ProjectErrorKind::SemanticRule {
-      rule: "a fragment spread may not target `on`",
-    }
+    ProjectErrorKind::SemanticRule("a fragment spread may not target `on`")
   );
 
   // The two a parse reaches, from a hand-built tree too, so all four read the same way here.
@@ -3308,9 +3216,7 @@ fn every_derived_rule_position_refuses_its_spelling_in_a_hand_built_tree() {
   assert_eq!(refuse_tree(node, text), rule_enum);
   assert_eq!(
     refuse("fragment on on T { f }"),
-    ProjectErrorKind::SemanticRule {
-      rule: "a fragment may not be named `on`",
-    }
+    ProjectErrorKind::SemanticRule("a fragment may not be named `on`")
   );
 }
 
@@ -3920,12 +3826,16 @@ fn header_lenient_rows() -> Vec<(String, String)> {
 /// A refusal's kind, spelled compactly enough to sit in a table cell.
 fn answer(kind: &ProjectErrorKind) -> String {
   match kind {
-    ProjectErrorKind::MissingChild { parent, .. } => std::format!("MissingChild {parent:?}"),
-    ProjectErrorKind::UnexpectedChild { parent, found } => {
-      std::format!("UnexpectedChild {parent:?} {found:?}")
+    ProjectErrorKind::MissingChild(missing) => {
+      std::format!("MissingChild {:?}", missing.parent())
     }
-    ProjectErrorKind::MalformedToken { kind } => std::format!("MalformedToken {kind:?}"),
-    ProjectErrorKind::SemanticRule { .. } => "SemanticRule".to_string(),
+    ProjectErrorKind::UnexpectedChild(unexpected) => std::format!(
+      "UnexpectedChild {:?} {:?}",
+      unexpected.parent(),
+      unexpected.found()
+    ),
+    ProjectErrorKind::MalformedToken(kind) => std::format!("MalformedToken {kind:?}"),
+    ProjectErrorKind::SemanticRule(_) => "SemanticRule".to_string(),
     other => std::format!("{other:?}"),
   }
 }
@@ -4325,7 +4235,7 @@ const CURSORS: usize = 57;
 fn a_raw_kind_outside_the_space_refuses_rather_than_panicking() {
   const FOREIGN: u16 = 60_000;
   let foreign = rowan::SyntaxKind(FOREIGN);
-  let refusal = ProjectErrorKind::InvalidRawKind { raw: FOREIGN };
+  let refusal = ProjectErrorKind::InvalidRawKind(FOREIGN);
   for root in [K::Document, K::ExecutableDocument, K::TypeSystemDocument] {
     // A foreign token, and a foreign node holding a legal one.
     for as_node in [false, true] {
@@ -4430,8 +4340,8 @@ fn a_parse_minted_over_a_wrong_root_is_refused_not_reported_complete() {
   };
 
   for root in [GraphQLLang::kind_to_raw(K::Name).0, 60_000] {
-    let unverified = Unverified::WrongRoot { raw: root };
-    let refusal = ProjectErrorKind::WrongRoot { raw: root };
+    let unverified = Unverified::WrongRoot(root);
+    let refusal = ProjectErrorKind::WrongRoot(root);
     for src in ["", "{ f }"] {
       let parse = foreign_root_parse(src, root);
       assert_eq!(parse.green().kind().0, root, "{root} {src:?}: the premise");
@@ -4518,7 +4428,7 @@ fn a_spelling_a_position_does_not_classify_is_malformed_in_a_parse() {
       .expect_err("the word is not one the position classifies");
     assert_eq!(
       refusal.kind(),
-      &ProjectErrorKind::MalformedToken { kind: K::Name },
+      &ProjectErrorKind::MalformedToken(K::Name),
       "{src}"
     );
     assert_eq!(refusal.span(), &at, "{src}: the token's own range");
@@ -4691,10 +4601,7 @@ fn a_root_with_two_containers_is_recovered_whole_and_refused_fail_fast() {
     let refusal = fail_fast.expect_err("the fail-fast door asserts one container");
     assert_eq!(
       refusal.kind(),
-      &ProjectErrorKind::UnexpectedChild {
-        parent: K::Root,
-        found: kind,
-      },
+      &ProjectErrorKind::UnexpectedChild(UnexpectedChild::new(K::Root, kind)),
       "{kind:?}: fail-fast"
     );
     assert_eq!(refusal.span(), &second, "{kind:?}: at the second container");

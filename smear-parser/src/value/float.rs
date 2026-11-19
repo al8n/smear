@@ -28,12 +28,24 @@ impl<S, Span, Lang: ?Sized> IntoSpan<Span> for FloatValue<S, Span, Lang> {
   }
 }
 
+/// `FloatValue` taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FloatValueComponents<S, Span> {
+  /// The span covering the floating-point literal.
+  pub span: Span,
+  /// The literal's source slice.
+  pub value: S,
+}
+
 impl<S, Span, Lang: ?Sized> IntoComponents for FloatValue<S, Span, Lang> {
-  type Components = (Span, S);
+  type Components = FloatValueComponents<S, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.value)
+    FloatValueComponents {
+      span: self.span,
+      value: self.value,
+    }
   }
 }
 

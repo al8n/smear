@@ -9,6 +9,8 @@ mod walk;
 
 pub(crate) use walk::drive;
 
+use derive_more::IsVariant;
+
 use super::{
   analysis::Analysis,
   diagnostic::{Diagnostic, Diagnostics, Reporter},
@@ -28,7 +30,7 @@ use super::{
 /// The walk enters every definition with at least one covered contribution, and the package and
 /// the module that hold it, even when that package is not covered. Inside, it reaches only what the
 /// covered contributions wrote; [`visit`] lists what that is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum Packages {
   /// The root package.
@@ -60,7 +62,7 @@ impl Packages {
 /// occurrence of any shape, [`TypeExpr::written_args`](crate::graphqlx::TypeExpr::written_args)
 /// answers the arguments written on it, and
 /// [`TypeExprKind::List`](crate::graphqlx::TypeExprKind::List) a list's element.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum Site {
   /// A member's type: a field's, an argument's or an input field's.

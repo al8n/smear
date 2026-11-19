@@ -47,12 +47,13 @@
 //! `proto` supply the content directly; the variant is where that would land, and a driver's
 //! `match` would not have to change.
 
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use tokora::SimpleSpan;
 
 use smear_parser::graphql::ast::{Field, InputValue, SelectionSet};
 use smear_schema::{PackedType, Schema, Sym, TypeId};
 
-use super::response::{Path, Slot};
+use super::response::{FlatRun, Path, Slot};
 
 /// The error types for the request.
 pub mod error;
@@ -118,8 +119,88 @@ impl ReqId {
   }
 }
 
+/// A variable the document wrote for an argument, and the value the request supplied for it.
+///
+/// [`ArgumentSource::Variable`]'s payload. Built with [`new`](Self::new); edited in place with the
+/// `set_*` setters or by value with the `with_*` ones.
+#[derive(Debug, Clone, Copy)]
+pub struct NamedVariable<'a, V> {
+  pub(crate) name: &'a str,
+  pub(crate) value: V,
+}
+
+impl<'a, V> NamedVariable<'a, V> {
+  /// Creates the payload from the variable's name, without the `$`, and its value.
+  #[inline]
+  pub const fn new(name: &'a str, value: V) -> Self {
+    Self { name, value }
+  }
+
+  /// Returns the variable's name, without the `$`.
+  #[inline]
+  pub const fn name(&self) -> &'a str {
+    self.name
+  }
+
+  /// Replaces the variable's name.
+  #[inline]
+  pub const fn set_name(&mut self, name: &'a str) -> &mut Self {
+    self.name = name;
+    self
+  }
+
+  /// Replaces the value.
+  #[inline]
+  pub fn set_value(&mut self, value: V) -> &mut Self {
+    self.value = value;
+    self
+  }
+
+  /// Returns the payload with its name replaced.
+  #[inline]
+  #[must_use]
+  pub const fn with_name(mut self, name: &'a str) -> Self {
+    self.name = name;
+    self
+  }
+
+  /// Returns the payload with its value replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_value(mut self, value: V) -> Self {
+    self.value = value;
+    self
+  }
+
+  /// Returns the value, exactly as [`Values::variable`](super::Values::variable) returned it.
+  #[inline]
+  pub const fn value(&self) -> &V {
+    &self.value
+  }
+
+  /// Returns the value, mutably.
+  #[inline]
+  pub const fn value_mut(&mut self) -> &mut V {
+    &mut self.value
+  }
+
+  /// Returns the value, giving up the name.
+  #[inline]
+  pub fn into_value(self) -> V {
+    self.value
+  }
+
+  /// Returns the name and the value, in that order.
+  #[inline]
+  pub fn into_parts(self) -> (&'a str, V) {
+    (self.name, self.value)
+  }
+}
+
 /// Where an argument's value comes from, after draft §6.4.1 has decided.
-#[derive(Debug)]
+#[derive(Debug, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum ArgumentSource<'a, S, V> {
   /// The document wrote a literal. It may still be the `null` literal — for a nullable argument
@@ -158,8 +239,8 @@ pub enum ArgumentSource<'a, S, V> {
   /// anywhere. Carrying it makes the checked value and the delivered value the same value by
   /// construction, and it is also one driver call fewer.
   ///
-  /// `name` is still here because draft §6.4.1's own errors name the variable, and because a
-  /// driver's tracing wants it.
+  /// The [`name`](NamedVariable::name) is still here because draft §6.4.1's own errors name the
+  /// variable, and because a driver's tracing wants it.
   ///
   /// # How long the executor owns it
   ///
@@ -169,14 +250,11 @@ pub enum ArgumentSource<'a, S, V> {
   /// or a pooled buffer, is handed back inside the operation rather than at the end of it. A
   /// driver that needs it for longer takes its own copy while the request is readable, which the
   /// borrow already requires of anything read out of a [`FieldRequest`].
-  Variable {
-    /// The variable's name, without the `$`.
-    name: &'a str,
-    /// Its value, exactly as [`Values::variable`](super::Values::variable) returned it.
-    value: V,
-  },
+  Variable(NamedVariable<'a, V>),
   /// No value reached the argument and the schema declares a default, so draft §6.4.1 step 5.b
   /// or 5.d says the default applies.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   SchemaDefault,
 }
 
@@ -219,7 +297,7 @@ pub struct FieldRequest<'r, 'a, S, V> {
   pub(super) schema: &'r Schema,
   pub(super) slots: &'r [Slot<V>],
   pub(super) names: &'r str,
-  pub(super) name_spans: &'r [(u32, u32)],
+  pub(super) name_spans: &'r [FlatRun],
   pub(super) slot: u32,
   pub(super) field: &'a Field<S>,
   pub(super) merged: &'r [&'a Field<S>],

@@ -71,11 +71,22 @@ pub(crate) fn bind(
       if own_directive(builder, sources, own, application) != Some(keys.directive) {
         continue;
       }
-      if let Some((lang, ty, tier)) = keys.read(builder, application, declared) {
+      if let Some(ExternBinding { lang, ty, tier }) = keys.read(builder, application, declared) {
         builder.bind_extern(def, application, lang, ty, tier);
       }
     }
   }
+}
+
+/// What one `@extern` binds: the kept text of its first `lang` and of its first `type`, and the
+/// tier.
+struct ExternBinding {
+  /// The kept text of its first `lang`.
+  lang: Text,
+  /// The kept text of its first `type`.
+  ty: Text,
+  /// The tier it binds at.
+  tier: Tier,
 }
 
 /// `core`'s `@extern` and its three arguments, and the three values of `core`'s `Tier`, each with
@@ -116,7 +127,7 @@ impl Keys {
     builder: &ModelBuilder,
     application: ApplicationId,
     declared: Tier,
-  ) -> Option<(Text, Text, Tier)> {
+  ) -> Option<ExternBinding> {
     let mut lang: Option<ValueId> = None;
     let mut ty: Option<ValueId> = None;
     let mut tier: Option<ValueId> = None;
@@ -145,7 +156,7 @@ impl Keys {
       Some(Stored::Enum(value)) => self.tier_of(value)?,
       Some(Stored::String(_) | Stored::Other) => return None,
     };
-    Some((lang, ty, tier))
+    Some(ExternBinding { lang, ty, tier })
   }
 
   /// The tier the value `value` of `Tier` names: `None` for a value of another enum's.

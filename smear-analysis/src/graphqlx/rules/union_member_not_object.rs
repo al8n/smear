@@ -17,7 +17,8 @@
 use std::format;
 
 use crate::graphqlx::{
-  Cx, DefId, DefKind, Diagnostic, TypeExprKind, Visitor, code::schema, diagnostic::Excerpt,
+  Cx, DefId, DefKind, Diagnostic, NamedTypeExpr, TypeExprKind, Visitor, code::schema,
+  diagnostic::Excerpt,
 };
 
 use super::supplied;
@@ -52,7 +53,7 @@ impl Visitor for UnionMemberNotObject {
       }
       for member in part.union_members() {
         let occurrence = model.type_expr(*member);
-        let TypeExprKind::Named { def: named, .. } = occurrence.kind() else {
+        let TypeExprKind::Named(NamedTypeExpr { def: named, .. }) = occurrence.kind() else {
           continue;
         };
         let named = model.def(named);

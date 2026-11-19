@@ -54,6 +54,48 @@ mod value;
 /// The default container type used for AST collections (lists, objects).
 pub type DefaultVec<T> = Vec<T>;
 
+// What `IntoComponents::into_components` returns for the nodes above: one struct per node, with
+// every field named and public, in the order the node writes them. A pattern needs no type
+// arguments, so a consumer destructures a node with
+// `let ArgumentComponents { span, name, value } = argument.into_components();`. A plain comment
+// rather than a doc comment, because rustdoc would merge a doc comment into the page of every
+// struct below.
+pub use crate::{
+  argument::{ArgumentComponents, ArgumentListComponents},
+  directive::{DirectiveComponents, DirectivesComponents},
+  executable::{
+    DescribedComponents, DocumentComponents, FragmentDefinitionComponents,
+    NamedOperationDefinitionComponents, VariableDefinitionComponents,
+    VariablesDefinitionComponents,
+  },
+  selection::{
+    AliasComponents, FieldComponents, FragmentSpreadComponents, InlineFragmentComponents,
+    SelectionSetComponents, TypeConditionComponents,
+  },
+  ty::{ListTypeComponents, NamedTypeComponents},
+  type_system::{
+    ArgumentsDefinitionComponents, DirectiveDefinitionComponents, DirectiveExtensionComponents,
+    DirectiveLocationsComponents, EnumTypeDefinitionComponents, EnumTypeExtensionComponents,
+    EnumValueDefinitionComponents, EnumValuesDefinitionComponents,
+    ExecutableDirectiveLocationComponents, FieldDefinitionComponents, FieldsDefinitionComponents,
+    ImplementInterfacesComponents, InputFieldsDefinitionComponents,
+    InputObjectTypeDefinitionComponents, InputObjectTypeExtensionComponents,
+    InputValueDefinitionComponents, InterfaceTypeDefinitionComponents,
+    InterfaceTypeExtensionComponents, LocationComponents, ObjectTypeDefinitionComponents,
+    ObjectTypeExtensionComponents, RootOperationTypeDefinitionComponents,
+    RootOperationTypesDefinitionComponents, ScalarTypeDefinitionComponents,
+    ScalarTypeExtensionComponents, SchemaDefinitionComponents, SchemaExtensionComponents,
+    TypeSystemDirectiveLocationComponents, UnionMemberTypesComponents,
+    UnionTypeDefinitionComponents, UnionTypeExtensionComponents,
+  },
+  value::{
+    BlockStringValueComponents, BooleanValueComponents, DefaultInputValueComponents,
+    EnumValueComponents, FloatValueComponents, InlineStringValueComponents, IntValueComponents,
+    ListComponents, NullValueComponents, ObjectComponents, ObjectFieldComponents,
+    StringValueComponents, VariableValueComponents,
+  },
+};
+
 /// The container the value and selection carriers hold their children in, and the trait that lets
 /// it take one apart.
 ///

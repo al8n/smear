@@ -7,7 +7,9 @@
 The GraphQL protocol machine, Sans-I/O.
 
 Draft §6 execution as a state machine: it takes events as inputs and emits actions as outputs,
-owning no I/O, no clock and no randomness source. It says which field it needs and waits to be
+owning no I/O and no clock, and nothing it emits depends on randomness: an `extensions` map
+hashes its keys at `RandomState`'s random seed with `std` and at a fixed, public seed without it,
+and it iterates in insertion order whatever the seed. It says which field it needs and waits to be
 told the answer.
 
 It defines no value type. The driver keeps values in its own representation and answers structural
@@ -24,9 +26,10 @@ does not put the front end in the graph.
 |---------|-------------|---------|
 | `alloc` | The executor, the response tree, the request errors and the `Values` trait, without the standard library. `std` gives the same API; with neither, the crate is `no_std` and exports nothing. Implied by no feature | |
 | `std` | Standard library support, and with it the executor; it does not turn `alloc` on. Off, the crate is `no_std` | ✓ |
+| `serde` | `Serialize` and `Deserialize` for `Limits`, so a deployment can read the executor's ceilings from its own configuration; a field the input leaves out takes its default. Implies no tier | |
 
-The crate has no capability feature, so a `default-features = false` consumer names `std` or
-`alloc` itself.
+`serde` is the one feature beside the tiers and it implies neither, so a `default-features = false`
+consumer names `std` or `alloc` itself.
 
 ## Part of the Smear Ecosystem
 

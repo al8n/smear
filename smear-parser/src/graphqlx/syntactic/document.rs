@@ -28,7 +28,7 @@ use super::{
   use_tree::use_definition_after_keyword,
 };
 use crate::{
-  combinator::{ParseCtx, TokenSpannedExt},
+  combinator::ParseCtx,
   graphqlx::{
     GraphQLx,
     ast::{Definition, Described, Document, DocumentItem, StringValue},
@@ -368,7 +368,7 @@ document_parser!(
       .at_least(1)
       .collect_with(Vec::new())
       .map(|entries: Vec<DocumentItem<GraphqlxSlice<'inp, Src>>>| entries)
-      .token_spanned()
+      .spanned_trimmed()
       .parse_input(inp)?;
     Ok(Document::new(span, entries))
   }

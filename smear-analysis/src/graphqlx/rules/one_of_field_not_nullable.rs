@@ -54,11 +54,11 @@ use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
   ApplicationId, Collection, Contribution, Cx, DefId, Diagnostic, MemberId, MemberKind, Model,
-  TyId, TyKind, TypeExprId, TypeExprKind, Visitor,
+  NamedTy, NamedTypeExpr, TyId, TyKind, TypeExprId, TypeExprKind, Visitor,
   code::schema,
   diagnostic::Excerpt,
   id::dense,
-  positions::{Derived, Fill, Mistake, Place, Positions, Taking, parameter, taking},
+  positions::{Derived, DerivedFill, Fill, Mistake, Place, Positions, Taking, parameter, taking},
 };
 
 use super::{Silence, one_of};
@@ -177,7 +177,7 @@ impl Visitor for OneOfFieldNotNullable {
     if let Some(report) = self.forced(model, cx.def(), occurrence.location()) {
       cx.report(report);
     }
-    let TypeExprKind::Named { args: written, .. } = occurrence.kind() else {
+    let TypeExprKind::Named(NamedTypeExpr { args: written, .. }) = occurrence.kind() else {
       return;
     };
     let complete = occurrence.ty();
@@ -219,7 +219,7 @@ impl OneOfFieldNotNullable {
   /// `written` type arguments is refused for: its type's own failure, else one among what its
   /// fill derives.
   fn judge(&mut self, model: &Model, ty: TyId, written: u32) -> Option<Found> {
-    let TyKind::Named { args, .. } = model.ty(ty).kind() else {
+    let TyKind::Named(NamedTy { args, .. }) = model.ty(ty).kind() else {
       return None;
     };
     if args.is_empty() {
@@ -258,7 +258,13 @@ impl OneOfFieldNotNullable {
         slot: filled,
         ty: derived,
         verdict: slot,
-      }) => (slot, Some((filled, derived))),
+      }) => (
+        slot,
+        Some(DerivedFill {
+          slot: filled,
+          ty: derived,
+        }),
+      ),
     };
     let Taking {
       def: taker,
@@ -339,7 +345,7 @@ fn verdict(
     return *kept;
   }
   let mut found: Option<u32> = None;
-  if let TyKind::Named { def, args } = model.ty(ty).kind() {
+  if let TyKind::Named(NamedTy { def, args }) = model.ty(ty).kind() {
     for (slot, argument) in args.iter().enumerate() {
       let slot = dense(slot);
       if model.ty(*argument).non_null() && positions.witness(def, slot, Place::OneOfField).is_some()

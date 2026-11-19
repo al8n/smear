@@ -3,7 +3,9 @@ use tokora::{
   utils::IntoComponents,
 };
 
-use super::{Alias, Field, FragmentSpread, InlineFragment, SelectionSet, TypeCondition};
+use super::{
+  Alias, AliasComponents, Field, FragmentSpread, InlineFragment, SelectionSet, TypeCondition,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CustomSpan(u8);
@@ -25,7 +27,13 @@ impl<T, const N: usize> AsRef<[T]> for ArrayBacked<T, N> {
 fn carriers_support_custom_spans() {
   let alias = Alias::<_, CustomSpan>::new(CustomSpan(1), "alias");
   assert_eq!(alias.as_span(), &CustomSpan(1));
-  assert_eq!(alias.into_components(), (CustomSpan(1), "alias"));
+  assert_eq!(
+    alias.into_components(),
+    AliasComponents {
+      span: CustomSpan(1),
+      name: "alias"
+    }
+  );
 
   let condition = TypeCondition::<_, CustomSpan>::new(CustomSpan(2), "User");
   assert_eq!(condition.into_span(), CustomSpan(2));

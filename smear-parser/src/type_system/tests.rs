@@ -4,9 +4,12 @@ use tokora::{
 };
 
 use super::{
-  ArgumentsDefinition, DirectiveDefinition, DirectiveExtension, DirectiveLocations,
-  ExecutableDirectiveLocation, FieldDefinition, InputValueDefinition, Location,
-  ObjectTypeDefinition, TypeSystemDirectiveLocation, TypeSystemExtension,
+  ArgumentsDefinition, DirectiveDefinition, DirectiveDefinitionComponents, DirectiveExtension,
+  DirectiveExtensionComponents, DirectiveLocations, ExecutableDirectiveLocation,
+  ExecutableDirectiveLocationComponents, ExtensionDirectives, ExtensionFields, ExtensionOperations,
+  FieldDefinition, InputValueDefinition, InputValueDefinitionComponents, Location,
+  ObjectTypeDefinition, ObjectTypeExtensionData, SchemaExtensionData, TypeSystemDirectiveLocation,
+  TypeSystemDirectiveLocationComponents, TypeSystemExtension,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,7 +39,13 @@ fn carriers_support_custom_spans_and_components() {
   assert_eq!(input.directives(), Some(&"@range"));
   assert_eq!(
     input.into_components(),
-    (CustomSpan(1), "limit", "Int", Some("10"), Some("@range"))
+    InputValueDefinitionComponents {
+      span: CustomSpan(1),
+      name: "limit",
+      ty: "Int",
+      default_value: Some("10"),
+      directives: Some("@range")
+    }
   );
 
   let field = FieldDefinition::<_, _, _, _, CustomSpan>::new(
@@ -75,14 +84,14 @@ fn carriers_support_custom_spans_and_components() {
   assert_eq!(directive.locations(), &"FIELD_DEFINITION");
   assert_eq!(
     directive.into_components(),
-    (
-      CustomSpan(4),
-      "deprecated",
-      None,
-      Some("@experimental"),
-      true,
-      "FIELD_DEFINITION"
-    )
+    DirectiveDefinitionComponents {
+      span: CustomSpan(4),
+      name: "deprecated",
+      arguments_definition: None,
+      directives: Some("@experimental"),
+      repeatable: true,
+      locations: "FIELD_DEFINITION"
+    }
   );
 
   let extension =
@@ -92,7 +101,11 @@ fn carriers_support_custom_spans_and_components() {
   assert_eq!(extension.directives(), &"@experimental");
   assert_eq!(
     extension.into_components(),
-    (CustomSpan(5), "deprecated", "@experimental")
+    DirectiveExtensionComponents {
+      span: CustomSpan(5),
+      name: "deprecated",
+      directives: "@experimental"
+    }
   );
 
   type Extension = DirectiveExtension<&'static str, &'static str, CustomSpan>;
@@ -124,7 +137,13 @@ fn collections_project_array_backed_containers_to_slices() {
 fn directive_locations_preserve_their_kind_and_span() {
   let executable = ExecutableDirectiveLocation::field(CustomSpan(1));
   assert_eq!(executable.as_str(), "FIELD");
-  assert_eq!(executable.into_components(), (CustomSpan(1), "FIELD"));
+  assert_eq!(
+    executable.into_components(),
+    ExecutableDirectiveLocationComponents {
+      span: CustomSpan(1),
+      spelling: "FIELD"
+    }
+  );
 
   let location: Location<CustomSpan> =
     TypeSystemDirectiveLocation::input_field_definition(CustomSpan(2)).into();
@@ -154,7 +173,10 @@ fn directive_location_enums_keep_variant_and_textual_ergonomics() {
   assert_eq!(AsRef::<str>::as_ref(&directive), "DIRECTIVE_DEFINITION");
   assert_eq!(
     directive.into_components(),
-    (CustomSpan(3), "DIRECTIVE_DEFINITION")
+    TypeSystemDirectiveLocationComponents {
+      span: CustomSpan(3),
+      spelling: "DIRECTIVE_DEFINITION"
+    }
   );
 
   let location: Location<CustomSpan> = query.into();
@@ -162,4 +184,66 @@ fn directive_location_enums_keep_variant_and_textual_ergonomics() {
   assert_eq!(location.unwrap_executable_ref().as_str(), "QUERY");
   assert!(location.try_unwrap_type_system_ref().is_err());
   assert_eq!(AsRef::<str>::as_ref(&location), "QUERY");
+}
+
+#[test]
+fn shared_extension_payloads_are_read_through_their_enums_and_unwrapped() {
+  let object = ObjectTypeExtensionData::<&str, &str, &str>::Fields(ExtensionFields::new(
+    Some("Node"),
+    None,
+    "{ id }",
+  ));
+  assert!(object.is_fields());
+  assert_eq!(object.implements(), Some(&"Node"));
+  assert_eq!(object.directives(), None);
+  assert_eq!(object.fields_definition(), Some(&"{ id }"));
+  assert_eq!(object.unwrap_fields_ref().fields_definition(), &"{ id }");
+
+  let directives =
+    ObjectTypeExtensionData::<&str, &str, &str>::Directives(ExtensionDirectives::new(None, "@d"));
+  assert_eq!(directives.directives(), Some(&"@d"));
+  assert_eq!(directives.fields_definition(), None);
+  assert!(directives.try_unwrap_fields_ref().is_err());
+
+  let schema = SchemaExtensionData::<&str, &str>::Operations(ExtensionOperations::new(
+    Some("@d"),
+    "{ query: Query }",
+  ));
+  assert!(schema.is_operations());
+  assert_eq!(schema.directives(), Some(&"@d"));
+  assert_eq!(
+    schema.root_operation_types_definition(),
+    Some(&"{ query: Query }")
+  );
+  assert!(schema.try_unwrap_directives_ref().is_err());
+  let only = SchemaExtensionData::<&str, &str>::Directives("@d");
+  assert_eq!(only.unwrap_directives(), "@d");
+}
+
+#[cfg(feature = "graphql")]
+#[test]
+fn graphql_extension_payloads_carry_no_interfaces() {
+  use super::{
+    EnumTypeExtensionData, ExtensionInputFields, ExtensionMembers, ExtensionValues,
+    InputObjectTypeExtensionData, UnionTypeExtensionData,
+  };
+
+  let members =
+    UnionTypeExtensionData::<&str, &str>::Members(ExtensionMembers::new(Some("@d"), "= A | B"));
+  assert!(members.is_members());
+  assert_eq!(members.directives(), Some(&"@d"));
+  assert_eq!(members.member_types(), Some(&"= A | B"));
+
+  let values = EnumTypeExtensionData::<&str, &str>::Values(ExtensionValues::new(None, "{ RED }"));
+  assert_eq!(
+    values.unwrap_values_ref().enum_values_definition(),
+    &"{ RED }"
+  );
+
+  let fields = InputObjectTypeExtensionData::<&str, &str>::Fields(ExtensionInputFields::new(
+    None,
+    "{ limit: Int }",
+  ));
+  assert_eq!(fields.fields_definition(), Some(&"{ limit: Int }"));
+  assert!(fields.try_unwrap_directives_ref().is_err());
 }

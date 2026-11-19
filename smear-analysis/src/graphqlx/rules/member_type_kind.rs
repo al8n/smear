@@ -55,7 +55,7 @@ use tokora::diagnostic::{Code, Location};
 
 use crate::graphqlx::{
   ApplicationId, Contribution, Cx, DefId, DefKind, Diagnostic, Member, MemberId, MemberKind, Model,
-  Site, TyId, TyKind, TypeExprId, TypeExprKind, Visitor,
+  NamedTy, NamedTypeExpr, Site, TyId, TyKind, TypeExprId, TypeExprKind, TypeParamRef, Visitor,
   code::schema,
   diagnostic::Excerpt,
   id::dense,
@@ -172,10 +172,10 @@ impl Visitor for MemberTypeKind {
     };
     // The base: under the member's own lists, one step for each `[` its type writes.
     let mut base = model.type_expr(ty);
-    while let TypeExprKind::List { element } = base.kind() {
+    while let TypeExprKind::List(element) = base.kind() {
       base = model.type_expr(element);
     }
-    let TypeExprKind::Named { def: named_def, .. } = base.kind() else {
+    let TypeExprKind::Named(NamedTypeExpr { def: named_def, .. }) = base.kind() else {
       return;
     };
     let definition = model.def(named_def);
@@ -201,7 +201,7 @@ impl Visitor for MemberTypeKind {
         .primary_label(position.label());
       if let Some(default) = misfit
         .filled
-        .and_then(|(def, index): (DefId, u32)| default_of(model, def, index))
+        .and_then(|param: TypeParamRef| default_of(model, param.def(), param.index()))
       {
         report = report.label(default, "filled from this default");
       }
@@ -243,7 +243,7 @@ impl Visitor for MemberTypeKind {
     }
     let model = cx.model();
     let occurrence = model.type_expr(ty);
-    let TypeExprKind::Named { args: written, .. } = occurrence.kind() else {
+    let TypeExprKind::Named(NamedTypeExpr { args: written, .. }) = occurrence.kind() else {
       return;
     };
     let complete = occurrence.ty();
@@ -282,7 +282,7 @@ impl MemberTypeKind {
   /// `written` type arguments is refused for: its type's own failure, else one among what its
   /// fill derives.
   fn judge(&mut self, model: &Model, ty: TyId, written: u32) -> Option<Found> {
-    let TyKind::Named { args, .. } = model.ty(ty).kind() else {
+    let TyKind::Named(NamedTy { args, .. }) = model.ty(ty).kind() else {
       return None;
     };
     if args.is_empty() {
@@ -316,7 +316,7 @@ impl MemberTypeKind {
     written: &[TypeExprId],
     whole: Location,
   ) -> Option<Diagnostic> {
-    let TyKind::Named { def, args } = model.ty(ty).kind() else {
+    let TyKind::Named(NamedTy { def, args }) = model.ty(ty).kind() else {
       return None;
     };
     let definition = Excerpt(model.def(def).name().as_bytes());
@@ -362,7 +362,7 @@ impl MemberTypeKind {
         }
         if let Some(default) = misfit
           .filled
-          .and_then(|(collection, index): (DefId, u32)| default_of(model, collection, index))
+          .and_then(|param: TypeParamRef| default_of(model, param.def(), param.index()))
         {
           report = report.label(default, "filled from this default");
         }
@@ -373,10 +373,10 @@ impl MemberTypeKind {
         ty: derived,
         verdict: Own { slot, position },
       }) => {
-        let TyKind::Named {
+        let TyKind::Named(NamedTy {
           def: derived_def,
           args: derived_args,
-        } = model.ty(derived).kind()
+        }) = model.ty(derived).kind()
         else {
           return None;
         };
@@ -426,7 +426,7 @@ fn verdict(
     return *kept;
   }
   let mut found: Option<Own> = None;
-  if let TyKind::Named { def, args } = model.ty(ty).kind() {
+  if let TyKind::Named(NamedTy { def, args }) = model.ty(ty).kind() {
     'arguments: for (slot, argument) in args.iter().enumerate() {
       let slot = dense(slot);
       for position in POSITIONS {

@@ -8,7 +8,7 @@ use core::cmp::Ordering;
 use std::vec::Vec;
 
 use super::{
-  builtin::{BUILT_INS, BuiltIn},
+  builtin::{BUILT_INS, BuiltIn, EmbeddedFile},
   package::{IntegerProvider, Layout, Package, Tier},
   text::{SourceText, View},
 };
@@ -77,7 +77,7 @@ impl<'a> PackageView<'a> {
 /// A built-in package, with its embedded files.
 fn built_in(package: &BuiltIn) -> PackageView<'static> {
   let mut files: Vec<FileView<'static>> = Vec::with_capacity(package.files.len());
-  for &(path, text) in package.files {
+  for &EmbeddedFile { path, text } in package.files {
     files.push(FileView {
       path: path.as_bytes(),
       text: View::Text(text),

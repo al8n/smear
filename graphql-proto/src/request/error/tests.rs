@@ -15,7 +15,7 @@
 //! retains — and the shape of an allocation is not a question of undefined behaviour. What found it
 //! was a measurement, the one `execute/tests.rs`'s header describes: alone under
 //! `cargo miri test -p graphql-proto --lib -- --exact`, Stacked Borrows, aarch64-apple-darwin,
-//! 2026-09-25, it had not returned after five minutes, the `GROWN_ENTRIES` quadratic inserts and
+//! 2026-09-25, it had not returned after five minutes, the `GROWN_ENTRIES` inserts and quadratic
 //! removes being the cost. The other tests here run: the entry-side cases grow their maps to
 //! [`ENTRY_GROWN`] rather than to [`GROWN_ENTRIES`], which states the same overshoot against a
 //! ceiling of four at a sixty-fourth of the quadratic cost, and the list case pushes a hundred
@@ -31,10 +31,10 @@ type Value = u32;
 
 /// How many entries the lax map is grown to before it is emptied.
 ///
-/// A power of two, so the spine's capacity lands on exactly that many slots — `Vec` doubles — and
-/// the overshoot against the strict ceiling is a number rather than an argument. The same number
-/// the executor-side case uses, for the same reason it is not a million: `insert` scans for a
-/// duplicate on every call.
+/// The map's high-water mark lands on exactly this, so the overshoot against the strict ceiling is
+/// a number rather than an argument. The same number the executor-side case uses, for the same
+/// reason it is not a million: emptying the map from its first key shifts every later entry down
+/// once per removal.
 const GROWN_ENTRIES: usize = 4096;
 
 /// How many entries an entry's own map is grown to before it is emptied.
@@ -45,8 +45,8 @@ const ENTRY_GROWN: usize = 64;
 
 /// A driver's entry carrying a map grown to [`ENTRY_GROWN`] entries under `lax` and emptied.
 ///
-/// It reports nothing over any ceiling — no entries, no key bytes — while holding every slot it
-/// grew to, which is the entry-side shape of the gap the module header names.
+/// It reports nothing over any ceiling — no entries, no key bytes — while holding room for every
+/// entry it grew to, which is the entry-side shape of the gap the module header names.
 fn grown_and_emptied(lax: &Limits) -> RequestError<Value> {
   let mut map: Extensions<Value> = Extensions::new(lax);
   for index in 0..ENTRY_GROWN {
@@ -74,8 +74,8 @@ fn grown_and_emptied(lax: &Limits) -> RequestError<Value> {
 ///
 /// The two ceilings [`RequestErrorResult::set_extensions`] re-checks bound what the map *reports* —
 /// `len` and `key_bytes` — and the resource being bounded is what it *holds*. `remove` gives the
-/// key bytes back to the ceiling and gives no slots back to the allocator, so an empty map can
-/// arrive carrying a spine no [`Limits`] this result was created under ever authorised.
+/// key bytes back to the ceiling and gives no room back to the allocator, so an empty map can
+/// arrive holding allocations no [`Limits`] this result was created under ever authorised.
 ///
 /// Read off the result's own field rather than through
 /// [`take_extensions`](RequestErrorResult::take_extensions), because the claim is about what is
@@ -86,7 +86,7 @@ fn grown_and_emptied(lax: &Limits) -> RequestError<Value> {
             slots a result retains after accepting a map grown under laxer limits, which is the \
             shape of an allocation, re-derived by an interpreter out of the same MIR, and not a \
             question of undefined behaviour. Its fixture is `GROWN_ENTRIES` inserts and removes \
-            into a map whose `insert` scans for a duplicate, quadratic by design; its \
+            on a map whose `remove` shifts every later entry, quadratic by design; its \
             executor-side twin in `execute/tests.rs` is skipped alike. Found by the five-minute \
             detector's measurement: over five minutes under `cargo miri test` on \
             aarch64-apple-darwin (Stacked Borrows, 2026-09-25). The file's header carries the \
@@ -167,9 +167,10 @@ fn a_refused_map_is_handed_back_without_being_reallocated() {
     .with_max_extension_key_bytes(NonZeroU32::new(1 << 20).expect("not zero"));
 
   // Grown to sixteen and emptied back to eight, so the map is refused (eight entries against a
-  // ceiling of four) **and** its spine is strictly larger than its entries. Both halves are load
-  // bearing: with capacity equal to length, a `shrink_to_fit` moved onto this path would return
-  // the same number and the assertion below would pass over the very defect it is written for.
+  // ceiling of four) **and** its high-water mark is strictly above its entries. Both halves are
+  // load bearing: with the mark equal to the length, a re-derivation moved onto this path would
+  // leave the same number and the assertion below would pass over the very defect it is written
+  // for.
   let mut map: Extensions<Value> = Extensions::new(&lax);
   for index in 0..16 {
     map
@@ -268,7 +269,7 @@ fn a_refused_entrys_map_is_handed_back_without_being_reallocated() {
   let strict = Limits::default().with_max_extension_entries(NonZeroU32::new(4).expect("not zero"));
 
   // Grown to sixteen and emptied back to eight, for the reason the map-side case gives: refused
-  // (eight entries against a ceiling of four), and holding strictly more slots than entries.
+  // (eight entries against a ceiling of four), and holding room for strictly more than it has.
   let mut map: Extensions<Value> = Extensions::new(&lax);
   for index in 0..16 {
     map

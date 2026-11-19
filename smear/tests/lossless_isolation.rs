@@ -553,9 +553,16 @@ fn the_substrate_names_no_dialect() {
 /// family: `pub(crate)`, with `root_turn` and one dialect's module body as its only callers, so
 /// with no dialect in the crate `root_turn` is gated away and it is dead. It names no dialect —
 /// the block that calls it is the dialect's — which is why it can be here at all.
+///
+/// **24 with `JudgedTurn`**: the struct `judge_turn` answers instead of a `(RootTurn, bool)`. It is
+/// the same cluster as `judge_turn` and carries the same gate, for the same reason — with no
+/// dialect in the crate `root_turn` is gated away, `judge_turn` is gated away with it, and a
+/// struct nothing builds would be dead. It names no dialect. It is a struct and not a tuple
+/// because a tuple's `RootTurn` element carried `#[must_use]` and a struct does not inherit the
+/// attribute from a field, so the struct carries it itself.
 const SUBSTRATE_FEATURE_GATE: &str = r#"#[cfg(any(feature = "graphql", feature = "graphqlx"))]"#;
 /// How many times [`SUBSTRATE_FEATURE_GATE`] occurs.
-const SUBSTRATE_FEATURE_GATES: usize = 23;
+const SUBSTRATE_FEATURE_GATES: usize = 24;
 
 #[test]
 fn every_dialect_word_in_the_substrate_is_prose_or_the_one_feature_gate() {

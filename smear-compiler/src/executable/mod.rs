@@ -449,6 +449,7 @@ mod values;
 
 use core::{cmp::Ordering, ops::ControlFlow};
 
+use derive_more::IsVariant;
 use tokora::{SimpleSpan, span::AsSpan};
 
 use smear_parser::graphql::ast::{
@@ -507,7 +508,7 @@ pub struct Invalid {
 /// [`Invalid`]'s [`Display`](core::fmt::Display) — inside the defining crate a `match` on a
 /// `#[non_exhaustive]` enum is still checked, so a new variant is a **compile error** there rather
 /// than a sentence nobody re-read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum Refusal {
   /// A [`Budget`] bound abandoned a pass.
@@ -962,8 +963,7 @@ impl<'p> Meter<'p> {
     if self.settled(a, left, b, right) {
       return left.cmp(right);
     }
-    let (ordering, _) = scan_cmp(left, right, |unit| self.charge(a, Some(b), unit));
-    ordering
+    scan_cmp(left, right, |unit| self.charge(a, Some(b), unit)).ordering
   }
 
   /// `left == right`, charged, stopping at the refusal.
@@ -980,9 +980,21 @@ impl<'p> Meter<'p> {
   }
 
   /// The ledger as this left it, and whether anything was refused.
-  pub(super) const fn finish(self) -> (Ledger, bool) {
-    (self.ledger, self.refused)
+  pub(super) const fn finish(self) -> Settled {
+    Settled {
+      ledger: self.ledger,
+      refused: self.refused,
+    }
   }
+}
+
+/// What a metered pass leaves behind: [`Meter::finish`]'s and [`sort_metered`]'s answer.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct Settled {
+  /// The ledger as the pass left it.
+  pub(super) ledger: Ledger,
+  /// Whether any charge was refused.
+  pub(super) refused: bool,
 }
 
 /// Sorts an ordinal segment by name, charging each comparison for the runs of bytes it reads.
@@ -1010,7 +1022,7 @@ fn sort_metered<'x, F>(
   ledger: Ledger,
   deepest: u32,
   name: F,
-) -> (Ledger, bool)
+) -> Settled
 where
   F: Fn(u32) -> &'x [u8],
 {
@@ -1018,7 +1030,10 @@ where
   // its group's first element — which is the one every reader of a group resolves to.
   if deepest <= 1 {
     keys.sort_unstable_by(|a, b| name(*a).cmp(name(*b)).then(a.cmp(b)));
-    return (ledger, false);
+    return Settled {
+      ledger,
+      refused: false,
+    };
   }
   let mut meter = Meter::new(paid, ledger, deepest);
   keys.sort_unstable_by(|a, b| {
@@ -1862,7 +1877,7 @@ where
       let scratch = &mut *self.scratch;
       scratch.order.extend(0..count);
       let rows = &scratch.fragments;
-      let (ledger, refused) = sort_metered(
+      let Settled { ledger, refused } = sort_metered(
         &mut scratch.order,
         &mut scratch.paid,
         self.left,
@@ -1897,7 +1912,7 @@ where
         let scratch = &mut *self.scratch;
         let mut meter = Meter::new(&mut scratch.paid, self.left, deepest);
         let compared = meter.eq(first as usize, name, next as usize, other);
-        let (ledger, _) = meter.finish();
+        let Settled { ledger, .. } = meter.finish();
         self.left = ledger;
         match compared {
           Compared::Equal => end += 1,
@@ -2228,7 +2243,7 @@ where
       let refused = {
         let scratch = &mut *self.scratch;
         let rows = &scratch.operations;
-        let (ledger, refused) = sort_metered(
+        let Settled { ledger, refused } = sort_metered(
           &mut scratch.keys[base..],
           &mut scratch.paid,
           self.left,
@@ -2253,7 +2268,7 @@ where
           let scratch = &mut *self.scratch;
           let mut meter = Meter::new(&mut scratch.paid, self.left, deepest);
           let compared = meter.eq(first as usize, name, next as usize, other);
-          let (ledger, _) = meter.finish();
+          let Settled { ledger, .. } = meter.finish();
           self.left = ledger;
           match compared {
             Compared::Equal => end += 1,
@@ -2939,7 +2954,7 @@ where
       let end = self.scratch.keys.len();
       let refused = {
         let scratch = &mut *self.scratch;
-        let (ledger, refused) = sort_metered(
+        let Settled { ledger, refused } = sort_metered(
           &mut scratch.keys[base..end],
           &mut scratch.paid,
           self.left,
@@ -2973,7 +2988,7 @@ where
           later as usize,
           name_bytes(repeat.name()),
         );
-        let (ledger, _) = meter.finish();
+        let Settled { ledger, .. } = meter.finish();
         self.left = ledger;
         match compared {
           Compared::Refused => return self.refuse(*repeat.span()),

@@ -3,6 +3,7 @@
 
 use core::fmt;
 
+use derive_more::IsVariant;
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::id::{DefId, ModuleId, Sym};
@@ -15,7 +16,7 @@ use super::{
 
 /// The two kinds of name a module gives: a type definition's and a directive definition's are
 /// apart, so one module may hold a type and a directive with one name.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum Namespace {
   /// The name of every definition but a directive's.
@@ -48,8 +49,11 @@ impl Model {
       sym.get(),
       self.spans.len()
     );
-    let (start, end) = self.spans[sym.get() as usize];
-    self.names.get(start as usize..end as usize).unwrap_or("")
+    let range = self.spans[sym.get() as usize];
+    self
+      .names
+      .get(range.start() as usize..range.end() as usize)
+      .unwrap_or("")
   }
 
   /// The canonical name of `def`: `^::package::module::path::Name` for a type, and

@@ -3,8 +3,9 @@
 use super::*;
 
 use crate::type_system::{
-  EnumTypeExtensionData, InputObjectTypeExtensionData, InterfaceTypeExtensionData,
-  ObjectTypeExtensionData, SchemaExtensionData, UnionTypeExtensionData,
+  EnumTypeExtensionData, ExtensionDirectives, ExtensionFields, ExtensionInputFields,
+  ExtensionMembers, ExtensionOperations, ExtensionValues, InputObjectTypeExtensionData,
+  InterfaceTypeExtensionData, ObjectTypeExtensionData, SchemaExtensionData, UnionTypeExtensionData,
 };
 
 macro_rules! extension_tail {
@@ -100,15 +101,12 @@ extension_tail!(
       |value| value.span().end(),
     );
     let data = match (implements, directives, fields_definition) {
-      (implements, directives, Some(fields_definition)) => ObjectTypeExtensionData::Fields {
-        implements,
-        directives,
-        fields_definition,
-      },
-      (implements, Some(directives), None) => ObjectTypeExtensionData::Directives {
-        implements,
-        directives,
-      },
+      (implements, directives, Some(fields_definition)) => ObjectTypeExtensionData::Fields(
+        ExtensionFields::new(implements, directives, fields_definition),
+      ),
+      (implements, Some(directives), None) => {
+        ObjectTypeExtensionData::Directives(ExtensionDirectives::new(implements, directives))
+      }
       (Some(implements), None, None) => ObjectTypeExtensionData::Implements(implements),
       (None, None, None) => {
         return expected_definition_phase(
@@ -155,15 +153,12 @@ extension_tail!(
       |value| value.span().end(),
     );
     let data = match (implements, directives, fields_definition) {
-      (implements, directives, Some(fields_definition)) => InterfaceTypeExtensionData::Fields {
-        implements,
-        directives,
-        fields_definition,
-      },
-      (implements, Some(directives), None) => InterfaceTypeExtensionData::Directives {
-        implements,
-        directives,
-      },
+      (implements, directives, Some(fields_definition)) => InterfaceTypeExtensionData::Fields(
+        ExtensionFields::new(implements, directives, fields_definition),
+      ),
+      (implements, Some(directives), None) => {
+        InterfaceTypeExtensionData::Directives(ExtensionDirectives::new(implements, directives))
+      }
       (Some(implements), None, None) => InterfaceTypeExtensionData::Implements(implements),
       (None, None, None) => {
         return expected_definition_phase(
@@ -201,10 +196,9 @@ extension_tail!(
       |value| value.span().end(),
     );
     let data = match (directives, member_types) {
-      (directives, Some(member_types)) => UnionTypeExtensionData::Members {
-        directives,
-        member_types,
-      },
+      (directives, Some(member_types)) => {
+        UnionTypeExtensionData::Members(ExtensionMembers::new(directives, member_types))
+      }
       (Some(directives), None) => UnionTypeExtensionData::Directives(directives),
       (None, None) => {
         return expected_definition_phase(
@@ -242,10 +236,9 @@ extension_tail!(
       |value| value.span().end(),
     );
     let data = match (directives, enum_values_definition) {
-      (directives, Some(enum_values_definition)) => EnumTypeExtensionData::Values {
-        directives,
-        enum_values_definition,
-      },
+      (directives, Some(enum_values_definition)) => {
+        EnumTypeExtensionData::Values(ExtensionValues::new(directives, enum_values_definition))
+      }
       (Some(directives), None) => EnumTypeExtensionData::Directives(directives),
       (None, None) => {
         return expected_definition_phase(
@@ -283,10 +276,9 @@ extension_tail!(
       |value| value.span().end(),
     );
     let data = match (directives, fields_definition) {
-      (directives, Some(fields_definition)) => InputObjectTypeExtensionData::Fields {
-        directives,
-        fields_definition,
-      },
+      (directives, Some(fields_definition)) => InputObjectTypeExtensionData::Fields(
+        ExtensionInputFields::new(directives, fields_definition),
+      ),
       (Some(directives), None) => InputObjectTypeExtensionData::Directives(directives),
       (None, None) => {
         return expected_definition_phase(
@@ -326,10 +318,9 @@ extension_tail!(
       |value| value.span().end(),
     );
     let data = match (directives, root_operation_types_definition) {
-      (directives, Some(root_operation_types_definition)) => SchemaExtensionData::Operations {
-        directives,
-        root_operation_types_definition,
-      },
+      (directives, Some(root_operation_types_definition)) => SchemaExtensionData::Operations(
+        ExtensionOperations::new(directives, root_operation_types_definition),
+      ),
       (Some(directives), None) => SchemaExtensionData::Directives(directives),
       (None, None) => {
         return expected_definition_phase(

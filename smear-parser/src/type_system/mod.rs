@@ -23,7 +23,13 @@ use tokora::{
 mod tests;
 
 macro_rules! impl_node_traits {
-  ($node:ident<$($generic:ident),+>, ($($component:ty),+), ($($field:ident),+)) => {
+  (
+    $node:ident<$($generic:ident),+>,
+    $components:ident,
+    ($($component:ty),+),
+    ($($field:ident),+),
+    [$($used:ident),+]
+  ) => {
     impl<$($generic),+> AsSpan<Span> for $node<$($generic),+> {
       #[inline]
       fn as_span(&self) -> &Span {
@@ -38,12 +44,21 @@ macro_rules! impl_node_traits {
       }
     }
 
+    #[doc = concat!("`", stringify!($node), "` taken apart: every field, in the order it is written.")]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct $components<$($used),+> {
+      $(
+        #[doc = concat!("The node's `", stringify!($field), "`.")]
+        pub $field: $component,
+      )+
+    }
+
     impl<$($generic),+> IntoComponents for $node<$($generic),+> {
-      type Components = ($($component,)+);
+      type Components = $components<$($used),+>;
 
       #[inline]
       fn into_components(self) -> Self::Components {
-        ($(self.$field,)+)
+        $components { $($field: self.$field,)+ }
       }
     }
   };
@@ -66,8 +81,10 @@ pub struct ArgumentsDefinition<InputValue, Container = Vec<InputValue>, Span = S
 
 impl_node_traits!(
   ArgumentsDefinition<InputValue, Container, Span>,
+  ArgumentsDefinitionComponents,
   (Span, Container),
-  (span, input_value_definitions)
+  (span, input_value_definitions),
+  [Container, Span]
 );
 
 impl<InputValue, Container, Span> ArgumentsDefinition<InputValue, Container, Span> {
@@ -115,8 +132,10 @@ pub struct InputValueDefinition<Name, Type, DefaultValue, Directives, Span = Sim
 
 impl_node_traits!(
   InputValueDefinition<Name, Type, DefaultValue, Directives, Span>,
+  InputValueDefinitionComponents,
   (Span, Name, Type, Option<DefaultValue>, Option<Directives>),
-  (span, name, ty, default_value, directives)
+  (span, name, ty, default_value, directives),
+  [Name, Type, DefaultValue, Directives, Span]
 );
 
 impl<Name, Type, DefaultValue, Directives, Span>
@@ -181,8 +200,10 @@ pub struct InputFieldsDefinition<InputValue, Container = Vec<InputValue>, Span =
 
 impl_node_traits!(
   InputFieldsDefinition<InputValue, Container, Span>,
+  InputFieldsDefinitionComponents,
   (Span, Container),
-  (span, input_value_definitions)
+  (span, input_value_definitions),
+  [Container, Span]
 );
 
 impl<InputValue, Container, Span> InputFieldsDefinition<InputValue, Container, Span> {
@@ -230,8 +251,10 @@ pub struct FieldDefinition<Name, Arguments, Type, Directives, Span = SimpleSpan>
 
 impl_node_traits!(
   FieldDefinition<Name, Arguments, Type, Directives, Span>,
+  FieldDefinitionComponents,
   (Span, Name, Option<Arguments>, Type, Option<Directives>),
-  (span, name, arguments_definition, ty, directives)
+  (span, name, arguments_definition, ty, directives),
+  [Name, Arguments, Type, Directives, Span]
 );
 
 impl<Name, Arguments, Type, Directives, Span>
@@ -296,8 +319,10 @@ pub struct FieldsDefinition<Field, Container = Vec<Field>, Span = SimpleSpan> {
 
 impl_node_traits!(
   FieldsDefinition<Field, Container, Span>,
+  FieldsDefinitionComponents,
   (Span, Container),
-  (span, field_definitions)
+  (span, field_definitions),
+  [Container, Span]
 );
 
 impl<Field, Container, Span> FieldsDefinition<Field, Container, Span> {
@@ -343,8 +368,10 @@ pub struct ImplementInterfaces<Name, Container = Vec<Name>, Span = SimpleSpan> {
 
 impl_node_traits!(
   ImplementInterfaces<Name, Container, Span>,
+  ImplementInterfacesComponents,
   (Span, Container),
-  (span, interfaces)
+  (span, interfaces),
+  [Container, Span]
 );
 
 impl<Name, Container, Span> ImplementInterfaces<Name, Container, Span> {
@@ -392,8 +419,10 @@ pub struct InterfaceTypeDefinition<Name, Implements, Directives, Fields, Span = 
 
 impl_node_traits!(
   InterfaceTypeDefinition<Name, Implements, Directives, Fields, Span>,
+  InterfaceTypeDefinitionComponents,
   (Span, Name, Option<Implements>, Option<Directives>, Option<Fields>),
-  (span, name, implements, directives, fields_definition)
+  (span, name, implements, directives, fields_definition),
+  [Name, Implements, Directives, Fields, Span]
 );
 
 impl<Name, Implements, Directives, Fields, Span>
@@ -458,8 +487,10 @@ pub struct RootOperationTypeDefinition<Name, OperationType, Span = SimpleSpan> {
 
 impl_node_traits!(
   RootOperationTypeDefinition<Name, OperationType, Span>,
+  RootOperationTypeDefinitionComponents,
   (Span, OperationType, Name),
-  (span, operation_type, name)
+  (span, operation_type, name),
+  [Name, OperationType, Span]
 );
 
 impl<Name, OperationType, Span> RootOperationTypeDefinition<Name, OperationType, Span> {
@@ -506,8 +537,10 @@ pub struct RootOperationTypesDefinition<
 
 impl_node_traits!(
   RootOperationTypesDefinition<RootOperation, Container, Span>,
+  RootOperationTypesDefinitionComponents,
   (Span, Container),
-  (span, root_operation_type_definitions)
+  (span, root_operation_type_definitions),
+  [Container, Span]
 );
 
 impl<RootOperation, Container, Span> RootOperationTypesDefinition<RootOperation, Container, Span> {
@@ -553,8 +586,10 @@ pub struct EnumValueDefinition<EnumValue, Directives, Span = SimpleSpan> {
 
 impl_node_traits!(
   EnumValueDefinition<EnumValue, Directives, Span>,
+  EnumValueDefinitionComponents,
   (Span, EnumValue, Option<Directives>),
-  (span, value, directives)
+  (span, value, directives),
+  [EnumValue, Directives, Span]
 );
 
 impl<EnumValue, Directives, Span> EnumValueDefinition<EnumValue, Directives, Span> {
@@ -597,8 +632,10 @@ pub struct EnumValuesDefinition<EnumValue, Container = Vec<EnumValue>, Span = Si
 
 impl_node_traits!(
   EnumValuesDefinition<EnumValue, Container, Span>,
+  EnumValuesDefinitionComponents,
   (Span, Container),
-  (span, enum_value_definitions)
+  (span, enum_value_definitions),
+  [Container, Span]
 );
 
 impl<EnumValue, Container, Span> EnumValuesDefinition<EnumValue, Container, Span> {
@@ -646,8 +683,10 @@ pub struct ObjectTypeDefinition<Name, Implements, Directives, Fields, Span = Sim
 
 impl_node_traits!(
   ObjectTypeDefinition<Name, Implements, Directives, Fields, Span>,
+  ObjectTypeDefinitionComponents,
   (Span, Name, Option<Implements>, Option<Directives>, Option<Fields>),
-  (span, name, implements, directives, fields_definition)
+  (span, name, implements, directives, fields_definition),
+  [Name, Implements, Directives, Fields, Span]
 );
 
 impl<Name, Implements, Directives, Fields, Span>
@@ -712,8 +751,10 @@ pub struct UnionMemberTypes<Name, Container = Vec<Name>, Span = SimpleSpan> {
 
 impl_node_traits!(
   UnionMemberTypes<Name, Container, Span>,
+  UnionMemberTypesComponents,
   (Span, Container),
-  (span, members)
+  (span, members),
+  [Container, Span]
 );
 
 impl<Name, Container, Span> UnionMemberTypes<Name, Container, Span> {
@@ -894,20 +935,24 @@ impl<Span> IntoSpan<Span> for ExecutableDirectiveLocation<Span> {
   }
 }
 
+/// `ExecutableDirectiveLocation` taken apart: the span it was written over and its spelling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ExecutableDirectiveLocationComponents<Span> {
+  /// The span the location was written over.
+  pub span: Span,
+  /// The location's spelling in a directive definition, such as `QUERY`.
+  pub spelling: &'static str,
+}
+
 impl<Span> IntoComponents for ExecutableDirectiveLocation<Span> {
-  type Components = (Span, &'static str);
+  type Components = ExecutableDirectiveLocationComponents<Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    match self {
-      Self::Query(span) => (span, "QUERY"),
-      Self::Mutation(span) => (span, "MUTATION"),
-      Self::Subscription(span) => (span, "SUBSCRIPTION"),
-      Self::Field(span) => (span, "FIELD"),
-      Self::FragmentDefinition(span) => (span, "FRAGMENT_DEFINITION"),
-      Self::FragmentSpread(span) => (span, "FRAGMENT_SPREAD"),
-      Self::InlineFragment(span) => (span, "INLINE_FRAGMENT"),
-      Self::VariableDefinition(span) => (span, "VARIABLE_DEFINITION"),
+    let spelling = self.as_str();
+    ExecutableDirectiveLocationComponents {
+      span: self.into_span(),
+      spelling,
     }
   }
 }
@@ -1085,24 +1130,24 @@ impl<Span> IntoSpan<Span> for TypeSystemDirectiveLocation<Span> {
   }
 }
 
+/// `TypeSystemDirectiveLocation` taken apart: the span it was written over and its spelling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TypeSystemDirectiveLocationComponents<Span> {
+  /// The span the location was written over.
+  pub span: Span,
+  /// The location's spelling in a directive definition, such as `SCHEMA`.
+  pub spelling: &'static str,
+}
+
 impl<Span> IntoComponents for TypeSystemDirectiveLocation<Span> {
-  type Components = (Span, &'static str);
+  type Components = TypeSystemDirectiveLocationComponents<Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    match self {
-      Self::Schema(span) => (span, "SCHEMA"),
-      Self::Scalar(span) => (span, "SCALAR"),
-      Self::Object(span) => (span, "OBJECT"),
-      Self::FieldDefinition(span) => (span, "FIELD_DEFINITION"),
-      Self::ArgumentDefinition(span) => (span, "ARGUMENT_DEFINITION"),
-      Self::Interface(span) => (span, "INTERFACE"),
-      Self::Union(span) => (span, "UNION"),
-      Self::Enum(span) => (span, "ENUM"),
-      Self::EnumValue(span) => (span, "ENUM_VALUE"),
-      Self::InputObject(span) => (span, "INPUT_OBJECT"),
-      Self::InputFieldDefinition(span) => (span, "INPUT_FIELD_DEFINITION"),
-      Self::DirectiveDefinition(span) => (span, "DIRECTIVE_DEFINITION"),
+    let spelling = self.as_str();
+    TypeSystemDirectiveLocationComponents {
+      span: self.into_span(),
+      spelling,
     }
   }
 }
@@ -1168,14 +1213,29 @@ impl<Span> IntoSpan<Span> for Location<Span> {
   }
 }
 
+/// `Location` taken apart: the span it was written over and its spelling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct LocationComponents<Span> {
+  /// The span the location was written over.
+  pub span: Span,
+  /// The location's spelling in a directive definition, such as `QUERY` or `SCHEMA`.
+  pub spelling: &'static str,
+}
+
 impl<Span> IntoComponents for Location<Span> {
-  type Components = (Span, &'static str);
+  type Components = LocationComponents<Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
     match self {
-      Self::Executable(location) => location.into_components(),
-      Self::TypeSystem(location) => location.into_components(),
+      Self::Executable(location) => {
+        let ExecutableDirectiveLocationComponents { span, spelling } = location.into_components();
+        LocationComponents { span, spelling }
+      }
+      Self::TypeSystem(location) => {
+        let TypeSystemDirectiveLocationComponents { span, spelling } = location.into_components();
+        LocationComponents { span, spelling }
+      }
     }
   }
 }
@@ -1236,8 +1296,10 @@ pub struct DirectiveLocations<
 
 impl_node_traits!(
   DirectiveLocations<DirectiveLocation, Container, Span>,
+  DirectiveLocationsComponents,
   (Span, Container),
-  (span, locations)
+  (span, locations),
+  [Container, Span]
 );
 
 impl<DirectiveLocation, Container, Span> DirectiveLocations<DirectiveLocation, Container, Span> {
@@ -1290,8 +1352,10 @@ pub struct DirectiveDefinition<Name, Arguments, Directives, Locations, Span = Si
 
 impl_node_traits!(
   DirectiveDefinition<Name, Arguments, Directives, Locations, Span>,
+  DirectiveDefinitionComponents,
   (Span, Name, Option<Arguments>, Option<Directives>, bool, Locations),
-  (span, name, arguments_definition, directives, repeatable, locations)
+  (span, name, arguments_definition, directives, repeatable, locations),
+  [Name, Arguments, Directives, Locations, Span]
 );
 
 impl<Name, Arguments, Directives, Locations, Span>
@@ -1364,8 +1428,10 @@ pub struct SchemaDefinition<Directives, RootOperations, Span = SimpleSpan> {
 
 impl_node_traits!(
   SchemaDefinition<Directives, RootOperations, Span>,
+  SchemaDefinitionComponents,
   (Span, Option<Directives>, RootOperations),
-  (span, directives, root_operation_types_definition)
+  (span, directives, root_operation_types_definition),
+  [Directives, RootOperations, Span]
 );
 
 impl<Directives, RootOperations, Span> SchemaDefinition<Directives, RootOperations, Span> {
@@ -1402,29 +1468,176 @@ impl<Directives, RootOperations, Span> SchemaDefinition<Directives, RootOperatio
   }
 }
 
+/// Directives added by an extension, with the optional interfaces written before them.
+///
+/// The `Directives` payload of the object and interface type extension data enums, and of
+/// GraphQLx's scalar, enum, union and input object ones. Built with [`new`](Self::new); edited in
+/// place with the `set_*` setters or by value with the `with_*` ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExtensionDirectives<Implements, Directives> {
+  pub(crate) implements: Option<Implements>,
+  pub(crate) directives: Directives,
+}
+
+impl<Implements, Directives> ExtensionDirectives<Implements, Directives> {
+  /// Creates the payload from the optional implemented interfaces and the directives being added.
+  #[inline]
+  pub const fn new(implements: Option<Implements>, directives: Directives) -> Self {
+    Self {
+      implements,
+      directives,
+    }
+  }
+
+  /// Returns the optional implemented interfaces.
+  #[inline]
+  pub const fn implements(&self) -> Option<&Implements> {
+    self.implements.as_ref()
+  }
+
+  /// Returns the directives being added.
+  #[inline]
+  pub const fn directives(&self) -> &Directives {
+    &self.directives
+  }
+
+  /// Replaces the optional implemented interfaces.
+  #[inline]
+  pub fn set_implements(&mut self, implements: Option<Implements>) -> &mut Self {
+    self.implements = implements;
+    self
+  }
+
+  /// Replaces the directives.
+  #[inline]
+  pub fn set_directives(&mut self, directives: Directives) -> &mut Self {
+    self.directives = directives;
+    self
+  }
+
+  /// Returns the payload with the optional implemented interfaces replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_implements(mut self, implements: Option<Implements>) -> Self {
+    self.implements = implements;
+    self
+  }
+
+  /// Returns the payload with the directives replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_directives(mut self, directives: Directives) -> Self {
+    self.directives = directives;
+    self
+  }
+}
+
+/// A fields definition added by an extension, with the optional interfaces and directives written
+/// before it.
+///
+/// The `Fields` payload of the object and interface type extension data enums, and of GraphQLx's
+/// input object one. Built with [`new`](Self::new); edited in place with the `set_*` setters or by
+/// value with the `with_*` ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExtensionFields<Implements, Directives, Fields> {
+  pub(crate) implements: Option<Implements>,
+  pub(crate) directives: Option<Directives>,
+  pub(crate) fields_definition: Fields,
+}
+
+impl<Implements, Directives, Fields> ExtensionFields<Implements, Directives, Fields> {
+  /// Creates the payload from the optional implemented interfaces, the optional directives and the
+  /// fields definition being added.
+  #[inline]
+  pub const fn new(
+    implements: Option<Implements>,
+    directives: Option<Directives>,
+    fields_definition: Fields,
+  ) -> Self {
+    Self {
+      implements,
+      directives,
+      fields_definition,
+    }
+  }
+
+  /// Returns the optional implemented interfaces.
+  #[inline]
+  pub const fn implements(&self) -> Option<&Implements> {
+    self.implements.as_ref()
+  }
+
+  /// Returns the optional directives being added.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.directives.as_ref()
+  }
+
+  /// Returns the nonempty fields definition being added.
+  #[inline]
+  pub const fn fields_definition(&self) -> &Fields {
+    &self.fields_definition
+  }
+
+  /// Replaces the optional implemented interfaces.
+  #[inline]
+  pub fn set_implements(&mut self, implements: Option<Implements>) -> &mut Self {
+    self.implements = implements;
+    self
+  }
+
+  /// Replaces the optional directives.
+  #[inline]
+  pub fn set_directives(&mut self, directives: Option<Directives>) -> &mut Self {
+    self.directives = directives;
+    self
+  }
+
+  /// Replaces the fields definition.
+  #[inline]
+  pub fn set_fields_definition(&mut self, fields_definition: Fields) -> &mut Self {
+    self.fields_definition = fields_definition;
+    self
+  }
+
+  /// Returns the payload with the optional implemented interfaces replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_implements(mut self, implements: Option<Implements>) -> Self {
+    self.implements = implements;
+    self
+  }
+
+  /// Returns the payload with the optional directives replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_directives(mut self, directives: Option<Directives>) -> Self {
+    self.directives = directives;
+    self
+  }
+
+  /// Returns the payload with the fields definition replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_fields_definition(mut self, fields_definition: Fields) -> Self {
+    self.fields_definition = fields_definition;
+    self
+  }
+}
+
 /// The payload contributed by an object or interface type extension.
 ///
 /// Each variant represents one of GraphQL's legal nonempty extension forms.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum ObjectTypeExtensionData<Implements, Directives, Fields> {
   /// Adds one or more implemented interfaces only.
   Implements(Implements),
   /// Adds directives, with optional implemented interfaces.
-  Directives {
-    /// The optional implemented interfaces.
-    implements: Option<Implements>,
-    /// The directives being added.
-    directives: Directives,
-  },
+  Directives(ExtensionDirectives<Implements, Directives>),
   /// Adds fields, with optional interfaces and directives.
-  Fields {
-    /// The optional implemented interfaces.
-    implements: Option<Implements>,
-    /// The optional directives being added.
-    directives: Option<Directives>,
-    /// The nonempty fields definition being added.
-    fields_definition: Fields,
-  },
+  Fields(ExtensionFields<Implements, Directives, Fields>),
 }
 
 impl<Implements, Directives, Fields> ObjectTypeExtensionData<Implements, Directives, Fields> {
@@ -1433,7 +1646,8 @@ impl<Implements, Directives, Fields> ObjectTypeExtensionData<Implements, Directi
   pub const fn implements(&self) -> Option<&Implements> {
     match self {
       Self::Implements(implements) => Some(implements),
-      Self::Directives { implements, .. } | Self::Fields { implements, .. } => implements.as_ref(),
+      Self::Directives(extension) => extension.implements(),
+      Self::Fields(extension) => extension.implements(),
     }
   }
 
@@ -1441,8 +1655,8 @@ impl<Implements, Directives, Fields> ObjectTypeExtensionData<Implements, Directi
   #[inline]
   pub const fn directives(&self) -> Option<&Directives> {
     match self {
-      Self::Directives { directives, .. } => Some(directives),
-      Self::Fields { directives, .. } => directives.as_ref(),
+      Self::Directives(extension) => Some(extension.directives()),
+      Self::Fields(extension) => extension.directives(),
       Self::Implements(_) => None,
     }
   }
@@ -1451,10 +1665,8 @@ impl<Implements, Directives, Fields> ObjectTypeExtensionData<Implements, Directi
   #[inline]
   pub const fn fields_definition(&self) -> Option<&Fields> {
     match self {
-      Self::Fields {
-        fields_definition, ..
-      } => Some(fields_definition),
-      Self::Implements(_) | Self::Directives { .. } => None,
+      Self::Fields(extension) => Some(extension.fields_definition()),
+      Self::Implements(_) | Self::Directives(_) => None,
     }
   }
 }
@@ -1471,8 +1683,10 @@ pub struct ObjectTypeExtension<Name, Implements, Directives, Fields, Span = Simp
 
 impl_node_traits!(
   ObjectTypeExtension<Name, Implements, Directives, Fields, Span>,
+  ObjectTypeExtensionComponents,
   (Span, Name, ObjectTypeExtensionData<Implements, Directives, Fields>),
-  (span, name, data)
+  (span, name, data),
+  [Name, Implements, Directives, Fields, Span]
 );
 
 impl<Name, Implements, Directives, Fields, Span>
@@ -1528,26 +1742,16 @@ impl<Name, Implements, Directives, Fields, Span>
 /// The payload contributed by an interface type extension.
 ///
 /// Each variant represents one of GraphQL's legal nonempty extension forms.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum InterfaceTypeExtensionData<Implements, Directives, Fields> {
   /// Adds one or more implemented interfaces only.
   Implements(Implements),
   /// Adds directives, with optional implemented interfaces.
-  Directives {
-    /// The optional implemented interfaces.
-    implements: Option<Implements>,
-    /// The directives being added.
-    directives: Directives,
-  },
+  Directives(ExtensionDirectives<Implements, Directives>),
   /// Adds fields, with optional interfaces and directives.
-  Fields {
-    /// The optional implemented interfaces.
-    implements: Option<Implements>,
-    /// The optional directives being added.
-    directives: Option<Directives>,
-    /// The nonempty fields definition being added.
-    fields_definition: Fields,
-  },
+  Fields(ExtensionFields<Implements, Directives, Fields>),
 }
 
 impl<Implements, Directives, Fields> InterfaceTypeExtensionData<Implements, Directives, Fields> {
@@ -1556,7 +1760,8 @@ impl<Implements, Directives, Fields> InterfaceTypeExtensionData<Implements, Dire
   pub const fn implements(&self) -> Option<&Implements> {
     match self {
       Self::Implements(implements) => Some(implements),
-      Self::Directives { implements, .. } | Self::Fields { implements, .. } => implements.as_ref(),
+      Self::Directives(extension) => extension.implements(),
+      Self::Fields(extension) => extension.implements(),
     }
   }
 
@@ -1564,8 +1769,8 @@ impl<Implements, Directives, Fields> InterfaceTypeExtensionData<Implements, Dire
   #[inline]
   pub const fn directives(&self) -> Option<&Directives> {
     match self {
-      Self::Directives { directives, .. } => Some(directives),
-      Self::Fields { directives, .. } => directives.as_ref(),
+      Self::Directives(extension) => Some(extension.directives()),
+      Self::Fields(extension) => extension.directives(),
       Self::Implements(_) => None,
     }
   }
@@ -1574,10 +1779,8 @@ impl<Implements, Directives, Fields> InterfaceTypeExtensionData<Implements, Dire
   #[inline]
   pub const fn fields_definition(&self) -> Option<&Fields> {
     match self {
-      Self::Fields {
-        fields_definition, ..
-      } => Some(fields_definition),
-      Self::Implements(_) | Self::Directives { .. } => None,
+      Self::Fields(extension) => Some(extension.fields_definition()),
+      Self::Implements(_) | Self::Directives(_) => None,
     }
   }
 }
@@ -1594,8 +1797,10 @@ pub struct InterfaceTypeExtension<Name, Implements, Directives, Fields, Span = S
 
 impl_node_traits!(
   InterfaceTypeExtension<Name, Implements, Directives, Fields, Span>,
+  InterfaceTypeExtensionComponents,
   (Span, Name, InterfaceTypeExtensionData<Implements, Directives, Fields>),
-  (span, name, data)
+  (span, name, data),
+  [Name, Implements, Directives, Fields, Span]
 );
 
 impl<Name, Implements, Directives, Fields, Span>
@@ -1648,18 +1853,89 @@ impl<Name, Implements, Directives, Fields, Span>
   }
 }
 
+/// Root operation types added by a schema extension, with the optional directives written before
+/// them.
+///
+/// The `Operations` payload of the schema extension data enum. Built with [`new`](Self::new);
+/// edited in place with the `set_*` setters or by value with the `with_*` ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExtensionOperations<Directives, RootOperations> {
+  pub(crate) directives: Option<Directives>,
+  pub(crate) root_operation_types_definition: RootOperations,
+}
+
+impl<Directives, RootOperations> ExtensionOperations<Directives, RootOperations> {
+  /// Creates the payload from the optional directives and the root-operation-types definition being
+  /// added.
+  #[inline]
+  pub const fn new(
+    directives: Option<Directives>,
+    root_operation_types_definition: RootOperations,
+  ) -> Self {
+    Self {
+      directives,
+      root_operation_types_definition,
+    }
+  }
+
+  /// Returns the optional directives being added.
+  #[inline]
+  pub const fn directives(&self) -> Option<&Directives> {
+    self.directives.as_ref()
+  }
+
+  /// Returns the nonempty root-operation-types definition being added.
+  #[inline]
+  pub const fn root_operation_types_definition(&self) -> &RootOperations {
+    &self.root_operation_types_definition
+  }
+
+  /// Replaces the optional directives.
+  #[inline]
+  pub fn set_directives(&mut self, directives: Option<Directives>) -> &mut Self {
+    self.directives = directives;
+    self
+  }
+
+  /// Replaces the root-operation-types definition.
+  #[inline]
+  pub fn set_root_operation_types_definition(
+    &mut self,
+    root_operation_types_definition: RootOperations,
+  ) -> &mut Self {
+    self.root_operation_types_definition = root_operation_types_definition;
+    self
+  }
+
+  /// Returns the payload with the optional directives replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_directives(mut self, directives: Option<Directives>) -> Self {
+    self.directives = directives;
+    self
+  }
+
+  /// Returns the payload with the root-operation-types definition replaced.
+  #[inline]
+  #[must_use]
+  pub fn with_root_operation_types_definition(
+    mut self,
+    root_operation_types_definition: RootOperations,
+  ) -> Self {
+    self.root_operation_types_definition = root_operation_types_definition;
+    self
+  }
+}
+
 /// The payload contributed by a schema extension.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 pub enum SchemaExtensionData<Directives, RootOperations> {
   /// Adds directives only.
   Directives(Directives),
   /// Adds root operation types, with optional directives.
-  Operations {
-    /// The optional directives being added.
-    directives: Option<Directives>,
-    /// The nonempty root-operation-types definition being added.
-    root_operation_types_definition: RootOperations,
-  },
+  Operations(ExtensionOperations<Directives, RootOperations>),
 }
 
 impl<Directives, RootOperations> SchemaExtensionData<Directives, RootOperations> {
@@ -1668,7 +1944,7 @@ impl<Directives, RootOperations> SchemaExtensionData<Directives, RootOperations>
   pub const fn directives(&self) -> Option<&Directives> {
     match self {
       Self::Directives(directives) => Some(directives),
-      Self::Operations { directives, .. } => directives.as_ref(),
+      Self::Operations(extension) => extension.directives(),
     }
   }
 
@@ -1676,10 +1952,7 @@ impl<Directives, RootOperations> SchemaExtensionData<Directives, RootOperations>
   #[inline]
   pub const fn root_operation_types_definition(&self) -> Option<&RootOperations> {
     match self {
-      Self::Operations {
-        root_operation_types_definition,
-        ..
-      } => Some(root_operation_types_definition),
+      Self::Operations(extension) => Some(extension.root_operation_types_definition()),
       Self::Directives(_) => None,
     }
   }
@@ -1696,8 +1969,10 @@ pub struct SchemaExtension<Directives, RootOperations, Span = SimpleSpan> {
 
 impl_node_traits!(
   SchemaExtension<Directives, RootOperations, Span>,
+  SchemaExtensionComponents,
   (Span, SchemaExtensionData<Directives, RootOperations>),
-  (span, data)
+  (span, data),
+  [Directives, RootOperations, Span]
 );
 
 impl<Directives, RootOperations, Span> SchemaExtension<Directives, RootOperations, Span> {
@@ -1879,8 +2154,10 @@ pub struct DirectiveExtension<Name, Directives, Span = SimpleSpan> {
 
 impl_node_traits!(
   DirectiveExtension<Name, Directives, Span>,
+  DirectiveExtensionComponents,
   (Span, Name, Directives),
-  (span, name, directives)
+  (span, name, directives),
+  [Name, Directives, Span]
 );
 
 impl<Name, Directives, Span> DirectiveExtension<Name, Directives, Span> {

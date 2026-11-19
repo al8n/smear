@@ -254,7 +254,7 @@ fn a_deep_use_tree_is_released() {
     let mut tree = x::UseTree::new(
       span(),
       x::UsePrefix::Path(segment()),
-      x::UseTreeKind::Simple { alias: None },
+      x::UseTreeKind::Simple(None),
     );
     for _ in 0..DEPTH {
       tree = x::UseTree::new(

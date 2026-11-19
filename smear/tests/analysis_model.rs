@@ -10,13 +10,13 @@
 use smear::{
   analysis::graphqlx::{
     Application, ApplicationArgument, ApplicationId, Builtins, CanonicalName, Collection,
-    Contribution, Contributions, Def, DefId, DefKind, Description, DirectiveLocation, Extern,
-    Externs, FloatValue, IntValue, IntegerProvider, Layout, Limits, Literal, LiteralKind, Member,
-    MemberId, MemberKind, Model, Module, ModuleId, ModuleKind, Namespace, ObjectEntry, Origin,
-    Package, PackageId, PackageInfo, PackageKind, Path, PathRoot, Primitive, Resolution, Root,
-    RootOperation, Schema, SourceId, Sym, Tier, Ty, TyId, TyKind, TypeBound, TypeExpr, TypeExprId,
-    TypeExprKind, TypeParam, TypeParams, Value, ValueId, ValueKind, analyze,
-    test_support::ModelBuilder,
+    Contribution, Contributions, Def, DefId, DefKind, Description, DirectiveLocation, EnumValueRef,
+    Extern, Externs, FloatValue, IntPrimitive, IntValue, IntegerProvider, Layout, Limits, Literal,
+    LiteralKind, Member, MemberId, MemberKind, Model, Module, ModuleId, ModuleKind, NamedTy,
+    NamedTypeExpr, Namespace, ObjectEntry, Origin, Package, PackageId, PackageInfo, PackageKind,
+    Path, PathRoot, Primitive, Resolution, Root, RootOperation, Schema, SourceId, Sym, Tier, Ty,
+    TyId, TyKind, TypeBound, TypeExpr, TypeExprId, TypeExprKind, TypeParam, TypeParamRef,
+    TypeParams, Value, ValueId, ValueKind, analyze, test_support::ModelBuilder,
   },
   diagnostic::Location,
   lexer::tokora::SimpleSpan,
@@ -1051,8 +1051,8 @@ fn fixture() -> Model {
   b.set_object(
     V_OBJECT,
     &[
-      (FILTER_TAGS, Some(at(APP_SCHEMA, 1086, 1087)), V_OBJECT_TAGS),
-      (FILTER_COLOR, None, V_OBJECT_COLOR),
+      ObjectEntry::new(FILTER_TAGS, Some(at(APP_SCHEMA, 1086, 1087)), V_OBJECT_TAGS),
+      ObjectEntry::new(FILTER_COLOR, None, V_OBJECT_COLOR),
     ],
   );
   assert_eq!(b.push_value(at(APP_SCHEMA, 1088, 1092), true), V_LITERAL);
@@ -1622,21 +1622,21 @@ fn distinct<T: PartialEq>(items: &[T]) -> bool {
 
 #[test]
 fn every_enum_is_built_as_the_design_says() {
-  // `Primitive::Int` cannot be written outside smear, because its fields may grow: it is built
-  // through these two, and read with a pattern that ends with `..`. Its documentation carries the
-  // `compile_fail` example that a struct expression is refused.
+  // `Primitive::Int` cannot be built outside smear, because its payload's fields are private: it
+  // is built through these two, and read through the payload's accessors. Its documentation
+  // carries the `compile_fail` example that a struct expression is refused.
   for (primitive, expected) in [
     (Primitive::signed(32), (true, 32)),
     (Primitive::unsigned(8), (false, 8)),
   ] {
     match primitive {
-      Primitive::Int { signed, width, .. } => assert_eq!((signed, width), expected),
+      Primitive::Int(int) => assert_eq!((int.is_signed(), int.width()), expected),
       other => panic!("{other:?} is not an integer"),
     }
   }
   assert_ne!(Primitive::signed(8), Primitive::unsigned(8));
   for primitive in [Primitive::Bool, Primitive::F32, Primitive::F64] {
-    assert!(!matches!(primitive, Primitive::Int { .. }));
+    assert!(!matches!(primitive, Primitive::Int(_)));
   }
 
   // Every other variant of every enum is a value a consumer writes as it is.
@@ -1707,9 +1707,9 @@ fn a_type_occurrence_answers_its_kind_path_location_and_type() {
   let implements: TypeExpr<'_> = model.type_expr(QUERY_IMPLEMENTS);
   assert_eq!(implements.id(), QUERY_IMPLEMENTS);
   match implements.kind() {
-    TypeExprKind::Named { def, args, .. } => {
-      assert_eq!(def, NODE);
-      assert!(args.is_empty());
+    TypeExprKind::Named(named_expr) => {
+      assert_eq!(named_expr.def(), NODE);
+      assert!(named_expr.args().is_empty());
     }
     other => panic!("{other:?} is not a named type"),
   }
@@ -1728,7 +1728,7 @@ fn a_type_occurrence_answers_its_kind_path_location_and_type() {
   // `[string]`: a list has an element and no path.
   let tags: TypeExpr<'_> = model.type_expr(TAGS_TYPE);
   match tags.kind() {
-    TypeExprKind::List { element, .. } => assert_eq!(element, TAGS_ELEMENT),
+    TypeExprKind::List(element) => assert_eq!(element, TAGS_ELEMENT),
     other => panic!("{other:?} is not a list"),
   }
   assert_eq!(tags.path(), None);
@@ -1738,7 +1738,7 @@ fn a_type_occurrence_answers_its_kind_path_location_and_type() {
   // `T!` inside `Page`: a parameter, which belongs to its definition.
   let element: TypeExpr<'_> = model.type_expr(ITEMS_ELEMENT);
   match element.kind() {
-    TypeExprKind::Param { def, index, .. } => assert_eq!((def, index), (PAGE, 0)),
+    TypeExprKind::Param(param) => assert_eq!((param.def(), param.index()), (PAGE, 0)),
     other => panic!("{other:?} is not a type parameter"),
   }
   assert!(element.non_null());
@@ -1748,9 +1748,9 @@ fn a_type_occurrence_answers_its_kind_path_location_and_type() {
 
   // `Page<Query>`: the written arguments, and the complete instantiation as its type.
   match model.type_expr(SEARCH_PAGE).kind() {
-    TypeExprKind::Named { def, args, .. } => {
-      assert_eq!(def, PAGE);
-      assert_eq!(args, &[SEARCH_PAGE_ARG]);
+    TypeExprKind::Named(named_expr) => {
+      assert_eq!(named_expr.def(), PAGE);
+      assert_eq!(named_expr.args(), &[SEARCH_PAGE_ARG]);
     }
     other => panic!("{other:?} is not a named type"),
   }
@@ -1787,9 +1787,9 @@ fn a_type_answers_its_kind_nullness_tier_and_closedness() {
   let string: Ty<'_> = model.ty(STRING_TY);
   assert_eq!(string.id(), STRING_TY);
   match string.kind() {
-    TyKind::Named { def, args, .. } => {
-      assert_eq!(def, STRING);
-      assert!(args.is_empty());
+    TyKind::Named(named_ty) => {
+      assert_eq!(named_ty.def(), STRING);
+      assert!(named_ty.args().is_empty());
     }
     other => panic!("{other:?} is not a named type"),
   }
@@ -1800,14 +1800,14 @@ fn a_type_answers_its_kind_nullness_tier_and_closedness() {
 
   let param: Ty<'_> = model.ty(T_TY);
   match param.kind() {
-    TyKind::Param { def, index, .. } => assert_eq!((def, index), (PAGE, 0)),
+    TyKind::Param(param) => assert_eq!((param.def(), param.index()), (PAGE, 0)),
     other => panic!("{other:?} is not a type parameter"),
   }
   assert!(param.non_null());
   assert!(!param.is_closed());
 
   match model.ty(TS_TY).kind() {
-    TyKind::List { element, .. } => assert_eq!(element, T_TY),
+    TyKind::List(element) => assert_eq!(element, T_TY),
     other => panic!("{other:?} is not a list"),
   }
   assert!(
@@ -1815,15 +1815,15 @@ fn a_type_answers_its_kind_nullness_tier_and_closedness() {
     "a list of a parameter names it"
   );
   match model.ty(STRINGS_TY).kind() {
-    TyKind::List { element, .. } => assert_eq!(element, STRING_TY),
+    TyKind::List(element) => assert_eq!(element, STRING_TY),
     other => panic!("{other:?} is not a list"),
   }
   assert!(model.ty(STRINGS_TY).is_closed());
 
   match model.ty(PAGE_QUERY_TY).kind() {
-    TyKind::Named { def, args, .. } => {
-      assert_eq!(def, PAGE);
-      assert_eq!(args, &[QUERY_TY]);
+    TyKind::Named(named_ty) => {
+      assert_eq!(named_ty.def(), PAGE);
+      assert_eq!(named_ty.args(), &[QUERY_TY]);
     }
     other => panic!("{other:?} is not a named type"),
   }
@@ -1903,10 +1903,10 @@ fn a_value_answers_every_kind_its_location_type_writtenness_and_path() {
   assert_eq!(float.to_f64().to_bits(), 1.5f64.to_bits());
   assert_eq!(float.text(), "1.5");
 
-  let ValueKind::Enum { def, value, .. } = model.value(V_ENUM).kind() else {
+  let ValueKind::Enum(enum_value) = model.value(V_ENUM).kind() else {
     panic!("not an enum value");
   };
-  assert_eq!((def, value), (COLOR, GREEN));
+  assert_eq!((enum_value.def(), enum_value.value()), (COLOR, GREEN));
   let path: Path<'_> = model
     .value(V_ENUM)
     .path()
@@ -1914,7 +1914,7 @@ fn a_value_answers_every_kind_its_location_type_writtenness_and_path() {
   assert_eq!(path.root(), PathRoot::Relative);
   assert_eq!(spelled(&model, path), vec!["GREEN"]);
 
-  let ValueKind::Type { def, .. } = model.value(V_TYPE).kind() else {
+  let ValueKind::Type(def) = model.value(V_TYPE).kind() else {
     panic!("not a type value");
   };
   assert_eq!(def, POINT);
@@ -1970,10 +1970,10 @@ fn a_value_answers_every_kind_its_location_type_writtenness_and_path() {
     model.value(REASON_DEFAULT).kind(),
     ValueKind::String("No longer supported")
   );
-  let ValueKind::Enum { def, value, .. } = model.value(COLOR_DEFAULT).kind() else {
+  let ValueKind::Enum(enum_value) = model.value(COLOR_DEFAULT).kind() else {
     panic!("not an enum value");
   };
-  assert_eq!((def, value), (COLOR, RED));
+  assert_eq!((enum_value.def(), enum_value.value()), (COLOR, RED));
 }
 
 /// The integer value `id` holds.
@@ -2358,6 +2358,11 @@ const _: () = {
   let _ = assert_send_sync::<IntValue<'static>>;
   let _ = assert_send_sync::<FloatValue<'static>>;
   let _ = assert_send_sync::<Literal<'static>>;
+  let _ = assert_send_sync::<NamedTypeExpr<'static>>;
+  let _ = assert_send_sync::<NamedTy<'static>>;
+  let _ = assert_send_sync::<TypeParamRef>;
+  let _ = assert_send_sync::<EnumValueRef>;
+  let _ = assert_send_sync::<IntPrimitive>;
   let _ = assert_send_sync::<ObjectEntry>;
   let _ = assert_send_sync::<Application<'static>>;
   let _ = assert_send_sync::<ApplicationArgument>;

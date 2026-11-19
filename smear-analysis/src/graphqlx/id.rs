@@ -191,6 +191,18 @@ pub(crate) fn dense(len: usize) -> u32 {
   u32::try_from(len).unwrap_or(u32::MAX)
 }
 
+/// A range of indices into one of a phase's pools, `start..end`: an owner's run of rows, told by
+/// where it starts and where it ends, as an [`IdRange`] tells a table's.
+///
+/// A run told by where it starts and how long it is is the model's `Run`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PoolRange {
+  /// The index of the first row.
+  pub(crate) start: u32,
+  /// One past the index of the last row.
+  pub(crate) end: u32,
+}
+
 /// The ids an [`IdRange`] can hold.
 mod sealed {
   /// A dense `u32` id. Sealed: only this crate's ids implement it.

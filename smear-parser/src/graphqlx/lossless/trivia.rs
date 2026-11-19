@@ -284,6 +284,15 @@ pub mod test_support {
 
   use super::super::{GraphqlxLosslessErrors, GraphqlxLosslessLexer, SyntaxNode, runner::profile};
 
+  /// What a driver answers: the atom's own result, and the text it committed to the tree.
+  #[derive(Debug, Clone, PartialEq, Eq)]
+  pub struct Driven<T> {
+    /// The atom's own result: did it match, or what did it read.
+    pub result: T,
+    /// The text of the node the atom ran inside, which is everything it committed.
+    pub committed: String,
+  }
+
   /// The kind vocabulary the atoms answer in — the lexer's, not the tree's.
   pub type Kind = smear_lexer::graphqlx::lossless::LosslessTokenKind;
 
@@ -353,7 +362,10 @@ pub mod test_support {
         .map(|n| n.text().to_string())
         .unwrap_or_default();
 
-      (out.into_inner(), text)
+      Driven {
+        result: out.into_inner(),
+        committed: text,
+      }
     }};
   }
 
@@ -367,7 +379,7 @@ pub mod test_support {
   /// asserts on it; folding an error into the same value would let a broken atom pass the
   /// end-of-input test for the wrong reason.
   pub fn peek_kind_of<'inp>(src: &'inp str) -> Option<Kind> {
-    let (kind, _text) = drive!('inp, src, None, |inp| super::peek_kind::<str, _>(inp)
+    let Driven { result: kind, .. } = drive!('inp, src, None, |inp| super::peek_kind::<str, _>(inp)
       .expect("peek_kind must not error over these fixtures"));
     kind
   }
@@ -379,13 +391,15 @@ pub mod test_support {
   /// comparison. A `None` means either "no token" or "this identifier spells nothing contextual",
   /// which is the flattening the substrate's `peek_as` documents.
   pub fn peek_keyword_of<'inp>(src: &'inp str) -> Option<Keyword> {
-    let (keyword, _text) = drive!('inp, src, None, |inp| super::peek_as::<str, _, Keyword>(inp)
+    let Driven {
+      result: keyword, ..
+    } = drive!('inp, src, None, |inp| super::peek_as::<str, _, Keyword>(inp)
       .expect("peek_as must not error over these fixtures"));
     keyword
   }
 
   /// `super::expect` for `{` over `src`: did it match, and what did it commit?
-  pub fn expect_brace_of<'inp>(src: &'inp str) -> (bool, String) {
+  pub fn expect_brace_of<'inp>(src: &'inp str) -> Driven<bool> {
     drive!('inp, src, false, |inp| super::expect::<str, _>(inp, Kind::LBrace).is_ok())
   }
 
@@ -395,7 +409,7 @@ pub mod test_support {
   /// "declined", which a test asserts on, so an error must not be able to spell it.
   /// `expect_brace_of` is the exception — its `bool` **is** `is_ok()`, since a failed `expect`
   /// erroring is the behaviour under test.
-  pub fn eat_if_brace_of<'inp>(src: &'inp str) -> (bool, String) {
+  pub fn eat_if_brace_of<'inp>(src: &'inp str) -> Driven<bool> {
     drive!('inp, src, false, |inp| super::eat_if::<str, _>(inp, Kind::LBrace)
       .expect("eat_if must not error over these fixtures"))
   }
@@ -407,10 +421,9 @@ pub mod test_support {
   /// The committed text is the assertion that matters as much as the kind: the atom rolls its
   /// speculative step back, so the head must **not** be in the tree afterwards while the trivia
   /// *before* the head must be.
-  pub fn peek_second_kind_of<'inp>(src: &'inp str) -> (Option<Kind>, String) {
-    let (kind, text) = drive!('inp, src, None, |inp| super::peek_second_kind::<str, _>(inp)
-      .expect("peek_second_kind must not error over these fixtures"));
-    (kind, text)
+  pub fn peek_second_kind_of<'inp>(src: &'inp str) -> Driven<Option<Kind>> {
+    drive!('inp, src, None, |inp| super::peek_second_kind::<str, _>(inp)
+      .expect("peek_second_kind must not error over these fixtures"))
   }
 
   /// `!` because that is the retro-wrap probe GraphQLx's type references will spend it on — the
@@ -418,7 +431,7 @@ pub mod test_support {
   /// The `bool` is `ParseAttempt::Accept`, so a decline and an accept are told apart while the
   /// committed text answers the question a decline still has to answer: did the trivia it crossed
   /// reach the tree?
-  pub fn try_eat_bang_of<'inp>(src: &'inp str) -> (bool, String) {
+  pub fn try_eat_bang_of<'inp>(src: &'inp str) -> Driven<bool> {
     drive!('inp, src, false, |inp| matches!(
       super::try_eat::<str, _>(inp, Kind::Bang)
         .expect("try_eat must not error over these fixtures"),

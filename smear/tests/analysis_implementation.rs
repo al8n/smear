@@ -1488,7 +1488,7 @@ fn an_ok_analysis_implements_what_its_interfaces_implement() {
       .iter()
       .filter_map(
         |entry: &TypeExprId| match model.ty(model.type_expr(*entry).ty()).kind() {
-          TyKind::Named { def, .. } => Some(def),
+          TyKind::Named(named) => Some(named.def()),
           _ => None,
         },
       )

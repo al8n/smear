@@ -393,7 +393,7 @@ fn run(
       .arguments()
       .iter()
       .filter_map(|argument| match argument.source() {
-        ArgumentSource::Variable { name, .. } => Some(name.as_bytes().to_vec()),
+        ArgumentSource::Variable(v) => Some(v.name().as_bytes().to_vec()),
         _ => None,
       })
       .collect();

@@ -45,11 +45,11 @@ definition_parser!(
   EnumValueDefinition<GraphqlSlice<'inp, Src>>,
   [contextual],
   {
-    let node_start = extent_start(inp)?;
+    let node_start = inp.cursor_trimmed()?;
     let description = description(inp)?;
     let value = take_enum_value(inp)?;
     let directives = optional_const_directives(inp)?;
-    let span = extent_since(inp, node_start);
+    let span = inp.span_since_trimmed(&node_start);
     Ok(Described::new(
       span,
       description,
@@ -72,7 +72,7 @@ definition_parser!(
       .at_least(1)
       .delimited_by_braces()
       .collect_with(Vec::new())
-      .token_spanned()
+      .spanned_trimmed()
       .parse_input(inp)
       .map(|Spanned { span, data }| EnumValuesDefinition::new(span, data))
   }
@@ -111,7 +111,7 @@ where
     ParseAttempt::Decline => None,
   };
   Ok(EnumTypeDefinition::new(
-    SimpleSpan::new(start, extent_end(inp)),
+    SimpleSpan::new(start, inp.span().end()),
     name,
     directives,
     enum_values_definition,

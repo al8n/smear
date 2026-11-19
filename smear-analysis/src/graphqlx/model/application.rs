@@ -1,5 +1,6 @@
 //! Directive applications: each `@directive(…)` as written, and the arguments it has.
 
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::id::{ApplicationId, DefId, MemberId, TyId, TypeExprId, ValueId};
@@ -14,12 +15,16 @@ use super::{
 ///
 /// It is never `Unresolved` in an analysis that [`is_ok`](crate::graphqlx::Analysis::is_ok): it
 /// appears only within the extent of an error a phase reported.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum Resolution<T> {
   /// It resolved to this.
   Resolved(T),
   /// It did not resolve, and a diagnostic says why.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Unresolved,
 }
 
@@ -115,7 +120,7 @@ impl Model {
 ///     match (name, model.value(argument.value()).kind()) {
 ///       ("lang", ValueKind::String(text)) => lang = Some(text),
 ///       ("type", ValueKind::String(text)) => host = Some(text),
-///       ("for", ValueKind::Type { def, .. }) => target = Some(def),
+///       ("for", ValueKind::Type(def)) => target = Some(def),
 ///       _ => {}
 ///     }
 ///   }

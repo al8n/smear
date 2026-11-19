@@ -32,8 +32,8 @@ use std::{format, vec::Vec};
 use smear_semantics::scc;
 
 use crate::graphqlx::{
-  ApplicationId, Contribution, Cx, Def, DefId, DefKind, Diagnostic, Model, Resolution, TypeExprId,
-  TypeExprKind, Visitor, code::schema, diagnostic::Excerpt, id::dense,
+  ApplicationId, Contribution, Cx, Def, DefId, DefKind, Diagnostic, Model, NamedTypeExpr,
+  Resolution, TypeExprId, TypeExprKind, Visitor, code::schema, diagnostic::Excerpt, id::dense,
 };
 
 /// Reports each directive on a cycle of the graph the module's header describes.
@@ -160,14 +160,14 @@ fn named(model: &Model, root: TypeExprId, stack: &mut Vec<TypeExprId>, reaches: 
   stack.push(root);
   while let Some(id) = stack.pop() {
     match model.type_expr(id).kind() {
-      TypeExprKind::Named { def, args } => {
+      TypeExprKind::Named(NamedTypeExpr { def, args }) => {
         reaches.push(def.get());
         if !opaque(model.def(def)) {
           stack.extend_from_slice(args);
         }
       }
-      TypeExprKind::List { element } => stack.push(element),
-      TypeExprKind::Param { .. } | TypeExprKind::Unresolved => {}
+      TypeExprKind::List(element) => stack.push(element),
+      TypeExprKind::Param(_) | TypeExprKind::Unresolved => {}
     }
   }
 }

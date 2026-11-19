@@ -96,48 +96,88 @@ pub type LosslessLexerErrors = error::LexerErrors<char, LimitExceeded>;
 #[try_unwrap(ref, ref_mut)]
 pub enum LosslessToken<S> {
   /// Ampersand `&` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Ampersand,
   /// At `@` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   At,
   /// BOM `\u{FEFF}` token
   Bom(S),
   /// Right curly brace `}` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   RBrace,
   /// Right square bracket `]` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   RBracket,
   /// Right parenthesis `)` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   RParen,
   /// Space ` ` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Space,
   /// Tab `\t` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Tab,
   /// Carriage return `\r` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   CarriageReturn,
   /// Newline `\n` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Newline,
   /// Carriage return + Newline `\r\n` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   CarriageReturnAndNewline,
   /// Comment token, including the leading `#`
   Comment(S),
   /// Comma `,` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Comma,
   /// Colon `:` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Colon,
   /// Dollar `$` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Dollar,
   /// Equal `=` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Equal,
   /// Exclamation mark `!` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Bang,
   /// Left curly brace `{` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   LBrace,
   /// Left square bracket `[` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   LBracket,
   /// Left parenthesis `(` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   LParen,
   /// Pipe `|` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Pipe,
   /// Spread operator `...` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Spread,
   /// Identifier token
   Identifier(S),

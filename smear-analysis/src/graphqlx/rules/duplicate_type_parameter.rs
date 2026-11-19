@@ -44,7 +44,19 @@ use super::own_contribution;
 pub(super) struct DuplicateTypeParameter {
   /// The names of the list at hand, each with its index in the list and where it is written,
   /// sorted by name, then index.
-  names: Vec<(Sym, u32, Location)>,
+  names: Vec<ListedName>,
+}
+
+/// A type parameter's name in the list at hand: the name, its index in the list, and where it is
+/// written.
+#[derive(Clone, Copy)]
+struct ListedName {
+  /// The name.
+  name: Sym,
+  /// Its index in the list.
+  index: u32,
+  /// Where it is written.
+  at: Location,
 }
 
 /// Which list the names at hand are.
@@ -75,7 +87,11 @@ impl Visitor for DuplicateTypeParameter {
       self.names.extend(
         definition
           .type_params()
-          .map(|param: TypeParam<'_>| (param.sym(), param.index(), param.location())),
+          .map(|param: TypeParam<'_>| ListedName {
+            name: param.sym(),
+            index: param.index(),
+            at: param.location(),
+          }),
       );
       self.report(cx, definition, List::Own);
     }
@@ -98,7 +114,7 @@ impl Visitor for DuplicateTypeParameter {
       self.names.extend(
         (0..)
           .zip(written)
-          .map(|(index, &(name, at)): (u32, &(Sym, Location))| (name, index, at)),
+          .map(|(index, &(name, at)): (u32, &(Sym, Location))| ListedName { name, index, at }),
       );
       self.report(cx, definition, List::Extension);
     }
@@ -112,7 +128,7 @@ impl DuplicateTypeParameter {
     let model = cx.model();
     self
       .names
-      .sort_unstable_by_key(|&(name, index, _): &(Sym, u32, Location)| (name, index));
+      .sort_unstable_by_key(|item: &ListedName| (item.name, item.index));
     let sigil = if definition.kind() == DefKind::Directive {
       "@"
     } else {
@@ -121,7 +137,7 @@ impl DuplicateTypeParameter {
     let kind = DiagnosticKind::DuplicateTypeParameter;
     // The first name of the run of one name at hand, and where it is written.
     let mut first: Option<(Sym, Location)> = None;
-    for &(name, _, at) in &self.names {
+    for &ListedName { name, at, .. } in &self.names {
       let earlier = match first {
         Some((seen, earlier)) if seen == name => earlier,
         _ => {

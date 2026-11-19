@@ -115,7 +115,8 @@ use super::{
 };
 use crate::graphql::{
   ast::{
-    BooleanValue, EnumValue, FloatValue, IntValue, NullValue, StringValue, VariableValue,
+    BooleanValue, EnumValue, FloatValue, FloatValueComponents, IntValue, IntValueComponents,
+    NullValue, StringValue, VariableValue,
     materialized::{
       ConstInputValue, ConstList, ConstObject, ConstObjectField, DefaultInputValue, InputValue,
       List, Object, ObjectField,
@@ -243,7 +244,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
   I: MaterializedInt,
 {
-  let (span, slice) = node.into_components();
+  let IntValueComponents { span, value: slice } = node.into_components();
   match <Materialized<I> as Numbers<GraphqlSlice<'inp, Src>>>::int(slice) {
     Ok(payload) => Ok(IntValue::new(span, payload)),
     Err(err) => {
@@ -269,7 +270,7 @@ where
   GraphqlError<'inp, Src, Ctx>: From<DialectGraphqlError<GraphqlSlice<'inp, Src>>>,
   Ctx: ParseCtx<'inp, GraphqlLexer<'inp, Src>, GraphQL>,
 {
-  let (span, slice) = node.into_components();
+  let FloatValueComponents { span, value: slice } = node.into_components();
   match numbers::float(slice) {
     Ok(payload) => Ok(FloatValue::new(span, payload)),
     Err(err) => Err(numbers::report_out_of_range(err, span).into()),

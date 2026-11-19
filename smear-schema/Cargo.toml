@@ -34,8 +34,12 @@ default = ["std"]
 # The reader tier is `std` or `alloc`: the representation is `core` + `alloc`, and with neither this
 # crate is `diagnostic` and `builtin` alone. `std` also flips the crate attribute. Neither tier
 # implies the other.
-alloc = ["tokora/alloc", "smear-parser?/alloc", "smear-semantics?/alloc"]
-std = ["tokora/std", "smear-parser?/std", "smear-semantics?/std"]
+#
+# Both tiers turn smol-bytes on, and nothing else does: it is the owned-text seam's buffer
+# (`src/text.rs`), which only heap code uses, so the core tier compiles neither it nor `bytes`.
+# `dep:` creates no feature of its own, so there is no `smol-bytes_0_2` switch here to witness.
+alloc = ["tokora/alloc", "smear-parser?/alloc", "smear-semantics?/alloc", "dep:smol-bytes_0_2", "smol-bytes_0_2?/alloc"]
+std = ["tokora/std", "smear-parser?/std", "smear-semantics?/std", "dep:smol-bytes_0_2", "smol-bytes_0_2?/std"]
 
 # Draft §3 "Type Validation" and the SDL door: `Schema::build`, `SchemaBuilder`, `SchemaError` and
 # the literal-shape table. This is the edge that pulls `smear-parser`, because the builder consumes
@@ -65,8 +69,17 @@ introspection = ["build"]
 # builds for `thumbv6m-none-eabi` with an empty table of its own; that claim is untouched.
 tokora.workspace = true
 
+# The derives of the public enums outside `repr/`, which takes no dependency: `smear-noatomic` includes
+# it with an empty table. Links no `alloc` with the workspace's feature list, so no tier turns it on.
+derive_more.workspace = true
+
 smear-parser = { workspace = true, optional = true }
 smear-semantics = { workspace = true, optional = true }
+
+# The owned-text seam's shared buffer, which needs pointer-width compare-and-swap. A target without
+# it never resolves the edge, and `src/text.rs` gives it a `Box<str>` instead.
+[target.'cfg(target_has_atomic = "ptr")'.dependencies]
+smol-bytes_0_2 = { workspace = true, optional = true }
 
 [lints]
 workspace = true

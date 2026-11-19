@@ -154,9 +154,9 @@ generic one cannot be inferred where a `&str` could be coerced: `String` is both
 `AsRef<[u8]>`, so a single generic door turns `parse_document(s.as_ref())` into an inference error
 at every call site that ever wrote it. And the **return type**, because a rowan green tree stores
 text as `&str` — so a `&str` source has already met the only requirement there is and cannot be
-refused, while bytes can. A source that is not UTF-8 yields `Err(Refused::NonUtf8Source {
-valid_up_to, source_len })` and no `Parse` at all: no empty tree to reprint, and nothing for a
-consumer that pairs a parse with a source to be handed.
+refused, while bytes can. A source that is not UTF-8 yields `Err(Refused::NonUtf8Source(refusal))`, whose
+`refusal.valid_up_to()` and `refusal.source_len()` carry both numbers, and no `Parse` at all: no
+empty tree to reprint, and nothing for a consumer that pairs a parse with a source to be handed.
 
 **This is not yet true of the whole crate.** The lossless **projection** takes `&str`, and so the
 lossless parser layer, which answers its document through the projection, reads `str` alone. The
@@ -358,7 +358,7 @@ enumerating the members rather than by reading the umbrella's own table.
 
 ## Feature Flags
 
-Seventeen features, and five aliases. The lexer is not one of them: it is the irreducible base, the
+Eighteen features, and five aliases. The lexer is not one of them: it is the irreducible base, the
 parser cannot exist without it, and a gate that can only ever be on is not a gate.
 
 | Feature | Description | Default |
@@ -369,9 +369,10 @@ parser cannot exist without it, and a gate that can only ever be on is not a gat
 | `graphqlx` | Extended GraphQL, in the lexer and parser. Semver-exempt until the dialect stabilises | ✓ |
 | `parser` | `smear::parser` — the combinators and the ASTs. Off, `smear-parser` is not in the graph at all and the umbrella is the lexer alone | ✓ |
 | `validator` | `smear::validator` — the draft §5 rules, plus `smear-schema`'s `build` feature for the §3 pass. Implies `parser` and `graphql`. Adds no third-party dependency | |
-| `proto` | `smear::proto` — draft §6 query, serial mutation and subscription execution as a Sans-I/O state machine. It returns a response tree that `smear::json` writes as §7.2.1 JSON. Implies `validator`, because execution is entered with a document the §5 rules have already accepted. Adds no third-party dependency and defines no value type: the driver's own representation reaches it through a trait | |
+| `proto` | `smear::proto` — draft §6 query, serial mutation and subscription execution as a Sans-I/O state machine. It returns a response tree that `smear::json` writes as §7.2.1 JSON. Implies `validator`, because execution is entered with a document the §5 rules have already accepted. Adds `indexmap` for the §7.1.7 `extensions` maps — and, with `alloc`, `foldhash`, their hasher where `std` is off — and `itoa` and `zmij` for `smear::json`'s numbers. Defines no value type: the driver's own representation reaches it through a trait | |
 | `introspection` | `Schema::from_introspection`, building a schema from a draft §4 response. Implies `validator`; needs `std` or `alloc`, which it does not imply. Adds no third-party dependency | |
 | `analysis` | `smear::analysis` — the GraphQLx schema analyzer: GraphQLx packages in, a resolved model and its diagnostics out, and rules as visitors over the model, smear's own and a consumer's. Implies `parser` and `graphqlx`; needs `std` or `alloc`, which it does not imply. Adds no third-party dependency | |
+| `serde` | `Serialize` and `Deserialize` for `proto::Limits`, so a deployment can read the executor's ceilings from its own configuration; a field the input leaves out takes its default. Takes effect with `proto`, which it does not imply, and implies no tier. Adds `serde` | |
 | `materialized-numbers` | A second set of GraphQL value productions whose `Int` and `Float` leaves carry a number instead of a source slice. One tree, generic over the integer: `Int` is `i32` — the width draft §3.5.1 specifies — or `i64`, the reading that takes §2.9.1's unbounded grammar at its word and accepts literals the specification does not; a refusal names which. `Float` is `f64` at both, because draft §3.5.2 says `Float` **is** IEEE 754 double precision. **Numbers only** — strings keep their slice, because materialisation is required to allocate nothing the slice parser did not already allocate. Implies `parser` and `graphql`; adds no dependency, leaves the slice AST and the slice parser untouched, and keeps the slice parser available for the literals neither width can hold | |
 | `rowan_0_17` | The lossless CST tower, over `rowan` 0.17. Implies `parser` and no tier; the tower needs `std` | |
 | `bytes_1` | Support the `bytes::Bytes` source type, from `bytes` 1. Implies no tier | |
@@ -386,6 +387,10 @@ No feature but `default` switches a tier on: not a capability (`graphql`, `graph
 `bytes_1`, `hipstr_0_8` and `smol-bytes_0_2` bring in a crate that links `alloc` on its own. So a
 `default-features = false` consumer names `std` or `alloc` itself, and names `std` beside
 `rowan_0_17`, because the lossless tower is written against the standard library.
+
+A tier brings two crates of its own, and "adds no third-party dependency" above is measured against
+them: on a target with pointer-width atomics, `smear-schema` holds the text it shares with `proto`
+in smol-bytes 0.2, which brings `bytes` 1. With no tier, neither is compiled.
 
 The five dependency features carry the major of the crate they enable, and the dependency is named
 the same way, so a second major of one of them can be added beside it. The unversioned names —

@@ -68,7 +68,7 @@
 
 use std::{collections::BTreeMap, format, string::String, vec, vec::Vec};
 
-use smear_lexer::decode_string_value;
+use smear_lexer::decode_string_value_to_string;
 use smear_parser::graphqlx::ast::{
   Name, PathRoot, TypeSystemItem, UsePrefix, UseTree, UseTreeKind,
 };
@@ -87,8 +87,9 @@ use crate::graphqlx::{
 };
 
 use super::{
-  Bound, ExplicitKey, Failure, Glob, Level, Lookup, Position, Query, Scopes, Target, Wanted, Why,
-  Within, quoted,
+  Bound, ExplicitKey, Failure, FoundTarget, Glob, GlobKey, KindMismatch, Level, Lookup,
+  ModuleWanted, ModuleWithin, NotInModule, Position, Query, Scopes, Target, Wanted, Why, Within,
+  quoted,
 };
 
 /// Resolves every `use` item of `declarations` into `scopes`, module by module, and reports what
@@ -187,9 +188,18 @@ enum Start<'x> {
   /// The item's head: the path's first segment, which the module's scope resolved.
   Head,
   /// A module, which the path names `within`.
-  Module(ModuleId, Within<'x>),
+  Module(ModuleStart<'x>),
   /// `^::`: the first segment names a package.
   Packages,
+}
+
+/// A module a path starts at: [`Start::Module`]'s payload.
+#[derive(Clone, Copy)]
+struct ModuleStart<'x> {
+  /// The module.
+  module: ModuleId,
+  /// How the path names it.
+  within: Within<'x>,
 }
 
 /// One tree of a `use` item being walked.
@@ -505,7 +515,10 @@ impl<'x> Run<'_, 'x> {
         "a `use` may not hang on the order its module's `use` items are resolved in: write its \
          path from a root, `~::`, `^::` or `..::`, or bind the name it starts with otherwise",
       );
-    if let Lookup::Found(_, Level::Explicit) = after
+    if let Lookup::Found(FoundTarget {
+      level: Level::Explicit,
+      ..
+    }) = after
       && let Some(sym) = self.names.find(head.name)
       && let Some(bound) =
         self
@@ -521,13 +534,25 @@ impl<'x> Run<'_, 'x> {
   /// name, and every one that gives a name another item than the first binding of it does.
   fn collisions(&mut self) {
     let module = self.module;
-    let from: ExplicitKey = (module, 0, Sym::new(0), 0, 0);
-    let to: ExplicitKey = (module, u8::MAX, Sym::new(u32::MAX), u32::MAX, u32::MAX);
+    let from = ExplicitKey {
+      module,
+      namespace: 0,
+      name: Sym::new(0),
+      item: 0,
+      order: 0,
+    };
+    let to = ExplicitKey {
+      module,
+      namespace: u8::MAX,
+      name: Sym::new(u32::MAX),
+      item: u32::MAX,
+      order: u32::MAX,
+    };
     let bound: Vec<(u8, Sym, Bound)> = self
       .scopes
       .explicit
       .range(from..=to)
-      .map(|(key, bound): (&ExplicitKey, &Bound)| (key.1, key.2, *bound))
+      .map(|(key, bound): (&ExplicitKey, &Bound)| (key.namespace, key.name, *bound))
       .collect();
     let mut first: Option<(u8, Sym, Bound)> = None;
     for (namespace, sym, binding) in bound {
@@ -607,14 +632,12 @@ impl<'x> Run<'_, 'x> {
     for item in &items {
       if let (State::Failed, Some(head)) = (item.state, item.head) {
         let why = if head.whole {
-          Why::NothingInScope {
-            module: self.module,
-          }
+          Why::NothingInScope(self.module)
         } else {
-          Why::NotInScope {
+          Why::NotInScope(ModuleWanted {
             module: self.module,
             wanted: Wanted::Module,
-          }
+          })
         };
         let failure = Failure {
           at: head.at,
@@ -710,11 +733,11 @@ impl<'x> Run<'_, 'x> {
         continue;
       };
       match frame.tree.kind() {
-        UseTreeKind::Simple { alias } => {
+        UseTreeKind::Simple(alias) => {
           self.simple(cursor, start, segments, alias.as_ref(), whole, found);
         }
         UseTreeKind::Glob => match self.reach(cursor, start, segments, found) {
-          Some(Start::Module(module, _)) => self.glob(cursor, module, whole),
+          Some(Start::Module(ModuleStart { module, .. })) => self.glob(cursor, module, whole),
           Some(Start::Packages) => self.fail(
             cursor.at,
             Failure {
@@ -805,10 +828,8 @@ impl<'x> Run<'_, 'x> {
         };
         Some((start, segments))
       }
-      UsePrefix::Source {
-        source: string,
-        segments,
-      } => {
+      UsePrefix::Source(prefix) => {
+        let string = prefix.source();
         let raw: &'x [u8] = string.source().as_ref();
         let at = location(source, *string.span());
         let module = match self.directory(source, raw) {
@@ -824,7 +845,7 @@ impl<'x> Run<'_, 'x> {
             return None;
           }
         };
-        let segments: &'x [Name<S>] = segments.as_slice();
+        let segments: &'x [Name<S>] = prefix.segments();
         if segments.len() > self.scopes.max_segments as usize {
           let failure = Failure {
             at,
@@ -835,7 +856,13 @@ impl<'x> Run<'_, 'x> {
           self.fail(cursor.at, failure);
           return None;
         }
-        Some((Start::Module(module, Within::After(raw)), segments))
+        Some((
+          Start::Module(ModuleStart {
+            module,
+            within: Within::After(raw),
+          }),
+          segments,
+        ))
       }
       // `UsePrefix` is `#[non_exhaustive]`: a prefix of a kind this analyzer does not know names no
       // module it can find, and is reported as an item of an unknown kind is.
@@ -856,13 +883,19 @@ impl<'x> Run<'_, 'x> {
   /// is kept.
   fn root(&mut self, cursor: &Cursor, root: &PathRoot, whole: Location) -> Option<Start<'x>> {
     match root {
-      PathRoot::Package(_) => Some(Start::Module(self.scopes.roots[self.package], Within::Own)),
+      PathRoot::Package(_) => Some(Start::Module(ModuleStart {
+        module: self.scopes.roots[self.package],
+        within: Within::Own,
+      })),
       PathRoot::Dependency(_) => Some(Start::Packages),
-      PathRoot::Parent { span, count } => match self.scopes.up(self.module, count.get()) {
-        Some(module) => Some(Start::Module(module, Within::Parent)),
+      PathRoot::Parent(parent) => match self.scopes.up(self.module, parent.count().get()) {
+        Some(module) => Some(Start::Module(ModuleStart {
+          module,
+          within: Within::Parent,
+        })),
         None => {
           let failure = Failure {
-            at: location(cursor.source, *span),
+            at: location(cursor.source, *parent.span()),
             name: b"..",
             why: Why::AboveRoot,
             single: false,
@@ -899,7 +932,7 @@ impl<'x> Run<'_, 'x> {
   ) -> Option<Start<'x>> {
     let source = cursor.source;
     let (mut module, mut within, rest): (ModuleId, Within<'x>, &'x [Name<S>]) = match start {
-      Start::Module(module, within) => (module, within, segments),
+      Start::Module(ModuleStart { module, within }) => (module, within, segments),
       Start::Packages => {
         let Some((first, rest)) = segments.split_first() else {
           return Some(Start::Packages);
@@ -916,28 +949,28 @@ impl<'x> Run<'_, 'x> {
         let name: &'x [u8] = first.source().as_ref();
         let ty = found.map_or(Lookup::Missing, |found: Found| found.ty);
         let module = match ty {
-          Lookup::Found(Target::Module(module), _) => module,
-          Lookup::Found(target, _) => {
-            let why = Why::WrongKind {
+          Lookup::Found(FoundTarget {
+            target: Target::Module(module),
+            ..
+          }) => module,
+          Lookup::Found(FoundTarget { target, .. }) => {
+            let why = Why::WrongKind(KindMismatch {
               found: target,
               wanted: Wanted::Module,
-            };
+            });
             self.fail(cursor.at, failure_at(source, first, why));
             return None;
           }
-          Lookup::Ambiguous(one, other) => {
-            let why = Why::Ambiguous {
-              first: one,
-              second: other,
-            };
+          Lookup::Ambiguous(pair) => {
+            let why = Why::Ambiguous(pair);
             self.fail(cursor.at, failure_at(source, first, why));
             return None;
           }
           Lookup::Missing => {
-            let why = Why::NotInScope {
+            let why = Why::NotInScope(ModuleWanted {
               module: self.module,
               wanted: Wanted::Module,
-            };
+            });
             self.fail(cursor.at, failure_at(source, first, why));
             return None;
           }
@@ -957,25 +990,25 @@ impl<'x> Run<'_, 'x> {
           within = Within::After(name);
         }
         Some(target) => {
-          let why = Why::WrongKind {
+          let why = Why::WrongKind(KindMismatch {
             found: target,
             wanted: Wanted::Module,
-          };
+          });
           self.fail(cursor.at, failure_at(source, segment, why));
           return None;
         }
         None => {
-          let why = Why::NotIn {
+          let why = Why::NotIn(NotInModule {
             module,
             within,
             wanted: Wanted::Module,
-          };
+          });
           self.fail(cursor.at, failure_at(source, segment, why));
           return None;
         }
       }
     }
-    Some(Start::Module(module, within))
+    Some(Start::Module(ModuleStart { module, within }))
   }
 
   /// Binds what a simple tree, written at `whole`, names from `start` through `segments`: under
@@ -995,7 +1028,7 @@ impl<'x> Run<'_, 'x> {
       alias.map(|name: &'x Name<S>| (name.source().as_ref(), location(source, *name.as_span())));
     let Some((last, before)) = segments.split_last() else {
       // A string source alone, which binds the module of its directory.
-      let Start::Module(module, within) = start else {
+      let Start::Module(ModuleStart { module, within }) = start else {
         return;
       };
       match aliased {
@@ -1032,7 +1065,7 @@ impl<'x> Run<'_, 'x> {
         Some(root) => self.bind_name(cursor, TYPE, name, at, Target::Module(root)),
         None => self.fail(cursor.at, failure_at(source, last, Why::UnknownPackage)),
       },
-      Some(Start::Module(module, within)) => {
+      Some(Start::Module(ModuleStart { module, within })) => {
         let sym = self.names.find(last_name);
         let ty = sym.and_then(|sym: Sym| self.scopes.declared(module, TYPE, sym, false));
         let directive =
@@ -1055,7 +1088,7 @@ impl<'x> Run<'_, 'x> {
         if !bound {
           let why = match unavailable {
             Some(primitive) => Why::Unavailable(primitive),
-            None => Why::NotDeclared { module, within },
+            None => Why::NotDeclared(ModuleWithin { module, within }),
           };
           self.fail(cursor.at, failure_at(source, last, why));
         }
@@ -1076,7 +1109,7 @@ impl<'x> Run<'_, 'x> {
   ) {
     let mut bound = false;
     let mut unavailable: Option<Primitive> = None;
-    if let Lookup::Found(target, _) = found.ty {
+    if let Lookup::Found(FoundTarget { target, .. }) = found.ty {
       match self.unavailable(target) {
         None => {
           self.bind_name(cursor, TYPE, name, at, target);
@@ -1085,19 +1118,17 @@ impl<'x> Run<'_, 'x> {
         Some(primitive) => unavailable = Some(primitive),
       }
     }
-    if let Lookup::Found(target, _) = found.directive {
+    if let Lookup::Found(FoundTarget { target, .. }) = found.directive {
       self.bind_name(cursor, DIRECTIVE, name, at, target);
       bound = true;
     }
     let why = match (found.ty, found.directive, unavailable) {
-      (Lookup::Ambiguous(first, second), _, _) | (_, Lookup::Ambiguous(first, second), _) => {
-        Some(Why::Ambiguous { first, second })
+      (Lookup::Ambiguous(pair), _, _) | (_, Lookup::Ambiguous(pair), _) => {
+        Some(Why::Ambiguous(pair))
       }
       _ if bound => None,
       (_, _, Some(primitive)) => Some(Why::Unavailable(primitive)),
-      _ => Some(Why::NothingInScope {
-        module: self.module,
-      }),
+      _ => Some(Why::NothingInScope(self.module)),
     };
     if let Some(why) = why {
       self.fail(cursor.at, failure_at(cursor.source, head, why));
@@ -1134,11 +1165,31 @@ impl<'x> Run<'_, 'x> {
     let first = self
       .scopes
       .explicit
-      .range((module, namespace, sym, 0, 0)..=(module, namespace, sym, u32::MAX, u32::MAX))
+      .range(
+        ExplicitKey {
+          module,
+          namespace,
+          name: sym,
+          item: 0,
+          order: 0,
+        }..=ExplicitKey {
+          module,
+          namespace,
+          name: sym,
+          item: u32::MAX,
+          order: u32::MAX,
+        },
+      )
       .next()
       .is_none();
     self.scopes.explicit.insert(
-      (module, namespace, sym, cursor.item, cursor.seq),
+      ExplicitKey {
+        module,
+        namespace,
+        name: sym,
+        item: cursor.item,
+        order: cursor.seq,
+      },
       Bound { target, at },
     );
     cursor.seq = cursor.seq.saturating_add(1);
@@ -1152,7 +1203,10 @@ impl<'x> Run<'_, 'x> {
   /// first glob that would give the module a row past `Limits::max_globs` is reported, once for the
   /// module, and every glob that would makes no row.
   fn glob(&mut self, cursor: &Cursor, target: ModuleId, at: Location) {
-    let key = (self.module, target);
+    let key = GlobKey {
+      module: self.module,
+      target,
+    };
     if let Some(row) = self.scopes.globs.get_mut(&key) {
       if row.item != cursor.item {
         row.shared = true;
@@ -1219,7 +1273,7 @@ impl<'x> Run<'_, 'x> {
       return Err(Why::Flat);
     }
     self.text.clear();
-    if decode_string_value(raw, &mut self.text).is_err() {
+    if decode_string_value_to_string(raw, &mut self.text).is_err() {
       return Err(Why::NotRelative);
     }
     if is_url(&self.text) {
@@ -1245,7 +1299,7 @@ impl<'x> Run<'_, 'x> {
             Some(child) => child,
             None => {
               return Err(match self.scopes.named_file(module, name) {
-                Some(directory) => Why::File { directory },
+                Some(directory) => Why::File(directory),
                 None => Why::NoDirectory,
               });
             }
@@ -1303,7 +1357,7 @@ fn head_of<S: AsRef<[u8]>>(tree: &UseTree<S>, source: SourceId) -> Option<Head<'
   Some(Head {
     name: first.source().as_ref(),
     at: location(source, *first.as_span()),
-    whole: segments.len() == 1 && matches!(tree.kind(), UseTreeKind::Simple { .. }),
+    whole: segments.len() == 1 && matches!(tree.kind(), UseTreeKind::Simple(_)),
   })
 }
 
@@ -1333,11 +1387,25 @@ fn answered(found: Found, whole: bool) -> bool {
 /// Where a lookup's answer came from, as a message names it.
 fn provenance(lookup: Lookup) -> &'static str {
   match lookup {
-    Lookup::Found(_, Level::Declared) => "a declaration of its module",
-    Lookup::Found(_, Level::Explicit) => "what a `use` item binds",
-    Lookup::Found(_, Level::Glob) => "what a glob gives",
-    Lookup::Found(_, Level::Prelude) => "a name of the prelude",
-    Lookup::Found(_, Level::Package) => "a package",
+    Lookup::Found(FoundTarget {
+      level: Level::Declared,
+      ..
+    }) => "a declaration of its module",
+    Lookup::Found(FoundTarget {
+      level: Level::Explicit,
+      ..
+    }) => "what a `use` item binds",
+    Lookup::Found(FoundTarget {
+      level: Level::Glob, ..
+    }) => "what a glob gives",
+    Lookup::Found(FoundTarget {
+      level: Level::Prelude,
+      ..
+    }) => "a name of the prelude",
+    Lookup::Found(FoundTarget {
+      level: Level::Package,
+      ..
+    }) => "a package",
     Lookup::Ambiguous(..) => "two items two globs give",
     Lookup::Missing => "nothing",
   }

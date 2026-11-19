@@ -26,7 +26,7 @@ use super::{
   unexpected_here,
 };
 use crate::{
-  combinator::{ParseCtx, TokenSpannedExt, extent_end, extent_since, try_at},
+  combinator::{ParseCtx, try_at},
   graphqlx::{
     GraphQLx,
     ast::{ConstDirective, ConstDirectives, Directive, Directives, TypePath},
@@ -97,14 +97,20 @@ where
     ParseAttempt::Decline => return unexpected_here(inp, Expectation::Path),
   };
   // Already the first token's start — the root's first token when the path has a root, the
-  // leading segment otherwise — so this is `extent_start` by another route and does not need to
-  // peek again.
+  // leading segment otherwise — so this is tokora's `InputRef::cursor_trimmed` by another route,
+  // with no second peek. The span below is `InputRef::span_since_trimmed` from that start, clamp
+  // included: the path consumed `first`, so the end never falls behind `start`, and `max` keeps
+  // the span from inverting regardless.
   let start = root
     .span()
     .map_or_else(|| first.span().start(), |span| span.start());
   let path = path_after_first(start, first, root, inp)?;
   let generics = try_type_generics(inp)?;
-  Ok(TypePath::new(extent_since(inp, start), path, generics))
+  Ok(TypePath::new(
+    SimpleSpan::new(start, inp.span().end().max(start)),
+    path,
+    generics,
+  ))
 }
 
 fn directive_after_at<'inp, Src, Ctx>(
@@ -122,7 +128,7 @@ where
 {
   take_directive_type_path
     .then(arguments)
-    .token_spanned()
+    .spanned_trimmed()
     .map(
       |Spanned {
          span,
@@ -153,7 +159,7 @@ where
 {
   take_directive_type_path
     .then(const_arguments)
-    .token_spanned()
+    .spanned_trimmed()
     .map(
       |Spanned {
          span,
@@ -269,8 +275,8 @@ directive_parser!(
   {
     // The **committed** end, not `inp.offset()`: `offset()` reports the end of the newest *lexed*
     // token, so a caller that left a peek in the cache would anchor this absent collection past
-    // the token that follows it. See `crate::combinator::extent`.
-    let start = extent_end(inp);
+    // the token that follows it. See tokora's `InputRef::span_since_trimmed`.
+    let start = inp.span().end();
     match try_at(inp)? {
       ParseAttempt::Accept(at) => directives_after_at(inp, at),
       ParseAttempt::Decline => Ok(Directives::new(SimpleSpan::new(start, start), Vec::new())),
@@ -292,8 +298,8 @@ directive_parser!(
   {
     // The **committed** end, not `inp.offset()`: `offset()` reports the end of the newest *lexed*
     // token, so a caller that left a peek in the cache would anchor this absent collection past
-    // the token that follows it. See `crate::combinator::extent`.
-    let start = extent_end(inp);
+    // the token that follows it. See tokora's `InputRef::span_since_trimmed`.
+    let start = inp.span().end();
     match try_at(inp)? {
       ParseAttempt::Accept(at) => const_directives_after_at(inp, at),
       ParseAttempt::Decline => Ok(ConstDirectives::new(

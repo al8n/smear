@@ -163,7 +163,9 @@ mod sink;
 
 #[cfg(any(feature = "std", feature = "alloc"))]
 #[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
-pub use diagnostic::{Context, Diagnostic, DiagnosticDisplay, MergeConflict};
+pub use diagnostic::{
+  Context, Diagnostic, DiagnosticDisplay, MemberContext, MergeConflict, UsageContext,
+};
 #[cfg(any(feature = "std", feature = "alloc"))]
 #[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
 pub use executable::{Invalid, Refusal, validate_executable, validate_executable_with};

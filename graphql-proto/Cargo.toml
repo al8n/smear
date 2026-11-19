@@ -26,14 +26,35 @@ readme = "README.md"
 
 [features]
 default = ["std"]
-alloc = ["smear-parser/alloc", "smear-schema/alloc", "tokora/alloc"]
-std = ["smear-parser/std", "smear-schema/std", "tokora/std"]
+# Both tiers turn `indexmap` on, and nothing else does: it is `Extensions`' map, heap code only,
+# and it links `alloc` whatever its features, so as a plain dependency it would break the core
+# tier's no-allocator build. `alloc` turns `foldhash` on as well, the hasher a build without the
+# standard library seeds; under `std` the map hashes with `std::hash::RandomState`. `dep:` creates
+# no feature of its own, so neither dependency is a switch to witness.
+#
+# Each tier forwards to `serde` weakly, so the feature below takes the tier the build has and
+# turning a tier on never turns `serde` on.
+alloc = ["smear-parser/alloc", "smear-schema/alloc", "tokora/alloc", "dep:indexmap", "dep:foldhash", "serde?/alloc"]
+std = ["smear-parser/std", "smear-schema/std", "tokora/std", "dep:indexmap", "indexmap?/std", "foldhash?/std", "serde?/std"]
+
+# `Serialize` and `Deserialize` for `Limits`, so a deployment can read its ceilings from its own
+# configuration; a field the input leaves out takes its default. `Extensions` has neither:
+# deserialising one would be a constructor that names no budget.
+serde = ["dep:serde"]
 
 [dependencies]
-tokora.workspace = true
+derive_more.workspace = true
 
 smear-parser = { workspace = true, features = ["graphql"] }
 smear-schema = { workspace = true }
+tokora.workspace = true
+
+# `Extensions`' map, which keeps insertion order, and its hasher where there is no standard
+# library. Both behind the tiers above.
+indexmap = { version = "2.14", default-features = false, optional = true }
+foldhash = { version = "0.2", default-features = false, optional = true }
+
+serde = { workspace = true, optional = true }
 
 [dev-dependencies]
 # The unit tests build a `Schema` from SDL, which is `smear-schema/build`. A dev-dependency rather

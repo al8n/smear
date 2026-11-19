@@ -183,6 +183,16 @@ impl Text<'_> {
   }
 }
 
+/// A string literal as [`Scanner::string`] read it: its raw contents, and whether it holds a
+/// backslash.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ScannedString<'a> {
+  /// The literal's bytes between its quotes, escapes unexpanded.
+  pub(super) raw: &'a str,
+  /// Whether the literal holds a backslash, so that [`Scanner::text`] has escapes to expand.
+  pub(super) escaped: bool,
+}
+
 /// Whether a `,` is still owed before the next member of the container being read.
 ///
 /// Handed out by [`Scanner::enter_object`] and [`Scanner::enter_array`] rather than kept on the
@@ -505,7 +515,7 @@ impl<'a> Scanner<'a> {
   /// The whole literal is validated here — control characters, escape spellings and surrogate
   /// pairing — so a caller that only wants the bytes gets the same refusals as one that wants the
   /// text, and [`Self::text`] can expand a literal this already proved well-formed.
-  pub(super) fn string(&mut self, what: &str) -> Scanned<(&'a str, bool)> {
+  pub(super) fn string(&mut self, what: &str) -> Scanned<ScannedString<'a>> {
     self.skip_ws();
     match self.peek() {
       Some(b'"') => {}
@@ -523,7 +533,7 @@ impl<'a> Scanner<'a> {
         b'"' => {
           let raw = &self.response[start..self.pos];
           self.pos += 1;
-          return Ok((raw, escaped));
+          return Ok(ScannedString { raw, escaped });
         }
         b'\\' => {
           escaped = true;
@@ -539,7 +549,7 @@ impl<'a> Scanner<'a> {
   /// Reads a string literal as text, expanding its escapes only if it has any.
   pub(super) fn text(&mut self, what: &str) -> Scanned<Text<'a>> {
     let at = self.pos;
-    let (raw, escaped) = self.string(what)?;
+    let ScannedString { raw, escaped } = self.string(what)?;
     if !escaped {
       return Ok(Text::Borrowed(raw));
     }
@@ -732,14 +742,23 @@ impl<'a> Scanner<'a> {
 ///
 /// A free function and not a `Scanner` method because the offset outlives the scan: it is staged in
 /// the refusal and counted by the door, against the same response, once.
-pub(super) fn line_column(response: &str, at: usize) -> (usize, usize) {
+pub(super) fn line_column(response: &str, at: usize) -> LineColumn {
   let upto = prefix(response, at);
   let line = 1 + upto.iter().filter(|&&byte| byte == b'\n').count();
   let column = match upto.iter().rposition(|&byte| byte == b'\n') {
     Some(newline) => upto.len() - newline,
     None => upto.len() + 1,
   };
-  (line, column)
+  LineColumn { line, column }
+}
+
+/// A 1-based line and column in a response: what [`line_column`] counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct LineColumn {
+  /// The line, counted from 1.
+  pub(super) line: usize,
+  /// The column, counted from 1: the byte offset within the line, plus one.
+  pub(super) column: usize,
 }
 
 /// Expands a literal [`Scanner::string`] has already validated.

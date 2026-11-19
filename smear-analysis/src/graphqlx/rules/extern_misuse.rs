@@ -74,6 +74,18 @@ impl Visitor for ExternMisuse {
   }
 }
 
+/// One extern of a scalar, bound from an application: its `lang`, that application, and whether a
+/// phase refused something in the contribution that holds it.
+#[derive(Clone, Copy)]
+struct LangBound<'k> {
+  /// The `lang`.
+  lang: &'k str,
+  /// The application it is bound from.
+  application: ApplicationId,
+  /// Whether a phase refused something in the contribution that holds the application.
+  has_errors: bool,
+}
+
 /// Reports each extern of the scalar `def` whose `lang` an earlier one of its externs has, at its
 /// application's path, with a label at the earlier one's.
 fn twice(cx: &mut Cx<'_>, def: DefId) {
@@ -86,7 +98,7 @@ fn twice(cx: &mut Cx<'_>, def: DefId) {
   // something in the contribution that holds it. The externs are in application order, and so
   // are the contributions' applications, so one pass pairs them.
   let mut pending = definition.externs().peekable();
-  let mut bound: Vec<(&str, ApplicationId, bool)> = Vec::with_capacity(definition.externs().len());
+  let mut bound: Vec<LangBound<'_>> = Vec::with_capacity(definition.externs().len());
   for part in definition.contributions() {
     for &application in part.applications() {
       // An extern bound from no application, which only a hand-built model holds, is passed over.
@@ -99,7 +111,11 @@ fn twice(cx: &mut Cx<'_>, def: DefId) {
       if let Some(next) = pending.peek().copied()
         && next.application() == Some(application)
       {
-        bound.push((next.lang(), application, part.has_errors()));
+        bound.push(LangBound {
+          lang: next.lang(),
+          application,
+          has_errors: part.has_errors(),
+        });
         pending.next();
       }
     }
@@ -107,12 +123,24 @@ fn twice(cx: &mut Cx<'_>, def: DefId) {
   let mut duplicates: Duplicates<&str> =
     Duplicates::over(bound.len(), |at: usize| lang_at(&bound, at));
   let kind = DiagnosticKind::ExternMisuse;
-  for (at, &(lang, application, refused)) in bound.iter().enumerate() {
+  for (
+    at,
+    &LangBound {
+      lang,
+      application,
+      has_errors: refused,
+    },
+  ) in bound.iter().enumerate()
+  {
     // Every position is asked, in order, so that the kernel's scan and its sort agree.
     let Some(first) = duplicates.first(at, lang) else {
       continue;
     };
-    let Some(&(_, earlier, _)) = bound.get(first) else {
+    let Some(&LangBound {
+      application: earlier,
+      ..
+    }) = bound.get(first)
+    else {
       continue;
     };
     if refused {
@@ -139,10 +167,8 @@ fn twice(cx: &mut Cx<'_>, def: DefId) {
 }
 
 /// The `lang` at `at` of `bound`, or `""` past its end.
-fn lang_at<'k>(bound: &[(&'k str, ApplicationId, bool)], at: usize) -> &'k str {
-  bound
-    .get(at)
-    .map_or("", |entry: &(&'k str, ApplicationId, bool)| entry.0)
+fn lang_at<'k>(bound: &[LangBound<'k>], at: usize) -> &'k str {
+  bound.get(at).map_or("", |entry: &LangBound<'k>| entry.lang)
 }
 
 /// Reports each `@extern` that `writer`, the root package, writes on `def`, a GraphQL built-in its

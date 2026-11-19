@@ -20,8 +20,8 @@ const SOURCE: u32 = 0;
 
 /// An error encountered during lexing for float literals.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
-#[unwrap(ref)]
-#[try_unwrap(ref)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum FloatError<Char = char> {
   /// The float has an unexpected suffix, e.g. `1.0x`, `1.e+1y`
@@ -71,8 +71,8 @@ impl<Char> FloatError<Char> {
 
 /// An error encountered during lexing for float literals.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
-#[unwrap(ref)]
-#[try_unwrap(ref)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum HexFloatError<Char = char> {
   /// The float has an unexpected suffix, e.g. `1.0x`, `1.e+1y`
@@ -128,8 +128,8 @@ impl<Char> HexFloatError<Char> {
 
 /// An error encountered during lexing for float literals.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
-#[unwrap(ref)]
-#[try_unwrap(ref)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum DecimalError<Char = char> {
   /// Unexpected character in decimal literal suffix, e.g. `123abc`
@@ -162,8 +162,8 @@ impl<Char> DecimalError<Char> {
 
 /// An error encountered during lexing for hex literals.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
-#[unwrap(ref)]
-#[try_unwrap(ref)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum HexError<Char = char> {
   /// Unexpected character in hex literal suffix, e.g. `0x123abc`
@@ -196,8 +196,8 @@ impl<Char> HexError<Char> {
 
 /// An error encountered during lexing for octal literals.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
-#[unwrap(ref)]
-#[try_unwrap(ref)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum OctalError<Char = char> {
   /// Unexpected character in octal literal suffix, e.g. `0o123abc`
@@ -230,8 +230,8 @@ impl<Char> OctalError<Char> {
 
 /// An error encountered during lexing for binary literals.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
-#[unwrap(ref)]
-#[try_unwrap(ref)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum BinaryError<Char = char> {
   /// Unexpected character in binary literal suffix, e.g. `0b10102`
@@ -305,8 +305,12 @@ pub enum LexerErrorData<Char = char, StateError = ()> {
   #[from(skip)]
   UnknownLexeme(Lexeme<Char>),
   /// Unexpected end of input.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   UnexpectedEndOfInput,
   /// Unterminated spread operator.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   UnterminatedSpreadOperator,
   /// The lexer state related error.
   #[from(skip)]

@@ -81,10 +81,7 @@
 
 use std::string::String;
 
-use smear_parser::{
-  graphql::ast::InputValue,
-  lexer::{decode_string_value, string_value_pieces},
-};
+use smear_parser::{graphql::ast::InputValue, lexer::string_value_pieces};
 use smear_schema::{
   InputValueDef, PackedType, Range32, RootOperation, Schema, Sym, Text, TypeId, TypeKind, builtin,
   is_reserved,
@@ -94,11 +91,16 @@ use tokora::{SimpleSpan, span::AsSpan};
 use crate::{
   ArgumentSource, Values,
   collect::{Visits, byte_units},
-  error::Raw,
-  response::{Entity, Key, MetaKind, MetaLeaf, NONE, State, TypeRef},
+  error::{ArgumentRef, FieldBudget, FieldCoordinate, Raw},
+  response::{Entity, FlatRun, Key, MetaKind, MetaLeaf, NONE, State, TypeMember, TypeRef},
 };
 
 use super::{Coercion, Executor, Mark};
+
+// `std` as well as `test`: its cases read the crate's counting allocator, which only a `std` build
+// of its tests installs.
+#[cfg(all(test, feature = "std"))]
+mod tests;
 
 /// What one meta field resolves to, short of a list.
 #[derive(Clone, Copy)]
@@ -193,7 +195,7 @@ where
   /// A list element shares its field's metadata, so an element of `types` collects the
   /// sub-selections of every `types` selection merged into that response key.
   fn merge_selection_sets(&mut self, slot: u32) {
-    let (start, len) = self.meta[slot as usize].merged;
+    let FlatRun { start, len } = self.meta[slot as usize].merged;
     self.scratch_sets.clear();
     for field in &self.merged[start as usize..(start + len) as usize] {
       if let Some(set) = field.selection_set() {
@@ -272,7 +274,7 @@ where
         _ => Answer::Null,
       },
       Entity::Type(ty) => return self.answer_type(ctx, slot, ty, field, pending),
-      Entity::Field { owner, at } => {
+      Entity::Field(TypeMember { owner, at }) => {
         let (Some(def), Some(meta)) = (
           schema.fields_of(owner).get(at as usize),
           schema.field_meta_of(owner).get(at as usize),
@@ -306,7 +308,7 @@ where
           _ => Answer::Null,
         }
       }
-      Entity::EnumValue { owner, at } => {
+      Entity::EnumValue(TypeMember { owner, at }) => {
         let (Some(&value), Some(meta)) = (
           schema.enum_values_of(owner).get(at as usize),
           schema.enum_value_meta_of(owner).get(at as usize),
@@ -418,7 +420,7 @@ where
             // builder admits no other `__`-prefixed field name.
             let shown = !is_reserved(schema.name_bytes(def.name()))
               && (include || !meta.deprecation().is_deprecated());
-            shown.then_some(Element::Object(Entity::Field { owner: id, at }))
+            shown.then_some(Element::Object(Entity::Field(TypeMember { owner: id, at })))
           },
         );
       }
@@ -453,8 +455,9 @@ where
           schema.enum_value_order_of(id).iter().copied(),
           |at| {
             let meta = meta.get(at as usize)?;
-            (include || !meta.deprecation().is_deprecated())
-              .then_some(Element::Object(Entity::EnumValue { owner: id, at }))
+            (include || !meta.deprecation().is_deprecated()).then_some(Element::Object(
+              Entity::EnumValue(TypeMember { owner: id, at }),
+            ))
           },
         );
       }
@@ -511,7 +514,7 @@ where
     match answer {
       Answer::Null if self.slots[slot as usize].ty.is_non_null() => {
         let (parent, field) = self.owner(slot);
-        self.fail(slot, Raw::NullInNonNull { parent, field });
+        self.fail(slot, Raw::NullInNonNull(FieldCoordinate { parent, field }));
       }
       Answer::Null => self.slots[slot as usize].state = State::Null,
       Answer::Leaf(leaf) => self.slots[slot as usize].state = State::MetaLeaf(leaf),
@@ -560,11 +563,11 @@ where
           mark,
           pending,
           queued,
-          Raw::IntrospectionBudget {
+          Raw::IntrospectionBudget(FieldBudget {
             parent,
             field,
             limit,
-          },
+          }),
         );
       }
       let Some(member) = element(position) else {
@@ -582,11 +585,11 @@ where
           mark,
           pending,
           queued,
-          Raw::ResponseBudget {
+          Raw::ResponseBudget(FieldBudget {
             parent,
             field,
             limit,
-          },
+          }),
         );
       };
       if let Element::Object(_) = member {
@@ -629,7 +632,7 @@ where
     let read = match self.scratch_args.first().map(|argument| &argument.source) {
       None | Some(ArgumentSource::SchemaDefault) => Some(false),
       Some(ArgumentSource::Literal(InputValue::Boolean(literal))) => Some(literal.value()),
-      Some(ArgumentSource::Variable { value, .. }) => ctx.as_bool(value),
+      Some(ArgumentSource::Variable(v)) => ctx.as_bool(v.value()),
       Some(ArgumentSource::Literal(_)) => None,
     };
     // The values are this walk's to drop: it is their only reader, and it has read them.
@@ -657,7 +660,7 @@ where
       Some(ArgumentSource::Literal(InputValue::String(literal))) => {
         literal_type(schema, literal.source().as_ref(), &mut self.visits)
       }
-      Some(ArgumentSource::Variable { value, .. }) => match ctx.as_str(value) {
+      Some(ArgumentSource::Variable(v)) => match ctx.as_str(v.value()) {
         Some(name) if self.visits.take_bytes(name.len()) => {
           Read::Named(schema.type_by_name(name.as_bytes()).map(|(id, _)| id))
         }
@@ -693,16 +696,16 @@ where
       // — rather than left a placeholder.
       if self.slots[slot as usize].ty.is_non_null() {
         let (parent, field) = self.owner(slot);
-        return self.fail(slot, Raw::NullInNonNull { parent, field });
+        return self.fail(slot, Raw::NullInNonNull(FieldCoordinate { parent, field }));
       }
       self.slots[slot as usize].state = State::Null;
       return;
     };
-    let raw = Raw::ArgumentCoercion {
+    let raw = Raw::ArgumentCoercion(ArgumentRef {
       field: self.meta[slot as usize].field_sym,
       argument: argument.name(),
       ty: argument.ty(),
-    };
+    });
     match self.written_value(slot, argument.name()) {
       Some(location) => self.fail_at(slot, raw, location),
       None => self.fail(slot, raw),
@@ -715,11 +718,11 @@ where
     let limit = self.visits.limit();
     self.fail(
       slot,
-      Raw::IntrospectionBudget {
+      Raw::IntrospectionBudget(FieldBudget {
         parent,
         field,
         limit,
-      },
+      }),
     );
   }
 
@@ -798,8 +801,9 @@ fn root(schema: &Schema, operation: RootOperation) -> Answer {
 ///
 /// The value is looked up in place when it is one piece — any inline string without an escape and
 /// any one-line block string — and assembled only when an escape or a line break splits it. That
-/// assembly is the one allocation this walk makes, it is freed before this returns, and it happens
-/// only where an escape forces it, which is the rule the introspection door keeps for the text it
+/// assembly is the one allocation this walk makes. It is reserved once, at the length the first
+/// walk added up, so the copy never grows it; it is freed before this returns; and it happens only
+/// where an escape forces it, which is the rule the introspection door keeps for the text it
 /// decodes.
 fn literal_type(schema: &Schema, spelling: &[u8], visits: &mut Visits) -> Read {
   // The piece walk, and the probe of its first piece, which is no longer than the spelling.
@@ -807,12 +811,15 @@ fn literal_type(schema: &Schema, spelling: &[u8], visits: &mut Visits) -> Read {
     return Read::Refused;
   }
   let mut pieces = 0usize;
+  let mut len = 0usize;
   let mut found = None;
   let walked = string_value_pieces(spelling, |piece| {
     pieces += 1;
+    len += piece.len();
     if pieces == 1 {
       found = schema.type_by_name(piece.as_bytes()).map(|(id, _)| id);
     }
+    Ok(())
   });
   if walked.is_err() {
     return Read::Invalid;
@@ -821,13 +828,18 @@ fn literal_type(schema: &Schema, spelling: &[u8], visits: &mut Visits) -> Read {
   if pieces <= 1 {
     return Read::Named(found);
   }
-  // The decoder's sizing walk, its copy, and the probe of what it assembled.
-  if !visits.take(byte_units(spelling.len()).saturating_mul(3)) {
+  // The copy, and the probe of what it assembled.
+  if !visits.take(byte_units(spelling.len()).saturating_mul(2)) {
     return Read::Refused;
   }
-  let mut value = String::new();
-  match decode_string_value(spelling, &mut value) {
+  let mut value = String::with_capacity(len);
+  let copied = string_value_pieces(spelling, |piece| {
+    value.push_str(piece);
+    Ok(())
+  });
+  match copied {
     Ok(()) => Read::Named(schema.type_by_name(value.as_bytes()).map(|(id, _)| id)),
+    // Unreachable: the walk above read the same spelling and accepted it.
     Err(_) => Read::Invalid,
   }
 }

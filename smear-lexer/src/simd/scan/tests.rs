@@ -3,7 +3,7 @@ use std::format;
 use super::*;
 
 fn scan(src: &[u8]) -> Option<(NumberKind, usize)> {
-  scan_number(src)
+  scan_number(src).map(|scanned| (scanned.kind, scanned.len))
 }
 
 #[test]

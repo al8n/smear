@@ -98,68 +98,128 @@ pub type LosslessLexerErrors = error::LexerErrors<char, LimitExceeded>;
 #[non_exhaustive]
 pub enum LosslessToken<S> {
   /// Asterisk `*` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Asterisk,
   /// Ampersand `&` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Ampersand,
   /// At `@` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   At,
   /// BOM `\u{FEFF}` token
   Bom(S),
   /// Right angle bracket `>` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   RAngle,
   /// Right curly brace `}` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   RBrace,
   /// Right square bracket `]` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   RBracket,
   /// Right parenthesis `)` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   RParen,
   /// Colon `:` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Colon,
   /// Dollar `$` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Dollar,
   /// Equal `=` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Equal,
   /// Exclamation mark `!` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Bang,
   /// Left angle bracket `<` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   LAngle,
   /// Left curly brace `{` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   LBrace,
   /// Left square bracket `[` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   LBracket,
   /// Left parenthesis `(` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   LParen,
   /// Pipe `|` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Pipe,
   /// Fat arrow `=>` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   FatArrow,
   /// Spread operator `...` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Spread,
   /// Plus `+` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Plus,
   /// Minus `-` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Minus,
   /// Space ` ` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Space,
   /// Tab `\t` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Tab,
   /// Newline `\n` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Newline,
   /// Carriage return `\r` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   CarriageReturn,
   /// Carriage return + newline `\r\n` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   CarriageReturnAndNewline,
   /// Comma `,` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Comma,
   /// Comment `# ...` token
   Comment(S),
   /// Path separator `::` token
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   PathSeparator,
   /// Tilde `~` token, the sigil of a path's package root `~::`
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Tilde,
   /// Dot-dot `..` token, the sigil of a path's parent-module root `..::`
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   DotDot,
   /// Caret `^` token, the sigil of a path's dependency root `^::`
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Caret,
   /// Identifier token
   Identifier(S),

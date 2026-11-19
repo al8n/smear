@@ -50,8 +50,10 @@ use self::{
 };
 use super::{
   builtin,
-  error::{SchemaError, SchemaErrorKind, SchemaErrors, directive_coordinate, owner_path},
-  literal::{BuiltInScalar, LiteralShape, fits_i32, is_finite},
+  error::{
+    DocumentSpan, SchemaError, SchemaErrorKind, SchemaErrors, directive_coordinate, owner_path,
+  },
+  literal::{BuiltInScalar, FloatShape, IntShape, LiteralShape, fits_i32, is_finite},
   repr::{
     DefaultKind, Deprecation, DirectiveDef, DirectiveLocation, DirectiveLocations, DirectiveMeta,
     EnumValueMeta, FieldDef, FieldMeta, InputValueDef, InputValueMeta, MAX_DIRECTIVE_ARGUMENTS,
@@ -191,25 +193,27 @@ impl core::fmt::Debug for TextArena {
 }
 
 impl TextArena {
-  /// Makes room for `len` more bytes and answers where they start and how long they are, or
-  /// refuses at [`MAX_TEXT_BYTES`].
+  /// Makes room for `len` more bytes and answers the [`Text`] that will name them — where they
+  /// start and how long they are — or refuses at [`MAX_TEXT_BYTES`].
   ///
   /// Asked before anything is written, so a refusal leaves the arena as it was, and the room is
   /// reserved from the length about to be written — one growth at most per string, and none when
   /// [`SchemaBuilder::inject`] has already reserved the built-ins' share.
-  fn admit(&mut self, len: usize) -> Option<(u32, u32)> {
+  fn admit(&mut self, len: usize) -> Option<Text> {
     self.admit_within(len, MAX_TEXT_BYTES)
   }
 
   /// [`TextArena::admit`] with the ceiling supplied, for the reason [`Interner::intern_within`]
   /// takes its two: a test can stand at a ceiling it can afford, and this is the whole mechanism.
-  fn admit_within(&mut self, len: usize, max_bytes: u32) -> Option<(u32, u32)> {
+  fn admit_within(&mut self, len: usize, max_bytes: u32) -> Option<Text> {
     let start = self.text.len();
     let bounds = match (
       u32::try_from(start),
       start.checked_add(len).map(u32::try_from),
     ) {
-      (Ok(start), Some(Ok(end))) if !self.refused && end <= max_bytes => Some((start, end - start)),
+      (Ok(start), Some(Ok(end))) if !self.refused && end <= max_bytes => {
+        Some(Text::new(start, end - start))
+      }
       _ => None,
     };
     match bounds {
@@ -239,7 +243,10 @@ impl TextArena {
       && self.text.capacity() - start >= spelling.len()
       && start + spelling.len() <= MAX_TEXT_BYTES as usize
     {
-      if let Err(error) = string_value_pieces(spelling, |piece| self.text.push_str(piece)) {
+      if let Err(error) = string_value_pieces(spelling, |piece| {
+        self.text.push_str(piece);
+        Ok(())
+      }) {
         self.text.truncate(start);
         return Err(error);
       }
@@ -247,12 +254,15 @@ impl TextArena {
       return Ok(Text::new(start as u32, (self.text.len() - start) as u32));
     }
     let len = string_value_len(spelling)?;
-    let Some((start, len)) = self.admit(len) else {
+    let Some(text) = self.admit(len) else {
       return Ok(Text::NONE);
     };
     // Cannot refuse: the sizing walk above read the same spelling and accepted it.
-    string_value_pieces(spelling, |piece| self.text.push_str(piece))?;
-    Ok(Text::new(start, len))
+    string_value_pieces(spelling, |piece| {
+      self.text.push_str(piece);
+      Ok(())
+    })?;
+    Ok(text)
   }
 
   /// Appends a constant value's canonical text, measured before it is written.
@@ -264,12 +274,12 @@ impl TextArena {
   {
     let mut measure = Measure::default();
     print::canonical(value, &mut measure)?;
-    let Some((start, len)) = self.admit(measure.0) else {
+    let Some(text) = self.admit(measure.0) else {
       return Ok(Text::NONE);
     };
     // Cannot refuse: the measure above printed the same literal.
     print::canonical(value, &mut self.text)?;
-    Ok(Text::new(start, len))
+    Ok(text)
   }
 }
 
@@ -395,21 +405,70 @@ impl Coordinate {
 /// Which input-value list a check is looking at, since it cannot hold a borrow of one.
 #[derive(Debug, Clone, Copy)]
 enum ArgumentsOf {
-  Field { ty: usize, field: usize },
-  Directive { index: usize },
+  /// The arguments of one field.
+  Field(FieldOf),
+  /// The arguments of the directive definition at this index.
+  Directive(usize),
 }
 
 /// Which directive-usage list a check is looking at, for the reason [`ArgumentsOf`] exists.
 #[derive(Debug, Clone, Copy)]
 enum DirectivesOf {
   Schema,
-  Type { ty: usize },
-  Field { ty: usize, field: usize },
-  FieldArgument { ty: usize, field: usize, arg: usize },
-  InputField { ty: usize, field: usize },
-  EnumValue { ty: usize, value: usize },
-  Directive { index: usize },
-  DirectiveArgument { directive: usize, arg: usize },
+  /// The usages on the type at this index.
+  Type(usize),
+  /// The usages on one field.
+  Field(FieldOf),
+  /// The usages on one argument of a field.
+  FieldArgument(FieldArgumentOf),
+  /// The usages on one field of an input object.
+  InputField(FieldOf),
+  /// The usages on one value of an enum.
+  EnumValue(EnumValueOf),
+  /// The usages on the directive definition at this index.
+  Directive(usize),
+  /// The usages on one argument of a directive definition.
+  DirectiveArgument(DirectiveArgumentOf),
+}
+
+/// One field of a type, by position: [`ArgumentsOf::Field`]'s payload, and the payload of
+/// [`DirectivesOf::Field`] and [`DirectivesOf::InputField`] too, which read the same two indices.
+#[derive(Debug, Clone, Copy)]
+struct FieldOf {
+  /// The index of the type.
+  ty: usize,
+  /// The index of the field in the type's list: its fields, or its input fields.
+  field: usize,
+}
+
+/// One argument of a field, by position: [`DirectivesOf::FieldArgument`]'s payload.
+#[derive(Debug, Clone, Copy)]
+struct FieldArgumentOf {
+  /// The index of the type.
+  ty: usize,
+  /// The index of the field in the type's fields.
+  field: usize,
+  /// The index of the argument in the field's arguments.
+  arg: usize,
+}
+
+/// One value of an enum, by position: [`DirectivesOf::EnumValue`]'s payload.
+#[derive(Debug, Clone, Copy)]
+struct EnumValueOf {
+  /// The index of the type.
+  ty: usize,
+  /// The index of the value in the type's enum values.
+  value: usize,
+}
+
+/// One argument of a directive definition, by position: [`DirectivesOf::DirectiveArgument`]'s
+/// payload.
+#[derive(Debug, Clone, Copy)]
+struct DirectiveArgumentOf {
+  /// The index of the directive definition.
+  directive: usize,
+  /// The index of the argument in the definition's arguments.
+  arg: usize,
 }
 
 /// What one declared argument list's three §3.6.1 rules are called.
@@ -534,10 +593,16 @@ enum Positions<'f, 's> {
   Scan(&'f [RawField]),
   /// Past it: `Sym` to the first position of `fields` that wrote it, [`Positions::ABSENT`]
   /// everywhere else, over a table sized to the whole symbol space.
-  Index {
-    fields: &'f [RawField],
-    of_sym: &'s mut [u32],
-  },
+  Index(IndexedPositions<'f, 's>),
+}
+
+/// A wide field list and the table that says where each of its names first sits:
+/// [`Positions::Index`]'s payload.
+struct IndexedPositions<'f, 's> {
+  /// The list the table indexes.
+  fields: &'f [RawField],
+  /// `Sym` to the first position of `fields` that wrote it, [`Positions::ABSENT`] everywhere else.
+  of_sym: &'s mut [u32],
 }
 
 impl<'f, 's> Positions<'f, 's> {
@@ -566,14 +631,14 @@ impl<'f, 's> Positions<'f, 's> {
         *slot = at as u32;
       }
     }
-    Self::Index { fields, of_sym }
+    Self::Index(IndexedPositions { fields, of_sym })
   }
 
   /// The first position that wrote `name`, or `None`.
   fn of(&self, name: Sym) -> Option<usize> {
     match self {
       Self::Scan(fields) => fields.iter().position(|field| field.name.sym == name),
-      Self::Index { of_sym, .. } => match of_sym[name.get() as usize] {
+      Self::Index(IndexedPositions { of_sym, .. }) => match of_sym[name.get() as usize] {
         Self::ABSENT => None,
         at => Some(at as usize),
       },
@@ -584,7 +649,7 @@ impl<'f, 's> Positions<'f, 's> {
 impl Drop for Positions<'_, '_> {
   /// Clears exactly the slots this list wrote, which is `O(fields)` and not `O(symbols)`.
   fn drop(&mut self) {
-    let Self::Index { fields, of_sym } = self else {
+    let Self::Index(IndexedPositions { fields, of_sym }) = self else {
       return;
     };
     for field in *fields {
@@ -659,8 +724,20 @@ enum Names {
   /// At or below [`NARROW_LIST`] asks: the scan, whose per-lookup cost that ceiling is what bounds,
   /// exactly as it bounds the declared argument lists'.
   Scan,
-  /// Past it: `(name, position)` sorted once, so a lookup is a binary search.
-  Sorted(Vec<(Sym, u32)>),
+  /// Past it: the names and their positions, sorted once, so a lookup is a binary search.
+  Sorted(Vec<NamePosition>),
+}
+
+/// A name and the position of the list entry that wrote it.
+///
+/// Ordered by name, and by position among equal names — the field order is the key order, so the
+/// derived `Ord` is the sort [`Names`] and [`DeclaredNames`] rely on for `first`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct NamePosition {
+  /// The name the entry wrote.
+  name: Sym,
+  /// The entry's position in its list.
+  position: u32,
 }
 
 impl Names {
@@ -670,7 +747,12 @@ impl Names {
     if asks <= NARROW_LIST {
       return Self::Scan;
     }
-    let mut order: Vec<(Sym, u32)> = (0..len).map(|at| (name(at), at as u32)).collect();
+    let mut order: Vec<NamePosition> = (0..len)
+      .map(|at| NamePosition {
+        name: name(at),
+        position: at as u32,
+      })
+      .collect();
     order.sort_unstable();
     Self::Sorted(order)
   }
@@ -681,9 +763,9 @@ impl Names {
     match self {
       Self::Scan => (0..len).find(|&at| name(at) == wanted),
       Self::Sorted(order) => {
-        let at = order.partition_point(|&(written, _)| written < wanted);
+        let at = order.partition_point(|entry| entry.name < wanted);
         match order.get(at) {
-          Some(&(written, position)) if written == wanted => Some(position as usize),
+          Some(entry) if entry.name == wanted => Some(entry.position as usize),
           _ => None,
         }
       }
@@ -769,8 +851,8 @@ struct DeclaredNames {
 struct Declaration {
   /// Asks this declaration has answered by scanning, across the whole build.
   asks: u32,
-  /// `(name, position)` sorted once, so a lookup is a binary search.
-  order: Option<Vec<(Sym, u32)>>,
+  /// The names and their positions, sorted once, so a lookup is a binary search.
+  order: Option<Vec<NamePosition>>,
 }
 
 impl DeclaredNames {
@@ -815,18 +897,21 @@ impl DeclaredNames {
         slot.asks += 1;
         return declared.iter().position(|entry| name(entry) == wanted);
       }
-      let mut sorted: Vec<(Sym, u32)> = declared
+      let mut sorted: Vec<NamePosition> = declared
         .iter()
         .enumerate()
-        .map(|(at, entry)| (name(entry), at as u32))
+        .map(|(at, entry)| NamePosition {
+          name: name(entry),
+          position: at as u32,
+        })
         .collect();
       sorted.sort_unstable();
       slot.order = Some(sorted);
     }
     let order = slot.order.as_ref().expect("the index was just filled");
-    let at = order.partition_point(|&(declared, _)| declared < wanted);
+    let at = order.partition_point(|entry| entry.name < wanted);
     match order.get(at) {
-      Some(&(declared, position)) if declared == wanted => Some(position as usize),
+      Some(entry) if entry.name == wanted => Some(entry.position as usize),
       _ => None,
     }
   }
@@ -839,6 +924,31 @@ struct RawTypeRef {
   span: SimpleSpan,
   packed: PackedType,
   too_deep: bool,
+}
+
+/// A type reference [`SchemaBuilder::resolve_type_refs`] will report, held until the push loops at
+/// the end: the base as written, where the reference sits, and the span to blame.
+///
+/// Both of its report lists, the references that name nothing and the ones past the nesting
+/// ceiling, hold these.
+#[derive(Debug, Clone, Copy)]
+struct Unresolved {
+  /// The base name as written, with the document it was read from.
+  at: Located,
+  /// The field, argument or input field the reference is written on.
+  path: Coordinate,
+  /// The span the diagnostic points at.
+  span: SimpleSpan,
+}
+
+/// The input object a field ties its owner to under `InputObjectHasUnbreakableCycle`:
+/// [`SchemaBuilder::input_link`]'s answer.
+#[derive(Debug, Clone, Copy)]
+struct InputLink {
+  /// The index of the input object type the field names.
+  target: usize,
+  /// Whether the field is nullable.
+  nullable: bool,
 }
 
 /// A directive written on a type-system element, kept whole.
@@ -1285,7 +1395,7 @@ impl Drop for RawValue {
 /// `fits_i32` and `is_finite` are **all** a numeric spelling is ever read for — see
 /// [`LiteralShape`] — and both are answerable where the literal is read. So they are answered
 /// there, and what this enum carries is the `bool`s: both for an integer, which may stand for a
-/// `Float`, and `is_finite` for a float. The growth is not bounded, it is *gone*: zero retained at
+/// `Float`, in an [`IntShape`], and `is_finite` for a float, in a [`FloatShape`]. The growth is not bounded, it is *gone*: zero retained at
 /// every `B` above, and one range decision per literal instead of one per check.
 ///
 /// The trade this reverses was made deliberately and is worth naming. Keeping the spelling let all
@@ -1323,12 +1433,9 @@ enum RawShape {
   Boolean,
   /// An integer literal, reduced to [`fits_i32`](crate::literal::fits_i32) and
   /// [`is_finite`](crate::literal::is_finite).
-  Int {
-    fits_i32: bool,
-    is_finite: bool,
-  },
+  Int(IntShape),
   /// A floating-point literal, reduced to [`is_finite`](crate::literal::is_finite).
-  Float(bool),
+  Float(FloatShape),
   String,
   /// An enum member's spelling, interned. The one arm that still retains bytes; see the header.
   Enum(Sym),
@@ -1378,15 +1485,15 @@ impl core::fmt::Debug for RawShape {
     match self {
       Self::Null => f.write_str("Null"),
       Self::Boolean => f.write_str("Boolean"),
-      Self::Int {
+      Self::Int(IntShape {
         fits_i32,
         is_finite,
-      } => f
+      }) => f
         .debug_struct("Int")
         .field("fits_i32", fits_i32)
         .field("is_finite", is_finite)
         .finish(),
-      Self::Float(is_finite) => f.debug_tuple("Float").field(is_finite).finish(),
+      Self::Float(FloatShape { is_finite }) => f.debug_tuple("Float").field(is_finite).finish(),
       Self::String => f.write_str("String"),
       Self::Enum(sym) => f.debug_tuple("Enum").field(sym).finish(),
       Self::List(values) => write!(f, "List({} entries)", values.len()),
@@ -1403,16 +1510,8 @@ impl RawShape {
     match self {
       Self::Null => Some(LiteralShape::Null),
       Self::Boolean => Some(LiteralShape::Boolean),
-      Self::Int {
-        fits_i32,
-        is_finite,
-      } => Some(LiteralShape::Int {
-        fits_i32: *fits_i32,
-        is_finite: *is_finite,
-      }),
-      Self::Float(is_finite) => Some(LiteralShape::Float {
-        is_finite: *is_finite,
-      }),
+      Self::Int(int) => Some(LiteralShape::Int(*int)),
+      Self::Float(float) => Some(LiteralShape::Float(*float)),
       Self::String => Some(LiteralShape::String),
       Self::Enum(_) => Some(LiteralShape::Enum),
       Self::List(_) => Some(LiteralShape::List),
@@ -1776,7 +1875,7 @@ struct RawExtension {
   /// for draft §3.3.2's "The Schema must already be defined", which has nothing narrower to point
   /// at. `None` for a type or directive extension, which [`target`](RawExtension::target) or
   /// [`directive`](RawExtension::directive) locates.
-  schema: Option<(SimpleSpan, u32)>,
+  schema: Option<DocumentSpan>,
   /// An `extend scalar`'s `@specifiedBy(url:)`, decoded into the text arena.
   specified_by: Text,
   /// An `extend directive`'s `@deprecated`, its reason decoded into the text arena, or
@@ -2031,31 +2130,35 @@ impl<'a> Model<'a> {
   /// and write halves were separated for. See [`Declared`].
   fn arguments(&self, at: ArgumentsOf) -> Args<'a> {
     match at {
-      ArgumentsOf::Field { ty, field } => self.types[ty].fields[field].args.read(),
-      ArgumentsOf::Directive { index } => self.directives[index].args.read(),
+      ArgumentsOf::Field(FieldOf { ty, field }) => self.types[ty].fields[field].args.read(),
+      ArgumentsOf::Directive(index) => self.directives[index].args.read(),
     }
   }
 
   fn directive_uses(&self, at: DirectivesOf) -> &'a [RawDirectiveUse] {
     match at {
       DirectivesOf::Schema => self.schema_directives,
-      DirectivesOf::Type { ty } => &self.types[ty].directives,
-      DirectivesOf::Field { ty, field } => &self.types[ty].fields[field].directives,
+      DirectivesOf::Type(ty) => &self.types[ty].directives,
+      DirectivesOf::Field(FieldOf { ty, field }) => &self.types[ty].fields[field].directives,
       // The two argument arms are the only ones whose list is behind a ceiling, and their
       // `Refused` arm is unreachable: an `arg` position exists only because the loop that minted
       // it read the same list through the gate and stopped when the gate refused. An empty list
       // is what an unreachable arm should degrade to here — no directive to check, so nothing
       // reported — rather than a diagnostic invented about a list nobody may look at.
-      DirectivesOf::FieldArgument { ty, field, arg } => {
+      DirectivesOf::FieldArgument(FieldArgumentOf { ty, field, arg }) => {
         match self.types[ty].fields[field].args.read() {
           Args::Bounded(args) => &args[arg].directives,
           Args::Refused => &[],
         }
       }
-      DirectivesOf::InputField { ty, field } => &self.types[ty].input_fields[field].directives,
-      DirectivesOf::EnumValue { ty, value } => &self.types[ty].enum_values[value].directives,
-      DirectivesOf::Directive { index } => &self.directives[index].directives,
-      DirectivesOf::DirectiveArgument { directive, arg } => {
+      DirectivesOf::InputField(FieldOf { ty, field }) => {
+        &self.types[ty].input_fields[field].directives
+      }
+      DirectivesOf::EnumValue(EnumValueOf { ty, value }) => {
+        &self.types[ty].enum_values[value].directives
+      }
+      DirectivesOf::Directive(index) => &self.directives[index].directives,
+      DirectivesOf::DirectiveArgument(DirectiveArgumentOf { directive, arg }) => {
         match self.directives[directive].args.read() {
           Args::Bounded(args) => &args[arg].directives,
           Args::Refused => &[],
@@ -2193,6 +2296,14 @@ fn push_related(
   errors.push(error);
 }
 
+/// The three disjoint borrows [`SchemaBuilder::split_indexed`] hands out: the read side, the
+/// errors, and the literal-checking index.
+struct SplitIndexed<'a> {
+  model: Model<'a>,
+  errors: &'a mut Vec<SchemaError>,
+  names: &'a mut DeclaredNames,
+}
+
 // ---------------------------------------------------------------------------------------------
 // the builder
 // ---------------------------------------------------------------------------------------------
@@ -2227,7 +2338,7 @@ pub struct SchemaBuilder {
   directive_of_sym: Vec<u32>,
   roots: [Option<Located>; 3],
   /// The `schema` definition's span, and the document it was read from.
-  schema_definition: Option<(SimpleSpan, u32)>,
+  schema_definition: Option<DocumentSpan>,
   /// `SCHEMA`-location directives, from the `schema` definition and every `extend schema`.
   ///
   /// One list rather than one per definition, because apollo and the draft both treat the schema
@@ -2398,7 +2509,7 @@ impl SchemaBuilder {
 
   /// The read side and the write side, borrowed apart. See [`Model`].
   fn split(&mut self) -> (Model<'_>, &mut Vec<SchemaError>) {
-    let (model, errors, _) = self.split_indexed();
+    let SplitIndexed { model, errors, .. } = self.split_indexed();
     (model, errors)
   }
 
@@ -2407,9 +2518,9 @@ impl SchemaBuilder {
   /// A third field borrow rather than a local, because the index is a function of the declarations
   /// alone: the checks that read literals are reached from four `&mut self` passes, and an index
   /// per pass would sort one declaration once for each of them. See [`DeclaredNames`].
-  fn split_indexed(&mut self) -> (Model<'_>, &mut Vec<SchemaError>, &mut DeclaredNames) {
-    (
-      Model {
+  fn split_indexed(&mut self) -> SplitIndexed<'_> {
+    SplitIndexed {
+      model: Model {
         types: &self.types,
         directives: &self.directives,
         type_of_sym: &self.type_of_sym,
@@ -2419,9 +2530,9 @@ impl SchemaBuilder {
         literals: &self.literals,
         built_in_document: self.built_in_document,
       },
-      &mut self.errors,
-      &mut self.declared_names,
-    )
+      errors: &mut self.errors,
+      names: &mut self.declared_names,
+    }
   }
 
   // -- interning ------------------------------------------------------------------------------
@@ -2898,15 +3009,18 @@ impl SchemaBuilder {
     S: AsRef<[u8]>,
   {
     let span = *def.span();
-    if let Some((previous, document)) = self.schema_definition {
+    if let Some(previous) = self.schema_definition {
       self.errors.push(
         SchemaError::new(SchemaErrorKind::DuplicateSchemaDefinition, "schema", span)
           .in_document(self.document)
-          .related_to(previous, document),
+          .related_to(previous.span, previous.document),
       );
       return;
     }
-    self.schema_definition = Some((span, self.document));
+    self.schema_definition = Some(DocumentSpan {
+      span,
+      document: self.document,
+    });
     self.schema_description = self.describe(description, Head::Schema);
     let directives = self.directive_uses(def.directives(), DirectiveLocation::Schema);
     self.schema_directives.extend(directives);
@@ -3150,21 +3264,27 @@ impl SchemaBuilder {
   {
     /// A container whose children are still being reduced.
     enum Frame<'a, S> {
-      List {
-        span: SimpleSpan,
-        values: Vec<RawValue>,
-        rest: core::slice::Iter<'a, ConstInputValue<S>>,
-      },
-      Object {
-        span: SimpleSpan,
-        fields: Vec<RawObjectField>,
-        /// The name of the field whose value is being reduced right now.
-        ///
-        /// One at a time, because the walk is depth-first: a frame reaches its next field only
-        /// once the previous field's whole subtree has been folded into `fields`.
-        pending: Option<Located>,
-        rest: core::slice::Iter<'a, ConstObjectField<S>>,
-      },
+      List(ListFrame<'a, S>),
+      Object(ObjectFrame<'a, S>),
+    }
+
+    /// A list whose entries are still being reduced: [`Frame::List`]'s payload.
+    struct ListFrame<'a, S> {
+      span: SimpleSpan,
+      values: Vec<RawValue>,
+      rest: core::slice::Iter<'a, ConstInputValue<S>>,
+    }
+
+    /// An object whose fields are still being reduced: [`Frame::Object`]'s payload.
+    struct ObjectFrame<'a, S> {
+      span: SimpleSpan,
+      fields: Vec<RawObjectField>,
+      /// The name of the field whose value is being reduced right now.
+      ///
+      /// One at a time, because the walk is depth-first: a frame reaches its next field only
+      /// once the previous field's whole subtree has been folded into `fields`.
+      pending: Option<Located>,
+      rest: core::slice::Iter<'a, ConstObjectField<S>>,
     }
 
     let mut frames: Vec<Frame<'_, S>> = Vec::new();
@@ -3178,10 +3298,10 @@ impl SchemaBuilder {
         // Nothing in hand: take the next child of the innermost open container, or close it.
         match frames.last_mut() {
           None => break,
-          Some(Frame::List { rest, .. }) => match rest.next() {
+          Some(Frame::List(ListFrame { rest, .. })) => match rest.next() {
             Some(entry) => current = Some(entry),
             None => {
-              let Some(Frame::List { span, values, .. }) = frames.pop() else {
+              let Some(Frame::List(ListFrame { span, values, .. })) = frames.pop() else {
                 unreachable!("the frame just matched as a list")
               };
               emit(
@@ -3194,13 +3314,13 @@ impl SchemaBuilder {
               );
             }
           },
-          Some(Frame::Object { rest, pending, .. }) => match rest.next() {
+          Some(Frame::Object(ObjectFrame { rest, pending, .. })) => match rest.next() {
             Some(field) => {
               *pending = Some(self.located(field.name()));
               current = Some(field.value());
             }
             None => {
-              let Some(Frame::Object { span, fields, .. }) = frames.pop() else {
+              let Some(Frame::Object(ObjectFrame { span, fields, .. })) = frames.pop() else {
                 unreachable!("the frame just matched as an object")
               };
               emit(
@@ -3227,12 +3347,14 @@ impl SchemaBuilder {
         // answer read at a different time.
         ConstInputValue::Int(int) => {
           let spelling: &[u8] = int.source().as_ref();
-          RawShape::Int {
+          RawShape::Int(IntShape {
             fits_i32: fits_i32(spelling),
             is_finite: is_finite(spelling),
-          }
+          })
         }
-        ConstInputValue::Float(float) => RawShape::Float(is_finite(float.source().as_ref())),
+        ConstInputValue::Float(float) => RawShape::Float(FloatShape {
+          is_finite: is_finite(float.source().as_ref()),
+        }),
         // The one arm that cannot: an enum member's spelling is resolved against the declared
         // members, and a member declared later in this document — or in a later one — is not a
         // symbol yet. Interned rather than copied, one copy per distinct spelling.
@@ -3248,11 +3370,11 @@ impl SchemaBuilder {
         ConstInputValue::List(list) => {
           if frames.len() < MAX_CONST_VALUE_DEPTH {
             let entries = list.values();
-            frames.push(Frame::List {
+            frames.push(Frame::List(ListFrame {
               span,
               values: Vec::with_capacity(entries.len()),
               rest: entries.iter(),
-            });
+            }));
             continue;
           }
           refused.get_or_insert(span);
@@ -3261,12 +3383,12 @@ impl SchemaBuilder {
         ConstInputValue::Object(object) => {
           if frames.len() < MAX_CONST_VALUE_DEPTH {
             let fields = object.fields();
-            frames.push(Frame::Object {
+            frames.push(Frame::Object(ObjectFrame {
               span,
               fields: Vec::with_capacity(fields.len()),
               pending: None,
               rest: fields.iter(),
-            });
+            }));
             continue;
           }
           refused.get_or_insert(span);
@@ -3290,10 +3412,10 @@ impl SchemaBuilder {
     fn emit<S>(frames: &mut [Frame<'_, S>], answer: &mut Option<RawValue>, value: RawValue) {
       match frames.last_mut() {
         None => *answer = Some(value),
-        Some(Frame::List { values, .. }) => values.push(value),
-        Some(Frame::Object {
+        Some(Frame::List(ListFrame { values, .. })) => values.push(value),
+        Some(Frame::Object(ObjectFrame {
           fields, pending, ..
-        }) => fields.push(RawObjectField {
+        })) => fields.push(RawObjectField {
           name: pending
             .take()
             .expect("an object frame reached a value with no field name waiting on it"),
@@ -3509,7 +3631,10 @@ impl SchemaBuilder {
     let mut raw = RawExtension::default();
     match extension {
       TypeSystemExtension::Schema(schema) => {
-        raw.schema = Some((*schema.span(), self.document));
+        raw.schema = Some(DocumentSpan {
+          span: *schema.span(),
+          document: self.document,
+        });
         raw.directives = self.directive_uses(schema.directives(), DirectiveLocation::Schema);
         if let Some(roots) = schema.root_operation_types_definition() {
           for root in roots.root_operation_type_definitions() {
@@ -3639,7 +3764,7 @@ impl SchemaBuilder {
         continue;
       }
       let Some(target) = extension.target else {
-        if !schema_defined && let Some((span, document)) = extension.schema {
+        if !schema_defined && let Some(DocumentSpan { span, document }) = extension.schema {
           self.errors.push(
             SchemaError::new(
               SchemaErrorKind::SchemaExtensionWithoutSchema,
@@ -3899,7 +4024,7 @@ impl SchemaBuilder {
         if operation == RootOperation::Query {
           // At the `schema` definition, in the document it was read from; with none, at the
           // start of the first document, since the refusal is about the document as a whole.
-          let (span, document) = self.schema_definition.unwrap_or_default();
+          let DocumentSpan { span, document } = self.schema_definition.unwrap_or_default();
           self.errors.push(
             SchemaError::new(
               SchemaErrorKind::MissingQueryRootOperationType,
@@ -3961,8 +4086,8 @@ impl SchemaBuilder {
   /// built-in ones included — and all but the handful that fail need no path at all. Rendering is
   /// deferred to the push loops at the end, where `&mut self` is free anyway.
   fn resolve_type_refs(&mut self) {
-    let mut unresolved: Vec<(Located, Coordinate, SimpleSpan)> = Vec::new();
-    let mut too_deep: Vec<(Located, Coordinate, SimpleSpan)> = Vec::new();
+    let mut unresolved: Vec<Unresolved> = Vec::new();
+    let mut too_deep: Vec<Unresolved> = Vec::new();
 
     for index in 0..self.types.len() {
       let owner = Coordinate::named(self.types[index].name.sym);
@@ -4022,12 +4147,12 @@ impl SchemaBuilder {
       }
     }
 
-    for (at, path, _) in unresolved {
+    for Unresolved { at, path, .. } in unresolved {
       let subject = self.text(at.sym).to_owned();
       let path = self.owner(path);
       self.push_owned(SchemaErrorKind::UndefinedType, &subject, path, at);
     }
-    for (at, path, span) in too_deep {
+    for Unresolved { at, path, span } in too_deep {
       let subject = self.text(at.sym).to_owned();
       let path = self.owner(path);
       let mut at = at;
@@ -4040,11 +4165,15 @@ impl SchemaBuilder {
     type_of_sym: &[u32],
     reference: &mut RawTypeRef,
     path: Coordinate,
-    unresolved: &mut Vec<(Located, Coordinate, SimpleSpan)>,
-    too_deep: &mut Vec<(Located, Coordinate, SimpleSpan)>,
+    unresolved: &mut Vec<Unresolved>,
+    too_deep: &mut Vec<Unresolved>,
   ) {
     if reference.too_deep {
-      too_deep.push((reference.base, path, reference.span));
+      too_deep.push(Unresolved {
+        at: reference.base,
+        path,
+        span: reference.span,
+      });
     }
     let slot = reference.base.sym.get() as usize;
     match type_of_sym.get(slot) {
@@ -4055,7 +4184,11 @@ impl SchemaBuilder {
           reference.packed.wrappers(),
         );
       }
-      _ => unresolved.push((reference.base, path, reference.span)),
+      _ => unresolved.push(Unresolved {
+        at: reference.base,
+        path,
+        span: reference.span,
+      }),
     }
   }
 
@@ -4394,12 +4527,16 @@ impl SchemaBuilder {
       }
 
       let built_in = self.types[index].built_in;
-      let (model, errors, names) = self.split_indexed();
+      let SplitIndexed {
+        model,
+        errors,
+        names,
+      } = self.split_indexed();
       Self::validate_arguments(
         model,
         errors,
         names,
-        ArgumentsOf::Field { ty: index, field },
+        ArgumentsOf::Field(FieldOf { ty: index, field }),
         path,
         built_in,
         ArgumentRules {
@@ -4700,7 +4837,11 @@ impl SchemaBuilder {
         .default_value
         .is_some()
       {
-        let (model, errors, names) = self.split_indexed();
+        let SplitIndexed {
+          model,
+          errors,
+          names,
+        } = self.split_indexed();
         let default = model.types[index].input_fields[position]
           .default_value
           .as_ref()
@@ -4757,12 +4898,16 @@ impl SchemaBuilder {
         self.push(SchemaErrorKind::TooManyDirectiveArguments, &name, at);
       }
 
-      let (model, errors, names) = self.split_indexed();
+      let SplitIndexed {
+        model,
+        errors,
+        names,
+      } = self.split_indexed();
       Self::validate_arguments(
         model,
         errors,
         names,
-        ArgumentsOf::Directive { index },
+        ArgumentsOf::Directive(index),
         Coordinate::named(at.sym),
         built_in,
         ArgumentRules {
@@ -4787,7 +4932,11 @@ impl SchemaBuilder {
   /// be resolved before a value can be checked against it, and after
   /// [`SchemaBuilder::apply_extensions`] because a definition and its extensions are one location.
   fn validate_directive_usages(&mut self) {
-    let (model, errors, names) = self.split_indexed();
+    let SplitIndexed {
+      model,
+      errors,
+      names,
+    } = self.split_indexed();
     Self::check_directive_uses(
       model,
       errors,
@@ -4798,7 +4947,7 @@ impl SchemaBuilder {
 
     for ty in 0..model.types.len() {
       let owner = Coordinate::named(model.types[ty].name.sym);
-      Self::check_directive_uses(model, errors, names, DirectivesOf::Type { ty }, owner);
+      Self::check_directive_uses(model, errors, names, DirectivesOf::Type(ty), owner);
 
       for field in 0..model.types[ty].fields.len() {
         let path = owner.then(model.types[ty].fields[field].name.sym);
@@ -4806,21 +4955,22 @@ impl SchemaBuilder {
           model,
           errors,
           names,
-          DirectivesOf::Field { ty, field },
+          DirectivesOf::Field(FieldOf { ty, field }),
           path,
         );
 
         // The gate decides whether this field's arguments are visited at all, which is also
         // what makes `DirectivesOf::FieldArgument`'s own refused arm unreachable: an `arg`
         // position exists only for a list admitted here.
-        if let Args::Bounded(declared) = model.arguments(ArgumentsOf::Field { ty, field }) {
+        if let Args::Bounded(declared) = model.arguments(ArgumentsOf::Field(FieldOf { ty, field }))
+        {
           for (arg, argument) in declared.iter().enumerate() {
             let path = path.then(argument.name.sym);
             Self::check_directive_uses(
               model,
               errors,
               names,
-              DirectivesOf::FieldArgument { ty, field, arg },
+              DirectivesOf::FieldArgument(FieldArgumentOf { ty, field, arg }),
               path,
             );
           }
@@ -4833,7 +4983,7 @@ impl SchemaBuilder {
           model,
           errors,
           names,
-          DirectivesOf::InputField { ty, field },
+          DirectivesOf::InputField(FieldOf { ty, field }),
           path,
         );
       }
@@ -4844,7 +4994,7 @@ impl SchemaBuilder {
           model,
           errors,
           names,
-          DirectivesOf::EnumValue { ty, value },
+          DirectivesOf::EnumValue(EnumValueOf { ty, value }),
           path,
         );
       }
@@ -4856,18 +5006,17 @@ impl SchemaBuilder {
         model,
         errors,
         names,
-        DirectivesOf::Directive { index: directive },
+        DirectivesOf::Directive(directive),
         owner,
       );
-      if let Args::Bounded(declared) = model.arguments(ArgumentsOf::Directive { index: directive })
-      {
+      if let Args::Bounded(declared) = model.arguments(ArgumentsOf::Directive(directive)) {
         for (arg, argument) in declared.iter().enumerate() {
           let path = owner.then(argument.name.sym);
           Self::check_directive_uses(
             model,
             errors,
             names,
-            DirectivesOf::DirectiveArgument { directive, arg },
+            DirectivesOf::DirectiveArgument(DirectiveArgumentOf { directive, arg }),
             path,
           );
         }
@@ -4989,8 +5138,7 @@ impl SchemaBuilder {
     // is the `Θ(declared × written)` review found here: a definition past its ceiling is refused
     // at build, and every usage of it then re-scanned the oversized list anyway. The refusal is
     // recorded where the definition is validated; this is the reader being told, by the list.
-    let Args::Bounded(declared) = model.arguments(ArgumentsOf::Directive { index: definition })
-    else {
+    let Args::Bounded(declared) = model.arguments(ArgumentsOf::Directive(definition)) else {
       return;
     };
 
@@ -5124,25 +5272,45 @@ impl SchemaBuilder {
     /// child. That is the same shape [`SchemaBuilder::const_value`] builds the literal with.
     enum Level<'a> {
       /// A list literal's entries, every one of them offered to the same item type.
-      Entries {
-        rest: core::slice::Iter<'a, RawValue>,
-        item: PackedType,
-      },
+      Entries(EntriesLevel<'a>),
       /// An input-object literal's fields, plus what the omitted-required pass will need once they
       /// run out.
-      Fields {
-        rest: core::slice::Iter<'a, RawObjectField>,
-        base: usize,
-        written: &'a [RawObjectField],
-        span: SimpleSpan,
-      },
+      Fields(FieldsLevel<'a>),
+    }
+
+    /// A list literal's open level: [`Level::Entries`]'s payload.
+    struct EntriesLevel<'a> {
+      rest: core::slice::Iter<'a, RawValue>,
+      item: PackedType,
+    }
+
+    /// An input-object literal's open level: [`Level::Fields`]'s payload.
+    struct FieldsLevel<'a> {
+      rest: core::slice::Iter<'a, RawObjectField>,
+      base: usize,
+      written: &'a [RawObjectField],
+      span: SimpleSpan,
     }
 
     /// What the innermost open level had left, read without holding a borrow on the stack.
     enum Step<'a> {
-      Entry(&'a RawValue, PackedType),
-      Field(&'a RawObjectField, usize),
+      Entry(EntryStep<'a>),
+      Field(FieldStep<'a>),
       Close,
+    }
+
+    /// The next entry of a list level, and the item type it is offered to: [`Step::Entry`]'s
+    /// payload.
+    struct EntryStep<'a> {
+      value: &'a RawValue,
+      item: PackedType,
+    }
+
+    /// The next field of an input-object level, and the index of the input object type whose
+    /// declaration it is looked up in: [`Step::Field`]'s payload.
+    struct FieldStep<'a> {
+      field: &'a RawObjectField,
+      base: usize,
     }
 
     let reject = |errors: &mut Vec<SchemaError>, span| {
@@ -5164,18 +5332,21 @@ impl SchemaBuilder {
       let Some((value, expected)) = current.take() else {
         let step = match levels.last_mut() {
           None => return,
-          Some(Level::Entries { rest, item }) => match rest.next() {
-            Some(entry) => Step::Entry(entry, *item),
+          Some(Level::Entries(EntriesLevel { rest, item })) => match rest.next() {
+            Some(entry) => Step::Entry(EntryStep {
+              value: entry,
+              item: *item,
+            }),
             None => Step::Close,
           },
-          Some(Level::Fields { rest, base, .. }) => match rest.next() {
-            Some(field) => Step::Field(field, *base),
+          Some(Level::Fields(FieldsLevel { rest, base, .. })) => match rest.next() {
+            Some(field) => Step::Field(FieldStep { field, base: *base }),
             None => Step::Close,
           },
         };
         match step {
-          Step::Entry(entry, item) => current = Some((entry, item)),
-          Step::Field(field, base) => {
+          Step::Entry(EntryStep { value: entry, item }) => current = Some((entry, item)),
+          Step::Field(FieldStep { field, base }) => {
             let object = Coordinate::named(model.types[base].name.sym);
             let Some(declared) = names
               .first(model.types, base, field.name.sym)
@@ -5210,12 +5381,12 @@ impl SchemaBuilder {
             current = Some((&field.value, declared.ty.packed));
           }
           Step::Close => {
-            let Some(Level::Fields {
+            let Some(Level::Fields(FieldsLevel {
               base,
               written,
               span,
               ..
-            }) = levels.pop()
+            })) = levels.pop()
             else {
               // A list level has nothing owed when its entries run out.
               continue;
@@ -5286,10 +5457,10 @@ impl SchemaBuilder {
         let (Some(item), RawShape::List(entries)) = (expected.list_item(), &value.shape) else {
           continue;
         };
-        levels.push(Level::Entries {
+        levels.push(Level::Entries(EntriesLevel {
           rest: entries.iter(),
           item,
-        });
+        }));
         continue;
       }
 
@@ -5337,12 +5508,12 @@ impl SchemaBuilder {
               _ => reject(errors, value.span),
             }
           }
-          levels.push(Level::Fields {
+          levels.push(Level::Fields(FieldsLevel {
             rest: fields.iter(),
             base,
             written: fields,
             span: value.span,
-          });
+          }));
         }
         TypeKind::Enum => {
           // One index per ENUM, shared by every literal offered to it, for the reason the input
@@ -5989,7 +6160,11 @@ impl SchemaBuilder {
         stack.push((current, cursor + 1, nullable));
         let field = &self.types[current].input_fields[cursor];
         let at = field.name;
-        let Some((target, link_is_nullable)) = self.input_link(current, field.ty.packed) else {
+        let Some(InputLink {
+          target,
+          nullable: link_is_nullable,
+        }) = self.input_link(current, field.ty.packed)
+        else {
           continue;
         };
         if finite[target] {
@@ -6055,7 +6230,7 @@ impl SchemaBuilder {
       let mut leaves = false;
       for field in &self.types[owner].input_fields {
         match self.input_link(owner, field.ty.packed) {
-          Some((target, _)) => {
+          Some(InputLink { target, .. }) => {
             start[target + 1] += 1;
             waiting[owner] += 1;
           }
@@ -6082,7 +6257,7 @@ impl SchemaBuilder {
         continue;
       }
       for field in &self.types[owner].input_fields {
-        if let Some((target, _)) = self.input_link(owner, field.ty.packed) {
+        if let Some(InputLink { target, .. }) = self.input_link(owner, field.ty.packed) {
           owners[next[target] as usize] = owner as u32;
           next[target] += 1;
         }
@@ -6115,7 +6290,7 @@ impl SchemaBuilder {
   /// enum; a nullable field of an ordinary input object, which may be left out; and a type that
   /// did not resolve or is not an input type, which another rule has already refused. A nullable
   /// field of a OneOf is still a link, because the one field a OneOf is given may not be `null`.
-  fn input_link(&self, owner: usize, packed: PackedType) -> Option<(usize, bool)> {
+  fn input_link(&self, owner: usize, packed: PackedType) -> Option<InputLink> {
     let nullable = !packed.is_non_null();
     if nullable && !self.types[owner].one_of {
       return None;
@@ -6128,7 +6303,10 @@ impl SchemaBuilder {
       return None;
     }
     let base = base.get() as usize;
-    (self.types[base].kind == TypeKind::InputObject).then_some((base, nullable))
+    (self.types[base].kind == TypeKind::InputObject).then_some(InputLink {
+      target: base,
+      nullable,
+    })
   }
 
   /// Draft §3.10.1(4): `InputObjectDefaultValueHasCycle(inputObject)` must be false.
@@ -6456,11 +6634,29 @@ impl SchemaBuilder {
     enum Ask<'a> {
       /// The caller's literal named this field, so the walk descends into that literal and the
       /// field's own default is never consulted. Nothing settles from this.
-      Supplied(usize, &'a RawValue),
+      Supplied(SuppliedField<'a>),
       /// No node of this level named it, so the walk descends into the field's OWN default —
-      /// and `.1` is where the field sits in its object's coverable run, which is what the
-      /// settling step needs to take it out of every later frame's way.
-      Omitted(usize, usize),
+      /// and its `position` is where the field sits in its object's coverable run, which is what
+      /// the settling step needs to take it out of every later frame's way.
+      Omitted(OmittedField),
+    }
+
+    /// A field the caller's literal named, and the literal it gave it: [`Ask::Supplied`]'s payload.
+    #[derive(Clone, Copy)]
+    struct SuppliedField<'a> {
+      /// The field's position in its object's input fields.
+      field: usize,
+      /// The literal the caller wrote for it.
+      literal: &'a RawValue,
+    }
+
+    /// A field no node of the level named: [`Ask::Omitted`]'s payload.
+    #[derive(Clone, Copy)]
+    struct OmittedField {
+      /// The field's position in its object's input fields.
+      field: usize,
+      /// Where the field sits in its object's coverable run.
+      position: usize,
     }
 
     /// What the walk knows about one input field's own `defaultValue`, which is the granularity
@@ -6500,7 +6696,11 @@ impl SchemaBuilder {
       position
     }
 
-    let (model, errors, names) = self.split_indexed();
+    let SplitIndexed {
+      model,
+      errors,
+      names,
+    } = self.split_indexed();
     let count = model.types.len();
     // A dense id per input field, so path membership is a bit rather than a search.
     let mut field_base: Vec<usize> = vec![0; count + 1];
@@ -6622,7 +6822,10 @@ impl SchemaBuilder {
         // header says what a tail cost, both times it was one.
         let ask = if let Some(&(field_index, value)) = frame.work.get(frame.cursor) {
           frame.cursor += 1;
-          Ask::Supplied(field_index, value)
+          Ask::Supplied(SuppliedField {
+            field: field_index,
+            literal: value,
+          })
         } else {
           // The next field of `object`'s run this frame still has something to learn from:
           // past the ones that have SETTLED, in one step whoever settled them, and past the
@@ -6658,7 +6861,10 @@ impl SchemaBuilder {
             frame.omitting = taken.map(|_| position);
           }
           match taken {
-            Some((field_index, position)) => Ask::Omitted(field_index, position),
+            Some((field_index, position)) => Ask::Omitted(OmittedField {
+              field: field_index,
+              position,
+            }),
             None => {
               // The rule, in one line. This frame descended into one field's own default and
               // followed every path out of it to the end without meeting a field it had itself
@@ -6686,7 +6892,9 @@ impl SchemaBuilder {
           }
         };
         let field_index = match ask {
-          Ask::Supplied(index, _) | Ask::Omitted(index, _) => index,
+          Ask::Supplied(SuppliedField { field, .. }) | Ask::Omitted(OmittedField { field, .. }) => {
+            field
+          }
         };
 
         // `InputFieldDefaultValueHasCycle`. A field whose named type is not an input object can
@@ -6704,7 +6912,7 @@ impl SchemaBuilder {
         let descend_into = match ask {
           // The caller's literal named this field, so the field's own default is never consulted
           // and `visited` does not grow.
-          Ask::Supplied(_, value) => value,
+          Ask::Supplied(SuppliedField { literal, .. }) => literal,
           // The field's own default, which is the descent `visited` grows for.
           Ask::Omitted(..) => match field.default_value.as_ref() {
             Some(default) => default,
@@ -6718,7 +6926,7 @@ impl SchemaBuilder {
 
         let pushed = match ask {
           Ask::Supplied(..) => None,
-          Ask::Omitted(_, position) => {
+          Ask::Omitted(OmittedField { position, .. }) => {
             let id = field_base[object] + field_index;
             match settling[id] {
               // Grey: the exploration below this field comes back to it.
@@ -7491,16 +7699,26 @@ impl SchemaBuilder {
       type_of_sym[raw.name.sym.get() as usize] = index as u32;
     }
 
-    let (strings, spans, retired) = interner.into_parts();
+    let semantics::interner::InternerParts {
+      bytes: strings,
+      spans,
+      retired,
+    } = interner.into_parts();
     _retired = Some(retired);
     let strings = strings.into_boxed_slice();
-    let spans = spans.into_boxed_slice();
+    // Mapped in place: a `ByteRange` and a `Range32` are both two `u32`s, so collecting from the
+    // interner's `Vec` reuses its buffer, and the build allocates no more than a plain hand-over.
+    let spans = spans
+      .into_iter()
+      .map(|range| Range32::new(range.start(), range.end()))
+      .collect::<Vec<_>>()
+      .into_boxed_slice();
     let index = {
       let spans_ref = &spans;
       let strings_ref = &strings;
       NameIndex::build(symbol_count, |sym| {
-        let (start, end) = spans_ref[sym as usize];
-        &strings_ref[start as usize..end as usize]
+        let range = spans_ref[sym as usize];
+        &strings_ref[range.start() as usize..range.end() as usize]
       })
     };
     let Some(index) = index else {
@@ -7760,7 +7978,7 @@ fn map_nodes<'a>(value: &'a RawValue, out: &mut Vec<&'a [RawObjectField]>) {
       RawShape::Refused => {}
       RawShape::Null
       | RawShape::Boolean
-      | RawShape::Int { .. }
+      | RawShape::Int(_)
       | RawShape::Float(_)
       | RawShape::String
       | RawShape::Enum(_) => {}

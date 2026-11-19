@@ -214,10 +214,7 @@ where
         end = root_separator(inp)?;
         count = count.saturating_add(1);
       }
-      ast::PathRoot::Parent {
-        span: SimpleSpan::new(start, end),
-        count,
-      }
+      ast::PathRoot::Parent(ast::ParentRoot::new(SimpleSpan::new(start, end), count))
     }
     Some(SyntacticTokenKind::PathSeparator) => return leading_path_separator(inp),
     _ => ast::PathRoot::Relative,

@@ -85,12 +85,27 @@ impl<T, Description, Span> IntoSpan<Span> for Described<T, Description, Span> {
   }
 }
 
+/// `Described` taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DescribedComponents<T, Description, Span> {
+  /// The span covering the description and node.
+  pub span: Span,
+  /// The optional description.
+  pub description: Option<Description>,
+  /// The described node.
+  pub node: T,
+}
+
 impl<T, Description, Span> IntoComponents for Described<T, Description, Span> {
-  type Components = (Span, Option<Description>, T);
+  type Components = DescribedComponents<T, Description, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.description, self.node)
+    DescribedComponents {
+      span: self.span,
+      description: self.description,
+      node: self.node,
+    }
   }
 }
 
@@ -174,26 +189,35 @@ impl<Variable, Type, DefaultValue, Directives, Span> IntoSpan<Span>
   }
 }
 
+/// `VariableDefinition` taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct VariableDefinitionComponents<Variable, Type, DefaultValue, Directives, Span> {
+  /// The span covering the whole definition.
+  pub span: Span,
+  /// The variable.
+  pub variable: Variable,
+  /// The declared type.
+  pub ty: Type,
+  /// The optional constant default value.
+  pub default_value: Option<DefaultValue>,
+  /// The nonempty constant directive collection, if present.
+  pub directives: Option<Directives>,
+}
+
 impl<Variable, Type, DefaultValue, Directives, Span> IntoComponents
   for VariableDefinition<Variable, Type, DefaultValue, Directives, Span>
 {
-  type Components = (
-    Span,
-    Variable,
-    Type,
-    Option<DefaultValue>,
-    Option<Directives>,
-  );
+  type Components = VariableDefinitionComponents<Variable, Type, DefaultValue, Directives, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (
-      self.span,
-      self.variable,
-      self.ty,
-      self.default_value,
-      self.directives,
-    )
+    VariableDefinitionComponents {
+      span: self.span,
+      variable: self.variable,
+      ty: self.ty,
+      default_value: self.default_value,
+      directives: self.directives,
+    }
   }
 }
 
@@ -260,14 +284,26 @@ impl<VariableDefinition, Span, Container> IntoSpan<Span>
   }
 }
 
+/// `VariablesDefinition` taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct VariablesDefinitionComponents<Span, Container> {
+  /// The span including surrounding parentheses when present.
+  pub span: Span,
+  /// The parsed variable definitions.
+  pub variable_definitions: Container,
+}
+
 impl<VariableDefinition, Span, Container> IntoComponents
   for VariablesDefinition<VariableDefinition, Span, Container>
 {
-  type Components = (Span, Container);
+  type Components = VariablesDefinitionComponents<Span, Container>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.variable_definitions)
+    VariablesDefinitionComponents {
+      span: self.span,
+      variable_definitions: self.variable_definitions,
+    }
   }
 }
 
@@ -357,26 +393,37 @@ impl<FragmentName, TypeCondition, Directives, SelectionSet, Span> IntoSpan<Span>
   }
 }
 
+/// `FragmentDefinition` taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FragmentDefinitionComponents<FragmentName, TypeCondition, Directives, SelectionSet, Span>
+{
+  /// The span covering the entire definition.
+  pub span: Span,
+  /// The fragment name.
+  pub name: FragmentName,
+  /// The required type condition.
+  pub type_condition: TypeCondition,
+  /// The nonempty directive collection, if present.
+  pub directives: Option<Directives>,
+  /// The required selection set.
+  pub selection_set: SelectionSet,
+}
+
 impl<FragmentName, TypeCondition, Directives, SelectionSet, Span> IntoComponents
   for FragmentDefinition<FragmentName, TypeCondition, Directives, SelectionSet, Span>
 {
-  type Components = (
-    Span,
-    FragmentName,
-    TypeCondition,
-    Option<Directives>,
-    SelectionSet,
-  );
+  type Components =
+    FragmentDefinitionComponents<FragmentName, TypeCondition, Directives, SelectionSet, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (
-      self.span,
-      self.name,
-      self.type_condition,
-      self.directives,
-      self.selection_set,
-    )
+    FragmentDefinitionComponents {
+      span: self.span,
+      name: self.name,
+      type_condition: self.type_condition,
+      directives: self.directives,
+      selection_set: self.selection_set,
+    }
   }
 }
 
@@ -490,6 +537,30 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet, Span> I
   }
 }
 
+/// `NamedOperationDefinition` taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct NamedOperationDefinitionComponents<
+  Name,
+  OperationType,
+  VariablesDefinition,
+  Directives,
+  SelectionSet,
+  Span,
+> {
+  /// The span covering the entire operation.
+  pub span: Span,
+  /// The operation keyword node.
+  pub operation_type: OperationType,
+  /// The optional operation name.
+  pub name: Option<Name>,
+  /// The nonempty variables collection, if present.
+  pub variable_definitions: Option<VariablesDefinition>,
+  /// The nonempty directive collection, if present.
+  pub directives: Option<Directives>,
+  /// The required operation selection set.
+  pub selection_set: SelectionSet,
+}
+
 impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet, Span> IntoComponents
   for NamedOperationDefinition<
     Name,
@@ -500,25 +571,25 @@ impl<Name, OperationType, VariablesDefinition, Directives, SelectionSet, Span> I
     Span,
   >
 {
-  type Components = (
-    Span,
+  type Components = NamedOperationDefinitionComponents<
+    Name,
     OperationType,
-    Option<Name>,
-    Option<VariablesDefinition>,
-    Option<Directives>,
+    VariablesDefinition,
+    Directives,
     SelectionSet,
-  );
+    Span,
+  >;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (
-      self.span,
-      self.operation_type,
-      self.name,
-      self.variable_definitions,
-      self.directives,
-      self.selection_set,
-    )
+    NamedOperationDefinitionComponents {
+      span: self.span,
+      operation_type: self.operation_type,
+      name: self.name,
+      variable_definitions: self.variable_definitions,
+      directives: self.directives,
+      selection_set: self.selection_set,
+    }
   }
 }
 
@@ -577,12 +648,24 @@ impl<Definition, Span, Container> IntoSpan<Span> for Document<Definition, Span, 
   }
 }
 
+/// `Document` taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DocumentComponents<Span, Container> {
+  /// The complete document span.
+  pub span: Span,
+  /// The parsed definitions.
+  pub definitions: Container,
+}
+
 impl<Definition, Span, Container> IntoComponents for Document<Definition, Span, Container> {
-  type Components = (Span, Container);
+  type Components = DocumentComponents<Span, Container>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.definitions)
+    DocumentComponents {
+      span: self.span,
+      definitions: self.definitions,
+    }
   }
 }
 

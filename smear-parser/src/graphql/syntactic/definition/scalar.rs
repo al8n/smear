@@ -18,7 +18,7 @@ where
   let name = take_name(inp)?;
   let directives = optional_const_directives(inp)?;
   Ok(ScalarTypeDefinition::new(
-    SimpleSpan::new(start, extent_end(inp)),
+    SimpleSpan::new(start, inp.span().end()),
     name,
     directives,
   ))

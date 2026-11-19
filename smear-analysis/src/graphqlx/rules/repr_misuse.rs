@@ -162,7 +162,7 @@ impl Visitor for ReprMisuse {
     let kind = DiagnosticKind::ReprMisuse;
     // Each `@repr` whose `for` names a type and whose `lang` is a string, with the two, its
     // application, and whether a phase refused something in its contribution, in order.
-    let mut pairs: Vec<((DefId, &str), ApplicationId, bool)> = Vec::new();
+    let mut pairs: Vec<ReprPair<'_>> = Vec::new();
     for part in model.schema().contributions() {
       for &application in part.applications() {
         let applied = model.application(application);
@@ -189,9 +189,14 @@ impl Visitor for ReprMisuse {
                 .build(),
             );
           }
-          Some(ValueKind::Type { def, .. }) => {
+          Some(ValueKind::Type(def)) => {
             if let Some(lang) = string_of(model, arguments, keys.lang) {
-              pairs.push(((def, lang), application, part.has_errors()));
+              pairs.push(ReprPair {
+                def,
+                lang,
+                application,
+                has_errors: part.has_errors(),
+              });
             }
           }
           Some(_) => {}
@@ -200,7 +205,16 @@ impl Visitor for ReprMisuse {
     }
     let mut duplicates: Duplicates<(DefId, &str)> =
       Duplicates::over(pairs.len(), |at: usize| pair_at(&pairs, at));
-    for (at, &((def, lang), application, refused)) in pairs.iter().enumerate() {
+    for (
+      at,
+      &ReprPair {
+        def,
+        lang,
+        application,
+        has_errors: refused,
+      },
+    ) in pairs.iter().enumerate()
+    {
       // Every position is asked, in order, so that the kernel's scan and its sort agree.
       let Some(earlier) = duplicates
         .first(at, (def, lang))
@@ -221,7 +235,7 @@ impl Visitor for ReprMisuse {
           ))
           .primary_label(kind.title())
           .label(
-            model.application(earlier.1).path_location(),
+            model.application(earlier.application).path_location(),
             "first chosen for this type in this language here",
           )
           .help("write one `@repr` on the schema for each type and language")
@@ -257,10 +271,25 @@ fn lang_at<'k>(langs: &[(&'k str, ApplicationId)], at: usize) -> &'k str {
     .map_or("", |entry: &(&'k str, ApplicationId)| entry.0)
 }
 
+/// One `@repr` on the schema that chooses a host type for a type: the type, the `lang`, the
+/// application, and whether a phase refused something in the contribution that holds it.
+#[derive(Clone, Copy)]
+struct ReprPair<'k> {
+  /// The type it chooses for.
+  def: DefId,
+  /// The `lang`.
+  lang: &'k str,
+  /// The application.
+  application: ApplicationId,
+  /// Whether a phase refused something in the contribution that holds the application.
+  has_errors: bool,
+}
+
 /// The pair at `at` of `pairs`, or one of no `lang` past its end.
-fn pair_at<'k>(pairs: &[((DefId, &'k str), ApplicationId, bool)], at: usize) -> (DefId, &'k str) {
-  pairs.get(at).map_or(
-    (DefId::new(0), ""),
-    |entry: &((DefId, &'k str), ApplicationId, bool)| entry.0,
-  )
+fn pair_at<'k>(pairs: &[ReprPair<'k>], at: usize) -> (DefId, &'k str) {
+  pairs
+    .get(at)
+    .map_or((DefId::new(0), ""), |entry: &ReprPair<'k>| {
+      (entry.def, entry.lang)
+    })
 }

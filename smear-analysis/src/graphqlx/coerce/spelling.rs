@@ -11,11 +11,20 @@ use std::{string::String, vec::Vec};
 
 use crate::graphqlx::id::dense;
 
+/// Where a spelling's copy grew: one sequence of it that is not UTF-8, which [`copy`] replaced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct Growth {
+  /// The offset in the written spelling just past the sequence.
+  pub(super) offset: u32,
+  /// How many bytes longer the copy is than the written spelling up to there.
+  pub(super) grown: u32,
+}
+
 /// Appends `written` to `out`, each sequence of it that is not UTF-8 replaced by one U+FFFD, as
 /// `String::from_utf8_lossy` writes it, and appends to `growths`, for each such sequence in order,
 /// the offset in `written` just past it and how many bytes longer the copy is than `written` up to
 /// there.
-pub(super) fn copy(written: &[u8], out: &mut String, growths: &mut Vec<(u32, u32)>) {
+pub(super) fn copy(written: &[u8], out: &mut String, growths: &mut Vec<Growth>) {
   let replaced = dense(char::REPLACEMENT_CHARACTER.len_utf8());
   let mut at: usize = 0;
   let mut grown: u32 = 0;
@@ -28,19 +37,22 @@ pub(super) fn copy(written: &[u8], out: &mut String, growths: &mut Vec<(u32, u32
     if !invalid.is_empty() {
       out.push(char::REPLACEMENT_CHARACTER);
       grown = grown.saturating_add(replaced.saturating_sub(dense(invalid.len())));
-      growths.push((dense(at), grown));
+      growths.push(Growth {
+        offset: dense(at),
+        grown,
+      });
     }
   }
 }
 
 /// Where the byte at `at` of a spelling is in its copy, `growths` being what [`copy`] recorded of
 /// it: `at`, moved by how much the copy grew before it.
-pub(super) fn offset(growths: &[(u32, u32)], at: u32) -> u32 {
-  let before = growths.partition_point(|&(after, _): &(u32, u32)| after <= at);
+pub(super) fn offset(growths: &[Growth], at: u32) -> u32 {
+  let before = growths.partition_point(|growth: &Growth| growth.offset <= at);
   let grown = before
     .checked_sub(1)
     .and_then(|row: usize| growths.get(row))
-    .map_or(0, |&(_, grown): &(u32, u32)| grown);
+    .map_or(0, |growth: &Growth| growth.grown);
   at.saturating_add(grown)
 }
 

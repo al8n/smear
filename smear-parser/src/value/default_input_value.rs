@@ -48,11 +48,23 @@ impl<Value, Span> IntoSpan<Span> for DefaultInputValue<Value, Span> {
   }
 }
 
+/// `DefaultInputValue` taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DefaultInputValueComponents<Value, Span> {
+  /// The span covering `=` and the value.
+  pub span: Span,
+  /// The constant default value.
+  pub value: Value,
+}
+
 impl<Value, Span> IntoComponents for DefaultInputValue<Value, Span> {
-  type Components = (Span, Value);
+  type Components = DefaultInputValueComponents<Value, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.value)
+    DefaultInputValueComponents {
+      span: self.span,
+      value: self.value,
+    }
   }
 }

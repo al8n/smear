@@ -328,8 +328,8 @@ lossless_production! {
           // `resync_to_definition` call site, see the note above — and not a shortcut past the
           // verdict, which is written to `stop` for the drain either way.
           match depth::root_turn(inp, stop, executable_definition::<Src, Ctx>) {
-            RootTurn::Parsed { .. } => {}
-            RootTurn::EndsTheDocument { error } | RootTurn::Recoverable { error } => {
+            RootTurn::Parsed(_) => {}
+            RootTurn::EndsTheDocument(error) | RootTurn::Recoverable(error) => {
               return Err(error);
             }
           }

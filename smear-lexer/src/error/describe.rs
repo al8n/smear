@@ -112,7 +112,7 @@ fn unicode_error<Char>(error: &UnicodeError<Char>) -> &'static str {
     UnicodeError::Braced(BracedUnicodeEscapeError::Empty(_)) => {
       "empty Unicode escape, expected a hex digit between `{` and `}`"
     }
-    UnicodeError::Braced(BracedUnicodeEscapeError::TooManyDigits { .. }) => {
+    UnicodeError::Braced(BracedUnicodeEscapeError::TooManyDigits(_)) => {
       "invalid Unicode escape, more than 6 hex digits"
     }
     UnicodeError::Braced(BracedUnicodeEscapeError::InvalidSequence(_)) => {

@@ -249,7 +249,7 @@ fn holds(extent: Location, at: Location) -> bool {
 /// of every member's, read as a consumer reads them. The members' ids run from 0 to the count the
 /// test-support door answers, as no public range holds every member.
 fn extents(model: &Model) -> Vec<Location> {
-  let (members, _, _, _) = test_support::counts(model);
+  let test_support::Counts { members, .. } = test_support::counts(model);
   let mut extents: Vec<Location> = Vec::new();
   for def in model.defs() {
     for part in model.def(def).contributions() {

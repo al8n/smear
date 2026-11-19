@@ -39,7 +39,7 @@ where
     (None, ParseAttempt::Decline) => None,
   };
   Ok(InterfaceTypeDefinition::new(
-    SimpleSpan::new(start, extent_end(inp)),
+    SimpleSpan::new(start, inp.span().end()),
     name,
     implements,
     directives,

@@ -89,10 +89,17 @@ where
   S: AsRef<[u8]>,
   K: Sink,
 {
-  /// A container whose children are still being printed, and whether the next one is its first.
+  /// A container whose children are still being printed.
   enum Frame<'a, S> {
-    List(core::slice::Iter<'a, ConstInputValue<S>>, bool),
-    Object(core::slice::Iter<'a, ConstObjectField<S>>, bool),
+    List(PrintFrame<'a, ConstInputValue<S>>),
+    Object(PrintFrame<'a, ConstObjectField<S>>),
+  }
+
+  /// A container's children still to print, and whether the next one is its first: the payload of
+  /// both [`Frame`] variants, over the children's type.
+  struct PrintFrame<'a, T> {
+    rest: core::slice::Iter<'a, T>,
+    first: bool,
   }
 
   let mut frames: Vec<Frame<'_, S>> = Vec::new();
@@ -102,7 +109,7 @@ where
       // Nothing in hand: take the next child of the innermost open container, or close it.
       match frames.last_mut() {
         None => return Ok(()),
-        Some(Frame::List(rest, first)) => match rest.next() {
+        Some(Frame::List(PrintFrame { rest, first })) => match rest.next() {
           Some(item) => {
             if !core::mem::replace(first, false) {
               sink.put(", ");
@@ -114,7 +121,7 @@ where
             frames.pop();
           }
         },
-        Some(Frame::Object(rest, first)) => match rest.next() {
+        Some(Frame::Object(PrintFrame { rest, first })) => match rest.next() {
           Some(field) => {
             if !core::mem::replace(first, false) {
               sink.put(", ");
@@ -152,7 +159,10 @@ where
           [] => sink.put("[]"),
           values => {
             sink.put("[");
-            frames.push(Frame::List(values.iter(), true));
+            frames.push(Frame::List(PrintFrame {
+              rest: values.iter(),
+              first: true,
+            }));
           }
         }
       }
@@ -164,7 +174,10 @@ where
           [] => sink.put("{}"),
           fields => {
             sink.put("{");
-            frames.push(Frame::Object(fields.iter(), true));
+            frames.push(Frame::Object(PrintFrame {
+              rest: fields.iter(),
+              first: true,
+            }));
           }
         }
       }
@@ -186,7 +199,10 @@ fn spelling<K: Sink>(bytes: &[u8], span: SimpleSpan, sink: &mut K) -> Result<(),
 /// Writes a `StringValue` spelling as the quoted string graphql-js prints for its value.
 fn quote_spelling<K: Sink>(spelling: &[u8], sink: &mut K) -> Result<(), StringValueError> {
   sink.put("\"");
-  string_value_pieces(spelling, |piece| escape(piece, sink))?;
+  string_value_pieces(spelling, |piece| {
+    escape(piece, sink);
+    Ok(())
+  })?;
   sink.put("\"");
   Ok(())
 }

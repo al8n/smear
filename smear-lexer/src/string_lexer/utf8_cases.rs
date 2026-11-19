@@ -18,8 +18,9 @@ use std::{vec, vec::Vec};
 /// Spaces after the closing delimiter of a case that needs a long scan window.
 ///
 /// The fast path scans the rest of the document, not the literal, so this is what puts a stop
-/// inside a full 64-byte vector rather than in the scalar tail of a short input.
-const LONG_TAIL: usize = 80;
+/// inside a full 64-byte vector rather than in the scalar tail of a short input. Both dialects'
+/// string-bounds tests run their probes before it too.
+pub(crate) const LONG_TAIL: usize = 80;
 
 /// The tails of the exhaustive cases: a short input takes the scalar search, and the long tail
 /// moves the same stops into a vector. Miri takes the first alone.

@@ -36,8 +36,9 @@ use smear_semantics::scc;
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  ApplicationId, Cx, DefId, Diagnostic, DiagnosticKind, MemberId, Model, Resolution, Site, Ty,
-  TyId, TyKind, TypeExprId, TypeExprKind, TypeParam, Visitor, diagnostic::Excerpt,
+  ApplicationId, Cx, DefId, Diagnostic, DiagnosticKind, MemberId, Model, NamedTy, NamedTypeExpr,
+  Resolution, Site, Ty, TyId, TyKind, TypeExprId, TypeExprKind, TypeParam, TypeParamRef, Visitor,
+  diagnostic::Excerpt,
 };
 
 /// The label at a written type argument that grows.
@@ -191,13 +192,13 @@ impl Visitor for UnboundedInstantiation {
       return;
     }
     // A list is never marked, and holds only what its element, which is written, holds.
-    let TyKind::Named { def, .. } = model.ty(own).kind() else {
+    let TyKind::Named(NamedTy { def, .. }) = model.ty(own).kind() else {
       return;
     };
     // An occurrence whose own type is a named type is a named occurrence.
     let written: &[TypeExprId] = match occurrence.kind() {
-      TypeExprKind::Named { args, .. } => args,
-      TypeExprKind::Param { .. } | TypeExprKind::List { .. } | TypeExprKind::Unresolved => &[],
+      TypeExprKind::Named(NamedTypeExpr { args, .. }) => args,
+      TypeExprKind::Param(_) | TypeExprKind::List(_) | TypeExprKind::Unresolved => &[],
     };
     let name = Excerpt(model.def(def).name().as_bytes());
     if found.marked {
@@ -398,6 +399,15 @@ enum Tail {
 /// The graph cannot be numbered in a `u32`.
 struct Overflow;
 
+/// An edge that does not grow: from its first node into its second.
+#[derive(Clone, Copy)]
+struct Edge {
+  /// The node it leaves.
+  from: u32,
+  /// The node it enters.
+  to: u32,
+}
+
 /// The graph `begin` builds over one model, and what it finds there.
 struct Build<'a> {
   /// The model it is built over.
@@ -411,7 +421,7 @@ struct Build<'a> {
   /// What the build found of each type, by id.
   found: Vec<Found>,
   /// The edges that do not grow, each from its first node into its second.
-  plain: Vec<(u32, u32)>,
+  plain: Vec<Edge>,
   /// The edges that grow.
   growing: Vec<Growing>,
   /// The occurrences still to walk.
@@ -511,10 +521,8 @@ impl<'a> Build<'a> {
       return Ok(None);
     }
     match view.kind() {
-      TyKind::Param { def, index } => Ok(self.param(def, index).map(Tail::Param)),
-      TyKind::Named { .. } | TyKind::List { .. } => {
-        self.node(ty).map(|node: u32| Some(Tail::Type(node)))
-      }
+      TyKind::Param(TypeParamRef { def, index }) => Ok(self.param(def, index).map(Tail::Param)),
+      TyKind::Named(_) | TyKind::List(_) => self.node(ty).map(|node: u32| Some(Tail::Type(node))),
       TyKind::Unresolved => Ok(None),
     }
   }
@@ -523,14 +531,14 @@ impl<'a> Build<'a> {
   /// argument or as its element. It does not grow.
   fn contain(&mut self, tail: Tail, holder: u32) {
     let (Tail::Param(from) | Tail::Type(from)) = tail;
-    self.plain.push((from, holder));
+    self.plain.push(Edge { from, to: holder });
   }
 
   /// The edge from what `tail` leaves into the type parameter whose node is `to`, held by `holder`
   /// at `index`. It grows when `tail` is an open type that is no bare parameter.
   fn pass(&mut self, tail: Tail, to: u32, holder: TyId, index: u32) {
     match tail {
-      Tail::Param(from) => self.plain.push((from, to)),
+      Tail::Param(from) => self.plain.push(Edge { from, to }),
       Tail::Type(from) => self.growing.push(Growing {
         from,
         to,
@@ -560,14 +568,14 @@ impl<'a> Build<'a> {
         continue;
       }
       match view.kind() {
-        TyKind::List { element } => {
+        TyKind::List(element) => {
           let holder = self.node(ty)?;
           if let Some(tail) = self.tail(element)? {
             self.contain(tail, holder);
           }
           self.pending.push(element);
         }
-        TyKind::Named { def, args } => {
+        TyKind::Named(NamedTy { def, args }) => {
           let holder = self.node(ty)?;
           for (position, &argument) in args.iter().enumerate() {
             let index = number(position)?;
@@ -581,7 +589,7 @@ impl<'a> Build<'a> {
             self.pending.push(argument);
           }
         }
-        TyKind::Param { .. } | TyKind::Unresolved => {}
+        TyKind::Param(_) | TyKind::Unresolved => {}
       }
     }
     Ok(())
@@ -597,9 +605,9 @@ impl<'a> Build<'a> {
       let occurrence = model.type_expr(id);
       self.enter(occurrence.ty())?;
       match occurrence.kind() {
-        TypeExprKind::Named { args, .. } => self.occurrences.extend_from_slice(args),
-        TypeExprKind::List { element } => self.occurrences.push(element),
-        TypeExprKind::Param { .. } | TypeExprKind::Unresolved => {}
+        TypeExprKind::Named(NamedTypeExpr { args, .. }) => self.occurrences.extend_from_slice(args),
+        TypeExprKind::List(element) => self.occurrences.push(element),
+        TypeExprKind::Param(_) | TypeExprKind::Unresolved => {}
       }
     }
     Ok(())
@@ -675,7 +683,7 @@ impl<'a> Build<'a> {
     let nodes = self.next as usize;
     // Node `n`'s row starts at `starts[n]` and ends at `starts[n + 1]`.
     let mut starts: Vec<usize> = vec![0; nodes.checked_add(1).ok_or(Overflow)?];
-    for &(from, _) in &self.plain {
+    for &Edge { from, .. } in &self.plain {
       count(&mut starts, from);
     }
     for edge in &self.growing {
@@ -688,7 +696,7 @@ impl<'a> Build<'a> {
     }
     let mut targets: Vec<u32> = vec![0; total];
     let mut cursors: Vec<usize> = starts.clone();
-    for &(from, to) in &self.plain {
+    for &Edge { from, to } in &self.plain {
       place(&mut cursors, &mut targets, from, to);
     }
     for edge in &self.growing {
@@ -764,12 +772,12 @@ impl<'a> Build<'a> {
         continue;
       };
       let default = match ty.kind() {
-        TyKind::Named { def, .. } => model
+        TyKind::Named(NamedTy { def, .. }) => model
           .def(def)
           .type_params()
           .nth(index as usize)
           .and_then(|param: TypeParam<'a>| param.default()),
-        TyKind::Param { .. } | TyKind::List { .. } | TyKind::Unresolved => None,
+        TyKind::Param(_) | TyKind::List(_) | TyKind::Unresolved => None,
       };
       if let Some(record) = self.found.get_mut(at) {
         record.holds = true;
@@ -783,12 +791,12 @@ impl<'a> Build<'a> {
   /// `0` for a list whose element holds one; `None` when nothing it holds does.
   fn held(&self, ty: Ty<'_>) -> Option<u32> {
     match ty.kind() {
-      TyKind::Named { args, .. } => args
+      TyKind::Named(NamedTy { args, .. }) => args
         .iter()
         .position(|argument: &TyId| holds(&self.found, *argument))
         .and_then(|position: usize| u32::try_from(position).ok()),
-      TyKind::List { element } => holds(&self.found, element).then_some(0),
-      TyKind::Param { .. } | TyKind::Unresolved => None,
+      TyKind::List(element) => holds(&self.found, element).then_some(0),
+      TyKind::Param(_) | TyKind::Unresolved => None,
     }
   }
 }

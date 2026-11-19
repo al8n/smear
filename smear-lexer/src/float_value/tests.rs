@@ -2,7 +2,7 @@
 //! spellings it refuses, and literals whose exponent the parser alone would misread. Every literal
 //! is built on the stack: the crate builds with no allocator.
 
-use super::{DecimalFloat, NORMALIZED_FLOAT_LEN, normalize_decimal_float};
+use super::{DecimalFloat, NORMALIZED_FLOAT_LEN, Sign, normalize_decimal_float};
 
 /// The zeros of the long literals: enough that a written exponent past 655 359 is offset back into
 /// range, which is what the parser alone misreads; fewer under Miri, where the verdict is the same
@@ -18,8 +18,8 @@ fn read(spelling: &[u8]) -> Option<DecimalFloat<'static>> {
   // `'static` table of the cases that answer one.
   let mut buffer = [0; NORMALIZED_FLOAT_LEN];
   match normalize_decimal_float(spelling, &mut buffer)? {
-    DecimalFloat::Zero { negative } => Some(DecimalFloat::Zero { negative }),
-    DecimalFloat::Overflow { negative } => Some(DecimalFloat::Overflow { negative }),
+    DecimalFloat::Zero(sign) => Some(DecimalFloat::Zero(sign)),
+    DecimalFloat::Overflow(sign) => Some(DecimalFloat::Overflow(sign)),
     DecimalFloat::Spelled(spelled) => Some(DecimalFloat::Spelled(known(spelled))),
   }
 }
@@ -122,17 +122,17 @@ fn a_value_is_spelled_with_its_digits_and_a_short_exponent() {
 #[test]
 fn zero_and_overflow_are_read_from_the_first_significant_digit() {
   let cases: [(&str, DecimalFloat<'static>); 9] = [
-    ("0", DecimalFloat::Zero { negative: false }),
-    ("-0.0", DecimalFloat::Zero { negative: true }),
-    ("0e999999", DecimalFloat::Zero { negative: false }),
-    ("1e-401", DecimalFloat::Zero { negative: false }),
-    ("1e-999999", DecimalFloat::Zero { negative: false }),
-    ("1e309", DecimalFloat::Overflow { negative: false }),
-    ("-1e309", DecimalFloat::Overflow { negative: true }),
-    ("10e308", DecimalFloat::Overflow { negative: false }),
+    ("0", DecimalFloat::Zero(Sign::Positive)),
+    ("-0.0", DecimalFloat::Zero(Sign::Negative)),
+    ("0e999999", DecimalFloat::Zero(Sign::Positive)),
+    ("1e-401", DecimalFloat::Zero(Sign::Positive)),
+    ("1e-999999", DecimalFloat::Zero(Sign::Positive)),
+    ("1e309", DecimalFloat::Overflow(Sign::Positive)),
+    ("-1e309", DecimalFloat::Overflow(Sign::Negative)),
+    ("10e308", DecimalFloat::Overflow(Sign::Positive)),
     (
       "1e99999999999999999999999",
-      DecimalFloat::Overflow { negative: false },
+      DecimalFloat::Overflow(Sign::Positive),
     ),
   ];
   for (written, expected) in cases {
@@ -172,13 +172,10 @@ fn an_exponent_past_what_the_parser_reads_is_read_exactly() {
   let mut room = [0; ROOM];
   // `0.`, the zeros, `1e999999`: 10^900000 when unshrunk, past every float.
   let codex = literal(&mut room, b"0.", ZEROS, b"1e999999");
-  assert_eq!(
-    read(codex),
-    Some(DecimalFloat::Overflow { negative: false })
-  );
+  assert_eq!(read(codex), Some(DecimalFloat::Overflow(Sign::Positive)));
   // `1`, the zeros and one more, `e-999999`: as far below every float.
   let reverse = literal(&mut room, b"1", ZEROS + 1, b"e-999999");
-  assert_eq!(read(reverse), Some(DecimalFloat::Zero { negative: false }));
+  assert_eq!(read(reverse), Some(DecimalFloat::Zero(Sign::Positive)));
   // The zeros offset by an exponent of their count, each way: 1.0.
   let mut place = [0; 24];
   let count = digits(ZEROS + 1, &mut place);

@@ -15,8 +15,11 @@ use super::{
 };
 
 pub use crate::type_system::{
-  DirectiveLocations, ExecutableDirectiveLocation, ImplementInterfaces, Location,
-  TypeSystemDirectiveLocation, UnionMemberTypes,
+  DirectiveLocations, EnumTypeExtensionData, ExecutableDirectiveLocation, ExtensionDirectives,
+  ExtensionFields, ExtensionInputFields, ExtensionMembers, ExtensionOperations, ExtensionValues,
+  ImplementInterfaces, InputObjectTypeExtensionData, InterfaceTypeExtensionData, Location,
+  ObjectTypeExtensionData, SchemaExtensionData, TypeSystemDirectiveLocation, UnionMemberTypes,
+  UnionTypeExtensionData,
 };
 
 /// Definition of the arguments accepted by a field or directive

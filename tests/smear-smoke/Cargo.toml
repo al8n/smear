@@ -38,6 +38,7 @@ smear = { path = "../../smear", default-features = false, features = [
   "introspection",
   "proto",
   "analysis",
+  "serde",
   "bytes",
   "bytes_1",
   "bstr",
@@ -60,6 +61,9 @@ bstr_1 = { workspace = true }
 bytes_1 = { workspace = true }
 hipstr_0_8 = { package = "hipstr", version = "0.8", default-features = false }
 smol-bytes_0_2 = { workspace = true }
+# `serde`'s probe names the two traits `Limits` implements, through `serde`'s own crate as a
+# dependent does. The workspace entry has no default features, which no tier needs here.
+serde = { workspace = true }
 # Must track `smear`'s rowan exactly, and for this crate that is the whole point rather than
 # housekeeping. `smear-smoke` exists to stand where a real dependent stands; a dependent whose own
 # `rowan` disagreed with smear's on the major would get two rowans and `expected rowan::SyntaxNode,

@@ -568,14 +568,28 @@ jobs:
       - name: Install Rust
         run: rustup update stable && rustup default stable
       # The same tier claim from the crate's own side, and it is a CELL rather than a sentence.
-      # `smear-schema`'s reader tier is `core` + `alloc` with `tokora` as its only dependency, and
-      # it needs `std` or `alloc`: with no tier feature the crate keeps only `diagnostic` and
-      # `builtin`. This cell is the reader tier without the standard library, `alloc` alone.
-      # `build` and `introspection` are what raise it further, and neither is in `default`.
-      # `cargo hack --each-feature` reaches this configuration too, but only as one row of a
-      # matrix — naming it here means a regression says which claim broke.
+      # `smear-schema`'s reader tier is `core` + `alloc` with `tokora` as its dependency, plus
+      # smol-bytes where the target has pointer-width atomics — the owned-text seam's buffer, which
+      # both tiers turn on and nothing else does — and it needs `std` or `alloc`: with no tier
+      # feature the crate keeps only `diagnostic` and `builtin`. This cell is the reader tier
+      # without the standard library, `alloc` alone. `build` and `introspection` are what raise it
+      # further, and neither is in `default`. `cargo hack --each-feature` reaches this
+      # configuration too, but only as one row of a matrix — naming it here means a regression says
+      # which claim broke.
       - name: cargo check -p smear-schema --no-default-features --features alloc
         run: cargo check -p smear-schema --no-default-features --features alloc
+      # The seam's other arm. On a target without pointer-width compare-and-swap,
+      # `smear-schema/src/text.rs` is a `Box<str>` and a `String`, and no target this job builds
+      # selects that arm: `thumbv6m-none-eabi` builds `smear-noatomic` alone, and whether `tokora`
+      # builds there is not established. `--cfg smear_seam_fallback` selects the arm on the host,
+      # where the rest of the graph builds, and `graphql-proto` is checked with it as the seam's
+      # first user. Appended to the workflow's `RUSTFLAGS`, so `-Dwarnings` still holds.
+      - name: the owned-text seam's fallback arm (--cfg smear_seam_fallback)
+        run: |
+          RUSTFLAGS="$RUSTFLAGS --cfg smear_seam_fallback" \
+            cargo check -p smear-schema --no-default-features --features alloc
+          RUSTFLAGS="$RUSTFLAGS --cfg smear_seam_fallback" \
+            cargo check -p graphql-proto --no-default-features --features alloc
       # ASSERT THE GRAPH, not only that the code compiles. `cargo check` passing says nothing about
       # what is in the dependency graph, and the claim `smear-schema`'s `build` feature exists to
       # support is exactly a graph claim: a machine that READS a schema at execution time does not
@@ -660,7 +674,7 @@ jobs:
       - name: no package in the alloc-tier graph has `std` on
         run: |
           set -euo pipefail
-          F=alloc,graphql,graphqlx,parser,validator,proto,introspection,analysis,materialized-numbers,test-support,bstr_1,smol-bytes_0_2,bytes_1,hipstr_0_8
+          F=alloc,graphql,graphqlx,parser,validator,proto,introspection,analysis,serde,materialized-numbers,test-support,bstr_1,smol-bytes_0_2,bytes_1,hipstr_0_8
           graph() {
             cargo tree -p smear --no-default-features --features "$1" --target thumbv7em-none-eabihf \
               -e normal,no-proc-macro --prefix none --format '{p} [{f}]'
@@ -676,7 +690,7 @@ jobs:
       - name: the alloc tier builds on thumbv7em-none-eabihf
         run: >-
           cargo build -p smear --no-default-features
-          --features alloc,graphql,graphqlx,parser,validator,proto,introspection,analysis,materialized-numbers,test-support,bstr_1,smol-bytes_0_2,bytes_1,hipstr_0_8
+          --features alloc,graphql,graphqlx,parser,validator,proto,introspection,analysis,serde,materialized-numbers,test-support,bstr_1,smol-bytes_0_2,bytes_1,hipstr_0_8
           --target thumbv7em-none-eabihf
       - name: the core tier links no allocator
         run: bash ci/noalloc.sh

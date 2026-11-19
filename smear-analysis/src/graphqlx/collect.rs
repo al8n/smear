@@ -57,13 +57,13 @@ use super::{
   diagnostic::{Diagnostic, Excerpt, Reporter},
   id::{SourceId, dense},
   limits::Limits,
-  model::{DefKind, Primitive},
+  model::{DefKind, Primitive, Rank},
   package::Layout,
   parse::Documents,
   set::{FileView, PackageView, ROOT},
   source::SourceMap,
   tree::{Declared, Tree},
-  widths::Widths,
+  widths::{Widths, WidthsFound},
 };
 
 /// What the walk found: every module, everything each module declares, and every primitive the
@@ -86,7 +86,7 @@ pub(crate) struct Collected<'d, 'a> {
   pub(crate) schemas: Vec<Placed>,
   /// Every primitive a placed file writes where its package may have it, or a root package's
   /// definition makes, keyed by its place among `core`'s materialised definitions.
-  pub(crate) written: BTreeMap<(u8, u32), Primitive>,
+  pub(crate) written: BTreeMap<Rank, Primitive>,
 }
 
 /// One document's items, flattened. Every document is one of text: a byte text that is not UTF-8
@@ -129,9 +129,17 @@ pub(crate) struct Found<'d> {
 /// A definition the definition limit counts.
 enum Counted<'n> {
   /// A type or a directive, of its kind, spelled so.
-  Definition(DefKind, &'n [u8]),
+  Definition(CountedDefinition<'n>),
   /// A primitive's, which `core` makes.
   Primitive(Primitive),
+}
+
+/// A type or a directive the definition limit counts: [`Counted::Definition`]'s payload.
+struct CountedDefinition<'n> {
+  /// Its kind.
+  kind: DefKind,
+  /// How it is spelled.
+  name: &'n [u8],
 }
 
 /// What would add a module the module limit refuses.
@@ -139,7 +147,15 @@ enum Adding<'n> {
   /// A directory of the package being walked, as the file paths spell it.
   Directory(&'n [u8]),
   /// A `mod` named so, naming its module at the location.
-  Mod(Location, &'n [u8]),
+  Mod(AddedMod<'n>),
+}
+
+/// A `mod` that would add a module: [`Adding::Mod`]'s payload.
+struct AddedMod<'n> {
+  /// Where it names its module.
+  at: Location,
+  /// The name it is spelled with.
+  name: &'n [u8],
 }
 
 /// Finds every module of `packages`, which are in id order and numbered by `sources`, and
@@ -219,7 +235,7 @@ pub(crate) fn items<'d, 'a: 'd>(
       }
     }
   }
-  let (written, unknown) = walk.widths.finish();
+  let WidthsFound { written, unknown } = walk.widths.finish();
   debug_assert_eq!(
     walk.unknown.saturating_add(unknown),
     0,
@@ -278,6 +294,15 @@ struct Frame<'d, S> {
   module: u32,
 }
 
+/// A name in its namespace.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct NamespacedName<'d> {
+  /// The rank of the namespace.
+  namespace: u8,
+  /// The name, as spelled.
+  name: &'d [u8],
+}
+
 /// What the walk keeps: the tree it grows, where it reports, the package it is in, what it counts
 /// against the definition limit, and what it has found.
 struct Walk<'d, 'r> {
@@ -299,7 +324,7 @@ struct Walk<'d, 'r> {
   root: u32,
   /// The names of GraphQL's built-ins that the root package's root module has defined so far, each
   /// in its namespace: only the first definition of each such name replaces a built-in.
-  graphql_names: BTreeSet<(u8, &'d [u8])>,
+  graphql_names: BTreeSet<NamespacedName<'d>>,
   /// How many definitions the model will hold so far.
   defined: u32,
   /// `Limits::max_definitions`.
@@ -536,7 +561,10 @@ impl<'d> Walk<'d, '_> {
     if self.package != ROOT
       || module != self.root
       || !replaceable(space, spelling)
-      || !self.graphql_names.insert((space, spelling))
+      || !self.graphql_names.insert(NamespacedName {
+        namespace: space,
+        name: spelling,
+      })
     {
       return None;
     }
@@ -560,13 +588,25 @@ impl<'d> Walk<'d, '_> {
         if self.widths.wrote(primitive) {
           return true;
         }
-        let made = self.room(location, Counted::Definition(kind, spelling));
+        let made = self.room(
+          location,
+          Counted::Definition(CountedDefinition {
+            kind,
+            name: spelling,
+          }),
+        );
         if made {
           self.widths.make(primitive);
         }
         made
       }
-      None => self.room(location, Counted::Definition(kind, spelling)),
+      None => self.room(
+        location,
+        Counted::Definition(CountedDefinition {
+          kind,
+          name: spelling,
+        }),
+      ),
     }
   }
 
@@ -621,7 +661,7 @@ impl<'d> Walk<'d, '_> {
       self.declared_twice(at, name, found);
       return Some(found);
     }
-    if !self.module_room(Adding::Mod(at, name)) {
+    if !self.module_room(Adding::Mod(AddedMod { at, name })) {
       return None;
     }
     let description: Option<(&'d [u8], Location)> =
@@ -698,7 +738,7 @@ impl<'d> Walk<'d, '_> {
           Excerpt(directory)
         ),
       ),
-      Adding::Mod(at, name) => (
+      Adding::Mod(AddedMod { at, name }) => (
         at,
         format!(
           "`mod {}` declares a module that would pass the limit of {max} modules the model may \
@@ -722,10 +762,15 @@ impl<'d> Walk<'d, '_> {
     let kind = DiagnosticKind::ResourceLimit;
     let max = self.max_definitions;
     let what = match counted {
-      Counted::Definition(DefKind::Directive, name) => {
+      Counted::Definition(CountedDefinition {
+        kind: DefKind::Directive,
+        name,
+      }) => {
         format!("the directive `@{}`", Excerpt(name))
       }
-      Counted::Definition(_, name) => format!("the type `{}`", Excerpt(name)),
+      Counted::Definition(CountedDefinition { name, .. }) => {
+        format!("the type `{}`", Excerpt(name))
+      }
       Counted::Primitive(primitive) => {
         format!("the primitive `{}` written here", spelled(primitive))
       }

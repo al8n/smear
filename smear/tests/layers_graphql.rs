@@ -672,7 +672,7 @@ mod validator {
   #[cfg(feature = "bytes_1")]
   #[test]
   fn the_answer_over_an_owned_body_borrows_nothing() {
-    use smear::lexer::tokora::utils::IntoComponents;
+    use smear::{lexer::tokora::utils::IntoComponents, parser::graphql::ParsedComponents};
 
     let schema = schema();
     let body = bytes_1::Bytes::from(String::from(QUERY));
@@ -680,7 +680,12 @@ mod validator {
       .executable_document(&body, &mut ())
       .expect("the syntactic layer reads the query");
     drop(body);
-    let (document, recovery, errors, ()) = parsed.into_components();
+    let ParsedComponents {
+      document,
+      recovery,
+      errors,
+      tree: (),
+    } = parsed.into_components();
     assert!(recovery.is_complete());
     assert_eq!(errors, 0);
     validate_executable(

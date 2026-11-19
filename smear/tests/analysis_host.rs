@@ -127,7 +127,7 @@ fn shown_arguments(model: &Model, application: ApplicationId) -> Vec<String> {
       let name = model.member(argument.argument()).name();
       match model.value(argument.value()).kind() {
         ValueKind::String(text) => format!("{name}: {text:?}"),
-        ValueKind::Type { def, .. } => format!("{name}: {}", model.def(def).name()),
+        ValueKind::Type(def) => format!("{name}: {}", model.def(def).name()),
         other => format!("{name}: {other:?}"),
       }
     })

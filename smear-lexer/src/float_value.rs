@@ -1,6 +1,8 @@
 //! A decimal float literal's value, read for `core`'s float parser, as `string_value_pieces`
 //! reads a string literal's value from its spelling: [`normalize_decimal_float`].
 
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
+
 /// The significant digits a spelling keeps: more than the 768 any halfway point between two `f64`s
 /// has.
 const KEPT: usize = 800;
@@ -21,22 +23,43 @@ pub const NORMALIZED_FLOAT_LEN: usize = 808;
 
 const _: () = assert!(1 + KEPT + 1 + 1 + 1 + 4 <= NORMALIZED_FLOAT_LEN);
 
+/// Which side of zero a literal is written on: whether it carries a leading `-`.
+///
+/// [`DecimalFloat::Zero`] and [`DecimalFloat::Overflow`] keep it, because the literal's own digits
+/// are not kept there: `-0.0` is a negative zero and `-1e309` is a negative infinity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
+pub enum Sign {
+  /// The literal is written without a `-`.
+  Positive,
+  /// The literal is written with a `-`.
+  Negative,
+}
+
+impl Sign {
+  /// The sign of a literal that is written with a `-` exactly when `negative`.
+  const fn of(negative: bool) -> Self {
+    if negative {
+      Self::Negative
+    } else {
+      Self::Positive
+    }
+  }
+}
+
 /// What [`normalize_decimal_float`] reads a decimal float literal as.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum DecimalFloat<'a> {
   /// Zero, or a value no binary float tells from zero: no digit of the literal is significant, or
-  /// the first that is stands below 10^-400.
-  Zero {
-    /// Whether the literal is written with `-`.
-    negative: bool,
-  },
+  /// the first that is stands below 10^-400. The payload is whether the literal is written with
+  /// `-`.
+  Zero(Sign),
   /// A value past every finite `f64`, and so past every finite `f32`: the literal's first
-  /// significant digit stands at 10^309 or higher.
-  Overflow {
-    /// Whether the literal is written with `-`.
-    negative: bool,
-  },
+  /// significant digit stands at 10^309 or higher. The payload is whether the literal is written
+  /// with `-`.
+  Overflow(Sign),
   /// Any other value, spelled as its significant digits with the exponent of its first, from -400
   /// to 308, as `d.ddd…e<E>`: `str::parse::<f64>` and `::<f32>` read it as they would read the
   /// literal if they read every exponent exactly.
@@ -178,7 +201,7 @@ pub fn normalize_decimal_float<'b>(
     None => 0,
   };
   let Some(start) = start else {
-    return Some(DecimalFloat::Zero { negative });
+    return Some(DecimalFloat::Zero(Sign::of(negative)));
   };
   let lead = match start {
     Start::Integer => integer.saturating_sub(1),
@@ -186,10 +209,10 @@ pub fn normalize_decimal_float<'b>(
   };
   let e = lead.saturating_add(power);
   if e >= OVERFLOW {
-    return Some(DecimalFloat::Overflow { negative });
+    return Some(DecimalFloat::Overflow(Sign::of(negative)));
   }
   if e < UNDERFLOW {
-    return Some(DecimalFloat::Zero { negative });
+    return Some(DecimalFloat::Zero(Sign::of(negative)));
   }
   // A digit past the kept ones that is not zero: a final `1` after them keeps the value on its
   // side of every halfway point.

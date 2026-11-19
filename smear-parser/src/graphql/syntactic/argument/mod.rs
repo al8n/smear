@@ -23,7 +23,7 @@ use super::{
   value::{HeadKind, const_value, value, value_head_kind},
 };
 use crate::{
-  combinator::{ParseCtx, TokenSpannedExt, colon, extent_end},
+  combinator::{ParseCtx, colon},
   graphql::{
     GraphQL,
     ast::{Argument, ArgumentList, Arguments, ConstArgument, ConstArguments},
@@ -115,7 +115,7 @@ argument_parser!(
         })?;
         value(inp)
       })
-      .token_spanned()
+      .spanned_trimmed()
       .map(|Spanned { span, data: (name, value) }| Argument::new(span, name, value))
       .parse_input(inp)
   }
@@ -150,7 +150,7 @@ argument_parser!(
         })?;
         const_value(inp)
       })
-      .token_spanned()
+      .spanned_trimmed()
       .map(|Spanned { span, data: (name, value) }| ConstArgument::new(span, name, value))
       .parse_input(inp)
   }
@@ -202,7 +202,7 @@ argument_parser!(
       .repeated_while::<_, U1>(decide_argument_head::<Src, Ctx>)
       .delimited_by_parens()
       .collect_with(Vec::new())
-      .token_spanned()
+      .spanned_trimmed()
       .parse_input(inp)
       .map(|Spanned { span, data }| ArgumentList::new(span, data))
   }
@@ -217,7 +217,7 @@ argument_parser!(
       .repeated_while::<_, U1>(decide_argument_head::<Src, Ctx>)
       .delimited_by_parens()
       .collect_with(Vec::new())
-      .token_spanned()
+      .spanned_trimmed()
       .parse_input(inp)
       .map(|Spanned { span, data }| ArgumentList::new(span, data))
   }
@@ -237,8 +237,8 @@ argument_parser!(
   {
     // The **committed** end, not `inp.offset()`: `offset()` reports the end of the newest *lexed*
     // token, so a caller that left a peek in the cache would anchor this absent collection past
-    // the token that follows it. See `crate::combinator::extent`.
-    let start = extent_end(inp);
+    // the token that follows it. See tokora's `InputRef::span_since_trimmed`.
+    let start = inp.span().end();
     committed_arguments
       .peek_then_try::<_, U1>(decide_arguments_head::<Src, Ctx>)
       .try_parse_input(inp)
@@ -264,8 +264,8 @@ argument_parser!(
   {
     // The **committed** end, not `inp.offset()`: `offset()` reports the end of the newest *lexed*
     // token, so a caller that left a peek in the cache would anchor this absent collection past
-    // the token that follows it. See `crate::combinator::extent`.
-    let start = extent_end(inp);
+    // the token that follows it. See tokora's `InputRef::span_since_trimmed`.
+    let start = inp.span().end();
     committed_const_arguments
       .peek_then_try::<_, U1>(decide_arguments_head::<Src, Ctx>)
       .try_parse_input(inp)

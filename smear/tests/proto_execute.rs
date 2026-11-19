@@ -51,7 +51,7 @@ enum J {
   Str(String),
   List(Vec<J>),
   /// An object, tagged with the concrete type name a driver's `resolveType` would report.
-  Obj(&'static str, Vec<(&'static str, J)>),
+  Obj(Obj),
   /// Resolving this field raises a field error carrying the message.
   Fail(&'static str),
   /// A list that *claims* `n` elements while holding none, every element read as `"x"`.
@@ -73,10 +73,19 @@ enum J {
   Vanishes,
 }
 
+/// [`J::Obj`]'s payload: an object's concrete type name and its fields.
+#[derive(Clone, Debug, PartialEq)]
+struct Obj {
+  /// The concrete type name a driver's `resolveType` would report.
+  name: &'static str,
+  /// The fields, in the order the driver holds them.
+  fields: Vec<(&'static str, J)>,
+}
+
 impl J {
   fn get(&self, key: &str) -> Option<&J> {
     match self {
-      J::Obj(_, fields) => fields
+      J::Obj(Obj { fields, .. }) => fields
         .iter()
         .find(|(name, _)| *name == key)
         .map(|(_, value)| value),
@@ -136,7 +145,7 @@ impl Values for Space {
 
   fn type_name<'a>(&'a self, value: &'a J) -> Option<&'a str> {
     match value {
-      J::Obj(name, _) => Some(name),
+      J::Obj(Obj { name, .. }) => Some(name),
       _ => None,
     }
   }
@@ -432,7 +441,12 @@ fn render(node: &Node<'_, J>) -> String {
 }
 
 fn obj(fields: Vec<(&'static str, J)>) -> J {
-  J::Obj("Query", fields)
+  object("Query", fields)
+}
+
+/// An object of the concrete type `name`.
+fn object(name: &'static str, fields: Vec<(&'static str, J)>) -> J {
+  J::Obj(Obj { name, fields })
 }
 
 // ------------------------------------------------------------------------------------------
@@ -560,13 +574,13 @@ fn skip_and_include_are_read_from_literals_and_variables() {
     }
   "#;
   let root = obj(vec![
-    ("a", J::Obj("Leaf", vec![("x", J::Str("A".into()))])),
-    ("b", J::Obj("Leaf", vec![("x", J::Str("B".into()))])),
+    ("a", object("Leaf", vec![("x", J::Str("A".into()))])),
+    ("b", object("Leaf", vec![("x", J::Str("B".into()))])),
     (
       "nest",
-      J::Obj(
+      object(
         "Query",
-        vec![("a", J::Obj("Leaf", vec![("x", J::Str("N".into()))]))],
+        vec![("a", object("Leaf", vec![("x", J::Str("N".into()))]))],
       ),
     ),
   ]);
@@ -587,8 +601,8 @@ fn skip_beats_include() {
     NEST_SDL,
     "{ a @skip(if: true) @include(if: true) { x } b { x } }",
     obj(vec![
-      ("a", J::Obj("Leaf", vec![("x", J::Str("A".into()))])),
-      ("b", J::Obj("Leaf", vec![("x", J::Str("B".into()))])),
+      ("a", object("Leaf", vec![("x", J::Str("A".into()))])),
+      ("b", object("Leaf", vec![("x", J::Str("B".into()))])),
     ]),
   );
   assert_eq!(data, r#"{"b":{"x":"B"}}"#);
@@ -644,7 +658,7 @@ const CONDITION_ARGUMENT_MISSING: &str =
 /// The root object every case in this section resolves against.
 fn guarded() -> J {
   let level = || {
-    J::Obj(
+    object(
       "Level",
       vec![
         ("secret", J::Str("SECRET".into())),
@@ -1063,9 +1077,9 @@ fn a_variable_argument_delivers_the_value_that_passed_the_check() {
     let id = request.id();
     let delivered = match request.arguments() {
       [argument] => match argument.source() {
-        ArgumentSource::Variable { name, value } => {
-          assert_eq!(*name, "n");
-          value.clone()
+        ArgumentSource::Variable(v) => {
+          assert_eq!(v.name(), "n");
+          v.value().clone()
         }
         other => panic!("`count` is a bare variable and arrived as {other:?}"),
       },
@@ -1091,7 +1105,7 @@ fn fields_sharing_a_response_key_merge_their_selection_sets() {
     "{ a { x } a { y } }",
     obj(vec![(
       "a",
-      J::Obj(
+      object(
         "Leaf",
         vec![("x", J::Str("X".into())), ("y", J::Str("Y".into()))],
       ),
@@ -1201,7 +1215,7 @@ fn an_alias_is_the_response_key_and_the_path_segment() {
   let (data, errors) = run(
     NEST_SDL,
     "{ first: a { x } second: a { x } }",
-    obj(vec![("a", J::Obj("Leaf", vec![("x", J::Fail("boom"))]))]),
+    obj(vec![("a", object("Leaf", vec![("x", J::Fail("boom"))]))]),
   );
   assert_eq!(data, r#"{"first":{"x":null},"second":{"x":null}}"#);
   assert_eq!(errors.len(), 2, "{errors:?}");
@@ -1240,7 +1254,7 @@ fn fragment_spreads_and_inline_fragments_apply_their_type_conditions() {
     query,
     obj(vec![(
       "pet",
-      J::Obj(
+      object(
         "Dog",
         vec![("name", J::Str("Rex".into())), ("barks", J::Bool(true))],
       ),
@@ -1262,7 +1276,7 @@ fn a_union_resolves_to_its_member() {
     "{ thing { __typename ... on Cat { meows } ... on Dog { barks } } }",
     obj(vec![(
       "thing",
-      J::Obj("Cat", vec![("meows", J::Bool(true))]),
+      object("Cat", vec![("meows", J::Bool(true))]),
     )]),
   );
   assert_eq!(data, r#"{"thing":{"__typename":"Cat","meows":true}}"#);
@@ -1287,7 +1301,7 @@ fn an_abstract_type_resolved_to_an_impossible_type_is_a_field_error() {
     "{ thing { __typename } }",
     // `Query` is a real type and is not a member of `Thing`, which is the mistake a driver whose
     // `resolveType` returns the wrong table's name actually makes.
-    obj(vec![("thing", J::Obj("Query", vec![]))]),
+    obj(vec![("thing", object("Query", vec![]))]),
   );
   assert_eq!(data, r#"{"thing":null}"#);
   assert_eq!(errors.len(), 1, "{errors:?}");
@@ -1313,7 +1327,7 @@ fn an_abstract_type_resolved_to_a_name_that_is_not_a_possible_object_is_a_field_
       "{ pet { name } }",
       obj(vec![(
         "pet",
-        J::Obj(named, vec![("name", J::Str("N".into()))]),
+        object(named, vec![("name", J::Str("N".into()))]),
       )]),
     );
     assert_eq!(data, r#"{"pet":null}"#, "resolved to {named}");
@@ -1352,7 +1366,7 @@ fn typename_on_an_interface_names_the_type_the_fragments_were_chosen_by() {
     query,
     obj(vec![(
       "pet",
-      J::Obj(
+      object(
         "Dog",
         vec![("name", J::Str("Rex".into())), ("barks", J::Bool(true))],
       ),
@@ -1375,8 +1389,8 @@ fn typename_follows_each_element_of_an_abstract_list() {
     obj(vec![(
       "pets",
       J::List(vec![
-        J::Obj("Dog", vec![("barks", J::Bool(true))]),
-        J::Obj("Cat", vec![("meows", J::Bool(false))]),
+        object("Dog", vec![("barks", J::Bool(true))]),
+        object("Cat", vec![("meows", J::Bool(false))]),
       ]),
     )]),
   );
@@ -1401,7 +1415,7 @@ fn typename_merges_and_aliases_like_any_other_response_key() {
     "{ a { __typename __typename kind: __typename x } }",
     obj(vec![(
       "a",
-      J::Obj("NotEvenAType", vec![("x", J::Str("X".into()))]),
+      object("NotEvenAType", vec![("x", J::Str("X".into()))]),
     )]),
   );
   assert_eq!(data, r#"{"a":{"__typename":"Leaf","kind":"Leaf","x":"X"}}"#);
@@ -1465,7 +1479,7 @@ fn a_leaf_that_cannot_be_serialised_is_a_field_error() {
     obj(vec![(
       "a",
       // `n` is an `Int` and coerces; `x` is a `String` handed an integer and does not.
-      J::Obj("Leaf", vec![("n", J::Int(7)), ("x", J::Int(7))]),
+      object("Leaf", vec![("n", J::Int(7)), ("x", J::Int(7))]),
     )]),
   );
   assert_eq!(data, r#"{"a":{"n":7,"x":null}}"#);
@@ -1639,7 +1653,7 @@ fn abandoned_work_is_reported_on_its_own_channel() {
     .expect("the operation resolves");
 
   let nest = executor.poll_resolve(&mut space).expect("nest").id();
-  executor.handle_resolved(&mut space, nest, J::Obj("Wrap", vec![]));
+  executor.handle_resolved(&mut space, nest, object("Wrap", vec![]));
   assert_eq!(executor.poll_abandoned(), None);
 
   // Both children in flight before either is answered, which is the situation the channel exists
@@ -1731,7 +1745,7 @@ fn a_request_abandoned_by_a_previous_operation_cannot_answer_this_one() {
     .start(&mut space, None, obj(vec![]))
     .expect("the operation resolves");
   let nest = executor.poll_resolve(&mut space).expect("nest").id();
-  executor.handle_resolved(&mut space, nest, J::Obj("Wrap", vec![]));
+  executor.handle_resolved(&mut space, nest, object("Wrap", vec![]));
   let boom = executor.poll_resolve(&mut space).expect("boom").id();
   let stale = executor.poll_resolve(&mut space).expect("slow").id();
   executor.handle_field_error(boom, "boom");
@@ -1751,7 +1765,7 @@ fn a_request_abandoned_by_a_previous_operation_cannot_answer_this_one() {
     .start(&mut space, None, obj(vec![]))
     .expect("the operation resolves");
   let nest = executor.poll_resolve(&mut space).expect("nest").id();
-  executor.handle_resolved(&mut space, nest, J::Obj("Wrap", vec![]));
+  executor.handle_resolved(&mut space, nest, object("Wrap", vec![]));
   let boom = executor.poll_resolve(&mut space).expect("boom").id();
   let slow = executor.poll_resolve(&mut space).expect("slow").id();
 
@@ -1794,7 +1808,7 @@ fn every_admissible_ceiling_finishes_a_valid_query() {
   let root = obj(vec![
     (
       "nest",
-      J::Obj(
+      object(
         "Wrap",
         vec![("boom", J::Fail("boom")), ("slow", J::Str("S".into()))],
       ),
@@ -2044,9 +2058,9 @@ fn answering_a_request_releases_its_argument_value() {
   let id = request.id();
   match request.arguments() {
     [argument] => match argument.source() {
-      ArgumentSource::Variable { name, value } => {
-        assert_eq!(*name, "text");
-        assert!(matches!(value.payload, Payload::Str("V")));
+      ArgumentSource::Variable(v) => {
+        assert_eq!(v.name(), "text");
+        assert!(matches!(v.value().payload, Payload::Str("V")));
       }
       other => panic!("`text` is a bare variable and arrived as {other:?}"),
     },
@@ -2848,12 +2862,12 @@ fn a_refused_expansion_leaves_the_room_a_later_sibling_is_owed() {
              type C { z: String }";
   let query = "{ a { x x x x x x x x } b { y y y y y } c { z z } }";
   let limits = Limits::default().with_max_response_metadata(NonZeroU32::new(28).expect("not zero"));
-  let root = J::Obj(
+  let root = object(
     "Query",
     vec![
-      ("a", J::Obj("A", vec![("x", J::Str("X".to_owned()))])),
-      ("b", J::Obj("B", vec![("y", J::Str("Y".to_owned()))])),
-      ("c", J::Obj("C", vec![("z", J::Str("Z".to_owned()))])),
+      ("a", object("A", vec![("x", J::Str("X".to_owned()))])),
+      ("b", object("B", vec![("y", J::Str("Y".to_owned()))])),
+      ("c", object("C", vec![("z", J::Str("Z".to_owned()))])),
     ],
   );
   let (data, errors) = run_bounded(sdl, query, root, limits);
@@ -3229,7 +3243,7 @@ fn a_resolvable_abstract_type_does_not_need_the_interner() {
     "{ pet { n } }",
     obj(vec![(
       "pet",
-      J::Obj(LONG_TYPE, vec![("n", J::Str("Rex".to_owned()))]),
+      object(LONG_TYPE, vec![("n", J::Str("Rex".to_owned()))]),
     )]),
     limits,
   );
@@ -3253,7 +3267,7 @@ fn a_typename_on_an_abstract_type_does_need_the_interner() {
   let (_, errors) = run_bounded(
     ARENA_SDL,
     "{ pet { __typename } }",
-    obj(vec![("pet", J::Obj(LONG_TYPE, vec![]))]),
+    obj(vec![("pet", object(LONG_TYPE, vec![]))]),
     limits,
   );
 
@@ -3279,7 +3293,7 @@ fn an_impossible_type_that_cannot_be_quoted_still_says_what_went_wrong() {
     "{ pet { n } }",
     obj(vec![(
       "pet",
-      J::Obj(
+      object(
         "AnEquallyLongNameThatIsNotAPetAtAllHere",
         vec![("n", J::Str("Buck".to_owned()))],
       ),
@@ -3499,7 +3513,7 @@ fn an_impossible_type_refused_for_work_names_the_work_ceiling() {
   let (_, errors) = run_bounded(
     ARENA_SDL,
     "{ pet { n } }",
-    obj(vec![("pet", J::Obj("pet", vec![("n", J::Null)]))]),
+    obj(vec![("pet", object("pet", vec![("n", J::Null)]))]),
     limits,
   );
 
@@ -3552,7 +3566,7 @@ fn a_runtime_type_lookup_the_budget_refuses_is_not_an_impossible_type() {
   let (_, errors) = run_bounded(
     ARENA_SDL,
     "{ pet { n } }",
-    obj(vec![("pet", J::Obj("pet", vec![("n", J::Null)]))]),
+    obj(vec![("pet", object("pet", vec![("n", J::Null)]))]),
     limits,
   );
 
@@ -3608,7 +3622,7 @@ fn a_drivers_runtime_type_name_is_charged_once_a_position() {
   fn least(concrete: &'static str) -> u32 {
     let schema = sdl(concrete);
     let elements: Vec<J> = (0..WIDTH)
-      .map(|_| J::Obj(concrete, vec![("n", J::Null)]))
+      .map(|_| object(concrete, vec![("n", J::Null)]))
       .collect();
     let clears = |limit: u32| {
       let limits =
@@ -3710,19 +3724,19 @@ type Other {
 "#;
 
 fn txn_root() -> J {
-  J::Obj(
+  object(
     "Query",
     vec![
       (
         "bad",
-        J::Obj(
+        object(
           "Bad",
           vec![("a", J::Str("A".to_owned())), ("b", J::Str("B".to_owned()))],
         ),
       ),
       (
         "other",
-        J::Obj("Other", vec![("ok", J::Str("OK".to_owned()))]),
+        object("Other", vec![("ok", J::Str("OK".to_owned()))]),
       ),
     ],
   )
@@ -3787,13 +3801,13 @@ fn a_failed_collection_gives_its_interned_keys_back() {
   let (data, errors) = run_bounded(
     TXN_ARENA_SDL,
     "query ($missing: Boolean!) { bad { zzzzzzzzzz: a boom @include(if: $missing) } other { ok } }",
-    J::Obj(
+    object(
       "Query",
       vec![
-        ("bad", J::Obj("Bad", vec![("a", J::Str("A".to_owned()))])),
+        ("bad", object("Bad", vec![("a", J::Str("A".to_owned()))])),
         (
           "other",
-          J::Obj("Other", vec![("ok", J::Str("OK".to_owned()))]),
+          object("Other", vec![("ok", J::Str("OK".to_owned()))]),
         ),
       ],
     ),
@@ -4255,13 +4269,13 @@ type Other {
 "#;
 
 fn list_txn_root(bad: J) -> J {
-  J::Obj(
+  object(
     "Query",
     vec![
       ("bad", bad),
       (
         "other",
-        J::Obj("Other", vec![("ok", J::Str("OK".to_owned()))]),
+        object("Other", vec![("ok", J::Str("OK".to_owned()))]),
       ),
     ],
   )
@@ -4364,16 +4378,16 @@ fn answering_an_abandoned_request_frees_its_in_flight_entry() {
     .expect("the operation resolves");
 
   let nest = executor.poll_resolve(&mut space).expect("nest").id();
-  executor.handle_resolved(&mut space, nest, J::Obj("Wrap", vec![]));
+  executor.handle_resolved(&mut space, nest, object("Wrap", vec![]));
   let deep = executor.poll_resolve(&mut space).expect("deep").id();
-  executor.handle_resolved(&mut space, deep, J::Obj("Wrap", vec![]));
+  executor.handle_resolved(&mut space, deep, object("Wrap", vec![]));
   let bulk = executor.poll_resolve(&mut space).expect("bulk").id();
   executor.handle_resolved(
     &mut space,
     bulk,
     J::List(vec![
-      J::Obj("Cell", vec![("text", J::Str("A".to_owned()))]),
-      J::Obj("Cell", vec![("text", J::Str("B".to_owned()))]),
+      object("Cell", vec![("text", J::Str("A".to_owned()))]),
+      object("Cell", vec![("text", J::Str("B".to_owned()))]),
     ]),
   );
 
@@ -4490,7 +4504,7 @@ fn offer(executor: &mut Executor<'_, &str, Space>, space: &mut Space) -> Option<
 }
 
 fn holder(text: &str) -> J {
-  J::Obj(
+  object(
     "Holder",
     vec![("text", J::Str(text.to_owned())), ("inner", J::Null)],
   )
@@ -4586,7 +4600,7 @@ fn a_mutation_withholds_for_the_subtree_and_not_just_the_answer() {
   executor.handle_resolved(
     &mut space,
     one,
-    J::Obj("Holder", vec![("inner", holder("deep"))]),
+    object("Holder", vec![("inner", holder("deep"))]),
   );
 
   let (path, inner) = offer(&mut executor, &mut space).expect("`one.inner`");
@@ -5185,7 +5199,7 @@ fn a_typename_between_two_mutation_fields_keeps_its_place() {
   let (data, errors) = run(
     MUTATION_SDL,
     query,
-    J::Obj("Mutation", vec![("one", holder("1")), ("two", holder("2"))]),
+    object("Mutation", vec![("one", holder("1")), ("two", holder("2"))]),
   );
   assert!(errors.is_empty(), "{errors:?}");
   assert_eq!(
@@ -6275,7 +6289,7 @@ fn the_errors_entry_is_the_one_refusal_start_raised() {
       "subscription { newMessage(roomId: \"1\") }",
       None,
       Limits::default().with_max_selection_visits(NonZeroU32::new(8).expect("eight is not zero")),
-      StartError::SourceFieldArgumentBudget { limit: 8 },
+      StartError::SourceFieldArgumentBudget(8),
     ),
     (
       both,

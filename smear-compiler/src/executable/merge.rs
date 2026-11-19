@@ -69,8 +69,8 @@ use crate::{
   diagnostic::{Context, MergeConflict},
   schema::{Range32, RootOperation, TypeId},
   scratch::{
-    Compared, MergeField, MergeFrame, MergeKid, MergeMemo, MergeName, MergeSet, NONE, byte_units,
-    count_units, get_bit, hash_bytes, hash_u32, scan_eq,
+    CompareFrame, Compared, MergeField, MergeFrame, MergeKid, MergeMemo, MergeName, MergeSet, NONE,
+    byte_units, count_units, get_bit, hash_bytes, hash_u32, scan_eq,
   },
 };
 
@@ -1359,9 +1359,13 @@ where
     right: &'d InputValue<S>,
   ) -> ControlFlow<(), bool> {
     self.scratch.merge_compare.clear();
-    self.scratch.merge_compare.push((NONE, NONE, 0));
+    self.scratch.merge_compare.push(CompareFrame {
+      left: NONE,
+      right: NONE,
+      cursor: 0,
+    });
 
-    while let Some(&(_, _, cursor)) = self.scratch.merge_compare.last() {
+    while let Some(&CompareFrame { cursor, .. }) = self.scratch.merge_compare.last() {
       let depth = self.scratch.merge_compare.len() as u32;
       // A value literal's nesting is bounded by the work counter rather than by `merge_depth`,
       // which means the *response shape*'s nesting and nothing else. Charging the depth makes the
@@ -1443,7 +1447,7 @@ where
         continue;
       }
       if let Some(top) = self.scratch.merge_compare.last_mut() {
-        top.2 += 1;
+        top.cursor += 1;
       }
 
       let mate = match (a.as_object(), b.as_object()) {
@@ -1470,7 +1474,11 @@ where
         // A list pairs positionally; `shallow_equal` has already established equal lengths.
         _ => cursor,
       };
-      self.scratch.merge_compare.push((cursor, mate, 0));
+      self.scratch.merge_compare.push(CompareFrame {
+        left: cursor,
+        right: mate,
+        cursor: 0,
+      });
     }
     ControlFlow::Continue(true)
   }
@@ -1556,12 +1564,12 @@ fn buckets_for(count: usize) -> usize {
 /// Follows a comparison stack's child-index chain into one of the two value trees.
 fn descend_value<'a, S>(
   root: &'a InputValue<S>,
-  frames: &[(u32, u32, u32)],
+  frames: &[CompareFrame],
   left: bool,
 ) -> Option<&'a InputValue<S>> {
   let mut value = root;
   for frame in &frames[1..] {
-    let index = (if left { frame.0 } else { frame.1 }) as usize;
+    let index = (if left { frame.left } else { frame.right }) as usize;
     value = match value {
       InputValue::List(list) => list.values().get(index)?,
       InputValue::Object(object) => object.fields().get(index)?.value(),

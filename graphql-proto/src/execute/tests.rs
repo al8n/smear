@@ -3433,11 +3433,10 @@ fn the_extensions_entry_points_settle_the_deferred_object_too() {
 
 /// How many entries the lax map is grown to before it is emptied.
 ///
-/// Chosen so the spine's capacity lands on a power of two exactly — `Vec` doubles, so 4,096
-/// pushes leave 4,096 slots — and so the overshoot against the strict ceiling below is a number
-/// rather than an argument. `insert` scans for a duplicate on every call, so growing a map is
-/// quadratic in its own ceiling; that cost is why this is 4,096 and not a million, and it is a
-/// cost the *map's* ceilings bound and the executor's do not.
+/// The map's high-water mark lands on exactly this, so the overshoot against the strict ceiling
+/// below is a number rather than an argument. Emptying the map from its first key shifts every
+/// later entry down once per removal, so the fixture is quadratic in this; that cost is why it is
+/// 4,096 and not a million, and it is a cost the *map's* ceilings bound and the executor's do not.
 const GROWN_ENTRIES: usize = 4096;
 
 /// A map grown under a lax `Limits` and emptied does not carry its allocation into a strict
@@ -3445,8 +3444,8 @@ const GROWN_ENTRIES: usize = 4096;
 ///
 /// The two ceilings `set_extensions` re-checks bound what the map *reports* — `len` and
 /// `key_bytes` — and the resource being bounded is what it *holds*. `remove` gives the key bytes
-/// back to the ceiling and gives no slots back to the allocator, so an empty map can arrive
-/// carrying a spine no `Limits` this executor was built with ever authorised.
+/// back to the ceiling and gives no room back to the allocator, so an empty map can arrive holding
+/// allocations no `Limits` this executor was built with ever authorised.
 ///
 /// Read off the executor's own field rather than through
 /// [`take_extensions`](Executor::take_extensions), because the claim is about what is *retained*:
@@ -3457,7 +3456,7 @@ const GROWN_ENTRIES: usize = 4096;
             slots the executor retains after accepting a map grown under laxer limits, which is \
             the shape of an allocation, re-derived by an interpreter out of the same MIR, and not \
             a question of undefined behaviour. Its fixture is `GROWN_ENTRIES` inserts and removes \
-            into a map whose `insert` scans for a duplicate, quadratic by design. Found by the \
+            on a map whose `remove` shifts every later entry, quadratic by design. Found by the \
             five-minute detector's measurement: over five minutes under `cargo miri test` on \
             aarch64-apple-darwin (Stacked Borrows, 2026-09-25). The file's header carries the \
             table. Declared in `ci/miri_scope.py`'s ignore table, which is what stops this from \
@@ -3914,20 +3913,27 @@ fn a_map_on_a_discarded_positions_error_holds_nothing_after_the_next_start() {
   );
 }
 
-/// A map built under this executor's *own* ceilings and emptied with `remove` is accepted, with its
-/// spine re-derived.
+/// A map grown under laxer ceilings and emptied with `remove` is accepted with a field error, with
+/// its allocations re-derived: the per-error door's twin of the `set_extensions` cases above.
 ///
-/// Its own ceilings are not enough to bound what it holds, and this is the case that shows it: a
-/// `Vec` grows by doubling, so five entries leave eight slots under a ceiling of five, and `remove`
-/// gives back no slot at all. Nothing here is over a ceiling the map reports against, so the call
-/// accepts; what it must not do is keep the eight.
+/// Nothing it reports is over a ceiling this executor reads, so the call accepts; what it holds is
+/// room for every entry it ever had, and what the call must not do is keep that.
+///
+/// It used to build the map under this executor's *own* ceilings and count on `Vec`'s doubling to
+/// leave eight slots under a ceiling of five. The map keeps its own high-water mark now, and a
+/// map's own entry ceiling bounds that mark by construction, so a map built under this executor's
+/// ceilings already holds no more than a constant multiple of them and is kept as it is. A laxer
+/// `Limits` is the one way left to arrive holding more, so it is the fixture.
 #[test]
-fn a_map_emptied_under_this_executors_own_ceilings_is_re_derived_on_acceptance() {
-  /// Not a power of two, which is what puts a doubled spine past it.
+fn a_map_emptied_under_laxer_ceilings_is_re_derived_on_the_error_path() {
+  /// This executor's own entry ceiling.
   const CEILING: u32 = 5;
+  /// What the lax map is grown to before it is emptied: four times the ceiling.
+  const GROWN: u32 = 4 * CEILING;
 
   let own =
     Limits::default().with_max_extension_entries(NonZeroU32::new(CEILING).expect("not zero"));
+  let lax = Limits::default().with_max_extension_entries(NonZeroU32::new(GROWN).expect("not zero"));
   let (schema, document) = compile_against(ERROR_MAP_SDL, "{ plain }");
   let mut space = Space;
   let mut executor = Executor::with_limits(&schema, &document, own);
@@ -3936,13 +3942,13 @@ fn a_map_emptied_under_this_executors_own_ceilings_is_re_derived_on_acceptance()
     .expect("the operation resolves");
   let plain = executor.poll_resolve(&mut space).expect("`plain`").id();
 
-  let mut map = Extensions::new(executor.limits());
-  for index in 0..CEILING {
+  let mut map = Extensions::new(&lax);
+  for index in 0..GROWN {
     map
       .insert(&std::format!("k{index}"), Value::Text)
-      .expect("up to this executor's own ceiling");
+      .expect("up to the lax ceiling");
   }
-  for index in 0..CEILING {
+  for index in 0..GROWN {
     map
       .remove(&std::format!("k{index}"))
       .expect("every key was inserted");
@@ -3950,7 +3956,8 @@ fn a_map_emptied_under_this_executors_own_ceilings_is_re_derived_on_acceptance()
   assert!(map.is_empty(), "emptied by every count the ceilings read");
   assert!(
     map.capacity() > CEILING as usize,
-    "the spine has to be past the ceiling or this case proves nothing: it holds {} slots",
+    "the map has to hold room past this executor's ceiling or this case proves nothing: it held \
+     {} entries",
     map.capacity()
   );
   executor
@@ -3960,7 +3967,7 @@ fn a_map_emptied_under_this_executors_own_ceilings_is_re_derived_on_acceptance()
   let retained = executor.error_extensions[0].capacity();
   assert!(
     retained as u64 <= u64::from(CEILING),
-    "the executor is holding {retained} entry slots for one empty map under a ceiling of \
+    "the executor is holding room for {retained} entries for one empty map under a ceiling of \
      {CEILING}"
   );
   let response = executor.poll_response().expect("nothing is outstanding");
@@ -4830,8 +4837,12 @@ fn no_buffer_a_subscription_retains_grows_with_the_stream() {
     ("locations", held.locations, u64::from(METADATA)),
     // `Interner::insert`, refused past the arena ceiling. A name is at least one byte, so entries
     // cannot outrun bytes.
-    ("interner entries", held.interner.0, u64::from(INTERNED)),
-    ("interner bytes", held.interner.1, u64::from(INTERNED)),
+    (
+      "interner entries",
+      held.interner.entries,
+      u64::from(INTERNED),
+    ),
+    ("interner bytes", held.interner.bytes, u64::from(INTERNED)),
     // `fail`/`fail_at`, derived: at most one row per position.
     ("errors", held.errors, u64::from(SLOTS)),
     // `handle_field_error_with`, derived: at most one map per error row, so one per position.
@@ -4846,10 +4857,10 @@ fn no_buffer_a_subscription_retains_grows_with_the_stream() {
     ("scratch.keys", held.scratch.keys, u64::from(INTERNED)),
     // Draft §6.3's `visitedFragments`: a bitset word per 64 fragment ordinals, and the ordinals
     // set. **The document's size, not a ceiling** — every ordinal comes from the fragment index.
-    ("scratch.visited words", held.scratch.visited.0, 1),
+    ("scratch.visited words", held.scratch.visited.words, 1),
     (
       "scratch.visited seen",
-      held.scratch.visited.1,
+      held.scratch.visited.ordinals,
       FRAGMENTS as u64,
     ),
     // One frame per fragment spread or inline fragment, each charged a visit before it is taken.
@@ -5282,7 +5293,7 @@ fn a_name_the_arena_refuses_is_not_charged_for_its_copy() {
   let mut visits = Visits::new(u32::MAX - 1);
   let refused = interner.intern(&long, &mut visits);
   assert!(
-    matches!(refused, Err(Unstored::Arena { limit }) if limit == CAP),
+    matches!(refused, Err(Unstored::Arena(limit)) if limit == CAP),
     "the arena is what refuses a {}-byte name under a {CAP}-byte cap",
     long.len()
   );

@@ -60,16 +60,18 @@
 //!
 //! **Two ceilings and not one, because the two are the factors.** Bounding entries alone leaves one
 //! key free to be a gigabyte; bounding key bytes alone leaves an unbounded number of empty-keyed
-//! entries, since a zero-length key is a legal key. Together they bound storage
-//! (`Σ key_len ≤ max_extension_key_bytes`, plus `entries ≤ max_extension_entries` `Vec` slots) and
-//! they bound the scan, whose worst case is `entries × Σ key_len` byte comparisons over the life of
-//! the map.
+//! entries, since a zero-length key is a legal key. Together they bound what the map reports
+//! (`Σ key_len ≤ max_extension_key_bytes` and `entries ≤ max_extension_entries`), and with it the
+//! work of finding a key: a lookup compares its key only against the entries whose hash it shares,
+//! and even where a client can make every hash collide, building the map costs the order of the
+//! linear scan's worst case, `entries × Σ key_len` byte comparisons. [`Extensions`] has the hasher
+//! and the argument.
 //!
 //! [`Extensions::insert`] is therefore fallible and **hands the caller's value back** on refusal,
-//! and it takes `&str` rather than an `impl Into<Box<str>>` for a reason that is not stylistic: an
-//! owning parameter would have allocated the key *before* the ceiling could refuse it, and a
-//! ceiling that allocates first is not a ceiling. For the same reason a repeated key is resolved by
-//! looking first and replacing in place, so a duplicate costs no allocation and charges nothing.
+//! and it takes `&str` rather than an owned key for a reason that is not stylistic: an owning
+//! parameter would have allocated the key *before* the ceiling could refuse it, and a ceiling that
+//! allocates first is not a ceiling. For the same reason a repeated key is resolved by looking
+//! first and replacing in place, so a duplicate costs no allocation and charges nothing.
 //!
 //! # The two ceilings bound what the map reports; a third quantity is what it holds
 //!
@@ -77,27 +79,32 @@
 //! the diagnosis is one step past the one that produced them. Entries and key bytes are the two
 //! factors of the map's *reported content*, and they do bound it. The resource
 //! [`set_extensions`](crate::Executor::set_extensions) is actually protecting is *retained memory*,
-//! whose factors are not those two: the spine's **capacity** is not derived from the entries at
-//! all. It is a high-water mark, and [`remove`](Extensions::remove) — whose own doc comment used to
-//! stop at "giving its key bytes back to the ceiling" — refunds the budget and returns no slot to
+//! whose factors are not those two: the map's allocations — its entry vector and its hash index —
+//! are not derived from the entries at all. Each grows to fit the most entries the map has held and
+//! neither shrinks on its own, and [`remove`](Extensions::remove) — whose own doc comment used to
+//! stop at "giving its key bytes back to the ceiling" — refunds the budget and returns nothing to
 //! the allocator. So a map grown to a million entries under a lax [`Limits`] and emptied reads as
-//! `len() == 0` and `key_bytes() == 0` through both re-checks while holding a million slots, and
-//! the executor keeps that allocation until the next `start`, a `take_extensions`, or drop.
+//! `len() == 0` and `key_bytes() == 0` through both re-checks while holding room for a million,
+//! and the executor keeps that allocation until the next `start`, a `take_extensions`, or drop.
 //!
-//! `Extensions::shrink_to_ceiling` closes it by re-deriving the allocation from the entries on the
-//! way in, and carries the argument for normalizing rather than refusing. The rule worth keeping is
-//! the general one: **a ceiling bounds a retained buffer only if every growth of that buffer passed
-//! through it.** This spine was the only buffer in the crate grown under a ceiling its retainer
-//! does not own — which is exactly what "a map built under a laxer `Limits`" means, and the
-//! re-check was written for the two quantities that were easy to see.
+//! `Extensions::shrink_to_ceiling` closes it by re-deriving the allocations from the entries on the
+//! way in, and carries the argument for normalizing rather than refusing. What it reads is a
+//! high-water mark the map keeps itself, and `Extensions::capacity` has why no allocation's own
+//! capacity is the measure. The rule worth keeping is the general one: **a ceiling bounds a
+//! retained buffer only if every growth of that buffer passed through it.** This map was the only
+//! buffer in the crate grown under a ceiling its retainer does not own — which is exactly what "a
+//! map built under a laxer `Limits`" means, and the re-check was written for the two quantities
+//! that were easy to see.
 //!
 //! # What it costs, stated rather than waved at
 //!
-//! One `Vec` and one boxed key per entry, paid once per response. An opaque `V::Value` allocated
-//! nothing, and that was its only real advantage. The comparison that settles it: a response tree is
-//! thousands of slots and the driver's own values are already owned by it, while an extensions map
-//! is a handful of keys written once — so this is not on any path that scales with the response,
-//! and it buys a state that cannot be reached rather than one that is merely discouraged.
+//! One hashed map — an entry vector and a hash index — and one frozen key per entry, inline up to
+//! 62 bytes where the target has pointer-width atomics, paid once per response. An opaque
+//! `V::Value` allocated nothing, and that was its only real advantage. The comparison that settles
+//! it: a response tree is thousands of slots and the driver's own values are already owned by it,
+//! while an extensions map is a handful of keys written once — so this is not on any path that
+//! scales with the response, and it buys a state that cannot be reached rather than one that is
+//! merely discouraged.
 //!
 //! Keys are owned rather than borrowed because they are the *driver's* strings, not the document's.
 //! An extension key is under no lexical restriction at all — it is not a GraphQL name — so the
@@ -108,17 +115,56 @@
 //!
 //! # No tier withholds it
 //!
-//! `alloc` is unconditional in this crate — the crate root aliases it as `std` when the `std`
-//! feature is off — and [`Executor`](crate::Executor) already allocates for every table it keeps.
-//! So this compiles and behaves the same under `--no-default-features` as it does with `std`, and
-//! no feature gates it.
+//! Both tiers have it, because both have a heap: `std` and `alloc` each turn on `indexmap`, and
+//! `alloc` without `std` turns on `foldhash` as well, for the hasher [`Extensions`] describes.
+//! With neither tier this crate exports nothing, this included — which is also what keeps
+//! `indexmap`, a crate that links `alloc` whatever its features, out of a build with no allocator.
+//! Between the two tiers only the hasher differs: what a map holds, refuses and iterates is the
+//! same.
 
-use core::fmt;
+use core::{fmt, iter::FusedIterator};
+
+use derive_more::IsVariant;
+use indexmap::IndexMap;
+use smear_schema::FrozenStr;
 
 use crate::Limits;
 
+#[cfg(test)]
+mod tests;
+
+/// The `BuildHasher` an [`Extensions`] map hashes its keys with: the standard library's, keyed
+/// per map from its per-thread random keys.
+#[cfg(feature = "std")]
+type KeyHasher = std::hash::RandomState;
+
+/// The `BuildHasher` an [`Extensions`] map hashes its keys with: foldhash at [`SEED`], because a
+/// build without the standard library has no randomness it can draw without blocking.
+#[cfg(not(feature = "std"))]
+type KeyHasher = foldhash::quality::FixedState;
+
+/// foldhash's seed in a build without the standard library.
+///
+/// Fixed and public on purpose: such a build has no randomness it can draw without blocking, and a
+/// seed in the source is no secret. [`Extensions`] says why foldhash's own `RandomState` is not
+/// used, and what the two extension ceilings bound a collision at.
+#[cfg(not(feature = "std"))]
+const SEED: u64 = 0x5EED_0000_0000_0001;
+
+#[cfg(feature = "std")]
+#[inline]
+fn key_hasher() -> KeyHasher {
+  std::hash::RandomState::new()
+}
+
+#[cfg(not(feature = "std"))]
+#[inline]
+const fn key_hasher() -> KeyHasher {
+  foldhash::quality::FixedState::with_seed(SEED)
+}
+
 /// Which ceiling refused an [`Extensions::insert`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum Ceiling {
   /// [`Limits::max_extension_entries`] has no room for another entry.
@@ -157,6 +203,14 @@ pub struct Full<V> {
 }
 
 impl<V> Full<V> {
+  #[inline]
+  const fn new(c: Ceiling, v: V) -> Self {
+    Self {
+      ceiling: c,
+      value: v,
+    }
+  }
+
   /// Returns which ceiling refused.
   #[inline]
   pub const fn ceiling(&self) -> Ceiling {
@@ -206,18 +260,55 @@ impl<V: fmt::Debug> core::error::Error for Full<V> {}
 /// because it is deterministic and it is the one order the driver can predict; a serialiser that
 /// writes [`iter`](Extensions::iter) in order produces the same bytes for the same calls.
 ///
-/// # It is a small map, and it is searched
+/// # Lookup is hashed, and the order is still the calls'
 ///
-/// Lookup and [`insert`](Extensions::insert) are linear, and that is affordable *because* of the
-/// ceilings rather than in spite of them: the whole life of a map costs at most
-/// `max_extension_entries × max_extension_key_bytes` byte comparisons. A hash map would cost a
-/// hasher, a `no_std` story for it and a non-deterministic iteration order, to save nothing at this
-/// size.
+/// [`insert`](Extensions::insert), [`get`](Extensions::get) and [`remove`](Extensions::remove) find
+/// a key by its hash: the standard library's `RandomState` under `std`, which draws a random seed
+/// for each map, and foldhash at a fixed, public seed without it. The hasher decides nothing a
+/// reader can see. Iteration is insertion order whatever the hasher and whatever the seed, so a
+/// serialiser's bytes are still a function of the calls alone.
+///
+/// A key longer than all the stored keys together is not looked up at all: none of them can equal
+/// it, so the answer is known without reading a byte of it. A lookup therefore hashes at most
+/// [`key_bytes`](Extensions::key_bytes) bytes, which the key-byte ceiling bounds, whatever key it
+/// is handed.
+///
+/// # Without the standard library the seed is fixed and public
+///
+/// A build without the standard library has no randomness it can draw without blocking, so it
+/// hashes at one seed, written in the source for anyone to read.
+///
+/// foldhash's own `RandomState` would draw one, and drawing it can block forever. The first
+/// `RandomState` a process creates makes a single seed for the whole process, and a caller that
+/// arrives while another is writing that seed spins until the writer is done. On a single core, a
+/// task of higher priority that preempts the writer there spins forever, because the writer cannot
+/// run again to finish. A map creates its hasher when the map is created, so this would happen
+/// before a key is hashed, whatever the ceilings. A fixed seed is a constant: creating a map with
+/// it takes no lock and waits for nothing.
+///
+/// # What a collision costs
+///
+/// Where the seed is public, a driver that reflects request data into keys can be handed keys whose
+/// hashes all collide, and the ceilings bound what that costs. A lookup then compares its key with
+/// every stored key, at most [`key_bytes`](Extensions::key_bytes) bytes in all. A new key is looked
+/// up twice, once for a repeat and once to place it, so building a map up to its ceilings compares
+/// at most `2 × max_extension_entries × max_extension_key_bytes` bytes: the order of what the
+/// linear scan this map used before it hashed cost. A [`remove`](Extensions::remove) finds each entry
+/// after the one it removes again, to move it down a place, so one removal probes on the order of
+/// `max_extension_entries²` slots, comparing positions rather than key bytes.
+///
+/// Under the default ceilings, 64 entries and 4,096 key bytes, that is at most 524,288 byte
+/// comparisons to build a map and on the order of 4,096 probes for one removal. A deployment that
+/// raises the ceilings and hashes keys it does not trust accepts the same bound at its own numbers.
 pub struct Extensions<V> {
-  entries: std::vec::Vec<(std::boxed::Box<str>, V)>,
+  entries: IndexMap<FrozenStr, V, KeyHasher>,
   key_bytes: u32,
   max_entries: u32,
   max_key_bytes: u32,
+  /// The most entries this map has held since its allocations were last derived from its entries.
+  /// See [`capacity`](Extensions::capacity) for what it bounds and why it is kept rather than read
+  /// off the map.
+  high_water: u32,
 }
 
 impl<V> Extensions<V> {
@@ -234,14 +325,18 @@ impl<V> Extensions<V> {
   /// `extensions` key. Handing this to
   /// [`set_extensions`](crate::Executor::set_extensions) asks for `"extensions": {}`; not calling
   /// it at all asks for no entry.
+  ///
+  /// Allocates nothing. Not `const`, because the standard library's hasher draws its keys when it
+  /// is created.
   #[inline]
   #[must_use]
-  pub const fn new(limits: &Limits) -> Self {
+  pub fn new(limits: &Limits) -> Self {
     Self {
-      entries: std::vec::Vec::new(),
+      entries: IndexMap::with_hasher(key_hasher()),
       key_bytes: 0,
       max_entries: limits.max_extension_entries.get(),
       max_key_bytes: limits.max_extension_key_bytes.get(),
+      high_water: 0,
     }
   }
 
@@ -252,59 +347,76 @@ impl<V> Extensions<V> {
   /// `Err` when the entry would pass [`Limits::max_extension_entries`] or
   /// [`Limits::max_extension_key_bytes`], carrying the value back so a handle is not closed by a
   /// refusal. Nothing is allocated on that path: the key is borrowed and the ceiling is checked
-  /// before it is boxed, which is the difference between a ceiling and a receipt.
+  /// before it is copied, which is the difference between a ceiling and a receipt.
   ///
   /// # A repeated key costs nothing
   ///
   /// The key is looked up first, and a hit replaces the value in place — no allocation, no charge
-  /// against either ceiling, and the displaced value returned. Replacement rather than duplication
-  /// because a map has one value per key, and a serialised duplicate would be a map only by
-  /// accident.
+  /// against either ceiling, the entry's position kept, and the displaced value returned.
+  /// Replacement rather than duplication because a map has one value per key, and a serialised
+  /// duplicate would be a map only by accident.
+  ///
+  /// A key longer than all the stored keys together cannot repeat one, so it is not looked up: it
+  /// goes straight to the ceilings, in the same order, and one they refuse is never hashed.
   pub fn insert(&mut self, key: &str, value: V) -> Result<Option<V>, Full<V>> {
-    if let Some((_, slot)) = self.entries.iter_mut().find(|(name, _)| &**name == key) {
+    if self.may_contain(key)
+      && let Some(slot) = self.entries.get_mut(key)
+    {
       return Ok(Some(core::mem::replace(slot, value)));
     }
-    if self.entries.len() as u64 >= u64::from(self.max_entries) {
-      return Err(Full {
-        ceiling: Ceiling::Entries,
-        value,
-      });
+    if self.entries.len() as u64 >= self.max_entries as u64 {
+      return Err(Full::new(Ceiling::Entries, value));
     }
-    if u64::from(self.key_bytes) + key.len() as u64 > u64::from(self.max_key_bytes) {
-      return Err(Full {
-        ceiling: Ceiling::KeyBytes,
-        value,
-      });
+    if self.key_bytes as u64 + key.len() as u64 > self.max_key_bytes as u64 {
+      return Err(Full::new(Ceiling::KeyBytes, value));
     }
     self.key_bytes += key.len() as u32;
-    self.entries.push((key.into(), value));
+    // A new key, by the lookup above or by its length, so this displaces nothing.
+    self.entries.insert(FrozenStr::from(key), value);
+    // At most `max_entries`, which is a `u32`, by the first ceiling above.
+    self.high_water = self.high_water.max(self.entries.len() as u32);
     Ok(None)
   }
 
   /// Removes an entry, returning its value and giving its key bytes back to the ceiling.
   ///
+  /// The entries after it keep their order, each moved down one place: that shift is linear in
+  /// them, and it is what keeps iteration insertion order.
+  ///
   /// **The budget it refunds and the memory it frees are not the same thing.** The key's bytes are
-  /// freed with its `Box<str>`, and the entry's *slot* is not: a `Vec` never returns capacity to
-  /// the allocator on its own, so a map emptied this way reports nothing and is still holding
-  /// everything it grew to. That is only a footprint the driver chose while the map is the
-  /// driver's; the moment it crosses into an executor it is a footprint that executor never
+  /// freed with the key, and the entry's room is not: neither the entry vector nor the hash index
+  /// returns capacity to the allocator on its own, so a map emptied this way reports nothing and is
+  /// still holding everything it grew to. That is only a footprint the driver chose while the map
+  /// is the driver's; the moment it crosses into an executor it is a footprint that executor never
   /// authorised, which is why `Extensions::shrink_to_ceiling` exists and why it is called by
   /// [`Executor::set_extensions`](crate::Executor::set_extensions) and
   /// [`Executor::handle_field_error_with`](crate::Executor::handle_field_error_with) on the way in.
   pub fn remove(&mut self, key: &str) -> Option<V> {
-    let index = self.entries.iter().position(|(name, _)| &**name == key)?;
-    let (name, value) = self.entries.remove(index);
-    self.key_bytes -= name.len() as u32;
+    if !self.may_contain(key) {
+      return None;
+    }
+    let value = self.entries.shift_remove(key)?;
+    // The key removed is equal to `key`, so it is `key.len()` bytes, all of them charged.
+    self.key_bytes -= key.len() as u32;
     Some(value)
   }
 
   /// Returns the value at `key`.
+  #[inline]
   pub fn get(&self, key: &str) -> Option<&V> {
-    self
-      .entries
-      .iter()
-      .find(|(name, _)| &**name == key)
-      .map(|(_, value)| value)
+    if !self.may_contain(key) {
+      return None;
+    }
+    self.entries.get(key)
+  }
+
+  /// Whether `key` is short enough to be one of the stored keys.
+  ///
+  /// Each stored key is at most [`key_bytes`](Extensions::key_bytes) long, all of them together
+  /// being that, so a longer `key` equals none of them and is answered without being hashed.
+  #[inline]
+  const fn may_contain(&self, key: &str) -> bool {
+    key.len() as u64 <= self.key_bytes as u64
   }
 
   /// Returns how many entries the map holds.
@@ -329,19 +441,32 @@ impl<V> Extensions<V> {
     self.key_bytes
   }
 
-  /// How many entry slots the spine is *holding*, which is not what [`len`](Extensions::len)
-  /// reports.
+  /// The most entries the map has held since its allocations were last derived from its entries,
+  /// which is not what [`len`](Extensions::len) reports.
+  ///
+  /// A high-water mark the map keeps itself. Both of its allocations — the entry vector and the
+  /// hash index — are within a small constant multiple of it, because each grows only when the
+  /// entries outgrow it and neither shrinks on its own; so bounding the mark bounds what the map
+  /// holds, where bounding [`len`](Extensions::len) does not.
+  ///
+  /// **Not the map's own capacity, and that is measured rather than argued.** `IndexMap::capacity`
+  /// is the smaller of its two allocations, and the hash index's half falls with every removal
+  /// that leaves a tombstone — so it reads low on exactly the grown and emptied map this exists to
+  /// catch.
+  ///
+  /// A clone's mark is its length. [`Clone`] rebuilds the map from its live entries, so the clone
+  /// holds room for those alone, whatever its source grew to.
   ///
   /// Crate-visible rather than public because it is not something a caller needs to act on: the
   /// invariant it measures is enforced on the way into an executor rather than reported back for
   /// the driver to fix. See [`shrink_to_ceiling`](Extensions::shrink_to_ceiling).
   #[inline]
-  pub(crate) fn capacity(&self) -> usize {
-    self.entries.capacity()
+  pub(crate) const fn capacity(&self) -> usize {
+    self.high_water as usize
   }
 
-  /// Re-derives the spine from the entries it actually holds, when it is holding more slots than
-  /// `max_entries`.
+  /// Re-derives the map's allocations from the entries it actually holds, when its high-water mark
+  /// is over `max_entries`, and lowers the mark to what it holds.
   ///
   /// `max_entries` is the **executor's** [`max_extension_entries`](Limits::max_extension_entries)
   /// and never this map's. The map's own ceilings are the ones the caller picked, and the point of
@@ -351,18 +476,19 @@ impl<V> Extensions<V> {
   /// # Why the entry ceilings did not already bound this
   ///
   /// `len` and `key_bytes` are the map's *reported content*, and the two ceilings bound them
-  /// exactly. Capacity is not derived from either: it is a high-water mark of every entry the map
-  /// has ever held, and [`remove`](Extensions::remove) refunds the budget without returning the
-  /// slot. So a map grown to a million entries under a lax [`Limits`] and emptied back down reads
-  /// as `len() == 0` and `key_bytes() == 0` through every check
-  /// [`set_extensions`](crate::Executor::set_extensions) performs, while holding a million slots.
+  /// exactly. Its allocations are derived from neither: they follow the most entries the map has
+  /// ever held, and [`remove`](Extensions::remove) refunds the budget without returning any of
+  /// that room. So a map grown to a million entries under a lax [`Limits`] and emptied back down
+  /// reads as `len() == 0` and `key_bytes() == 0` through every check
+  /// [`set_extensions`](crate::Executor::set_extensions) performs, while holding room for a
+  /// million.
   ///
   /// The rule that generalises it: **a ceiling bounds a retained buffer only if every growth of
   /// that buffer passed through it.** Every other buffer the executor keeps satisfies that by
   /// construction — the interner's arena can only ever have been grown through
   /// `Interner::intern`, which is gated by the executor's own `max_interned_bytes`, so its
   /// never-shrunk capacity is bounded by the executor's ceiling however many operations it has
-  /// served. This spine was the one buffer grown under a ceiling the executor does not own.
+  /// served. This map was the one buffer grown under a ceiling the executor does not own.
   ///
   /// # Normalized rather than refused
   ///
@@ -371,47 +497,79 @@ impl<V> Extensions<V> {
   /// refusal would fail a legal program on a property its author cannot see. Nor could they act on
   /// it if they could see it: there is no `shrink` and no `drain` out here, so the only recovery
   /// would be to [`remove`](Extensions::remove) every entry into a freshly constructed map and
-  /// re-attach that. Re-deriving the allocation here keeps acceptance exactly as documented and
+  /// re-attach that. Re-deriving the allocations here keeps acceptance exactly as documented and
   /// makes the ceiling mean what it says.
   ///
-  /// Nothing is cloned. [`std::vec::Vec::shrink_to_fit`] moves the entries into the smaller
-  /// allocation, so no `V: Clone` bound appears anywhere and a driver's handle is neither
-  /// duplicated nor dropped. The cost is one reallocation, on the one path where the spine is over
-  /// the ceiling.
+  /// # Rebuilt at the cost of what it holds
+  ///
+  /// Nothing is cloned. The entries move, in order, out of the grown map through its owning
+  /// iterator and into a fresh one sized to them, so no `V: Clone` bound appears anywhere and a
+  /// driver's handle is neither duplicated nor dropped. The owning iterator reads the dense entry
+  /// vector, and the old hash index is freed without being read, so the work follows the entries
+  /// the map holds and not the room it grew to: one hash of each key, `key_bytes` bytes in all,
+  /// which every caller has checked against its own ceiling first.
+  ///
+  /// Not `IndexMap::shrink_to_fit`, which keeps the hash index and rebuilds it smaller by scanning
+  /// the old one for the entries still in it. That scan is as long as the most entries the map ever
+  /// held, so a map kept down to one entry from a million would be read through room for a
+  /// million on its way in.
   pub(crate) fn shrink_to_ceiling(&mut self, max_entries: u32) {
-    if self.capacity() as u64 > u64::from(max_entries) {
-      self.entries.shrink_to_fit();
+    if self.capacity() > max_entries as usize {
+      let fresh = IndexMap::with_capacity_and_hasher(self.entries.len(), key_hasher());
+      let grown = core::mem::replace(&mut self.entries, fresh);
+      // The keys are distinct, so each is new here and the reserved room is never outgrown.
+      self.entries.extend(grown);
+      // At most `max_entries` of this map's own ceiling, which is a `u32`.
+      self.high_water = self.entries.len() as u32;
     }
   }
 
   /// Returns the entries in insertion order.
-  pub fn iter(&self) -> impl ExactSizeIterator<Item = (&str, &V)> + '_ {
-    self.entries.iter().map(|(key, value)| (&**key, value))
+  #[inline]
+  pub fn iter(&self) -> ExtensionsIter<'_, V> {
+    ExtensionsIter {
+      inner: self.entries.iter(),
+    }
   }
 }
 
 impl<'e, V> IntoIterator for &'e Extensions<V> {
   type Item = (&'e str, &'e V);
-  type IntoIter = core::iter::Map<
-    core::slice::Iter<'e, (std::boxed::Box<str>, V)>,
-    fn(&'e (std::boxed::Box<str>, V)) -> (&'e str, &'e V),
-  >;
+  type IntoIter = ExtensionsIter<'e, V>;
 
+  #[inline]
   fn into_iter(self) -> Self::IntoIter {
-    fn pair<V>(entry: &(std::boxed::Box<str>, V)) -> (&str, &V) {
-      (&entry.0, &entry.1)
-    }
-    self.entries.iter().map(pair as fn(_) -> _)
+    self.iter()
   }
 }
 
 impl<V: Clone> Clone for Extensions<V> {
+  /// The entries in insertion order, with the ceilings they were inserted under, in a map that
+  /// holds room for those entries and no more.
+  ///
+  /// Rebuilt from the live entries rather than cloned whole. `IndexMap`'s own clone copies the hash
+  /// index at its full size, which follows the most entries the source ever held, so the clone of a
+  /// map grown and emptied would hold that index for nothing, once per copy and for as long as each
+  /// copy lives. Rebuilt, a clone holds room for its own entries alone and its high-water mark is
+  /// its length. Each key is hashed again on the way, which costs at most the bytes the key-byte
+  /// ceiling allows.
   fn clone(&self) -> Self {
+    let mut entries: IndexMap<FrozenStr, V, KeyHasher> =
+      IndexMap::with_capacity_and_hasher(self.entries.len(), key_hasher());
+    // The source's keys are distinct, so each is new here and the reserved room is never outgrown.
+    entries.extend(
+      self
+        .entries
+        .iter()
+        .map(|(key, value)| (key.clone(), value.clone())),
+    );
     Self {
-      entries: self.entries.clone(),
+      entries,
       key_bytes: self.key_bytes,
       max_entries: self.max_entries,
       max_key_bytes: self.max_key_bytes,
+      // At most `max_entries`, which is a `u32`.
+      high_water: self.entries.len() as u32,
     }
   }
 }
@@ -419,11 +577,14 @@ impl<V: Clone> Clone for Extensions<V> {
 impl<V: PartialEq> PartialEq for Extensions<V> {
   /// Entry-wise and *in order*, because the order is part of what a serialiser writes.
   ///
+  /// Not `IndexMap`'s own `==`, which asks only that every key map to an equal value and so
+  /// calls two maps equal that serialise differently.
+  ///
   /// The ceilings are not compared. They are the budget the map was built under, not part of the
   /// `extensions` entry any response carries, and two maps with the same entries serialise
   /// identically whatever they were allowed to grow to.
   fn eq(&self, other: &Self) -> bool {
-    self.entries == other.entries
+    self.len() == other.len() && self.iter().eq(other.iter())
   }
 }
 
@@ -437,7 +598,70 @@ impl<V> fmt::Debug for Extensions<V> {
   /// bound reach [`Response`](crate::Response) through this field.
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     f.debug_map()
-      .entries(self.entries.iter().map(|(key, _)| (key, "<value>")))
+      .entries(self.iter().map(|(key, _)| (key, "<value>")))
+      .finish()
+  }
+}
+
+/// The entries of an [`Extensions`] map, in insertion order: what [`Extensions::iter`] returns and
+/// what `&Extensions` iterates as.
+///
+/// Each item is a key and its value. It runs from both ends, knows how many entries it has left,
+/// and stays exhausted once it is.
+pub struct ExtensionsIter<'e, V> {
+  inner: indexmap::map::Iter<'e, FrozenStr, V>,
+}
+
+impl<'e, V> Iterator for ExtensionsIter<'e, V> {
+  type Item = (&'e str, &'e V);
+
+  #[inline]
+  fn next(&mut self) -> Option<Self::Item> {
+    self.inner.next().map(|(key, value)| (key.as_str(), value))
+  }
+
+  #[inline]
+  fn size_hint(&self) -> (usize, Option<usize>) {
+    self.inner.size_hint()
+  }
+}
+
+impl<V> DoubleEndedIterator for ExtensionsIter<'_, V> {
+  #[inline]
+  fn next_back(&mut self) -> Option<Self::Item> {
+    self
+      .inner
+      .next_back()
+      .map(|(key, value)| (key.as_str(), value))
+  }
+}
+
+impl<V> ExactSizeIterator for ExtensionsIter<'_, V> {
+  #[inline]
+  fn len(&self) -> usize {
+    self.inner.len()
+  }
+}
+
+impl<V> FusedIterator for ExtensionsIter<'_, V> {}
+
+impl<V> Clone for ExtensionsIter<'_, V> {
+  /// Written out rather than derived, because a derive would bound `V: Clone` for an iterator that
+  /// holds only references.
+  #[inline]
+  fn clone(&self) -> Self {
+    Self {
+      inner: self.inner.clone(),
+    }
+  }
+}
+
+impl<V> fmt::Debug for ExtensionsIter<'_, V> {
+  /// The keys still to come, and not their values, for the reason [`Extensions`]' own `Debug`
+  /// gives: no `V: Debug` bound.
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.debug_list()
+      .entries(self.clone().map(|(key, _)| key))
       .finish()
   }
 }

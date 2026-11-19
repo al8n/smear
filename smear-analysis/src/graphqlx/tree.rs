@@ -28,7 +28,7 @@
 
 use std::{collections::BTreeMap, string::String, vec, vec::Vec};
 
-use smear_lexer::decode_string_value;
+use smear_lexer::decode_string_value_to_string;
 use tokora::diagnostic::Location;
 
 use super::{
@@ -65,13 +65,22 @@ pub(crate) struct Declared<'d> {
   pub(crate) description: Option<(&'d [u8], Location)>,
 }
 
+/// A module's place in its parent: the parent's node and its name.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct ChildKey<'d> {
+  /// The parent's node.
+  parent: u32,
+  /// The module's name.
+  name: &'d [u8],
+}
+
 /// Every module found so far, and the key each is found by.
 pub(crate) struct Tree<'d> {
   nodes: Vec<Node<'d>>,
   /// Every module but a root module, by its parent's node and its name: what two declarations of
   /// one module share, and, in the map's order, each module's children in bytewise order of their
   /// names, which numbering reads.
-  children: BTreeMap<(u32, &'d [u8]), u32>,
+  children: BTreeMap<ChildKey<'d>, u32>,
   /// Each package's root module, by the package's index.
   roots: Vec<u32>,
 }
@@ -127,7 +136,7 @@ impl<'d> Tree<'d> {
 
   /// The module `name` inside `parent`, when the tree has it.
   pub(crate) fn child(&self, parent: u32, name: &'d [u8]) -> Option<u32> {
-    self.children.get(&(parent, name)).copied()
+    self.children.get(&ChildKey { parent, name }).copied()
   }
 
   /// The module `node` names.
@@ -148,7 +157,7 @@ impl<'d> Tree<'d> {
     // The children map is ordered by parent, then name, so each node's children are one run of
     // `order`, from `starts[node]` to `starts[node + 1]`, in bytewise order of their names.
     let mut starts: Vec<u32> = vec![0; self.nodes.len() + 1];
-    for &(parent, _) in self.children.keys() {
+    for &ChildKey { parent, .. } in self.children.keys() {
       starts[parent as usize] += 1;
     }
     let mut total: u32 = 0;
@@ -176,7 +185,7 @@ impl<'d> Tree<'d> {
           if let Some((spelling, location)) = declared.description {
             text.clear();
             // A description the lexer read always decodes; one that did not is left absent.
-            if decode_string_value(spelling, &mut text).is_ok() {
+            if decode_string_value_to_string(spelling, &mut text).is_ok() {
               builder.set_module_description(id, &text, location);
             }
           }
@@ -211,7 +220,7 @@ impl<'d> Tree<'d> {
       declared,
     };
     let index = dense(self.nodes.len());
-    self.children.insert((parent, name), index);
+    self.children.insert(ChildKey { parent, name }, index);
     self.nodes.push(node);
     index
   }

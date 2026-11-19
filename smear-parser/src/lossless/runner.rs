@@ -243,7 +243,7 @@ impl<L: rowan_0_17::Language> crate::layer::SyntaxTree for Parse<L> {
 /// [`FinishError`](tokora::cst::FinishError), it is upstream's, and it is `#[non_exhaustive]`.
 ///
 /// A smear-side enum mirroring it was considered, and it is worse for a reason that is not taste.
-/// The requirement is `tokora = "0.13.1"` and the workspace commits no lock, so a build compiles
+/// The requirement is `tokora = "0.13.2"` and the workspace commits no lock, so a build compiles
 /// against whichever `0.13` release it resolves, and a later one may add a variant. A mirror would
 /// be a smear type asserting a variant set it does not own and cannot keep current.
 ///
@@ -434,7 +434,7 @@ impl core::error::Error for MintError {}
 ///     mistake with a different remedy, and the caller is the one who can tell them apart.
 ///
 ///     **The forwarding is only as good as the release it is compiled against.** The requirement
-///     is `tokora = "0.13.1"` and no lock is committed, so the ceiling is whatever the resolved
+///     is `tokora = "0.13.2"` and no lock is committed, so the ceiling is whatever the resolved
 ///     `0.13` release enforces; 0.13.1 refuses past `MAX_TREE_DEPTH` (1024) with
 ///     `FinishError::TooDeep`. That is the dependency edge's residual rather than this door's.
 ///   - **Destruction.** `rowan` drops a green tree recursively, so a tree deep enough to overflow

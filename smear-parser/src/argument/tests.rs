@@ -3,8 +3,8 @@ use tokora::{
   utils::IntoComponents,
 };
 
-use super::{Argument, ArgumentList};
-use crate::directive::{Directive, Directives};
+use super::{Argument, ArgumentComponents, ArgumentList, ArgumentListComponents};
+use crate::directive::{Directive, DirectiveComponents, Directives, DirectivesComponents};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CustomSpan(u8);
@@ -22,13 +22,23 @@ fn carriers_support_custom_spans() {
   let argument = Argument::<_, _, CustomSpan>::new(CustomSpan(1), "name", 7_u8);
   assert_eq!(argument.as_span(), &CustomSpan(1));
   assert_eq!(argument.into_span(), CustomSpan(1));
-  assert_eq!(argument.into_components(), (CustomSpan(1), "name", 7));
+  assert_eq!(
+    argument.into_components(),
+    ArgumentComponents {
+      span: CustomSpan(1),
+      name: "name",
+      value: 7
+    }
+  );
 
   let arguments =
     ArgumentList::<Argument<&str, u8, CustomSpan>, _, CustomSpan>::new(CustomSpan(2), [argument]);
   assert_eq!(arguments.as_span(), &CustomSpan(2));
   assert_eq!(arguments.into_span(), CustomSpan(2));
-  let (span, [argument]) = arguments.into_components();
+  let ArgumentListComponents {
+    span,
+    arguments: [argument],
+  } = arguments.into_components();
   assert_eq!(span, CustomSpan(2));
   assert_eq!(argument.span(), &CustomSpan(1));
   assert_eq!(argument.name(), &"name");
@@ -39,14 +49,21 @@ fn carriers_support_custom_spans() {
   assert_eq!(directive.into_span(), CustomSpan(3));
   assert_eq!(
     directive.into_components(),
-    (CustomSpan(3), "name", Some(7))
+    DirectiveComponents {
+      span: CustomSpan(3),
+      name: "name",
+      arguments: Some(7)
+    }
   );
 
   let directives =
     Directives::<Directive<&str, u8, CustomSpan>, _, CustomSpan>::new(CustomSpan(4), [directive]);
   assert_eq!(directives.as_span(), &CustomSpan(4));
   assert_eq!(directives.into_span(), CustomSpan(4));
-  let (span, [directive]) = directives.into_components();
+  let DirectivesComponents {
+    span,
+    directives: [directive],
+  } = directives.into_components();
   assert_eq!(span, CustomSpan(4));
   assert_eq!(directive.span(), &CustomSpan(3));
   assert_eq!(directive.name(), &"name");

@@ -55,7 +55,7 @@ fn the_byte_ceiling_is_a_price_at_it_and_a_refusal_one_past_it() {
   assert_eq!(interner.bytes(beta), b"bet");
   assert_eq!(
     interner.spans[beta.index() as usize],
-    (5, 8),
+    ByteRange::new(5, 8),
     "a spelling ending exactly at the ceiling is interned"
   );
   assert!(interner.refused.is_none());

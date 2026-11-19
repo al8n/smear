@@ -121,7 +121,7 @@ where
     // `Nested`, as a use group collects into: the container is where a deep module's release
     // lives.
     .collect_with(Nested::empty())
-    .token_spanned()
+    .spanned_trimmed()
     .parse_input(inp)
     .map(|Spanned { span, data }| (span, data))
 }
@@ -244,7 +244,7 @@ definition_parser!(
   {
     description
       .then(type_system_definition)
-      .token_spanned()
+      .spanned_trimmed()
       .parse_input(inp)
       .map(|Spanned {
         span,
@@ -468,7 +468,7 @@ definition_parser!(
       .at_least(1)
       .collect_with(Vec::new())
       .map(|entries: Vec<TypeSystemItem<GraphqlxSlice<'inp, Src>>>| entries)
-      .token_spanned()
+      .spanned_trimmed()
       .parse_input(inp)?;
     Ok(TypeSystemDocument::new(span, entries))
   }

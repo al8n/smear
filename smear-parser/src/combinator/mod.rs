@@ -30,16 +30,14 @@
 //! against a spelling (`slice.equivalent("true")`) without an `AsRef<[u8]>`
 //! detour that pins the source representation.
 //!
-//! The **span-extent** vocabulary — [`extent_start`], [`extent_end`], [`extent_since`] and
-//! [`token_spanned`](TokenSpannedExt::token_spanned) — is the one place this layer does *not* take
-//! tokora's answer as given. A composite node's span is a fact about the tokens it contains, and
-//! tokora's `.spanned()` measures the lookahead position instead; the difference, and why it is
-//! invisible on compact input, is on [`extent_start`].
+//! A composite node takes tokora's **trimmed span**, from the first token's start to the last
+//! committed token's end, through [`spanned_trimmed`](tokora::ParseInput::spanned_trimmed), or
+//! [`InputRef::cursor_trimmed`](tokora::InputRef::cursor_trimmed) followed by
+//! [`InputRef::span_since_trimmed`](tokora::InputRef::span_since_trimmed). A production never
+//! takes a lookahead `.spanned()`. See tokora's [span rules](tokora::span#the-two-span-rules).
 
-mod extent;
 mod token;
 
-pub use extent::*;
 pub use token::*;
 pub use tokora::{
   ComposableParseContext as ParseCtx, ErrorOf, emitter::ComposableEmitter, lexer::SliceOf,

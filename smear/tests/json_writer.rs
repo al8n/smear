@@ -17,7 +17,7 @@
 //! | oracle | what it settles |
 //! |---|---|
 //! | `serde_json` | the output is JSON at all, and *means* what a hand-built value means |
-//! | `apollo-parser` | draft §2.9.4 block-string cooking, from a third-party GraphQL implementation |
+//! | `apollo-parser` | draft §2.9.4 block-string cooking and §2.9.1 inline escapes, from a third-party GraphQL implementation |
 //! | fixed byte strings | the choices where the *formatting* is the contract — entry order, and the shape of an `errors` entry |
 //!
 //! The first is the round trip and it compares **values, not bytes**, so key order and spacing stay
@@ -39,7 +39,10 @@
 use smear::{
   diagnostic::Diagnose,
   json,
-  lexer::tokora::{Parse as _, Parser, SimpleSpan},
+  lexer::{
+    self,
+    tokora::{Parse as _, Parser, SimpleSpan},
+  },
   parser::graphql::{
     GraphQL,
     ast::{ExecutableDocument, TypeSystemDocument, materialized},
@@ -746,8 +749,10 @@ fn every_string_survives_the_round_trip() {
 /// specification's worked example, which #163 repaired, but because it is in this workspace and an
 /// oracle that shares a repository with its subject can be wrong in the same direction.
 /// `apollo-parser` is a dev-dependency of this package already, is a different organisation's
-/// implementation, and cooks a `StringValue` into a `String` through its own code. The differential
-/// against `smear-lexer` lives in `src/json/tests.rs` and is a second check, not this one.
+/// implementation, and cooks a `StringValue` into a `String` through its own code. The writer cooks
+/// through `smear-lexer`'s decoder, so this is that decoder's oracle as well; `src/json/tests.rs`
+/// holds the writer to the lexer's own conversions, which run the same decoder, and is a second
+/// check of the doors rather than of the reading.
 #[test]
 fn block_string_cooking_agrees_with_apollo_parser() {
   const CORPUS: &[&str] = &[
@@ -775,6 +780,65 @@ fn block_string_cooking_agrees_with_apollo_parser() {
     let ours: String = serde_json::from_str(&out).expect("a JSON string");
 
     assert_eq!(ours, theirs, "disagreed with apollo-parser on `{literal}`");
+  }
+}
+
+/// Inline-string cooking, against `apollo-parser`.
+///
+/// `smear-lexer` reads an inline literal's escapes in one place, `string_lexer/escape.rs`: the
+/// `Cow` conversions, `decode_string_value` and the writer's walk all go through it. So a
+/// misreading of draft §2.9.1 there would be the same misreading in all three, and no comparison
+/// among them could see it. `apollo-parser` unescapes a `StringValue` with its own code, so this is
+/// the independent check of that reader that the block test above is of the dedent. The writer is
+/// held to it through the JSON it writes, and the decoder directly.
+///
+/// The corpus is the escapes `apollo-parser` can answer. It cannot answer a surrogate escape, which
+/// it hands to `char::from_u32(..).unwrap()` whether or not a low half follows, nor the braced
+/// `\u{X…}`, which it predates, so those two stay with `string_lexer/tests.rs` and `value/tests.rs`.
+#[test]
+fn inline_string_cooking_agrees_with_apollo_parser() {
+  const CORPUS: &[&str] = &[
+    r#""""#,
+    r#""plain""#,
+    r#""a \"quoted\" word""#,
+    r#""back\\slash""#,
+    r#""trailing\\""#,
+    r#""a\\nb""#,
+    r#""solidus \/ \/\/""#,
+    r#""\b\f\n\r\t""#,
+    r#""tab\there\nand a new line""#,
+    r#""\u0041\u0042\u0043""#,
+    r#""\u00e9 \u00E9 \u4e2d\u6587""#,
+    r#""\u007f\u00a0\u2028\uFFFD""#,
+    r#""mix \u0041\n\"\\ end""#,
+    r#""escape at the end \u00e9""#,
+    r#""\u00e9 escape at the start""#,
+    "\"raw é中😀 and an escape \\u00e9\"",
+  ];
+
+  for literal in CORPUS {
+    let query = format!("{{ f(a: {literal}) }}");
+    let cst = apollo_parser::Parser::new(&query).parse();
+    assert_eq!(cst.errors().len(), 0, "apollo-parser rejected `{query}`");
+
+    let theirs = apollo_string(&cst).unwrap_or_else(|| panic!("no string value in `{query}`"));
+
+    let mut out = String::new();
+    let mut writer = json::Json::new(&mut out);
+    writer.graphql_string(literal).expect("writable");
+    let written: String = serde_json::from_str(&out).expect("a JSON string");
+    assert_eq!(
+      written, theirs,
+      "the writer disagreed with apollo-parser on `{literal}`"
+    );
+
+    let mut decoded = String::new();
+    lexer::decode_string_value(literal.as_bytes(), &mut decoded)
+      .unwrap_or_else(|error| panic!("the decoder refused `{literal}`: {error}"));
+    assert_eq!(
+      decoded, theirs,
+      "the decoder disagreed with apollo-parser on `{literal}`"
+    );
   }
 }
 

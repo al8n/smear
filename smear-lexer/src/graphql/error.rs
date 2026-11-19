@@ -17,8 +17,8 @@ const SOURCE: u32 = 0;
 
 /// An error encountered during lexing for float literals.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
-#[unwrap(ref)]
-#[try_unwrap(ref)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum FloatError<Char = char> {
   /// The float has an unexpected suffix, e.g. `1.0x`, `1.e+1y`
@@ -33,6 +33,8 @@ pub enum FloatError<Char = char> {
   LeadingZeros(Lexeme<Char>),
   /// Float literals must have an integer part, e.g. `.1` is invalid.
   #[from(skip)]
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   MissingIntegerPart,
 }
 
@@ -71,8 +73,8 @@ impl<Char> FloatError<Char> {
 
 /// An error encountered during lexing for decimal literals.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, From, IsVariant, Unwrap, TryUnwrap)]
-#[unwrap(ref)]
-#[try_unwrap(ref)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum DecimalError<Char = char> {
   /// Unexpected character in decimal literal suffix, e.g. `123abc`
@@ -143,8 +145,12 @@ pub enum LexerErrorData<Char = char, StateError = ()> {
   #[from(skip)]
   UnknownLexeme(Lexeme<Char>),
   /// Unexpected end of input.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   UnexpectedEndOfInput,
   /// Unterminated spread operator.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   UnterminatedSpreadOperator,
   /// The lexer state related error.
   #[from(skip)]

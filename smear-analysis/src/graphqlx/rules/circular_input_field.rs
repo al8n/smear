@@ -84,7 +84,8 @@ use std::{
 };
 
 use crate::graphqlx::{
-  Contribution, Cx, DefId, DefKind, Diagnostic, MemberId, Model, TyId, TyKind, Visitor,
+  Contribution, Cx, DefId, DefKind, Diagnostic, MemberId, Model, NamedTy, TyId, TyKind,
+  TypeParamRef, Visitor,
   code::schema,
   diagnostic::Excerpt,
   id::dense,
@@ -116,7 +117,16 @@ use super::one_of;
 pub(super) struct CircularInputField {
   /// The fields that close a cycle, sorted by id, each with whether the cycle passes a nullable
   /// field of a OneOf.
-  closing: Vec<(MemberId, bool)>,
+  closing: Vec<ClosingField>,
+}
+
+/// A field that closes a cycle, and whether the cycle passes a nullable field of a OneOf.
+#[derive(Clone, Copy)]
+struct ClosingField {
+  /// The field.
+  field: MemberId,
+  /// Whether the cycle passes a nullable field of a OneOf.
+  through_nullable_oneof: bool,
 }
 
 impl Visitor for CircularInputField {
@@ -127,11 +137,15 @@ impl Visitor for CircularInputField {
   fn enter_member(&mut self, cx: &mut Cx<'_>, member: MemberId) {
     let Ok(index) = self
       .closing
-      .binary_search_by_key(&member, |&(field, _): &(MemberId, bool)| field)
+      .binary_search_by_key(&member, |closing: &ClosingField| closing.field)
     else {
       return;
     };
-    let Some(&(_, through_one_of)) = self.closing.get(index) else {
+    let Some(&ClosingField {
+      through_nullable_oneof: through_one_of,
+      ..
+    }) = self.closing.get(index)
+    else {
       return;
     };
     if cx
@@ -175,7 +189,7 @@ impl Visitor for CircularInputField {
 
 /// The fields of the input objects of `cx`'s model that close a cycle, sorted by id, each with
 /// whether the cycle passes a nullable field of a OneOf.
-fn closing(cx: &Cx<'_>) -> Vec<(MemberId, bool)> {
+fn closing(cx: &Cx<'_>) -> Vec<ClosingField> {
   let model = cx.model();
   let inputs: Vec<DefId> = model
     .defs()
@@ -238,8 +252,8 @@ fn alternatives_of(model: &Model, input: DefId) -> Alternatives {
       continue;
     };
     match model.ty(model.type_expr(occurrence).ty()).kind() {
-      TyKind::Param { def, index } if def == input => alternatives.params.push(index),
-      TyKind::Named { def, .. } if is_input(model, def) => alternatives.fields = true,
+      TyKind::Param(TypeParamRef { def, index }) if def == input => alternatives.params.push(index),
+      TyKind::Named(NamedTy { def, .. }) if is_input(model, def) => alternatives.fields = true,
       _ => alternatives.leaf = true,
     }
   }
@@ -261,6 +275,18 @@ enum Other {
   Group(u32),
 }
 
+/// What a OneOf's instantiation makes of the input object that holds it: the group it makes, by its
+/// input object, its slots and its other alternatives.
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct Choice {
+  /// The input object.
+  owner: DefId,
+  /// The slots, of the input object's type parameters, whose arguments are alternatives.
+  slots: Vec<u32>,
+  /// The other alternatives.
+  others: Vec<Other>,
+}
+
 /// A requirement of an input object's instantiations that a OneOf on the way makes a choice: a
 /// value of the input object holds a finite value of one of the arguments at `slots`, or of one of
 /// the other alternatives.
@@ -271,6 +297,15 @@ struct Group {
   slots: Vec<u32>,
   /// The other alternatives.
   others: Vec<Other>,
+}
+
+/// A group, and the input object whose instantiations it constrains.
+#[derive(Clone, Copy)]
+struct OwnedGroup {
+  /// The input object.
+  owner: DefId,
+  /// The group's id.
+  group: u32,
 }
 
 /// What each type parameter of an input object carries, by slot: whether a value of the input
@@ -286,7 +321,7 @@ struct Carried {
   groups: Vec<Group>,
   /// Each group by the input object whose instantiations it constrains, sorted: none of an input
   /// object past its cap.
-  owners: Vec<(DefId, u32)>,
+  owners: Vec<OwnedGroup>,
   /// The alternatives of each OneOf.
   alternatives: BTreeMap<DefId, Alternatives>,
 }
@@ -321,7 +356,7 @@ impl Carried {
       fresh: Vec::new(),
       added: Vec::new(),
     };
-    let mut seeds: Vec<(u32, u8)> = Vec::new();
+    let mut seeds: Vec<SlotLevel> = Vec::new();
     // The types whose arguments are still to read.
     let mut stack: Vec<TyId> = Vec::new();
     for &input in inputs {
@@ -338,13 +373,13 @@ impl Carried {
         let complete = model.ty(ty);
         let non_null = complete.non_null();
         match complete.kind() {
-          TyKind::Param { def, index } if def == input => {
+          TyKind::Param(TypeParamRef { def, index }) if def == input => {
             if let Some(slot) = slot(&work.base, input, index) {
               let level = if non_null { 2 } else { 1 };
-              seeds.push((slot, level));
+              seeds.push(SlotLevel { slot, level });
             }
           }
-          TyKind::Named { def, .. } if is_input(model, def) && non_null => {
+          TyKind::Named(NamedTy { def, .. }) if is_input(model, def) && non_null => {
             if let Some(to) = work.node(&mut stack, ty) {
               work.entries.push(Entry {
                 from: Origin::Root,
@@ -365,7 +400,7 @@ impl Carried {
       let Some(&from) = work.nodes.get(&ty) else {
         continue;
       };
-      let TyKind::Named { def: holder, args } = model.ty(ty).kind() else {
+      let TyKind::Named(NamedTy { def: holder, args }) = model.ty(ty).kind() else {
         continue;
       };
       for (position, &argument) in args.iter().enumerate() {
@@ -374,7 +409,7 @@ impl Carried {
         };
         let given = model.ty(argument);
         match given.kind() {
-          TyKind::Param { def, index } => {
+          TyKind::Param(TypeParamRef { def, index }) => {
             if let Some(target) = slot(&work.base, def, index) {
               work.rules.push(Rule {
                 from,
@@ -384,13 +419,16 @@ impl Carried {
               });
             }
           }
-          TyKind::Named { def, .. } if is_input(model, def) => {
+          TyKind::Named(NamedTy { def, .. }) if is_input(model, def) => {
             if let Some(to) = work.node(&mut stack, argument) {
               let threshold = if given.non_null() { 1 } else { 2 };
               work.entries.push(Entry {
                 from: Origin::Node(from),
                 to,
-                slot: Some((step, threshold)),
+                slot: Some(SlotLevel {
+                  slot: step,
+                  level: threshold,
+                }),
               });
             }
           }
@@ -411,12 +449,16 @@ impl Carried {
     } = work;
     // In the order of the owners' ids, each owner's groups in the order they were made. An owner
     // past its cap is judged as if it had none: its instantiations require less.
-    let mut owners: Vec<(DefId, u32)> = Vec::new();
-    for (owner, (list, _)) in owned {
+    let mut owners: Vec<OwnedGroup> = Vec::new();
+    for (owner, Groups { groups: list, .. }) in owned {
       if saturated.contains(&owner) {
         continue;
       }
-      owners.extend(list.into_iter().map(|group: u32| (owner, group)));
+      owners.extend(
+        list
+          .into_iter()
+          .map(|group: u32| OwnedGroup { owner, group }),
+      );
     }
     Self {
       base,
@@ -436,16 +478,16 @@ impl Carried {
   fn groups_of(&self, def: DefId) -> impl Iterator<Item = u32> + '_ {
     let from = self
       .owners
-      .partition_point(|&(owner, _): &(DefId, u32)| owner < def);
+      .partition_point(|entry: &OwnedGroup| entry.owner < def);
     let to = self
       .owners
-      .partition_point(|&(owner, _): &(DefId, u32)| owner <= def);
+      .partition_point(|entry: &OwnedGroup| entry.owner <= def);
     self
       .owners
       .get(from..to)
       .unwrap_or(&[])
       .iter()
-      .map(|&(_, group): &(DefId, u32)| group)
+      .map(|entry: &OwnedGroup| entry.group)
   }
 
   /// The group `id`.
@@ -471,6 +513,16 @@ enum Origin {
   Node(u32),
 }
 
+/// A slot, and the level it carries or must carry.
+#[derive(Clone, Copy)]
+struct SlotLevel {
+  /// The slot.
+  slot: u32,
+  /// The level: 0 when nothing carries it, 1 when it is carried when non-null, 2 when it is
+  /// carried.
+  level: u8,
+}
+
 /// A way into an open type: it is held when what it hangs from is, and the slot it is the
 /// argument of, when it is one, carries at least the threshold: 1 for an argument that is
 /// non-null, 2 otherwise.
@@ -481,7 +533,7 @@ struct Entry {
   /// The open type's node.
   to: u32,
   /// The slot it is the argument of, and what the slot must carry.
-  slot: Option<(u32, u8)>,
+  slot: Option<SlotLevel>,
 }
 
 /// A type parameter an open type holds as an argument: when the type is held, the parameter's
@@ -506,6 +558,15 @@ enum Waiter {
   Entry(u32),
   /// A rule.
   Rule(u32),
+}
+
+/// The groups of an input object, with how many slots they name together.
+#[derive(Default)]
+struct Groups {
+  /// The groups' ids.
+  groups: Vec<u32>,
+  /// How many slots they name together.
+  slots: usize,
 }
 
 /// What the slots carry while it is found: the open types and how they are held, the groups, and
@@ -534,12 +595,12 @@ struct Work<'m> {
   /// Every group.
   groups: Vec<Group>,
   /// The groups of each input object, with how many slots they name together.
-  owned: BTreeMap<DefId, (Vec<u32>, usize)>,
+  owned: BTreeMap<DefId, Groups>,
   /// The input objects past their cap, which make no more groups and are judged as if they had
   /// none.
   saturated: BTreeSet<DefId>,
   /// Each group made, by its input object and alternatives, so that none is made twice.
-  seen: BTreeSet<(DefId, Vec<u32>, Vec<Other>)>,
+  seen: BTreeSet<Choice>,
   /// The slots that gained a level and whose waiters have not seen it.
   slots: Vec<u32>,
   /// The open types that were held and whose waiters have not seen it.
@@ -570,12 +631,12 @@ impl Work<'_> {
   /// Gives the slots `seeds`' levels, and spreads them along the entries and rules until nothing
   /// changes. Each slot changes at most twice and each open type once, so each waiter is woken a
   /// bounded number of times.
-  fn run(&mut self, seeds: &[(u32, u8)]) {
+  fn run(&mut self, seeds: &[SlotLevel]) {
     // Who waits on each slot, and on each open type, each as one run of a sorted list.
     let mut waiting: Vec<(u32, Waiter)> = Vec::new();
     let mut children: Vec<(u32, Waiter)> = Vec::new();
     for (index, entry) in self.entries.iter().enumerate() {
-      if let Some((slot, _)) = entry.slot {
+      if let Some(SlotLevel { slot, .. }) = entry.slot {
         waiting.push((slot, Waiter::Entry(dense(index))));
       }
       if let Origin::Node(above) = entry.from {
@@ -588,7 +649,7 @@ impl Work<'_> {
     }
     waiting.sort_by_key(|entry: &(u32, Waiter)| entry.0);
     children.sort_by_key(|entry: &(u32, Waiter)| entry.0);
-    for &(slot, level) in seeds {
+    for &SlotLevel { slot, level } in seeds {
       self.raise(slot, level);
     }
     // What hangs from a link field is looked at once; the rest when what it waits on changes.
@@ -647,7 +708,10 @@ impl Work<'_> {
     if !self.source(from) {
       return;
     }
-    if let Some((slot, threshold)) = slot
+    if let Some(SlotLevel {
+      slot,
+      level: threshold,
+    }) = slot
       && self.level(slot) < threshold
     {
       return;
@@ -676,11 +740,16 @@ impl Work<'_> {
       return;
     };
     let model = self.model;
-    let TyKind::Named { def, args } = model.ty(ty).kind() else {
+    let TyKind::Named(NamedTy { def, args }) = model.ty(ty).kind() else {
       return;
     };
     if self.alternatives.contains_key(&def) {
-      if let Some((owner, slots, others)) = self.choice(def, args) {
+      if let Some(Choice {
+        owner,
+        slots,
+        others,
+      }) = self.choice(def, args)
+      {
         self.add(owner, slots, others);
       }
       return;
@@ -689,7 +758,7 @@ impl Work<'_> {
     let groups: Vec<u32> = self
       .owned
       .get(&def)
-      .map(|(groups, _): &(Vec<u32>, usize)| groups.clone())
+      .map(|owned: &Groups| owned.groups.clone())
       .unwrap_or_default();
     for group in groups {
       self.induce(node, group);
@@ -719,7 +788,7 @@ impl Work<'_> {
   /// of the OneOf, is an alternative with the type parameters it names taken as finite, which
   /// requires less than a substitution would: what only a substitution would say is never
   /// required.
-  fn choice(&self, def: DefId, args: &[TyId]) -> Option<(DefId, Vec<u32>, Vec<Other>)> {
+  fn choice(&self, def: DefId, args: &[TyId]) -> Option<Choice> {
     let alternatives = self.alternatives.get(&def)?;
     if alternatives.leaf {
       return None;
@@ -732,13 +801,13 @@ impl Work<'_> {
         continue;
       };
       match self.model.ty(argument).kind() {
-        TyKind::Param { def: holder, index } => {
+        TyKind::Param(TypeParamRef { def: holder, index }) => {
           if let Some(slot) = slot(&self.base, holder, index) {
             owner = Some(holder);
             slots.push(slot);
           }
         }
-        TyKind::Named { def: inner, .. } if is_input(self.model, inner) => {
+        TyKind::Named(NamedTy { def: inner, .. }) if is_input(self.model, inner) => {
           others.push(Other::Ty(argument));
         }
         // A scalar, an enum, a list: an alternative a finite value always satisfies.
@@ -749,7 +818,11 @@ impl Work<'_> {
       others.push(Other::OneOf(def));
     }
     let owner = owner?;
-    Some((owner, slots, others))
+    Some(Choice {
+      owner,
+      slots,
+      others,
+    })
   }
 
   /// Passes the group `id` of an ordinary input object on through its held open type `node`, to
@@ -760,7 +833,7 @@ impl Work<'_> {
       return;
     };
     let model = self.model;
-    let TyKind::Named { def: holder, args } = model.ty(ty).kind() else {
+    let TyKind::Named(NamedTy { def: holder, args }) = model.ty(ty).kind() else {
       return;
     };
     let Some(group) = self.groups.get(id as usize) else {
@@ -781,13 +854,15 @@ impl Work<'_> {
         continue;
       };
       match model.ty(argument).kind() {
-        TyKind::Param { def, index } => {
+        TyKind::Param(TypeParamRef { def, index }) => {
           if let Some(slot) = slot(&self.base, def, index) {
             owner = Some(def);
             slots.push(slot);
           }
         }
-        TyKind::Named { def, .. } if is_input(model, def) => others.push(Other::Ty(argument)),
+        TyKind::Named(NamedTy { def, .. }) if is_input(model, def) => {
+          others.push(Other::Ty(argument))
+        }
         _ => return,
       }
     }
@@ -810,7 +885,11 @@ impl Work<'_> {
     if slots.is_empty() || self.saturated.contains(&owner) {
       return;
     }
-    if !self.seen.insert((owner, slots.clone(), others.clone())) {
+    if !self.seen.insert(Choice {
+      owner,
+      slots: slots.clone(),
+      others: others.clone(),
+    }) {
       return;
     }
     let at = owner.get() as usize;
@@ -824,9 +903,7 @@ impl Work<'_> {
     let (count, named) = self
       .owned
       .get(&owner)
-      .map_or((0, 0), |(groups, named): &(Vec<u32>, usize)| {
-        (groups.len(), *named)
-      });
+      .map_or((0, 0), |owned: &Groups| (owned.groups.len(), owned.slots));
     let bound = arity.saturating_mul(2).saturating_add(2);
     if count >= bound || named.saturating_add(slots.len()) > bound {
       self.saturated.insert(owner);
@@ -840,8 +917,8 @@ impl Work<'_> {
       others,
     });
     let entry = self.owned.entry(owner).or_default();
-    entry.0.push(id);
-    entry.1 = entry.1.saturating_add(width);
+    entry.groups.push(id);
+    entry.slots = entry.slots.saturating_add(width);
     self.added.push(id);
   }
 
@@ -886,11 +963,31 @@ impl Work<'_> {
 
 /// An edge of the requirements: from, to, whether it passes a nullable field of a OneOf, and the
 /// link field it is when it leaves an input object's node.
-type Edge = (u32, u32, bool, Option<MemberId>);
+#[derive(Clone, Copy)]
+struct Edge {
+  /// The node it leaves.
+  from: u32,
+  /// The node it enters.
+  to: u32,
+  /// Whether it passes a nullable field of a OneOf.
+  through_nullable_oneof: bool,
+  /// The link field it is, when it leaves an input object's node.
+  link: Option<MemberId>,
+}
 
 /// A frame of the coloured walk: a node, its next edge, the nullable links on the path down to it,
 /// and the link field of the input object it was reached through.
-type Frame = (u32, u32, u32, Option<MemberId>);
+#[derive(Clone, Copy)]
+struct Frame {
+  /// The node.
+  node: u32,
+  /// Its next edge.
+  next_edge: u32,
+  /// The nullable links on the path down to it.
+  nullable_links: u32,
+  /// The link field of the input object it was reached through.
+  link: Option<MemberId>,
+}
 
 /// A node of the requirements that is no type's, finite when one of its targets is: what a group's
 /// other alternatives give, or what a OneOf's fields of an input object type give.
@@ -902,6 +999,24 @@ enum Part {
   /// OneOf's type parameters taken as finite, which requires less than any substitution of them
   /// would.
   OneOf(DefId),
+}
+
+/// A part whose edges are still to make: its node, and the part.
+#[derive(Clone, Copy)]
+struct UnbuiltPart {
+  /// The part's node.
+  node: u32,
+  /// The part.
+  part: Part,
+}
+
+/// An instantiation whose edges are still to make: its node, and its type.
+#[derive(Clone, Copy)]
+struct PendingInstantiation {
+  /// The instantiation's node.
+  node: u32,
+  /// Its type.
+  ty: TyId,
 }
 
 /// What each link requires, as a graph: a node for each input object, in id order, then one for
@@ -919,7 +1034,7 @@ struct Requirements<'g> {
   /// The node of each part, made the first time it is asked for.
   parts: BTreeMap<Part, u32>,
   /// The parts whose edges are still to make.
-  unbuilt: Vec<(u32, Part)>,
+  unbuilt: Vec<UnbuiltPart>,
   /// For each node, whether one edge's target being finite makes it finite, rather than every
   /// one.
   any: Vec<bool>,
@@ -929,7 +1044,7 @@ struct Requirements<'g> {
   /// when it leaves an input object's node.
   edges: Vec<Edge>,
   /// The instantiations whose edges are still to make.
-  pending: Vec<(u32, TyId)>,
+  pending: Vec<PendingInstantiation>,
 }
 
 impl Requirements<'_> {
@@ -955,9 +1070,14 @@ impl Requirements<'_> {
           continue;
         }
         match self.model.ty(ty).kind() {
-          TyKind::Named { def, .. } if is_input(self.model, def) => {
+          TyKind::Named(NamedTy { def, .. }) if is_input(self.model, def) => {
             if let Some(target) = self.requirement(ty) {
-              self.edges.push((node, target, !non_null, Some(field)));
+              self.edges.push(Edge {
+                from: node,
+                to: target,
+                through_nullable_oneof: !non_null,
+                link: Some(field),
+              });
             }
           }
           // A link to a type parameter requires nothing of this input object, and a OneOf's field
@@ -971,9 +1091,9 @@ impl Requirements<'_> {
       }
     }
     loop {
-      if let Some((node, ty)) = self.pending.pop() {
+      if let Some(PendingInstantiation { node, ty }) = self.pending.pop() {
         self.instantiation(node, ty);
-      } else if let Some((node, part)) = self.unbuilt.pop() {
+      } else if let Some(UnbuiltPart { node, part }) = self.unbuilt.pop() {
         self.part_edges(node, part);
       } else {
         break;
@@ -996,7 +1116,7 @@ impl Requirements<'_> {
     }
     let node = self.fresh(true);
     self.parts.insert(part, node);
-    self.unbuilt.push((node, part));
+    self.unbuilt.push(UnbuiltPart { node, part });
     node
   }
 
@@ -1018,7 +1138,12 @@ impl Requirements<'_> {
             Other::Group(next) => Some(self.part(Part::Group(next))),
           };
           if let Some(target) = target {
-            self.edges.push((node, target, true, None));
+            self.edges.push(Edge {
+              from: node,
+              to: target,
+              through_nullable_oneof: true,
+              link: None,
+            });
           }
         }
       }
@@ -1028,11 +1153,16 @@ impl Requirements<'_> {
             continue;
           };
           let ty = model.type_expr(occurrence).ty();
-          if let TyKind::Named { def: inner, .. } = model.ty(ty).kind()
+          if let TyKind::Named(NamedTy { def: inner, .. }) = model.ty(ty).kind()
             && is_input(model, inner)
             && let Some(target) = self.requirement(ty)
           {
-            self.edges.push((node, target, true, None));
+            self.edges.push(Edge {
+              from: node,
+              to: target,
+              through_nullable_oneof: true,
+              link: None,
+            });
           }
         }
       }
@@ -1042,7 +1172,7 @@ impl Requirements<'_> {
   /// The node `ty`, an input object's type, requires: its definition's for one with no argument,
   /// and its own for an instantiation, made the first time.
   fn requirement(&mut self, ty: TyId) -> Option<u32> {
-    let TyKind::Named { def, args } = self.model.ty(ty).kind() else {
+    let TyKind::Named(NamedTy { def, args }) = self.model.ty(ty).kind() else {
       return None;
     };
     if args.is_empty() {
@@ -1055,7 +1185,7 @@ impl Requirements<'_> {
     self.any.push(false);
     self.ready.push(false);
     self.nodes.insert(ty, node);
-    self.pending.push((node, ty));
+    self.pending.push(PendingInstantiation { node, ty });
     Some(node)
   }
 
@@ -1074,7 +1204,7 @@ impl Requirements<'_> {
   /// Makes the edges of `node`, the requirement of the instantiation `ty`.
   fn instantiation(&mut self, node: u32, ty: TyId) {
     let carried = self.carried;
-    let TyKind::Named { def, args } = self.model.ty(ty).kind() else {
+    let TyKind::Named(NamedTy { def, args }) = self.model.ty(ty).kind() else {
       return;
     };
     if let Some(alternatives) = carried.alternatives(def) {
@@ -1082,7 +1212,12 @@ impl Requirements<'_> {
       return;
     }
     if let Some(target) = self.node_of(def) {
-      self.edges.push((node, target, false, None));
+      self.edges.push(Edge {
+        from: node,
+        to: target,
+        through_nullable_oneof: false,
+        link: None,
+      });
     }
     for (index, &argument) in args.iter().enumerate() {
       let index = dense(index);
@@ -1092,11 +1227,16 @@ impl Requirements<'_> {
         continue;
       }
       // A slot an ordinary input object carries passes no field of a OneOf: a OneOf carries none.
-      if let TyKind::Named { def: inner, .. } = self.model.ty(argument).kind()
+      if let TyKind::Named(NamedTy { def: inner, .. }) = self.model.ty(argument).kind()
         && is_input(self.model, inner)
         && let Some(target) = self.requirement(argument)
       {
-        self.edges.push((node, target, false, None));
+        self.edges.push(Edge {
+          from: node,
+          to: target,
+          through_nullable_oneof: false,
+          link: None,
+        });
       }
     }
     let groups: Vec<u32> = carried.groups_of(def).collect();
@@ -1126,9 +1266,14 @@ impl Requirements<'_> {
         continue;
       };
       match model.ty(argument).kind() {
-        TyKind::Named { def: inner, .. } if is_input(model, inner) => {
+        TyKind::Named(NamedTy { def: inner, .. }) if is_input(model, inner) => {
           if let Some(target) = self.requirement(argument) {
-            self.edges.push((node, target, true, None));
+            self.edges.push(Edge {
+              from: node,
+              to: target,
+              through_nullable_oneof: true,
+              link: None,
+            });
           }
         }
         // A type parameter of the input object that holds the type, whose group answers for it;
@@ -1141,7 +1286,12 @@ impl Requirements<'_> {
     }
     if alternatives.fields {
       let target = self.part(Part::OneOf(def));
-      self.edges.push((node, target, true, None));
+      self.edges.push(Edge {
+        from: node,
+        to: target,
+        through_nullable_oneof: true,
+        link: None,
+      });
     }
   }
 
@@ -1156,7 +1306,12 @@ impl Requirements<'_> {
     };
     let first = carried.base.get(def.get() as usize).copied().unwrap_or(0);
     let any = self.fresh(true);
-    self.edges.push((node, any, true, None));
+    self.edges.push(Edge {
+      from: node,
+      to: any,
+      through_nullable_oneof: true,
+      link: None,
+    });
     for &at in &group.slots {
       let Some(&argument) = at
         .checked_sub(first)
@@ -1165,9 +1320,14 @@ impl Requirements<'_> {
         continue;
       };
       match model.ty(argument).kind() {
-        TyKind::Named { def: inner, .. } if is_input(model, inner) => {
+        TyKind::Named(NamedTy { def: inner, .. }) if is_input(model, inner) => {
           if let Some(target) = self.requirement(argument) {
-            self.edges.push((any, target, true, None));
+            self.edges.push(Edge {
+              from: any,
+              to: target,
+              through_nullable_oneof: true,
+              link: None,
+            });
           }
         }
         _ => {
@@ -1178,7 +1338,12 @@ impl Requirements<'_> {
     }
     if !group.others.is_empty() {
       let target = self.part(Part::Group(id));
-      self.edges.push((any, target, true, None));
+      self.edges.push(Edge {
+        from: any,
+        to: target,
+        through_nullable_oneof: true,
+        link: None,
+      });
     }
   }
 
@@ -1188,7 +1353,7 @@ impl Requirements<'_> {
     let count = self.any.len();
     let mut finite = vec![false; count];
     let mut waiting = vec![0u32; count];
-    for &(from, _, _, _) in &self.edges {
+    for &Edge { from, .. } in &self.edges {
       if let Some(waits) = waiting.get_mut(from as usize) {
         *waits = waits.saturating_add(1);
       }
@@ -1197,7 +1362,7 @@ impl Requirements<'_> {
     let mut incoming: Vec<(u32, u32)> = self
       .edges
       .iter()
-      .map(|&(from, to, _, _): &Edge| (to, from))
+      .map(|&Edge { from, to, .. }: &Edge| (to, from))
       .collect();
     incoming.sort_unstable();
     let mut found: Vec<u32> = Vec::new();
@@ -1242,16 +1407,16 @@ impl Requirements<'_> {
   /// each node's edges in the order they were made: the link field that closes each cycle, once
   /// for the input object that owns it, with whether the cycle passes a nullable field of a OneOf;
   /// sorted by the field's id.
-  fn walk(mut self, finite: &[bool]) -> Vec<(MemberId, bool)> {
+  fn walk(mut self, finite: &[bool]) -> Vec<ClosingField> {
     // The edges by their source, a stable sort keeping each node's in the order they were made.
-    self.edges.sort_by_key(|edge: &Edge| edge.0);
+    self.edges.sort_by_key(|edge: &Edge| edge.from);
     let count = self.any.len();
     // 0 for a node not reached, 1 for one on the current path, 2 for one settled.
     let mut colour = vec![0u8; count];
     // Where on the stack a node on the current path is.
     let mut depth = vec![0u32; count];
     let mut owners: BTreeSet<DefId> = BTreeSet::new();
-    let mut found: Vec<(MemberId, bool)> = Vec::new();
+    let mut found: Vec<ClosingField> = Vec::new();
     // Each frame: a node, its next edge, the nullable links on the path down to it, and the link
     // field of the input object it was reached through.
     let mut stack: Vec<Frame> = Vec::new();
@@ -1267,19 +1432,41 @@ impl Requirements<'_> {
       if let Some(at) = depth.get_mut(start as usize) {
         *at = 0;
       }
-      stack.push((start, 0, 0, None));
-      while let Some((node, cursor, through, link)) = stack.pop() {
-        let first = self.edges.partition_point(|edge: &Edge| edge.0 < node);
-        let end = self.edges.partition_point(|edge: &Edge| edge.0 <= node);
+      stack.push(Frame {
+        node: start,
+        next_edge: 0,
+        nullable_links: 0,
+        link: None,
+      });
+      while let Some(Frame {
+        node,
+        next_edge: cursor,
+        nullable_links: through,
+        link,
+      }) = stack.pop()
+      {
+        let first = self.edges.partition_point(|edge: &Edge| edge.from < node);
+        let end = self.edges.partition_point(|edge: &Edge| edge.from <= node);
         let at = first.saturating_add(cursor as usize);
         let edge = if at < end { self.edges.get(at) } else { None };
-        let Some(&(_, target, nullable, field)) = edge else {
+        let Some(&Edge {
+          to: target,
+          through_nullable_oneof: nullable,
+          link: field,
+          ..
+        }) = edge
+        else {
           if let Some(state) = colour.get_mut(node as usize) {
             *state = 2;
           }
           continue;
         };
-        stack.push((node, cursor.saturating_add(1), through, link));
+        stack.push(Frame {
+          node,
+          next_edge: cursor.saturating_add(1),
+          nullable_links: through,
+          link,
+        });
         if is_finite(target) {
           continue;
         }
@@ -1293,7 +1480,12 @@ impl Requirements<'_> {
             if let Some(at) = depth.get_mut(target as usize) {
               *at = dense(stack.len());
             }
-            stack.push((target, 0, here, field));
+            stack.push(Frame {
+              node: target,
+              next_edge: 0,
+              nullable_links: here,
+              link: field,
+            });
           }
           Some(1) => {
             let Some(field) = field else {
@@ -1307,14 +1499,17 @@ impl Requirements<'_> {
             let entered = depth
               .get(target as usize)
               .and_then(|at: &u32| stack.get(*at as usize))
-              .map(|frame: &Frame| frame.2);
-            found.push((field, entered != Some(here)));
+              .map(|frame: &Frame| frame.nullable_links);
+            found.push(ClosingField {
+              field,
+              through_nullable_oneof: entered != Some(here),
+            });
           }
           _ => {}
         }
       }
     }
-    found.sort_unstable_by_key(|&(field, _): &(MemberId, bool)| field);
+    found.sort_unstable_by_key(|closing: &ClosingField| closing.field);
     found
   }
 }

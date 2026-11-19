@@ -1,5 +1,6 @@
 //! Values: defaults, the arguments of applications, and every value nested in them.
 
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::id::{DefId, MemberId, TyId, ValueId};
@@ -15,7 +16,7 @@ use super::{
 };
 
 /// The syntactic kind of a literal kept as written.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum LiteralKind {
   /// `true` or `false`.
@@ -44,12 +45,22 @@ pub enum LiteralKind {
 /// written, and the field's value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ObjectEntry {
-  pub(super) field: MemberId,
-  pub(super) name: Option<Location>,
-  pub(super) value: ValueId,
+  pub(crate) field: MemberId,
+  pub(crate) name: Option<Location>,
+  pub(crate) value: ValueId,
 }
 
 impl ObjectEntry {
+  /// Creates the entry: the input field `field` set, where its name is written (`None` for a field
+  /// a default filled), and its value.
+  ///
+  /// Public because the model builder's `set_object`, which the test-support door exposes, takes
+  /// entries, and a test that builds a model by hand makes them.
+  #[inline]
+  pub const fn new(field: MemberId, name: Option<Location>, value: ValueId) -> Self {
+    Self { field, name, value }
+  }
+
   /// The input field it sets.
   #[inline]
   pub const fn field(&self) -> MemberId {
@@ -80,10 +91,14 @@ impl ObjectEntry {
 /// value under a generic directive's application with complete type arguments is coerced against
 /// its type under them, and so is a field's value of an instantiation of a generic input object,
 /// under its type's arguments.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum ValueKind<'a> {
   /// `null`.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Null,
   /// `true` or `false`.
   Bool(bool),
@@ -97,20 +112,10 @@ pub enum ValueKind<'a> {
   /// a list of integers from 0 to 255, so that two spellings of one sequence are one value.
   Bytes(&'a [u8]),
   /// A value of an enum.
-  #[non_exhaustive]
-  Enum {
-    /// The enum.
-    def: DefId,
-    /// The value.
-    value: MemberId,
-  },
-  /// A `TypeRef` value: a definition, never an instantiation, of any kind, named by a path resolved
-  /// as a type where the value is written; a generic definition is named bare.
-  #[non_exhaustive]
-  Type {
-    /// The definition it names.
-    def: DefId,
-  },
+  Enum(EnumValueRef),
+  /// A `TypeRef` value: the definition it names, never an instantiation, of any kind, named by a
+  /// path resolved as a type where the value is written; a generic definition is named bare.
+  Type(DefId),
   /// A list, of its elements.
   List(&'a [ValueId]),
   /// A set, of its elements, in written order: a set literal where a set is expected, an extern
@@ -135,7 +140,30 @@ pub enum ValueKind<'a> {
   /// within the extent of the error that says why, but for a copy of a default: its error is where
   /// the default is written, or at the application, the literal or the instantiation's occurrence
   /// whose type arguments it does not fit, which may stand in another definition.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
   Unresolved,
+}
+
+/// A value of an enum: [`ValueKind::Enum`]'s payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EnumValueRef {
+  pub(crate) def: DefId,
+  pub(crate) value: MemberId,
+}
+
+impl EnumValueRef {
+  /// The enum.
+  #[inline]
+  pub const fn def(&self) -> DefId {
+    self.def
+  }
+
+  /// The value: one of the enum's members.
+  #[inline]
+  pub const fn value(&self) -> MemberId {
+    self.value
+  }
 }
 
 /// An integer value, of any width: its sign, its magnitude and the literal as written.
@@ -310,11 +338,11 @@ impl<'a> Value<'a> {
       }
       VALUE_STRING => ValueKind::String(row.run.text(&model.text)),
       VALUE_BYTES => ValueKind::Bytes(row.run.of(&model.magnitudes)),
-      VALUE_ENUM => ValueKind::Enum {
+      VALUE_ENUM => ValueKind::Enum(EnumValueRef {
         def: row.def,
         value: row.member,
-      },
-      VALUE_TYPE => ValueKind::Type { def: row.def },
+      }),
+      VALUE_TYPE => ValueKind::Type(row.def),
       VALUE_LIST => ValueKind::List(row.run.of(&model.value_items)),
       VALUE_SET => ValueKind::Set(row.run.of(&model.value_items)),
       VALUE_MAP => ValueKind::Map(row.run.of(&model.map_entries)),

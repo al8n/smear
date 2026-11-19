@@ -1,5 +1,7 @@
 //! The schema, and the built-in definitions a consumer keys on.
 
+use derive_more::{IsVariant, TryUnwrap, Unwrap};
+
 use crate::graphqlx::id::{ApplicationId, DefId, TypeExprId};
 
 use super::{
@@ -10,7 +12,7 @@ use super::{
 };
 
 /// One of the three root operations a schema has a type for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
 #[non_exhaustive]
 pub enum RootOperation {
   /// `query`.
@@ -33,7 +35,9 @@ impl RootOperation {
 }
 
 /// A root operation's type, and how the schema came to have it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant, Unwrap, TryUnwrap)]
+#[unwrap(ref, ref_mut)]
+#[try_unwrap(ref, ref_mut)]
 #[non_exhaustive]
 pub enum Root {
   /// Written in a schema definition or extension, as `query: Q` is: the type occurrence, which is

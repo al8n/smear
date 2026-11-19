@@ -56,11 +56,11 @@ use std::{collections::BTreeMap, format};
 use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
-  ApplicationId, Contribution, Cx, Diagnostic, DiagnosticKind, MemberId, MemberKind, Model, Site,
-  TyId, TyKind, TypeExprId, TypeExprKind, Visitor,
+  ApplicationId, Contribution, Cx, Diagnostic, DiagnosticKind, MemberId, MemberKind, Model,
+  NamedTy, NamedTypeExpr, Site, TyId, TyKind, TypeExprId, TypeExprKind, Visitor,
   diagnostic::Excerpt,
   id::dense,
-  positions::{Derived, Fill, Place, Positions, Taking, parameter, taking},
+  positions::{Derived, DerivedFill, Fill, Place, Positions, Taking, parameter, taking},
   reach::Reach,
 };
 
@@ -190,7 +190,7 @@ impl Visitor for TypeRefMisuse {
       return;
     }
     let occurrence = model.type_expr(ty);
-    let TypeExprKind::Named { def, args: written } = occurrence.kind() else {
+    let TypeExprKind::Named(NamedTypeExpr { def, args: written }) = occurrence.kind() else {
       return;
     };
     if def != model.builtins().type_ref() {
@@ -265,7 +265,7 @@ impl TypeRefMisuse {
   /// `written` type arguments is refused for: its type's own failure, else one among what its
   /// fill derives.
   fn judge(&mut self, model: &Model, ty: TyId, written: u32) -> Option<Found> {
-    let TyKind::Named { args, .. } = model.ty(ty).kind() else {
+    let TyKind::Named(NamedTy { args, .. }) = model.ty(ty).kind() else {
       return None;
     };
     if args.is_empty() {
@@ -305,7 +305,14 @@ impl TypeRefMisuse {
         slot: filled,
         ty: derived,
         verdict: Held { slot, field },
-      }) => (slot, field, Some((filled, derived))),
+      }) => (
+        slot,
+        field,
+        Some(DerivedFill {
+          slot: filled,
+          ty: derived,
+        }),
+      ),
     };
     let Taking {
       def: taker,
@@ -361,7 +368,7 @@ fn verdict(
     return *kept;
   }
   let mut found: Option<Held> = None;
-  if let TyKind::Named { def, args } = model.ty(ty).kind() {
+  if let TyKind::Named(NamedTy { def, args }) = model.ty(ty).kind() {
     for (slot, argument) in args.iter().enumerate() {
       let slot = dense(slot);
       if positions.witness(def, slot, Place::Operation).is_some()

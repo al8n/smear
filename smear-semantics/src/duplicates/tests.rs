@@ -116,8 +116,12 @@ fn a_name_skipped_at_every_occurrence_is_never_recorded() {
   let Repr::Trail(trail) = seen.repr else {
     panic!("six names is the narrow path");
   };
+  let recorded: Vec<(u32, u32)> = trail
+    .iter()
+    .map(|entry| (entry.name, entry.position))
+    .collect();
   assert_eq!(
-    trail,
+    recorded,
     [(1, 0), (3, 2)],
     "the trail holds the first occurrences it was asked about, and nothing of the skipped name"
   );

@@ -126,9 +126,12 @@ fn an_ordinary_schema_reaches_neither_ceiling() {
   builder.document(&parse(SDL));
   builder.document(&parse("scalar Custom"));
 
-  for (at, &(start, end)) in builder.interner.spans().iter().enumerate() {
+  for (at, range) in builder.interner.spans().iter().enumerate() {
     let sym = Sym::new(at as u32);
-    assert!(start <= end, "span {at} is inverted: {start}..{end}");
+    assert!(
+      range.start() <= range.end(),
+      "span {at} is inverted: {range:?}"
+    );
     assert_eq!(
       builder.interner.lookup(builder.interner.bytes(sym)),
       Some(sym),
@@ -569,11 +572,11 @@ fn the_built_in_text_reservation_is_exact() {
 #[test]
 fn the_text_ceiling_is_a_price_at_it_and_a_refusal_one_past_it() {
   let mut arena = TextArena::default();
-  assert_eq!(arena.admit_within(5, 8), Some((0, 5)));
+  assert_eq!(arena.admit_within(5, 8), Some(Text::new(0, 5)));
   arena.text.push_str("alpha");
   assert_eq!(
     arena.admit_within(3, 8),
-    Some((5, 3)),
+    Some(Text::new(5, 3)),
     "a string ending exactly at the ceiling is admitted"
   );
   arena.text.push_str("bet");

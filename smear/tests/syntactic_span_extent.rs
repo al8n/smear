@@ -108,8 +108,8 @@
 //! measurement. tokora's delimited shapes span a recovered construct with
 //! [`span_since`](tokora::InputRef::span_since) — cursor to cursor — so a group closed by
 //! recovery ends at the **live lookahead cursor**, which at a wrong closer is that token's start.
-//! `token_spanned` overrides it with the token extent, and the two differ by exactly the trivia in
-//! between. The witness pins which of the two readings is right *in the lexer's terms*: the
+//! `spanned_trimmed` overrides it with the token extent, and the two differ by exactly the trivia
+//! in between. The witness pins which of the two readings is right *in the lexer's terms*: the
 //! recovery cursor is an offset the lexer reports as a token **start** and not a token **end**, so
 //! the cursor reading is `end-not-token-end` — the #68 defect — and the checker is made to say so.
 
@@ -854,8 +854,8 @@ fn recovered_spans_are_token_extents_over_the_invalid_corpus() {
 /// inside an argument list, and the list *type* inside a variables definition. tokora reports the
 /// wrong token through the emitter and recovers with a `]` synthesized at the live cursor, spanning
 /// the group with [`span_since`](tokora::InputRef::span_since) — cursor to cursor — so its own
-/// answer ends at the `)`'s start. `token_spanned` overrides that with the token extent, one token
-/// short.
+/// answer ends at the `)`'s start. `spanned_trimmed` overrides that with the token extent, one
+/// token short.
 ///
 /// #75 read the override as a shortening bug. It is the opposite, and the **lexer** settles it
 /// without anyone asking the parser: the recovery cursor is an offset the lexer reports as a token

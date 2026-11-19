@@ -4,6 +4,135 @@ All notable changes to Smear are documented in this file.
 
 ## [Unreleased]
 
+- `graphql-proto`!: `Extensions` holds its entries in an `IndexMap` and finds a key by its hash,
+  with `std::hash::RandomState` under `std` and foldhash at a fixed, public seed without it,
+  where it scanned. Iteration is still insertion order, `remove` keeps the remaining entries in
+  order, and two maps are still equal only with the same entries in the same order. A key is
+  held inline up to 62 bytes where the target has pointer-width atomics. `Extensions::new` is no
+  longer `const`. `Extensions::iter` returns `ExtensionsIter`, which can be named and runs from
+  both ends as well as knowing its length, and `&Extensions` iterates as it, where
+  `IntoIterator`'s iterator type spelled the storage.
+- `graphql-proto`!: `ArgumentSource::Variable` carries a `NamedVariable`, exported at the crate
+  root, where it had the fields `name` and `value`: `name()`, `value()` and `into_parts()` read
+  them, and `new` with the `set_*` and `with_*` methods builds one. `StartError`'s
+  `SourceFieldArgumentBudget` carries its ceiling as `SourceFieldArgumentBudget(u32)`, where it
+  had the field `limit`.
+- `graphql-proto`: the public enums derive their `is_*` predicates, and each one with data
+  `unwrap_*` and `try_unwrap_*`, by value, by reference and by mutable reference. `Error`
+  implements `core::error::Error`.
+- `graphql-proto` and `smear`: a `serde` feature derives `Serialize` and `Deserialize` for
+  `Limits`, and a field the input leaves out takes its default. A key that names no ceiling is
+  refused, so a misspelt one cannot leave a default in place. `smear/serde` forwards it, and
+  implies neither `proto` nor a tier.
+- `graphql-proto` and `smear-schema`: a tier brings dependencies. `graphql-proto` depends on
+  `indexmap` with either tier and on foldhash with `alloc`, and `smear-schema` on smol-bytes 0.2
+  with either tier where the target has pointer-width atomics. A build with no tier compiles none
+  of them.
+- `smear-lexer`!: `BracedUnicodeEscapeError::TooManyDigits` carries a `TooManyDigits`, exported with
+  the other error types, where it had the fields `span` and `count`: `span()`, `span_ref()`,
+  `span_mut()` and `count()` read it. `BracedUnicodeEscapeError::too_many_digits` and
+  `UnicodeError::too_many_digits_in_braced_unicode_escape` still build the refusal.
+- `smear-lexer`!: the public enums of up to sixteen variants derive their `is_*` predicates, and
+  each one with data `unwrap_*` and `try_unwrap_*`, by value, by reference and by mutable
+  reference. `DecimalFloat`, `StringValueError`, `BracedUnicodeEscapeError`, `Sign`,
+  `LengthError`, `InvalidUnicodeScalarKind`, `LitStrDelimiterHint`, `LineTerminatorHint` and
+  `WhiteSpaceHint` are new to it, and the float, decimal, hex, octal and binary errors and the two
+  float hints gain the mutable reference. The enums of more than sixteen variants, the keywords
+  and the token kinds, derive nothing new, and the token enums that already had the face keep it.
+  A unit variant has no `unwrap_*` or `try_unwrap_*`, which could only return `()`:
+  `FloatError::unwrap_missing_integer_part_ref` is gone, and `is_missing_integer_part` answers
+  it; so are those of every unit variant of the token enums and of both `LexerErrorData`s, and
+  the `digit` ones of `DecimalHint`, `HexHint`, `OctalHint` and `BinaryHint`, which derive
+  `is_digit` alone.
+- `smear-lexer`!: `string_value_pieces` takes a callback that returns `core::fmt::Result`, answering
+  each piece as a `fmt::Write` answers a write. A piece it refuses stops the walk, with nothing
+  after it decoded or handed out, and the walk answers `StringValueError::Sink`. A callback that
+  takes every piece returns `Ok(())`. The new `string_value_pieces_from_str` runs the same walk
+  over a spelling held as `&str`, handing out the same pieces without checking it for UTF-8 again.
+- `smear-lexer`: `decode_string_value` writes to any `core::fmt::Write`: a `String` as before, a
+  `&mut dyn fmt::Write`, or the `fmt::Formatter` a `Display` implementation is handed. A writer
+  that refuses a write is answered with the new `StringValueError::Sink`, holding a prefix of the
+  value and written to no further; a spelling the decoder refuses still writes nothing. It no
+  longer reserves the value's length in a `String` first: the new `decode_string_value_to_string`
+  appends to a `String` after reserving the value's length, for a caller that wants one
+  allocation: a `String` with no room takes the value's length and no more, and one that is reused
+  grows as `String::reserve` does.
+- `smear`!: `json::Error::SurrogateEscape` is removed. `Json::graphql_string` cooks a literal
+  through `smear-lexer`'s `string_value_pieces_from_str`, the decoder the lexer's own conversions
+  run, and answers every spelling no lexer produces with `MalformedEscape`: a `\u` escape that
+  names a surrogate, which was `SurrogateEscape`, and a literal without its `"` or `"""`
+  delimiters, whose bytes it wrote as the value.
+- `smear-parser`!: the extension-data enums hold named payloads where fifteen variants had
+  fields. `ExtensionDirectives`, `ExtensionFields` and `ExtensionOperations` are shared by
+  GraphQL and GraphQLx; `ExtensionValues` and `ExtensionMembers` are GraphQLx's, and GraphQL's own
+  `ExtensionValues`, `ExtensionMembers` and `ExtensionInputFields` have fewer fields. Each has
+  `new`, a getter for every field, and `set_*` and `with_*` methods. The enums' accessors
+  (`implements()`, `directives()`, `fields_definition()` and the rest) read as before. Every
+  extension-data enum derives `unwrap_*` and `try_unwrap_*`, by value, by reference and by mutable
+  reference. `smear_parser::graphql::ast` exports GraphQL's `UnionTypeExtensionData`,
+  `EnumTypeExtensionData` and `InputObjectTypeExtensionData`, the shared
+  `ObjectTypeExtensionData`, `InterfaceTypeExtensionData` and `SchemaExtensionData`, and the six
+  payloads, none of which it named before; `smear_parser::graphqlx::ast` exports its five.
+- `smear-parser`!: the variants of the public refusals and of the path and `use` trees hold named
+  payloads or the one value they stand for. `ProjectErrorKind::MissingChild` and `UnexpectedChild`
+  carry `MissingChild` and `UnexpectedChild`, exported from `lossless::project` with a public `new`;
+  `MalformedToken(K)`, `SemanticRule(&'static str)`, `TooDeep(usize)`, `InvalidRawKind(u16)` and
+  `WrongRoot(u16)` carry their value, and so do `Unverified::TooDeep` and `Unverified::WrongRoot`.
+  `Refused::NonUtf8Source` and `Refused::SourceTooLong` carry `NonUtf8Source` and
+  `SourceTooLong`, exported at `smear_parser::lossless` with `const fn new` and `valid_up_to()`,
+  `source_len()` and `max()`. `PathRoot::Parent` carries a `ParentRoot`, exported at
+  `graphqlx::ast`, and `PathRoot::is_relative` is derived, no longer `const`.
+  `UsePrefix::Source` carries a `SourcePrefix`, and `UseTreeKind::Simple` the alias, an
+  `Option<Name>`. `ProjectErrorKind`, `Unverified`, `Refused`, `LosslessView`, `PathRoot`,
+  `UsePrefix` and `UseTreeKind` derive their `is_*` predicates and `unwrap_*` and `try_unwrap_*`;
+  both dialects' `ErrorData` have none for a unit variant, which could only return `()`.
+- `smear-parser`!: every `IntoComponents` implementation returns a named `<Node>Components` struct
+  with public fields, in the order of the tuple it replaces, where it returned a tuple:
+  `ArgumentComponents { span, name, value }`, `ListTypeComponents { span, ty, required }`,
+  `DefinitionTypePathComponents`, `UseTreeComponents` and the rest. A pattern needs no type
+  arguments, so `let ArgumentComponents { span, name, .. } = argument.into_components();` reads a
+  node. Each dialect's `ast` module exports the struct beside the node. `Parsed::into_components`
+  returns `ParsedComponents { document, recovery, errors, tree }`, exported from `graphql` and
+  `graphqlx` beside `Parsed`. The three directive-location enums return a `spelling`
+  beside the span. `Name` and `FragmentName` still return tokora's own `Components`.
+- `smear-semantics`: the interner's ranges and parts are named types. `Interner::spans` lends one
+  `ByteRange` per symbol, the half-open range of the arena's bytes that spells it, with `new`,
+  `start()`, `end()`, `len()` and `is_empty()`. `Interner::into_parts` answers an
+  `InternerParts`, whose public fields `bytes`, `spans` and `retired` are the arena, those ranges
+  and the retired map. Both are exported from `interner`.
+- `smear-schema`: `TypeRef`, the `(TypeId, &TypeDef)` pair `Schema::type_by_name` answers, is
+  exported at the crate root, where only the private `repr` module named it.
+- `smear-compiler`!: `Context::Member` and `Context::Usage` hold named payloads, exported at the
+  crate root beside `Context`, where they had the fields `owner` and `name`, and `variable` and
+  `expected`: `MemberContext` has `owner()` and `name()`, and `UsageContext` has `variable()` and
+  `expected()`. They are built by the validator, and a caller reads them off the diagnostics it
+  is handed.
+- `smear-schema` and `smear-compiler`: the public enums derive their `is_*` predicates, and each
+  one with data `unwrap_*` and `try_unwrap_*`, by value, by reference and by mutable reference.
+  `Context`, `MergeConflict`, `Refusal`, `ResponseErrorKind` and `IntrospectionError` are new to
+  it; `Context::None`, which could only return `()`, has no `unwrap_*`. `Rule` and
+  `SchemaErrorKind`, of more than sixteen variants, and the enums under `repr` derive nothing new.
+  Both crates take `derive_more` as a dependency for it, with no feature in front of it.
+- `smear-analysis`!: the model's variants hold named payloads or the one value they stand for,
+  where nine had fields, exported at `graphqlx` beside the enums. `TypeExprKind::Named` and
+  `TyKind::Named` carry a `NamedTypeExpr` and a `NamedTy`, each with `def()` and `args()`;
+  `TypeExprKind::Param` and `TyKind::Param` a `TypeParamRef`, with `def()` and `index()`;
+  `ValueKind::Enum` an `EnumValueRef`, with `def()` and `value()`; `Primitive::Int` an
+  `IntPrimitive`, with `is_signed()` and `width()`, built as before by `Primitive::signed` and
+  `Primitive::unsigned`; and `List(element)` of both type kinds and `ValueKind::Type(def)` carry
+  the id. A pattern reads `TyKind::Named(named)` and `named.def()`, where it named the fields.
+  The nine variant-level `#[non_exhaustive]` are gone: a payload's private fields refuse a
+  construction and an exhaustive pattern as they did. The public enums derive their `is_*`
+  predicates, and each one with data `unwrap_*` and `try_unwrap_*`, by value, by reference and by
+  mutable reference; a unit variant has none, which could only return `()`. `TyKind`,
+  `TypeExprKind`, `ValueKind`, `Primitive`, `Resolution`, `Root` and `PathRoot` take all three,
+  and `DefKind`, `Origin`, `Collection`, `MemberKind`, `PackageKind`, `ModuleKind`, `Namespace`,
+  `RootOperation`, `LiteralKind`, `Layout`, `Tier`, `Packages` and `Site` the predicates alone.
+  `DirectiveLocation` and `DiagnosticKind`, of more than sixteen variants, derive nothing new.
+  `smear-analysis` takes `derive_more` as a dependency for it, with no feature in front of it.
+  The hidden test-support door follows: `ModelBuilder::set_object` takes `&[ObjectEntry]`, which
+  `ObjectEntry::new` builds, and `counts` answers a `Counts { members, type_exprs, values,
+  applications }` where it answered a four-tuple.
 - `smear-schema` and `smear-compiler`: an `Int` literal stands for a `Float` only while a finite
   double holds its value, as `Float`'s input coercion requires (§3.5.2). `Schema::build` and
   `Rule::ValuesOfCorrectType` refuse one of magnitude `2^1024 - 2^970` or more, the least integer
@@ -11,7 +140,8 @@ All notable changes to Smear are documented in this file.
   that keeps its verdict. The request door now reads such an integer's digits, and charges them
   as it charges a `Float` literal's.
 - `smear-lexer`: `normalize_decimal_float` reads a decimal float literal's spelling, its `-`
-  included, as a binary float would hold it: `DecimalFloat::Zero`, `DecimalFloat::Overflow`, or
+  included, as a binary float would hold it: `DecimalFloat::Zero(Sign)`,
+  `DecimalFloat::Overflow(Sign)`, where `Sign` says whether the literal is written with a `-`, or
   `DecimalFloat::Spelled`, a spelling `str::parse::<f64>` and `::<f32>` read exactly, written into
   the caller's `[u8; NORMALIZED_FLOAT_LEN]`. It needs no allocator and sits behind no feature.
   Those parsers stop reading an exponent's digits once it reaches 65 536, so a literal whose long
@@ -94,9 +224,16 @@ All notable changes to Smear are documented in this file.
   `LexerErrorData::Omitted(n)`, in either dialect, counting the rest and spanning from the first
   of them to the last. It renders as "n more errors in this comment were found and not kept" and
   reports `SyntaxErrorKind::InvalidSyntax`.
-- `smear-lexer`: a `\u` escape in a text source with fewer than four hex digits, before characters
-  of more than one byte, as in `"\u€€€€"`, no longer panics. The escape takes up to four
-  characters whole as its digits, and reports each one that is not hex at its own byte.
+- `smear-lexer`!: a `\u` escape without four hex digits takes as its digits up to four characters
+  after the `u`, and stops before a `"`, `\`, CR or LF, as `\u{` already does, in a text source and
+  a byte source alike. 0.0.1 took the four bytes after the `u` in either source, whatever they were,
+  and a text source panicked when they ended inside a character, as in `"\u€€€€"`. So `"\u12"`,
+  which was an invalid escape that took its closing quote and left the literal unterminated, is now
+  one incomplete escape in a literal that ends at its quote. A byte source reports a digit that is
+  not hex by its character's first byte, and takes an ill-formed sequence as one character.
+  `InvalidUnicodeSequence::taken()` is how many characters the escape took, `is_incomplete()` counts
+  those rather than bytes, and `UnicodeError::invalid_fixed_unicode_escape_sequence` takes the
+  count.
 - `smear-parser`!: `Recovery` counts at every module depth. 0.0.1 released it counting a
   document's top-level elements, so that `projected()` was the length of the document's
   definitions. GraphQLx's recovering type-system doors, and both layers, now count every item
@@ -294,11 +431,17 @@ All notable changes to Smear are documented in this file.
   directives included. An extension that adds directives alone still builds.
 - `smear-schema`: `SchemaErrorKind::UnreadableText` is no longer reachable from
   a parsed document. The kind is kept.
-- Builds on tokora 0.13.1 and smol-bytes 0.2. Paths through the
+- Builds on tokora 0.13.2 and smol-bytes 0.2. Paths through the
   `smear::lexer::tokora` re-export follow the layout tokora adopted in 0.12. The
   `smol-bytes` feature of `smear`, `smear-lexer` and `smear-parser` now enables
   tokora's `smol-bytes_0_2` integration instead of `smol_bytes_0_1`, so the four
   smol-bytes source types are smol-bytes 0.2's. Supersedes #235.
+- `smear-parser`!: the token-extent span vocabulary leaves `combinator`: `extent_start`,
+  `extent_end`, `extent_since`, `TokenSpanned` and `TokenSpannedExt`. tokora 0.13.2's trimmed
+  spans give the same answers, and the parsers now use them: `ParseInput::spanned_trimmed` for
+  `.token_spanned()`, `InputRef::cursor_trimmed` and `InputRef::span_since_trimmed` for the start
+  and the span, and `InputRef::span().end()` for `extent_end`. Every span the parsers report is
+  unchanged. The workspace requires tokora 0.13.2.
 - **Diagnostics follow tokora 0.13: label and help text is borrowed from the
   diagnostic.** `Diagnose::label` on every smear error type returns
   `Option<Label<'_>>`; `primary_label` and `help` are unchanged in what they

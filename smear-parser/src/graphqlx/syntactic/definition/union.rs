@@ -1,7 +1,7 @@
 //! GraphQLx union type definitions and member paths.
 
 use super::*;
-use crate::combinator::{extent_end, pipe, try_pipe};
+use crate::combinator::{pipe, try_pipe};
 
 fn union_members_after_equal<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
@@ -108,7 +108,7 @@ where
     (ParseAttempt::Decline, Some(_)) => unreachable!("a where clause requires union members"),
   };
   Ok(UnionTypeDefinition::new(
-    SimpleSpan::new(start, extent_end(inp)),
+    SimpleSpan::new(start, inp.span().end()),
     name,
     implements,
     directives,

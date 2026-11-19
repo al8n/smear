@@ -411,7 +411,7 @@ where
   }
   let mut list = entry.key("locations")?.array()?;
   for span in spans {
-    let (line, column) = locations.resolve(span.start())?;
+    let LineColumn { line, column } = locations.resolve(span.start())?;
     let mut position = list.element()?.object()?;
     position.key("line")?.number(line)?;
     position.key("column")?.number(column)?;
@@ -901,6 +901,15 @@ struct Checkpoint {
   chars: usize,
 }
 
+/// Draft §7.1.2's `line` and `column` of one location: what [`Locations::resolve`] answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct LineColumn {
+  /// The one-based line.
+  pub(super) line: i64,
+  /// The one-based column, counted in characters.
+  pub(super) column: i64,
+}
+
 /// Draft §7.1.2's `line` and `column` for every location in one response.
 ///
 /// # Why an index, when the walk it replaces was two dozen lines
@@ -968,7 +977,7 @@ impl<'d> Locations<'d> {
   ///
   /// [`Error::Allocation`] when the allocator refuses room for the index, which is the first
   /// location's cost and no later one's.
-  pub(super) fn resolve(&mut self, offset: usize) -> Result<(i64, i64), Error> {
+  pub(super) fn resolve(&mut self, offset: usize) -> Result<LineColumn, Error> {
     if self.checkpoints.is_empty() {
       self.build()?;
     }
@@ -1016,7 +1025,10 @@ impl<'d> Locations<'d> {
     // this one has to answer, so the count is a difference of two absolute character counts and
     // not a walk from wherever the line happens to start.
     let column = chars - self.chars_before(line_start) + 1;
-    Ok((as_i64(line), as_i64(column)))
+    Ok(LineColumn {
+      line: as_i64(line),
+      column: as_i64(column),
+    })
   }
 
   /// Returns how many characters of the document lie before `at`, which must be a checkpointed or

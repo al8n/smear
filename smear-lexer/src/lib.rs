@@ -53,7 +53,7 @@ pub use lossless_lexer::LosslessLexer;
 #[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]
 pub use string_lexer::*;
 
-pub use float_value::{DecimalFloat, NORMALIZED_FLOAT_LEN, normalize_decimal_float};
+pub use float_value::{DecimalFloat, NORMALIZED_FLOAT_LEN, Sign, normalize_decimal_float};
 
 #[cfg(any(feature = "std", feature = "alloc"))]
 #[cfg_attr(docsrs, doc(cfg(any(feature = "std", feature = "alloc"))))]

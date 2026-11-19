@@ -632,8 +632,7 @@ fn every_optional_probe_raises_the_stop_instead_of_declining() {
   // ── THE CONTROLS: every probe must still report a genuinely absent thing as absent ──
   let no_alias = budgeted(
     |inp| {
-      UseTree::<_>::graphqlx(inp)
-        .map(|tree| matches!(tree.kind(), UseTreeKind::Simple { alias: Some(_) }))
+      UseTree::<_>::graphqlx(inp).map(|tree| matches!(tree.kind(), UseTreeKind::Simple(Some(_))))
     },
     "Foo",
     64,
@@ -642,8 +641,7 @@ fn every_optional_probe_raises_the_stop_instead_of_declining() {
   assert!(!no_alias, "a tree with no `as` must have no alias");
   let with_alias = budgeted(
     |inp| {
-      UseTree::<_>::graphqlx(inp)
-        .map(|tree| matches!(tree.kind(), UseTreeKind::Simple { alias: Some(_) }))
+      UseTree::<_>::graphqlx(inp).map(|tree| matches!(tree.kind(), UseTreeKind::Simple(Some(_))))
     },
     "Foo as Bar",
     64,

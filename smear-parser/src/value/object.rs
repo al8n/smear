@@ -84,12 +84,27 @@ impl<Name, Value: crate::value::Nestable, Span> crate::value::Nestable
   }
 }
 
+/// `ObjectField` taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ObjectFieldComponents<Name, Value, Span> {
+  /// The span covering the complete field.
+  pub span: Span,
+  /// The field name.
+  pub name: Name,
+  /// The field value.
+  pub value: Value,
+}
+
 impl<Name, Value, Span> IntoComponents for ObjectField<Name, Value, Span> {
-  type Components = (Span, Name, Value);
+  type Components = ObjectFieldComponents<Name, Value, Span>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.name, self.value)
+    ObjectFieldComponents {
+      span: self.span,
+      name: self.name,
+      value: self.value,
+    }
   }
 }
 
@@ -151,11 +166,23 @@ impl<Name, Value, Span, Container> IntoSpan<Span> for Object<Name, Value, Span, 
   }
 }
 
+/// `Object` taken apart: every field, in the order it is written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObjectComponents<Span, Container> {
+  /// The span covering the complete object.
+  pub span: Span,
+  /// The parsed object fields.
+  pub fields: Container,
+}
+
 impl<Name, Value, Span, Container> IntoComponents for Object<Name, Value, Span, Container> {
-  type Components = (Span, Container);
+  type Components = ObjectComponents<Span, Container>;
 
   #[inline]
   fn into_components(self) -> Self::Components {
-    (self.span, self.fields)
+    ObjectComponents {
+      span: self.span,
+      fields: self.fields,
+    }
   }
 }

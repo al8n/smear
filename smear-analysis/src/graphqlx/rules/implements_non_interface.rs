@@ -18,7 +18,8 @@
 use std::{format, string::String};
 
 use crate::graphqlx::{
-  Cx, DefId, DefKind, Diagnostic, Path, TypeExprKind, Visitor, code::schema, diagnostic::Excerpt,
+  Cx, DefId, DefKind, Diagnostic, NamedTypeExpr, Path, TypeExprKind, Visitor, code::schema,
+  diagnostic::Excerpt,
 };
 
 use super::supplied;
@@ -60,7 +61,7 @@ impl Visitor for ImplementsNonInterface {
       for entry in part.implements() {
         let occurrence = model.type_expr(*entry);
         let what: String = match occurrence.kind() {
-          TypeExprKind::Named { def: named, .. } => {
+          TypeExprKind::Named(NamedTypeExpr { def: named, .. }) => {
             let named = model.def(named);
             let kind = match named.kind() {
               DefKind::Interface => continue,
@@ -78,7 +79,7 @@ impl Visitor for ImplementsNonInterface {
           }
           // The type parameter as the entry writes it: an extension's own name for its target's
           // parameter is its own.
-          TypeExprKind::Param { .. } => {
+          TypeExprKind::Param(_) => {
             let Some(&name) = occurrence
               .path()
               .and_then(|path: Path<'_>| path.segments().last())
@@ -90,7 +91,7 @@ impl Visitor for ImplementsNonInterface {
               Excerpt(model.name(name).as_bytes())
             )
           }
-          TypeExprKind::List { .. } | TypeExprKind::Unresolved => continue,
+          TypeExprKind::List(_) | TypeExprKind::Unresolved => continue,
         };
         cx.report(
           Diagnostic::builder(schema::IMPLEMENTS_NON_INTERFACE, occurrence.location())

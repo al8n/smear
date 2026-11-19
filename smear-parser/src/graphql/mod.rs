@@ -34,7 +34,7 @@ mod layer;
 pub use layer::Lossless;
 pub use layer::{Layer, Syntactic};
 
-pub use crate::layer::{Parsed, Recovery, Rejected, Report};
+pub use crate::layer::{Parsed, ParsedComponents, Recovery, Rejected, Report};
 
 /// The GraphQL dialect marker.
 ///

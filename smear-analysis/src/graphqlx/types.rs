@@ -18,8 +18,18 @@ use std::{collections::BTreeMap, vec::Vec};
 use crate::graphqlx::{
   id::{DefId, TyId},
   limits::Limits,
-  model::{ModelBuilder, Shape},
+  model::{ModelBuilder, Shape, TypeParamRef},
 };
+
+/// A type being walked, with the index of the next of its children to look at: a walk's stack
+/// holds them, in the type services and in the positions.
+#[derive(Clone, Copy)]
+pub(crate) struct TyCursor {
+  /// The type.
+  pub(crate) ty: TyId,
+  /// The index of the next of its arguments, or of its element, to look at.
+  pub(crate) next: u32,
+}
 
 /// A budget of steps: the most it may spend, and what it has spent.
 pub(crate) struct Counter {
@@ -146,7 +156,7 @@ pub(crate) struct Derived {
   /// node, which the rebuild looks up for each child it meets; cleared for each type.
   rebuilt: BTreeMap<TyId, TyId>,
   /// While one type is rebuilt: the nodes being rebuilt, each with its next child to look at.
-  frames: Vec<(TyId, u32)>,
+  frames: Vec<TyCursor>,
 }
 
 impl Derived {
@@ -225,23 +235,23 @@ impl Derived {
     if !steps.charge(1) {
       return Err(Stop::Steps);
     }
-    self.frames.push((open, 0));
-    while let Some(&(node, next)) = self.frames.last() {
+    self.frames.push(TyCursor { ty: open, next: 0 });
+    while let Some(&TyCursor { ty: node, next }) = self.frames.last() {
       let child = match builder.ty_shape(node) {
         Some(Shape::Named(_)) => builder.ty_args(node).get(next as usize).copied(),
         Some(Shape::List(element)) => (next == 0).then_some(element),
-        Some(Shape::Param { .. } | Shape::Unresolved) | None => None,
+        Some(Shape::Param(_) | Shape::Unresolved) | None => None,
       };
       if let Some(child) = child {
         if let Some(frame) = self.frames.last_mut() {
-          frame.1 = next.saturating_add(1);
+          frame.next = next.saturating_add(1);
         }
         // Looked at, whether it is closed, rebuilt already or still to do.
         if !steps.charge(1) {
           return Err(Stop::Steps);
         }
         if !builder.ty_closed(child) && !self.rebuilt.contains_key(&child) {
-          self.frames.push((child, 0));
+          self.frames.push(TyCursor { ty: child, next: 0 });
         }
         continue;
       }
@@ -272,7 +282,7 @@ impl Derived {
     match builder.ty_shape(node) {
       // The argument for the parameter, as it is, its `!` included; written `T!`, its non-null
       // form, which a collection's key, already non-null, is.
-      Some(Shape::Param { def: owner, index }) => {
+      Some(Shape::Param(TypeParamRef { def: owner, index })) => {
         debug_assert!(
           owner == def,
           "a type is rebuilt under the arguments of the definition whose parameters it names"

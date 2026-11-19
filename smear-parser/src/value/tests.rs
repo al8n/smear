@@ -7,8 +7,12 @@ use tokora::{
 };
 
 use super::{
-  BlockStringValue, BooleanValue, DefaultInputValue, EnumValue, FloatValue, InlineStringValue,
-  IntValue, List, NullValue, Object, ObjectField, StringValue, VariableValue,
+  BlockStringValue, BlockStringValueComponents, BooleanValue, BooleanValueComponents,
+  DefaultInputValue, DefaultInputValueComponents, EnumValue, EnumValueComponents, FloatValue,
+  FloatValueComponents, InlineStringValue, InlineStringValueComponents, IntValue,
+  IntValueComponents, List, ListComponents, NullValue, NullValueComponents, Object,
+  ObjectComponents, ObjectField, ObjectFieldComponents, StringValue, StringValueComponents,
+  VariableValue, VariableValueComponents,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -37,7 +41,13 @@ fn carriers_support_custom_spans_and_language_markers() {
     BooleanValue::<str, CustomSpan, dyn CustomLang>::new(CustomSpan(1), true).into_span(),
     CustomSpan(1)
   );
-  assert_eq!(boolean.into_components(), (CustomSpan(1), true));
+  assert_eq!(
+    boolean.into_components(),
+    BooleanValueComponents {
+      span: CustomSpan(1),
+      value: true
+    }
+  );
 
   let enum_value = EnumValue::<_, CustomSpan, dyn CustomLang>::new(CustomSpan(2), "ACTIVE");
   assert_eq!(enum_value.as_span(), &CustomSpan(2));
@@ -45,7 +55,13 @@ fn carriers_support_custom_spans_and_language_markers() {
     EnumValue::<_, CustomSpan, dyn CustomLang>::new(CustomSpan(2), "ACTIVE").into_span(),
     CustomSpan(2)
   );
-  assert_eq!(enum_value.into_components(), (CustomSpan(2), "ACTIVE"));
+  assert_eq!(
+    enum_value.into_components(),
+    EnumValueComponents {
+      span: CustomSpan(2),
+      source: "ACTIVE"
+    }
+  );
 
   let float = FloatValue::<_, CustomSpan, dyn CustomLang>::new(CustomSpan(3), "1.5");
   assert_eq!(float.as_span(), &CustomSpan(3));
@@ -53,7 +69,13 @@ fn carriers_support_custom_spans_and_language_markers() {
     FloatValue::<_, CustomSpan, dyn CustomLang>::new(CustomSpan(3), "1.5").into_span(),
     CustomSpan(3)
   );
-  assert_eq!(float.into_components(), (CustomSpan(3), "1.5"));
+  assert_eq!(
+    float.into_components(),
+    FloatValueComponents {
+      span: CustomSpan(3),
+      value: "1.5"
+    }
+  );
 
   let int = IntValue::<_, CustomSpan, dyn CustomLang>::new(CustomSpan(4), "1");
   assert_eq!(int.as_span(), &CustomSpan(4));
@@ -61,7 +83,13 @@ fn carriers_support_custom_spans_and_language_markers() {
     IntValue::<_, CustomSpan, dyn CustomLang>::new(CustomSpan(4), "1").into_span(),
     CustomSpan(4)
   );
-  assert_eq!(int.into_components(), (CustomSpan(4), "1"));
+  assert_eq!(
+    int.into_components(),
+    IntValueComponents {
+      span: CustomSpan(4),
+      value: "1"
+    }
+  );
 
   let null = NullValue::<_, CustomSpan, dyn CustomLang>::new(CustomSpan(5), "null");
   assert_eq!(null.as_span(), &CustomSpan(5));
@@ -69,7 +97,13 @@ fn carriers_support_custom_spans_and_language_markers() {
     NullValue::<_, CustomSpan, dyn CustomLang>::new(CustomSpan(5), "null").into_span(),
     CustomSpan(5)
   );
-  assert_eq!(null.into_components(), (CustomSpan(5), "null"));
+  assert_eq!(
+    null.into_components(),
+    NullValueComponents {
+      span: CustomSpan(5),
+      source: "null"
+    }
+  );
 
   let inline_lit = match LitStr::try_from("\"inline\"").unwrap() {
     LitStr::Inline(lit) => lit,
@@ -83,7 +117,7 @@ fn carriers_support_custom_spans_and_language_markers() {
       .into_span(),
     CustomSpan(6)
   );
-  let (span, lit) = string.into_components();
+  let StringValueComponents { span, lit } = string.into_components();
   assert_eq!(span, CustomSpan(6));
   assert_eq!(lit.source_ref(), &"\"inline\"");
 
@@ -93,7 +127,7 @@ fn carriers_support_custom_spans_and_language_markers() {
     InlineStringValue::<_, CustomSpan, dyn CustomLang>::new(CustomSpan(7), inline_lit).into_span(),
     CustomSpan(7)
   );
-  let (span, lit) = inline.into_components();
+  let InlineStringValueComponents { span, lit } = inline.into_components();
   assert_eq!(span, CustomSpan(7));
   assert_eq!(lit.source_ref(), &"\"inline\"");
 
@@ -107,7 +141,7 @@ fn carriers_support_custom_spans_and_language_markers() {
     BlockStringValue::<_, CustomSpan, dyn CustomLang>::new(CustomSpan(8), block_lit).into_span(),
     CustomSpan(8)
   );
-  let (span, lit) = block.into_components();
+  let BlockStringValueComponents { span, lit } = block.into_components();
   assert_eq!(span, CustomSpan(8));
   assert_eq!(lit.source_ref(), &"\"\"\"block\"\"\"");
 
@@ -117,31 +151,56 @@ fn carriers_support_custom_spans_and_language_markers() {
     VariableValue::<_, CustomSpan>::new(CustomSpan(9), "value").into_span(),
     CustomSpan(9)
   );
-  assert_eq!(variable.into_components(), (CustomSpan(9), "value"));
+  assert_eq!(
+    variable.into_components(),
+    VariableValueComponents {
+      span: CustomSpan(9),
+      name: "value"
+    }
+  );
 
   let list = List::<i32, CustomSpan>::new(CustomSpan(10), vec![1, 2]);
   assert_eq!(list.as_span(), &CustomSpan(10));
   assert_eq!(list.values(), &[1, 2]);
-  assert_eq!(list.into_components(), (CustomSpan(10), vec![1, 2]));
+  assert_eq!(
+    list.into_components(),
+    ListComponents {
+      span: CustomSpan(10),
+      values: vec![1, 2]
+    }
+  );
 
   let field = ObjectField::<_, _, CustomSpan>::new(CustomSpan(15), "answer", 42);
   assert_eq!(field.as_span(), &CustomSpan(15));
   assert_eq!(field.name(), &"answer");
   assert_eq!(field.value(), &42);
-  assert_eq!(field.into_components(), (CustomSpan(15), "answer", 42));
+  assert_eq!(
+    field.into_components(),
+    ObjectFieldComponents {
+      span: CustomSpan(15),
+      name: "answer",
+      value: 42
+    }
+  );
 
   let object_field = ObjectField::<_, _, CustomSpan>::new(CustomSpan(12), "answer", 42);
   let object = Object::<&str, i32, CustomSpan>::new(CustomSpan(13), vec![object_field]);
   assert_eq!(object.as_span(), &CustomSpan(13));
   assert_eq!(object.fields().len(), 1);
-  let (span, fields) = object.into_components();
+  let ObjectComponents { span, fields } = object.into_components();
   assert_eq!(span, CustomSpan(13));
   assert_eq!(fields[0].name(), &"answer");
 
   let default = DefaultInputValue::<_, CustomSpan>::new(CustomSpan(14), 42);
   assert_eq!(default.as_span(), &CustomSpan(14));
   assert_eq!(default.value(), &42);
-  assert_eq!(default.into_components(), (CustomSpan(14), 42));
+  assert_eq!(
+    default.into_components(),
+    DefaultInputValueComponents {
+      span: CustomSpan(14),
+      value: 42
+    }
+  );
 
   #[cfg(feature = "graphql")]
   {
@@ -154,18 +213,31 @@ fn carriers_support_custom_spans_and_language_markers() {
 #[cfg(feature = "graphqlx")]
 #[test]
 fn graphqlx_collections_support_custom_spans() {
-  use super::{Map, MapEntry, Set};
+  use super::{Map, MapEntry, MapEntryComponents, Set, SetComponents};
 
   let set = Set::<i32, CustomSpan>::new(CustomSpan(11), vec![1, 2]);
   assert_eq!(set.as_span(), &CustomSpan(11));
   assert_eq!(set.values(), &[1, 2]);
-  assert_eq!(set.into_components(), (CustomSpan(11), vec![1, 2]));
+  assert_eq!(
+    set.into_components(),
+    SetComponents {
+      span: CustomSpan(11),
+      values: vec![1, 2]
+    }
+  );
 
   let entry = MapEntry::<_, _, CustomSpan>::new(CustomSpan(12), "answer", 42);
   assert_eq!(entry.as_span(), &CustomSpan(12));
   assert_eq!(entry.key(), &"answer");
   assert_eq!(entry.value(), &42);
-  assert_eq!(entry.into_components(), (CustomSpan(12), "answer", 42));
+  assert_eq!(
+    entry.into_components(),
+    MapEntryComponents {
+      span: CustomSpan(12),
+      key: "answer",
+      value: 42
+    }
+  );
 
   let map = Map::<_, _, CustomSpan>::new(
     CustomSpan(13),

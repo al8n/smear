@@ -1,7 +1,8 @@
 #![cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphql"))]
 
 use smear::parser::{
-  graphql::lossless::trivia, lexer::graphql::lossless::LosslessTokenKind as Kind,
+  graphql::lossless::trivia::{self, test_support::Driven},
+  lexer::graphql::lossless::LosslessTokenKind as Kind,
 };
 
 /// Every case pairs a compact input with a trivia-laden one that must behave identically.
@@ -20,7 +21,10 @@ fn peek_kind_sees_past_leading_trivia() {
 
 #[test]
 fn expect_accepts_a_token_behind_trivia_and_commits_the_trivia() {
-  let (ok, text) = trivia::test_support::expect_brace_of("  # hi\n{");
+  let Driven {
+    result: ok,
+    committed: text,
+  } = trivia::test_support::expect_brace_of("  # hi\n{");
   assert!(ok, "expect must match the brace behind trivia");
   assert_eq!(
     text, "  # hi\n{",
@@ -30,7 +34,10 @@ fn expect_accepts_a_token_behind_trivia_and_commits_the_trivia() {
 
 #[test]
 fn eat_if_declines_without_consuming_trivia_twice() {
-  let (ate, text) = trivia::test_support::eat_if_brace_of("  a");
+  let Driven {
+    result: ate,
+    committed: text,
+  } = trivia::test_support::eat_if_brace_of("  a");
   assert!(!ate, "eat_if must decline when the token does not match");
   assert_eq!(
     text, "  ",
@@ -58,7 +65,10 @@ fn is_trivia_covers_every_graphql_ignored_token_and_commits_it() {
     "# a comment\n", // Comment, and the terminator that closes it
   ] {
     let src = format!("{lead}{{");
-    let (ok, text) = trivia::test_support::expect_brace_of(&src);
+    let Driven {
+      result: ok,
+      committed: text,
+    } = trivia::test_support::expect_brace_of(&src);
     assert!(ok, "{lead:?} must be crossed as trivia");
     assert_eq!(text, src, "{lead:?} must be committed, byte for byte");
   }
@@ -75,7 +85,7 @@ fn is_trivia_covers_nothing_significant() {
       Some(Kind::LBrace),
       "{lead:?} is significant and must stop the skip"
     );
-    let (ok, _) = trivia::test_support::expect_brace_of(&src);
+    let Driven { result: ok, .. } = trivia::test_support::expect_brace_of(&src);
     assert!(!ok, "{lead:?} is significant and must make expect fail");
   }
 }
@@ -134,7 +144,10 @@ fn peek_kind_reports_none_at_end_of_input() {
 /// `eat_if` on a match consumes exactly the token and the trivia before it.
 #[test]
 fn eat_if_accepts_a_token_behind_trivia() {
-  let (ate, text) = trivia::test_support::eat_if_brace_of(" ,{ ");
+  let Driven {
+    result: ate,
+    committed: text,
+  } = trivia::test_support::eat_if_brace_of(" ,{ ");
   assert!(ate, "eat_if must accept the brace behind trivia");
   assert_eq!(
     text, " ,{",
