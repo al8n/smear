@@ -182,8 +182,11 @@
 //!   the first such copy that does not fit, in its directive's order: one `invalid-default-value`,
 //!   at its path, labelled at the default;
 //! - a written object literal whose type a type occurrence a supplied package writes has, in
-//!   either nullness, is silent: that type's instantiation is checked where it is written, and its
-//!   check reports the default there, once at each occurrence;
+//!   either nullness, is silent about a copy of a default that type's check records: that type's
+//!   instantiation is checked where it is written, and its check reports the default there, once at
+//!   each occurrence. A default a contribution the orphan rule refuses writes is recorded for no
+//!   check, so the literal reports the first copy of one that does not fit, as any other literal
+//!   does;
 //! - any other written object literal reports the first copy of a default it leaves out that does
 //!   not fit, in its input object's order: one `invalid-default-value`, at the literal, labelled
 //!   at the default. So does one whose type a rebuild made, a field's or an argument's type under
@@ -192,8 +195,9 @@
 //!
 //! Which types occurrences write is read once, before the walk: the nullable form of each closed
 //! instantiation of a generic definition that a supplied package's type occurrence has, as the
-//! check at each instantiation reads them. A literal asks at its first copy that does not fit,
-//! once. Whether a rebuild made a type says only whether a copy against it is judged.
+//! check at each instantiation reads them. A literal asks at its first copy that does not fit of
+//! a default that check records, once. Whether a rebuild made a type says only whether a copy
+//! against it is judged.
 //!
 //! A copy reports nothing: whether it fits reaches whoever asked for its outermost count. A
 //! default whose copy would hold a copy of itself is not copied, and is judged all the same, by
@@ -555,6 +559,8 @@ pub(crate) fn coerce(
     searched: BTreeMap::new(),
     owner: None,
     refusing: false,
+    refused_applications: Vec::new(),
+    refused_members: Vec::new(),
     recorded: Vec::new(),
     checked: BTreeMap::new(),
     written: BTreeSet::new(),
@@ -570,27 +576,23 @@ pub(crate) fn coerce(
   coercion.list_fields();
   coercion.list_cycled();
   coercion.list_written();
-  // The applications and the direct members of the definition being walked that contributions
-  // the orphan rule refuses write, each sorted: what is recorded of them is nothing.
-  let mut refused_applications: Vec<ApplicationId> = Vec::new();
-  let mut refused_members: Vec<MemberId> = Vec::new();
+  coercion.list_refused();
   for index in 0..coercion.builder.def_count() {
     let def = DefId::new(index);
     // A generic definition's values that name its type parameters are recorded under it: a
     // type's, and those of the applications on a directive and on its arguments. A directive's
     // own arguments' defaults are judged where its applications leave them out.
     coercion.owner = (coercion.builder.type_param_count(def) > 0).then_some(def);
-    coercion.refused(def, &mut refused_applications, &mut refused_members);
     let count = coercion.builder.def_applications(def).len();
     for at in 0..count {
       if let Some(&application) = coercion.builder.def_applications(def).get(at) {
-        coercion.refusing = refused_applications.binary_search(&application).is_ok();
+        coercion.refusing = coercion.refused_application(application);
         coercion.application(application);
       }
     }
     for member in coercion.builder.def_members(def) {
       // A member's arguments and applications are its contribution's, refused with it.
-      coercion.refusing = refused_members.binary_search(&member).is_ok();
+      coercion.refusing = coercion.refused_member(member);
       coercion.member(member);
       for argument in coercion.builder.member_arguments(member) {
         coercion.member(argument);
@@ -1533,6 +1535,13 @@ struct Coercion<'c, 'p, 'x> {
   /// Whether the walk is in a contribution the orphan rule refuses, or in an application it
   /// refuses: what is written there is coerced where it is written, and recorded for none.
   refusing: bool,
+  /// The applications that contributions of generic definitions the orphan rule refuses write,
+  /// and those it refuses in the root package's extensions of built-ins, sorted, as
+  /// [`list_refused`](Self::list_refused) finds them.
+  refused_applications: Vec<ApplicationId>,
+  /// The direct members that contributions of generic definitions the orphan rule refuses write,
+  /// sorted, as [`list_refused`](Self::list_refused) finds them.
+  refused_members: Vec<MemberId>,
   /// Each value of a generic definition whose type names its type parameters, but not a whole
   /// `null` no instantiation takes, and each argument an application in it leaves out whose type is
   /// a bare nullable type parameter of it, but not a collection's key or element, in the walk's
@@ -1717,37 +1726,56 @@ impl<'p> Coercion<'_, 'p, '_> {
     found
   }
 
-  /// Fills `applications` and `members` with what the contributions of `def` that the orphan rule
-  /// refuses write, as `rules::accepted` answers, each sorted: each application of a contribution
-  /// it refuses whole, and each it refuses in the root package's extension of a built-in, as
+  /// Lists what the contributions of each generic definition that the orphan rule refuses write,
+  /// as `rules::accepted` answers, each sorted: each application of a contribution it refuses
+  /// whole, and each it refuses in the root package's extension of a built-in, as
   /// `rules::accepts_application` answers; and each direct member of a contribution it refuses,
-  /// whose arguments and applications are refused with it. Empty for a definition of no type
-  /// parameter, which records nothing.
-  fn refused(
-    &self,
-    def: DefId,
-    applications: &mut Vec<ApplicationId>,
-    members: &mut Vec<MemberId>,
-  ) {
-    applications.clear();
-    members.clear();
-    if self.owner.is_none() {
-      return;
-    }
+  /// whose arguments and applications are refused with it. A definition of no type parameter
+  /// records nothing, and lists nothing. One look at each contribution of each generic definition,
+  /// before the walk.
+  fn list_refused(&mut self) {
     let model = self.builder.so_far();
-    for part in model.def(def).contributions() {
-      let judged = accepted(model, self.sources, def, &part);
-      for &application in part.applications() {
-        if !accepts_application(model, self.meanings, judged, application) {
-          applications.push(application);
-        }
+    let mut applications: Vec<ApplicationId> = Vec::new();
+    let mut members: Vec<MemberId> = Vec::new();
+    for index in 0..self.builder.def_count() {
+      let def = DefId::new(index);
+      if self.builder.type_param_count(def) == 0 {
+        continue;
       }
-      if judged == Accepted::Refused {
-        members.extend(part.members());
+      for part in model.def(def).contributions() {
+        let judged = accepted(model, self.sources, def, &part);
+        for &application in part.applications() {
+          if !accepts_application(model, self.meanings, judged, application) {
+            applications.push(application);
+          }
+        }
+        if judged == Accepted::Refused {
+          members.extend(part.members());
+        }
       }
     }
     applications.sort_unstable();
     members.sort_unstable();
+    self.refused_applications = applications;
+    self.refused_members = members;
+  }
+
+  /// Whether `application` is one the orphan rule refuses, as
+  /// [`list_refused`](Self::list_refused) found: nothing it writes is recorded.
+  fn refused_application(&self, application: ApplicationId) -> bool {
+    self
+      .refused_applications
+      .binary_search(&application)
+      .is_ok()
+  }
+
+  /// Whether a contribution the orphan rule refuses wrote `member`, a direct member of a generic
+  /// definition, as [`list_refused`](Self::list_refused) found: nothing it writes is recorded, its
+  /// default among them, so no check at an instantiation holds a row of that default. The walk
+  /// records by this answer, and a written object literal leaves its copy of a default to such a
+  /// check by it too: one answer for both.
+  fn refused_member(&self, member: MemberId) -> bool {
+    self.refused_members.binary_search(&member).is_ok()
   }
 
   /// Records the value of the tree `tree`, of the type `ty`, written at `site` in the definition
@@ -1822,11 +1850,14 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
   }
 
-  /// Whether a written object literal of the input object `def`, made against `ty`, leaves a copy
-  /// that does not fit under `ty`'s arguments to the check where `ty` is written: when a type
-  /// occurrence a supplied package writes has `ty`, in either nullness. One look at `ty`'s
-  /// nullable form and one search of [`Coercion::written`], asked once for each literal, at its
-  /// first such copy, whose count the literal paid for.
+  /// Whether a written object literal of the input object `def`, made against `ty`, may leave a
+  /// copy that does not fit under `ty`'s arguments to the check where `ty` is written: when a type
+  /// occurrence a supplied package writes has `ty`, in either nullness. It leaves that check only
+  /// the copy of a default the check records: a default a contribution the orphan rule refuses
+  /// writes is recorded for none, as [`refused_member`](Self::refused_member) says, and its copy is
+  /// reported at the literal. One look at `ty`'s nullable form and one search of
+  /// [`Coercion::written`], asked once for each literal, at its first such copy, whose count the
+  /// literal paid for.
   fn checked_where_written(&mut self, ty: Option<TyId>, def: DefId) -> bool {
     let Some(ty) = ty else {
       return false;
@@ -4092,9 +4123,12 @@ impl<'p> Coercion<'_, 'p, '_> {
     // The entries' tasks are pushed in order, then reversed, so that the first is made first.
     let tasks = self.stack.len();
     let alone = one_of && fields.written == 1;
-    // Whether the first copy that does not fit under the object's type arguments was met: reported
-    // here, or left to the check where the object's type is written. Once for the literal.
+    // Whether a copy that does not fit under the object's type arguments was reported here: once
+    // for the literal.
     let mut met = false;
+    // Whether a type occurrence a supplied package writes has the object's type: asked at the
+    // first copy that does not fit of a default the check there records, and kept.
+    let mut written: Option<bool> = None;
     while let Some(next) = self.next(&mut merge) {
       let (field, default) = match next {
         Next::Set(set) => {
@@ -4144,12 +4178,15 @@ impl<'p> Coercion<'_, 'p, '_> {
           }
         };
         // A literal whose type a type occurrence a supplied package writes has leaves its copy that
-        // does not fit to that occurrence's check, which reports it there; any other reports it
-        // here, whether a rebuild or a fill made its type. A copy of a default its declaration
-        // refuses, judged and charged as any other, is that declaration's to report.
+        // does not fit of a default the check there records to that occurrence's check, which
+        // reports it there; it reports here the first other, as any other literal does, whether a
+        // rebuild or a fill made its type. A copy of a default its declaration refuses, judged and
+        // charged as any other, is that declaration's to report.
         if !fits && !met && !self.owned(field, default) {
-          met = true;
-          if !self.checked_where_written(making.ty, def) {
+          let left = !self.refused_member(field)
+            && *written.get_or_insert_with(|| self.checked_where_written(making.ty, def));
+          if !left {
+            met = true;
             self.unfit_field(at, field, default);
             // The literal owns the default's count, and each one beneath it that does not fit
             // (W:979).

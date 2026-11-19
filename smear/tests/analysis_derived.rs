@@ -1748,6 +1748,39 @@ fn an_orphan_applications_argument_is_judged_at_no_instantiation() {
   );
 }
 
+/// A copy of a default another package's extension writes in a dependency's generic input object
+/// is reported at the object literal that leaves its field out, whether or not a supplied package
+/// writes the literal's type: the root package's refused extension gives `^::dep::Box<U>` the field
+/// `extra: U = 1`, and `@take<String>(x: {})` copies `1` against `String`. The check where
+/// `Box<String>` is written records no default a refused contribution writes, so the literal leaves
+/// it no copy. Refuses a literal that leaves its copy to a check that holds no row of it.
+#[test]
+fn a_refused_defaults_copy_is_reported_at_the_literal_whatever_is_written() {
+  let theirs = "input Box<T> {\n  value: T\n}\n";
+  let rest = "directive @take<T>(x: ^::dep::Box<T>) on OBJECT\n\
+              extend input ^::dep::Box<U> {\n  extra: U = 1\n}\n";
+  // No type occurrence writes `Box<String>`, and then an argument's type does.
+  for query in [
+    "type Query @take<String>(x: {}) {\n  ok: Int\n}\n",
+    "type Query @take<String>(x: {}) {\n  ok(b: ^::dep::Box<String>): Int\n}\n",
+  ] {
+    let ours = format!("{query}{rest}");
+    let analysis = analyze_beside(&ours, theirs, &Limits::new());
+    let schema = schema_file(&analysis);
+    assert_eq!(
+      codes_at(&analysis, DEFAULT),
+      [after(schema, &ours, "x: ", "{}")],
+      "{:#?}",
+      analysis.diagnostics()
+    );
+    assert!(
+      !codes_at(&analysis, ORPHAN).is_empty(),
+      "{:#?}",
+      analysis.diagnostics()
+    );
+  }
+}
+
 /// What another package writes into a dependency's definition grows nothing: the root package's
 /// `implements Loop<[T]>` on `^::dep::I<T>`, where `Loop<X>` holds an `I<X>`, would close a cycle
 /// that wraps `T`, and make `I` grow, so that the `I<Boolean>` the dependency's `Wrap<Boolean>`
