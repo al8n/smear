@@ -89,10 +89,12 @@
 //! complete type its defaults fill, read its arguments once between them. What an executable
 //! directive's own parameter can receive is entered once, however many such parameters the walk
 //! meets: one look at each definition. Each closure reads each definition's occurrences at most
-//! once. The work is linear in the definitions, their occurrences, the applications and the type
-//! arguments they write, the types and their arguments; nothing recurses, nothing is interned and
-//! nothing is reported. When `reached` holds nothing, `runtime` is not walked. Both are least sets,
-//! so the answer depends on no order.
+//! once, but that `runtime` reads an executable directive's arguments' types twice: first as the
+//! directive's own, then with the rest of its occurrences, when each is a type walked already and
+//! costs one look. The work is linear in the definitions, their occurrences, the applications and
+//! the type arguments they write, the types and their arguments; nothing recurses, nothing is
+//! interned and nothing is reported. When `reached` holds nothing, `runtime` is not walked. Both
+//! are least sets, so the answer depends on no order.
 
 use std::{vec, vec::Vec};
 

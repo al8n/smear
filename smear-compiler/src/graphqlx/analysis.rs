@@ -452,8 +452,11 @@ impl Analysis {
 ///   through lists and every type argument, or that such a definition's own types name in turn,
 ///   and that no type written anywhere else names, every package's together. A definition both
 ///   reach is judged where it is written, and so is what the argument types of a directive an
-///   operation can apply name, whose values arrive at run time; a report within a definition both
-///   reach has a last label at where the reach from outside metadata entered. GraphQL's own rules
+///   operation can apply name, whose values arrive at run time; and while such a directive holds
+///   one of its own type parameters in an argument's type, every such definition is judged, since
+///   an operation can fill that parameter with any of them. A report within a definition both
+///   reach has a last label at where the reach from outside metadata entered, which for what such
+///   a parameter can receive is that argument's type. GraphQL's own rules
 ///   judge what a definition a supplied package wrote holds, a GraphQL built-in the root package
 ///   replaces among them, with GraphQL's codes: a member whose name begins with `__` is
 ///   `reserved-field-name`, `reserved-argument-name`, `reserved-enum-value-name`,

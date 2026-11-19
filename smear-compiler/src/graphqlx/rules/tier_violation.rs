@@ -30,21 +30,27 @@
 //! object of a supplied package that a type a type-system directive writes, one that lists no
 //! executable location, or an application's type argument names, through lists and every type
 //! argument, or that such a definition's own types name in turn, and that no type written anywhere
-//! else names, every package's together. So a `core` package may declare a directive with a
-//! `string` argument, apply another package's directive with a `string` type argument, and take
+//! else names, every package's together, while no directive an operation can apply holds one of
+//! its own type parameters in an argument's type. So a `core` package may declare a directive with
+//! a `string` argument, apply another package's directive with a `string` type argument, and take
 //! in a directive's argument an input object that holds a `string`.
 //!
 //! A definition that a type outside metadata names too, through any type argument and in whatever
 //! package, is judged where it is written, like any other. So is what the argument types of an
-//! executable directive name, one an operation can apply, whose values arrive at run time; the
-//! types such a directive writes are exempt all the same, as every directive's are. An object, an
-//! interface and a union are never metadata: one can be a runtime type that no type names.
+//! executable directive name, one an operation can apply, whose values arrive at run time; and
+//! while such a directive holds one of its own type parameters in an argument's type, every
+//! definition only metadata would reach is judged, since an operation can fill that parameter with
+//! any of them. The types such a directive writes are exempt all the same, as every directive's
+//! are. An object, an interface and a union are never metadata: one can be a runtime type that no
+//! type names.
 //!
 //! A report within a definition both reach has a last label at where the reach from outside
 //! metadata entered, "`A` is reached from here, outside compile-time metadata": the occurrence
-//! outside metadata whose type names it, or, for a definition that another such definition holds,
-//! that definition's own entry. So when a field's argument takes `B` and `B` holds `A`, a report
-//! in `A` is labelled at `B` in that argument, where the chain starts, and not at `B`'s field.
+//! outside metadata whose type names it; for a definition that another such definition holds, that
+//! definition's own entry; and for what an executable directive's own type parameter can receive,
+//! the type of the argument that holds that parameter, though that type need not name it. So when
+//! a field's argument takes `B` and `B` holds `A`, a report in `A` is labelled at `B` in that
+//! argument, where the chain starts, and not at `B`'s field.
 //!
 //! So one cause is one report: a `string` field in a `core` package is reported at `string`, and
 //! not at the uses of the type that holds it; a dependency's type that needs more than the root
