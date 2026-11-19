@@ -19,6 +19,11 @@ readme = "README.md"
 # difference between the two consumers: this crate produces a `Schema`, the protocol machine reads
 # one.
 
+# The validator's files sit where the crate's `graphql` module keeps them once three more crates
+# fold into this one and the crate has a root of its own.
+[lib]
+path = "src/graphql/mod.rs"
+
 [features]
 default = ["std"]
 
