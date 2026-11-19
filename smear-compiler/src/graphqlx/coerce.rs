@@ -521,6 +521,9 @@ pub(crate) fn coerce(
     written: BTreeSet::new(),
     owned: BTreeSet::new(),
     beneath: BTreeMap::new(),
+    claimed: BTreeSet::new(),
+    halted_row: None,
+    written_halts: BTreeMap::new(),
     paid: 0,
     copied: 0,
     levels: BTreeMap::new(),
@@ -1493,6 +1496,15 @@ struct Coercion<'c, 'p, 'x> {
   /// Each judged count that does not fit because a count it reads does not, with each such count:
   /// what a report that owns the first owns too.
   beneath: BTreeMap<CountKey, Vec<CountKey>>,
+  /// Each count whose counts beneath it were claimed: an application's report of the same default
+  /// claims them once, however many applications leave it out.
+  claimed: BTreeSet<CountKey>,
+  /// The type of the row whose rebuild stopped the check being made, when a rebuild did.
+  halted_row: Option<TyId>,
+  /// Each rebuild that stopped the check of a written instantiation, which reported it at each of
+  /// its occurrences, by the instantiation's nullable form and the row's type, with what stopped
+  /// it: the closure of that root says nothing more of the same rebuild stopping it.
+  written_halts: BTreeMap<(TyId, TyId), Stop>,
   /// The rows of every count a copy was made of, charged or not.
   paid: u64,
   /// The rows made of copies: what `paid` is when the phase ends, since a copy and its count are
@@ -1788,7 +1800,14 @@ impl<'p> Coercion<'_, 'p, '_> {
     let verdict = match self.checked.get(&nullable).copied() {
       Some(verdict) => verdict,
       None => {
+        self.halted_row = None;
         let verdict = self.check(def, nullable, start, end);
+        // The rebuild that stopped it, which the closure of this root may meet again.
+        if let Checked::Stopped(stop) = verdict
+          && let Some(written) = self.halted_row.take()
+        {
+          self.written_halts.insert((nullable, written), stop);
+        }
         self.checked.insert(nullable, verdict);
         verdict
       }
@@ -1818,7 +1837,10 @@ impl<'p> Coercion<'_, 'p, '_> {
       let under = match self.rebuilt(recorded.ty, ty, def, false) {
         Ok(Some(under)) => under,
         Ok(None) => continue,
-        Err(stop) => return Checked::Stopped(stop),
+        Err(stop) => {
+          self.halted_row = Some(recorded.ty);
+          return Checked::Stopped(stop);
+        }
       };
       let tree = match recorded.owed {
         Owed::Value(OwedValue { tree, .. }) => tree,
@@ -2591,6 +2613,10 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// that holds that default under a definition is another application's omission, a mistake of its
   /// own, which this report does not own.
   fn claim_beneath(&mut self, key: CountKey) {
+    // Claimed beneath already, by this report's default or by a claim of the default itself.
+    if self.owned.contains(&key) || !self.claimed.insert(key) {
+      return;
+    }
     let count = self.beneath.get(&key).map_or(0, Vec::len);
     for index in 0..count {
       let Some(&child) = self

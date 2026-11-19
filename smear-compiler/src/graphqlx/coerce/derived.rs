@@ -68,13 +68,15 @@
 //! So the closure does work linear in the model's size and in the steps it pays, but for sorting.
 //!
 //! A limit that stops an expansion is `resource-limit`, once, at where the root whose expansion was
-//! running is first written, and the closure ends there. The stopped expansion keeps what it
-//! derived before the stop, and what the closure derived is judged, each instantiation as it was
-//! derived. The stopped root absorbs each check a limit stopped that it reaches, its one
-//! `resource-limit` standing for them, and reports the first failure that is confirmed; a check a
-//! limit stopped while an earlier root's expansion was running is reported at that root's
-//! occurrences. The rebuild that stopped the closure is handed to the implementation check, which
-//! says nothing of it again. What the closure did not reach is not judged.
+//! running is first written, and the closure ends there; but when the written check of that root
+//! stopped at the same rebuild for the same cause, it reported that at each of the root's
+//! occurrences, which stands for both, and the closure ends saying nothing more. The stopped
+//! expansion keeps what it derived before the stop, and what the closure derived is judged, each
+//! instantiation as it was derived. The stopped root absorbs each check a limit stopped that it
+//! reaches, its one `resource-limit` standing for them, and reports the first failure that is
+//! confirmed; a check a limit stopped while an earlier root's expansion was running is reported at
+//! that root's occurrences. The rebuild that stopped the closure is handed to the implementation
+//! check, which says nothing of the same stop again. What the closure did not reach is not judged.
 //!
 //! # The check, and its report
 //!
@@ -112,7 +114,7 @@ use crate::graphqlx::{
   raw::RawTree,
   types::{
     Limit, Stop,
-    closure::{Blame, Closure, DERIVES, Halt, Node, Place},
+    closure::{Blame, Budget, Closure, DERIVES, Halt, Node, Place},
   },
 };
 
@@ -287,7 +289,14 @@ impl Coercion<'_, '_, '_> {
         while let Some(&expanding) = building.queue.get(next) {
           next += 1;
           if let Err(stop) = self.expand(&mut building, expanding) {
-            self.report_unexpanded(at, def, stop);
+            // A rebuild the written check of this root stopped at was reported at each of its
+            // occurrences: the closure ends there all the same, and says nothing more of it.
+            let reported = building.halted.is_some_and(|halt: Halt| {
+              self.written_halts.get(&(halt.instantiation, halt.written)) == Some(&halt.stop)
+            });
+            if !reported {
+              self.report_unexpanded(at, def, stop);
+            }
             return Derivation {
               closure: building.closure,
               stopped: Some(root),
@@ -744,6 +753,7 @@ impl Coercion<'_, '_, '_> {
             instantiation: node.ty,
             written: ty,
             stop,
+            budget: Budget::Values,
           });
           return Err(stop);
         }

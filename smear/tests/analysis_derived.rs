@@ -1089,19 +1089,128 @@ fn a_rebuild_that_stops_the_closure_is_reported_once() {
   );
 }
 
-/// A failure reported where an open instantiation is written is not reported again at each closed
-/// root that derives it: `Outer<T>`'s `Either<T, T>` has two members of one type however it is
-/// closed, reported there once, and neither `Outer<User>` nor `Outer<Order>` reports it again.
-/// Refuses one declaration's mistake copied to every use.
+/// A failure at an open occurrence is reported where it is written, and again at each closed
+/// written root that derives a failing instantiation of it, as design Z's section 4.9 says: at each
+/// written occurrence whose expansion holds the failing instantiation, once for each. `Outer<T>`'s
+/// `Either<T, T>` has two members of one type however it is closed: one report there, and one at
+/// each of `Outer<User>` and `Outer<Order>`, labelled at the type that derives it. Refuses a
+/// failure lost at a root that derives it.
 #[test]
-fn a_failure_an_open_occurrence_reported_is_not_reported_at_each_use() {
+fn a_failure_at_an_open_occurrence_is_reported_there_and_at_each_root_that_derives_it() {
   let text = "type Query {\n  a: Outer<User>\n  b: Outer<Order>\n}\ntype User {\n  id: ID\n}\n\
               type Order {\n  id: ID\n}\nunion Either<A, B> = A | B\n\
               type Outer<T> {\n  e: Either<T, T>\n}\n";
   let analysis = analyze_text(text, &Limits::new());
   let schema = schema_file(&analysis);
+  let user = at(schema, text, "Outer<User>", 0);
+  let order = at(schema, text, "Outer<Order>", 0);
+  let open = at(schema, text, "Either<T, T>", 0);
   assert_eq!(
     found(&analysis),
-    [(MEMBER, at(schema, text, "Either<T, T>", 0))]
+    [(MEMBER, user), (MEMBER, order), (MEMBER, open)]
   );
+  for root in [user, order] {
+    assert_eq!(
+      labels(the(&analysis, MEMBER, root)),
+      [
+        (after(schema, text, "e: ", "Either<T, T>"), DERIVES),
+        (named(schema, text, "= ", "A", 0), "this member"),
+        (named(schema, text, "| ", "B", 0), "the same type here"),
+      ]
+    );
+  }
+}
+
+/// An application's report of a default it leaves out claims the counts beneath it once, however
+/// many applications leave it out: each of many `@d<String>` leaves out `a`, whose `{}` holds a
+/// copy of itself through `again` and leaves out many fields whose `1` does not fit `String`. Each
+/// application reports its default, the cycle is reported once, and the `Rec<String>` the
+/// applications derive passes over what the reports own, within a budget linear in the program.
+/// Refuses claims that walk the same counts again for each application.
+#[test]
+fn many_applications_of_one_reported_default_claim_its_counts_once() {
+  const M: usize = 200;
+  const N: usize = 200;
+  let fields: String = (0..N).map(|k: usize| format!("  f{k}: T = 1\n")).collect();
+  let uses: String = (0..M)
+    .map(|j: usize| format!("  x{j}: Int @d<String>\n"))
+    .collect();
+  let text = format!(
+    "type Query {{\n{uses}}}\ninput Rec<T> {{\n  again: Rec<T> = {{}}\n{fields}}}\n\
+     directive @d<T>(a: Rec<T> = {{}}) on FIELD_DEFINITION\n"
+  );
+  let budget = u32::try_from(16 * (M + N)).expect("a small budget");
+  let analysis = analyze_text(&text, &Limits::new().with_max_value_steps(budget));
+  assert_eq!(
+    codes_at(&analysis, DEFAULT).len(),
+    M,
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(codes_at(&analysis, CYCLE).len(), 1);
+  assert_eq!(analysis.diagnostics().len(), M + 1);
+}
+
+/// Two phases that each run out of their own budget at one rebuild each say so: with no value
+/// step, the closure of the written `U<Int>` stops rebuilding its member `Box<[T]>`, and with one
+/// implementation step fewer than its comparison needs, the comparison of `U<Int>`'s members stops
+/// on the same rebuild. Raising either budget clears only its own report. Refuses two budgets taken
+/// for one stop.
+#[test]
+fn two_phases_out_of_their_own_budgets_at_one_rebuild_each_report_it() {
+  let text = "type Query {\n  u: U<Int>\n}\ntype Box<T> {\n  f(x: T = null): Int\n}\n\
+              union U<T> = Box<[T]>\n";
+  let least = (0..256_u32)
+    .find(|&steps: &u32| {
+      let analysis = analyze_text(text, &Limits::new().with_max_implementation_steps(steps));
+      codes_at(&analysis, LIMIT).is_empty()
+    })
+    .expect("an implementation budget the program says no limit at");
+  assert!(least > 0);
+  let limits = Limits::new()
+    .with_max_value_steps(0)
+    .with_max_implementation_steps(least - 1);
+  let analysis = analyze_text(text, &limits);
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, text, "U<Int>", 0);
+  assert_eq!(codes_at(&analysis, LIMIT), [occurrence, occurrence]);
+  assert_eq!(analysis.diagnostics().len(), 2);
+  let messages: Vec<String> = analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| diagnostic.to_string())
+    .collect();
+  assert!(
+    messages
+      .iter()
+      .any(|message: &String| message.contains("`Limits::max_value_steps`")),
+    "{messages:#?}"
+  );
+  assert!(
+    messages
+      .iter()
+      .any(|message: &String| message.contains("`Limits::max_implementation_steps`")),
+    "{messages:#?}"
+  );
+}
+
+/// A rebuild the written check of an instantiation stopped at, which the closure of that root then
+/// meets again, is reported once: with one instantiation fewer than the program needs, the check
+/// of `Outer<i32>`'s default of its field's argument cannot rebuild `Box<T>` there, and says so,
+/// and the closure, reading the same position, stops on the same rebuild and says nothing more.
+/// Refuses one stopped rebuild reported twice at one occurrence.
+#[test]
+fn a_rebuild_the_written_check_reported_is_not_reported_again_by_the_closure() {
+  let text = "type Query {\n  o: Outer<i32>\n}\ntype Outer<T> {\n  f(arg: Box<T> = {}): Int\n}\n\
+              input Box<T> {\n  v: T = null\n}\n";
+  let least = (0..64_u32)
+    .find(|&bound: &u32| {
+      let analysis = analyze_text(text, &Limits::new().with_max_instantiations(bound));
+      codes_at(&analysis, LIMIT).is_empty()
+    })
+    .expect("a bound the program says no limit at");
+  assert!(least > 0);
+  let short = analyze_text(text, &Limits::new().with_max_instantiations(least - 1));
+  let schema = schema_file(&short);
+  assert_eq!(found(&short), [(LIMIT, at(schema, text, "Outer<i32>", 0))]);
 }

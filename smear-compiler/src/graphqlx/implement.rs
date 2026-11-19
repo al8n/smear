@@ -158,7 +158,10 @@ use super::{
     WrittenParam,
   },
   source::SourceMap,
-  types::{Counter, Limit, Stop, Types, closure::Halt},
+  types::{
+    Counter, Limit, Stop, Types,
+    closure::{Budget, Halt},
+  },
 };
 
 use subtype::{Alternative, Answer, Frame, TyPair};
@@ -272,7 +275,7 @@ enum Verdict {
 }
 
 /// What the comparison found: [`Verdict::Compared`]'s payload.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 struct Comparison {
   /// The first two entries that are one type there.
   entries: Option<Twin>,
@@ -281,7 +284,7 @@ struct Comparison {
 }
 
 /// Two items of a list that are one type under an instantiation's arguments.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 struct Twin {
   /// The earlier of the two.
   earlier: TypeExprId,
@@ -1171,12 +1174,15 @@ impl Implementing<'_> {
 
   /// Whether the comparison of `ty` stopped at the rebuild that stopped the closure, which coercion
   /// reported once at the root whose expansion was running, the one root that reaches it: the same
-  /// rebuild says nothing more here.
+  /// stop of the same rebuild says nothing more here. Steps run out are the same stop only on the
+  /// same budget, and the two phases pay from two, so only a limit on types is ever the same.
   fn repeats(&self, ty: TyId) -> bool {
-    self
-      .types
-      .halted
-      .is_some_and(|halted: Halt| self.halts.get(&ty) == Some(&halted))
+    self.types.halted.is_some_and(|halted: Halt| {
+      self
+        .halts
+        .get(&ty)
+        .is_some_and(|halt: &Halt| halt.same(&halted))
+    })
   }
 
   /// The first two of the run `run` of `distinct`, each under the arguments of `ty`, a named type
@@ -1198,6 +1204,7 @@ impl Implementing<'_> {
             instantiation: ty,
             written,
             stop,
+            budget: Budget::Implementation,
           });
           return Err(stop);
         }
