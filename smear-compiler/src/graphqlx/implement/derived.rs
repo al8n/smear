@@ -23,10 +23,11 @@
 //! open occurrence, `Either<T, T>` in `Outer<T>`, is reported where it is written, by the
 //! occurrences' pass, and again at each closed written root that derives a failing instantiation of
 //! it, `Outer<User>` and `Outer<Order>`, labelled at the type that derives it. That is by design:
-//! reporting a failure more than once is acceptable, and losing one is not. Only the rebuild that
-//! stopped the closure is not said twice: a comparison stopped by that same rebuild, for the same
-//! cause, is coercion's to report, which it did once; a limit on types, which both phases share, is
-//! the same stop whichever phase met it, while each phase's step budget is its own.
+//! reporting a failure more than once is acceptable, and losing one is not. A `resource-limit` is
+//! the one exception: it is said once for each written occurrence and kind of limit, whichever
+//! phase or path meets it there first, each phase's step budget a kind of its own and a limit on
+//! types one kind across the phases. A root whose failure blamed is a stop of a kind said where it
+//! is already reports its first confirmed failure instead, so that a stop said once hides nothing.
 
 use std::{collections::BTreeMap, format, string::String, vec::Vec};
 
@@ -39,7 +40,10 @@ use crate::graphqlx::{
   id::{ApplicationId, DefId, TyId, TypeExprId},
   model::{Applied, DefKind, Occurrence, Resolution, Shape, Written},
   set::ROOT,
-  types::closure::{Blame, Closure, DERIVES, Place},
+  types::{
+    Spent, Stop,
+    closure::{Blame, Closure, DERIVES, Node, Place},
+  },
 };
 
 /// What each node of the closure reaches that fails, for each of the phase's two checks.
@@ -48,6 +52,12 @@ struct Blamed {
   met: Vec<Option<Blame>>,
   /// An argument made required, or a stop.
   made: Vec<Option<Blame>>,
+  /// The same of the confirmed failures alone, two entries or two members of one type, when a
+  /// limit stopped a comparison.
+  met_confirmed: Option<Vec<Option<Blame>>>,
+  /// The same of the confirmed failures alone, an argument made required, when a limit stopped
+  /// one's check.
+  made_confirmed: Option<Vec<Option<Blame>>>,
 }
 
 impl Implementing<'_> {
@@ -61,6 +71,8 @@ impl Implementing<'_> {
     }
     let mut meeting: Vec<u32> = Vec::new();
     let mut making: Vec<u32> = Vec::new();
+    let mut met: Vec<u32> = Vec::new();
+    let mut made: Vec<u32> = Vec::new();
     for at in 0..closure.len() {
       let Some(node) = closure.node(at) else {
         break;
@@ -74,13 +86,20 @@ impl Implementing<'_> {
             entries: None,
             members: None,
           }) => {}
-          // The rebuild that stopped the closure, which coercion reported: not again.
-          Verdict::Stopped(_) if self.repeats(node.ty) => {}
-          Verdict::Compared(_) | Verdict::Stopped(_) => meeting.push(at),
+          Verdict::Compared(_) => {
+            meeting.push(at);
+            met.push(at);
+          }
+          Verdict::Stopped(_) => meeting.push(at),
         }
       }
-      if !matches!(self.made_by(node.ty, node.def), Made::Nothing) {
-        making.push(at);
+      match self.made_by(node.ty, node.def) {
+        Made::Nothing => {}
+        Made::Required(_) => {
+          making.push(at);
+          made.push(at);
+        }
+        Made::Stopped(_) => making.push(at),
       }
     }
     if meeting.is_empty() && making.is_empty() {
@@ -89,6 +108,8 @@ impl Implementing<'_> {
     let blamed = Blamed {
       met: closure.blame(&meeting),
       made: closure.blame(&making),
+      met_confirmed: (met.len() < meeting.len()).then(|| closure.blame(&met)),
+      made_confirmed: (made.len() < making.len()).then(|| closure.blame(&made)),
     };
     let supplied = self.sources.package_sources(ROOT).start();
     // The root of each type an occurrence or an application has, by that type, either nullness.
@@ -198,15 +219,69 @@ impl Implementing<'_> {
         })
       )
     });
-    if compared && let Some(&Some(blame)) = blamed.met.get(root as usize) {
-      self.report_derived_meeting(closure, at, user, blame);
+    if compared {
+      let blame = self.chosen(
+        closure,
+        &blamed.met,
+        blamed.met_confirmed.as_deref(),
+        root,
+        at,
+        |this: &Self, ty: TyId| match this.verdicts.get(&ty) {
+          Some(&Verdict::Stopped(stop)) => Some(stop),
+          _ => None,
+        },
+      );
+      if let Some(blame) = blame {
+        self.report_derived_meeting(closure, at, user, blame);
+      }
     }
     let required = self
       .made
       .get(&ty)
       .is_some_and(|made: &Made| !matches!(made, Made::Nothing));
-    if !required && let Some(&Some(blame)) = blamed.made.get(root as usize) {
-      self.report_derived_made(closure, at, user, blame);
+    if !required {
+      let blame = self.chosen(
+        closure,
+        &blamed.made,
+        blamed.made_confirmed.as_deref(),
+        root,
+        at,
+        |this: &Self, ty: TyId| match this.made.get(&ty) {
+          Some(&Made::Stopped(stop)) => Some(stop),
+          _ => None,
+        },
+      );
+      if let Some(blame) = blame {
+        self.report_derived_made(closure, at, user, blame);
+      }
+    }
+  }
+
+  /// The failure `blamed` keeps for `root`, reported at `at`; or, when that is a check a limit
+  /// stopped, as `stopped` reads off the failing type, whose kind of `resource-limit` was said at
+  /// `at` already, the first confirmed failure `confirmed` keeps: so a stop said once at a place
+  /// never hides a failure that is confirmed there.
+  fn chosen(
+    &self,
+    closure: &Closure,
+    blamed: &[Option<Blame>],
+    confirmed: Option<&[Option<Blame>]>,
+    root: u32,
+    at: Location,
+    stopped: impl Fn(&Self, TyId) -> Option<Stop>,
+  ) -> Option<Blame> {
+    let chosen = blamed.get(root as usize).copied().flatten();
+    let Some(confirmed) = confirmed else {
+      return chosen;
+    };
+    let said = chosen
+      .and_then(|blame: Blame| closure.node(blame.node))
+      .and_then(|failed: Node| stopped(self, failed.ty))
+      .is_some_and(|stop: Stop| self.types.limit_said(at, stop.spent(Spent::Implementation)));
+    if said {
+      confirmed.get(root as usize).copied().flatten()
+    } else {
+      chosen
     }
   }
 

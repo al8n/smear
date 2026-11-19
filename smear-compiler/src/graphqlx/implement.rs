@@ -109,6 +109,11 @@
 //! each application, whose own verdict holds reports the first derived instantiation that fails. A
 //! derived instantiation of a definition that grows is not judged, nor what only it derives.
 //!
+//! Every `resource-limit` is said once for each written occurrence and kind of limit, whichever
+//! phase or path meets it there first, as the type services keep them: this check's steps are a
+//! kind of their own, and a limit on types one kind with coercion's, so a type coercion could not
+//! build at an occurrence, which it said, is not said there again by any of this check's paths.
+//!
 //! # What it costs, and what bounds it
 //!
 //! A definition's own entries and members are written, and each is read once: one scan of the
@@ -158,10 +163,7 @@ use super::{
     WrittenParam,
   },
   source::SourceMap,
-  types::{
-    Counter, Limit, Stop, Types,
-    closure::{Budget, Halt},
-  },
+  types::{Counter, Limit, Spent, Stop, Types},
 };
 
 use subtype::{Alternative, Answer, Frame, TyPair};
@@ -224,8 +226,6 @@ pub(crate) fn implement(
     verdicts: BTreeMap::new(),
     latent: Vec::new(),
     made: BTreeMap::new(),
-    halt: None,
-    halts: BTreeMap::new(),
   };
   implementing.definitions();
   implementing.occurrences();
@@ -417,11 +417,6 @@ struct Implementing<'p> {
   /// Each type an occurrence of a definition with latent arguments has, with what it makes
   /// required.
   made: BTreeMap<TyId, Made>,
-  /// The rebuild that stopped the comparison being made, when one did.
-  halt: Option<Halt>,
-  /// Each type whose comparison a rebuild stopped, by the type and by its nullable form, with that
-  /// rebuild: one the closure's own stop repeats says nothing more, coercion having reported it.
-  halts: BTreeMap<TyId, Halt>,
 }
 
 impl Implementing<'_> {
@@ -954,7 +949,7 @@ impl Implementing<'_> {
         }
       }
       Verdict::Stopped(stop) => {
-        if !self.stopped_roots.contains(&id) && !self.repeats(ty) {
+        if !self.stopped_roots.contains(&id) {
           self.report_uncompared(at, def, stop);
         }
       }
@@ -1148,7 +1143,6 @@ impl Implementing<'_> {
     let verdict = match self.verdicts.get(&nullable).copied() {
       Some(known) => known,
       None => {
-        self.halt = None;
         let made = match self.meeting(nullable, def, listed.entries) {
           Err(stop) => Verdict::Stopped(stop),
           Ok(entries) => match self.meeting(nullable, def, listed.members) {
@@ -1156,33 +1150,12 @@ impl Implementing<'_> {
             Ok(members) => Verdict::Compared(Comparison { entries, members }),
           },
         };
-        if matches!(made, Verdict::Stopped(_))
-          && let Some(halt) = self.halt.take()
-        {
-          self.halts.insert(nullable, halt);
-        }
         self.verdicts.insert(nullable, made);
         made
       }
     };
-    if let Some(&halt) = self.halts.get(&nullable) {
-      self.halts.insert(ty, halt);
-    }
     self.verdicts.insert(ty, verdict);
     verdict
-  }
-
-  /// Whether the comparison of `ty` stopped at the rebuild that stopped the closure, which coercion
-  /// reported once at the root whose expansion was running, the one root that reaches it: the same
-  /// stop of the same rebuild says nothing more here. Steps run out are the same stop only on the
-  /// same budget, and the two phases pay from two, so only a limit on types is ever the same.
-  fn repeats(&self, ty: TyId) -> bool {
-    self.types.halted.is_some_and(|halted: Halt| {
-      self
-        .halts
-        .get(&ty)
-        .is_some_and(|halt: &Halt| halt.same(&halted))
-    })
   }
 
   /// The first two of the run `run` of `distinct`, each under the arguments of `ty`, a named type
@@ -1197,19 +1170,7 @@ impl Implementing<'_> {
       let Some(&(item, written)) = self.distinct.get(at as usize) else {
         break;
       };
-      let made = match self.rebuilt(written, ty, def) {
-        Ok(made) => made,
-        Err(stop) => {
-          self.halt = Some(Halt {
-            instantiation: ty,
-            written,
-            stop,
-            budget: Budget::Implementation,
-          });
-          return Err(stop);
-        }
-      };
-      if let Some(made) = made {
+      if let Some(made) = self.rebuilt(written, ty, def)? {
         self.under.push((item, made));
       }
     }
@@ -1536,6 +1497,11 @@ impl Implementing<'_> {
   /// Reports `resource-limit` at `at`, where `stop` stopped the check of `subject`, naming the
   /// limit: one message for each way to stop.
   fn report_limit(&mut self, at: Location, subject: &str, stop: Stop) {
+    // Once for each place and kind of limit, whichever phase or path met it there first: this
+    // phase's steps are a kind of their own, a limit on types one kind across the phases.
+    if !self.types.say_limit(at, stop.spent(Spent::Implementation)) {
+      return;
+    }
     let limits = self.types.limits();
     let (message, help): (String, &'static str) = match stop {
       Stop::Steps => (

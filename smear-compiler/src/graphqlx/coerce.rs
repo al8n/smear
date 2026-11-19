@@ -382,7 +382,7 @@ use super::{
   resolve::{ParamName, Position, Request, Resolved, Root, Scopes, Segment, Wanted},
   set::ROOT,
   source::SourceMap,
-  types::{Counter, Limit, Stop, Types},
+  types::{Counter, Limit, Spent, Stop, Types},
 };
 
 mod derived;
@@ -522,8 +522,6 @@ pub(crate) fn coerce(
     owned: BTreeSet::new(),
     beneath: BTreeMap::new(),
     claimed: BTreeSet::new(),
-    halted_row: None,
-    written_halts: BTreeMap::new(),
     paid: 0,
     copied: 0,
     levels: BTreeMap::new(),
@@ -1499,12 +1497,6 @@ struct Coercion<'c, 'p, 'x> {
   /// Each count whose counts beneath it were claimed: an application's report of the same default
   /// claims them once, however many applications leave it out.
   claimed: BTreeSet<CountKey>,
-  /// The type of the row whose rebuild stopped the check being made, when a rebuild did.
-  halted_row: Option<TyId>,
-  /// Each rebuild that stopped the check of a written instantiation, which reported it at each of
-  /// its occurrences, by the instantiation's nullable form and the row's type, with what stopped
-  /// it: the closure of that root says nothing more of the same rebuild stopping it.
-  written_halts: BTreeMap<(TyId, TyId), Stop>,
   /// The rows of every count a copy was made of, charged or not.
   paid: u64,
   /// The rows made of copies: what `paid` is when the phase ends, since a copy and its count are
@@ -1800,14 +1792,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     let verdict = match self.checked.get(&nullable).copied() {
       Some(verdict) => verdict,
       None => {
-        self.halted_row = None;
         let verdict = self.check(def, nullable, start, end);
-        // The rebuild that stopped it, which the closure of this root may meet again.
-        if let Checked::Stopped(stop) = verdict
-          && let Some(written) = self.halted_row.take()
-        {
-          self.written_halts.insert((nullable, written), stop);
-        }
         self.checked.insert(nullable, verdict);
         verdict
       }
@@ -1837,10 +1822,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       let under = match self.rebuilt(recorded.ty, ty, def, false) {
         Ok(Some(under)) => under,
         Ok(None) => continue,
-        Err(stop) => {
-          self.halted_row = Some(recorded.ty);
-          return Checked::Stopped(stop);
-        }
+        Err(stop) => return Checked::Stopped(stop),
       };
       let tree = match recorded.owed {
         Owed::Value(OwedValue { tree, .. }) => tree,
@@ -1991,7 +1973,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       },
       Stop::Built(_) => self.stopped(stop, &format!("a value `{sigil}{name}` holds takes")),
     };
-    self.limit(at, message);
+    self.limit(at, stop, message);
   }
 
   /// Whether `ty` is a named type of `def`.
@@ -3324,11 +3306,17 @@ impl<'p> Coercion<'_, 'p, '_> {
       },
       Stop::Built(_) => self.stopped(stop, "the arguments this application leaves out take"),
     };
-    self.limit(at, message);
+    self.limit(at, stop, message);
   }
 
-  /// Reports `resource-limit` at `at`, saying `message`, with its help.
-  fn limit(&mut self, at: Location, message: Message) {
+  /// Reports `resource-limit` at `at`, where `stop` stopped what is reported, saying `message`,
+  /// with its help: once for each place and kind of limit, whichever phase or path met it there
+  /// first. Each phase's steps are a kind of their own, and a limit on types is one kind across
+  /// the phases.
+  fn limit(&mut self, at: Location, stop: Stop, message: Message) {
+    if !self.types.say_limit(at, stop.spent(Spent::Values)) {
+      return;
+    }
     let kind = DiagnosticKind::ResourceLimit;
     self.reporter.report(
       Diagnostic::builder(kind.code(), at)
@@ -3513,7 +3501,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     }
     self.path(id, node.kind);
     let message = self.stopped(stop, "this value takes");
-    self.limit(at, message);
+    self.limit(at, stop, message);
     Some(id)
   }
 
@@ -4316,7 +4304,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       },
       Stop::Built(_) => self.stopped(stop, "the fields this literal leaves out take"),
     };
-    self.limit(at, message);
+    self.limit(at, stop, message);
   }
 
   /// Makes the row of `making`'s node one unresolved row, typed with its type, with the path the
@@ -5239,6 +5227,15 @@ impl<'p> Coercion<'_, 'p, '_> {
       return;
     }
     let at = Location::new(source, raw.span);
+    // A `resource-limit` is said once for each place and kind of limit.
+    let spent = match refused.why {
+      Why::Costly(_) => Some(Spent::Values),
+      Why::Unbuilt(stop) => Some(stop.spent(Spent::Values)),
+      _ => None,
+    };
+    if spent.is_some_and(|spent: Spent| !self.types.say_limit(at, spent)) {
+      return;
+    }
     let literal = Excerpt(self.raw.text(source, raw.span));
     let name: &[u8] = match ty.and_then(|ty: TyId| self.builder.ty_shape(ty)) {
       Some(Shape::Named(def)) => self.builder.def_name(def),
@@ -5420,8 +5417,12 @@ impl<'p> Coercion<'_, 'p, '_> {
     self.reporter.report(report.build());
   }
 
-  /// Reports that the lists a value written at `at` stands for are past the budget.
+  /// Reports that the lists a value written at `at` stands for are past the budget: once for each
+  /// place, as every `resource-limit`.
   fn lone_limit(&mut self, at: Location) {
+    if !self.types.say_limit(at, Spent::Values) {
+      return;
+    }
     let kind = DiagnosticKind::ResourceLimit;
     let max = self.values.max();
     self.reporter.report(

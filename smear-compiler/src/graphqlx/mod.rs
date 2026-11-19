@@ -276,7 +276,9 @@
 //! [`Limits`] bounds what the analysis builds and spends once it has numbered what it was given: a
 //! bound passed stops that work, is reported as `smear::graphqlx::resource-limit`, and the
 //! analysis goes on, but for the diagnostic ceiling and the near-miss budget, which limit what the
-//! analysis says and not what it accepts.
+//! analysis says and not what it accepts. From instantiation on, a written occurrence reports one
+//! for each kind of bound, whichever phase or path passes it there first: each phase's step budget
+//! is a kind of its own, and a bound on the types the phases build one kind across them.
 //!
 //! Before any bound applies, the diagnostic ceiling aside, the analysis reads what the caller
 //! supplied, to number and order it. It sorts each package's files by path, and orders two files

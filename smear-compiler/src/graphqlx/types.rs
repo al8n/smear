@@ -21,8 +21,18 @@
 //! `closure`, which coercion builds once its walk has ended, paying for its rebuilds from
 //! `Limits::max_value_steps`, and keeps here for the implementation check, which judges the same
 //! derived instantiations and reports them at the same written occurrences.
+//!
+//! Every phase that shares these services says a `resource-limit` once for each written occurrence
+//! and kind of limit, whichever phase or path meets it there first, as `say_limit` keeps them: each
+//! phase's step budget is a kind of its own, and a limit on types, which every phase shares, one
+//! kind across the phases.
 
-use std::{collections::BTreeMap, vec::Vec};
+use std::{
+  collections::{BTreeMap, BTreeSet},
+  vec::Vec,
+};
+
+use tokora::{SimpleSpan, diagnostic::Location};
 
 use crate::graphqlx::{
   id::{DefId, TyId},
@@ -106,7 +116,7 @@ impl Counter {
 }
 
 /// The limit a type passed, which its report names.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Limit {
   /// `Limits::max_generic_depth`.
   Depth,
@@ -117,11 +127,35 @@ pub(crate) enum Limit {
 }
 
 /// What stopped a rebuild, or the judging that asked for one.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub(crate) enum Stop {
   /// The budget it charges.
   Steps,
   /// A type it would derive passes this limit.
+  Built(Limit),
+}
+
+impl Stop {
+  /// The kind of `resource-limit` this stop is, met by a phase whose steps are `steps`.
+  pub(crate) const fn spent(self, steps: Spent) -> Spent {
+    match self {
+      Self::Steps => steps,
+      Self::Built(limit) => Spent::Built(limit),
+    }
+  }
+}
+
+/// A kind of `resource-limit`: the step budget of the phase that ran out of it, each phase's its
+/// own, or a limit on the types a phase builds or derives, which every phase shares.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Spent {
+  /// `Limits::max_bound_steps`, the judging of bounds.
+  Bounds,
+  /// `Limits::max_value_steps`, coercion's.
+  Values,
+  /// `Limits::max_implementation_steps`, the implementation check's.
+  Implementation,
+  /// A limit on the types a phase builds or derives.
   Built(Limit),
 }
 
@@ -138,9 +172,20 @@ pub(crate) struct Types {
   pub(crate) derived: Derived,
   /// What each written instantiation derives: built by coercion, read by the implementation check.
   pub(crate) closure: closure::Closure,
-  /// The rebuild that stopped the closure, which coercion reported, when one did: the
-  /// implementation check says nothing of the same rebuild stopping it again.
-  pub(crate) halted: Option<closure::Halt>,
+  /// Each `resource-limit` reported, by where it is and its kind: one is said for each written
+  /// occurrence and kind, whichever phase meets it there first, and whichever path, a written type,
+  /// its bounds, a value, a copy, the closure or a comparison.
+  said: BTreeSet<(Spot, Spent)>,
+}
+
+/// Where a report is written: its source, and where its span starts and ends.
+type Spot = (u32, usize, usize);
+
+/// The spot of `at`; `None` for a whole source, which is no written occurrence, and whose reports
+/// are each said.
+fn spot(at: Location) -> Option<Spot> {
+  at.span()
+    .map(|span: SimpleSpan| (at.source(), span.start(), span.end()))
 }
 
 impl Types {
@@ -151,7 +196,7 @@ impl Types {
       substitutions: Counter::new(limits.max_substitutions()),
       bound_steps: Counter::new(limits.max_bound_steps()),
       closure: closure::Closure::default(),
-      halted: None,
+      said: BTreeSet::new(),
       derived: Derived {
         max_depth: limits.max_generic_depth(),
         max_instantiations: limits.max_instantiations(),
@@ -168,6 +213,17 @@ impl Types {
   /// The analysis's limits.
   pub(crate) const fn limits(&self) -> &Limits {
     &self.limits
+  }
+
+  /// Whether a `resource-limit` of the kind `spent` is still to be said at `at`, which this marks
+  /// said: one for each written occurrence and kind, and each at a whole source.
+  pub(crate) fn say_limit(&mut self, at: Location, spent: Spent) -> bool {
+    spot(at).is_none_or(|written: Spot| self.said.insert((written, spent)))
+  }
+
+  /// Whether a `resource-limit` of the kind `spent` was said at `at`.
+  pub(crate) fn limit_said(&self, at: Location, spent: Spent) -> bool {
+    spot(at).is_some_and(|written: Spot| self.said.contains(&(written, spent)))
   }
 }
 

@@ -76,16 +76,19 @@
 //! and for the lookups of the arguments fields add, which the implementation check's own
 //! comparisons bound.
 //!
-//! A limit that stops an expansion is `resource-limit`, once, at where the root whose expansion was
-//! running is first written, and the closure ends there; but when the written check of that root
-//! stopped at the same rebuild for the same cause, it reported that at each of the root's
-//! occurrences, which stands for both, and the closure ends saying nothing more. The stopped
+//! A limit that stops an expansion is `resource-limit` at where the root whose expansion was
+//! running is first written, and the closure ends there. As every `resource-limit`, it is said once
+//! for each written occurrence and kind of limit, whichever phase or path meets it there first,
+//! each phase's step budget a kind of its own and a limit on types, which every phase shares, one
+//! kind: so the same limit met at the same place by the written check of that root, by an
+//! application's omitted argument, or later by the implementation check, is said once. The stopped
 //! expansion keeps what it derived before the stop, and what the closure derived is judged, each
 //! instantiation as it was derived. The stopped root absorbs each check a limit stopped that it
 //! reaches, its one `resource-limit` standing for them, and reports the first failure that is
-//! confirmed; a check a limit stopped while an earlier root's expansion was running is reported at
-//! that root's occurrences. The rebuild that stopped the closure is handed to the implementation
-//! check, which says nothing of the same stop again. What the closure did not reach is not judged.
+//! confirmed; and so does a root whose first failure is a check a limit stopped whose kind was said
+//! where it is written already, so that a stop said once hides nothing confirmed. A check a limit
+//! stopped while an earlier root's expansion was running is reported at that root's occurrences.
+//! What the closure did not reach is not judged.
 //!
 //! # The check, and its report
 //!
@@ -122,8 +125,8 @@ use crate::graphqlx::{
   model::{Applied, DefKind, Occurrence, Resolution, Shape, Written, WrittenParam},
   raw::RawTree,
   types::{
-    Limit, Stop,
-    closure::{Blame, Budget, Closure, DERIVES, Halt, Node, Place},
+    Limit, Spent, Stop,
+    closure::{Blame, Closure, DERIVES, Node, Place},
   },
 };
 
@@ -179,8 +182,6 @@ struct Building {
   root: u32,
   /// Each derived instantiation whose check a limit stopped, by the root whose expansion judged it.
   stalled: BTreeMap<u32, u32>,
-  /// The rebuild that stopped the expansion, when a rebuild did.
-  halted: Option<Halt>,
 }
 
 /// The roots of the closure, as the type occurrences and the applications are read.
@@ -222,8 +223,6 @@ struct Derivation {
   stopped: Option<u32>,
   /// Each derived instantiation whose check a limit stopped, by the root whose expansion judged it.
   stalled: BTreeMap<u32, u32>,
-  /// The rebuild that stopped the closure, when a rebuild did.
-  halted: Option<Halt>,
 }
 
 impl Derivation {
@@ -243,7 +242,6 @@ impl Coercion<'_, '_, '_> {
   pub(super) fn derived(&mut self) {
     let derivation = self.derive_closure();
     self.judge_derived(&derivation);
-    self.types.halted = derivation.halted;
     self.types.closure = derivation.closure;
   }
 
@@ -287,7 +285,6 @@ impl Coercion<'_, '_, '_> {
         closure,
         stopped: None,
         stalled: BTreeMap::new(),
-        halted: None,
       };
     }
     let mut building = Building {
@@ -306,7 +303,6 @@ impl Coercion<'_, '_, '_> {
       queue: Vec::new(),
       root: 0,
       stalled: BTreeMap::new(),
-      halted: None,
     };
     self.relevance(&mut building, &roots);
     if building.relevant.iter().any(|relevant: &bool| *relevant) {
@@ -318,19 +314,11 @@ impl Coercion<'_, '_, '_> {
         while let Some(&expanding) = building.queue.get(next) {
           next += 1;
           if let Err(stop) = self.expand(&mut building, expanding) {
-            // A rebuild the written check of this root stopped at was reported at each of its
-            // occurrences: the closure ends there all the same, and says nothing more of it.
-            let reported = building.halted.is_some_and(|halt: Halt| {
-              self.written_halts.get(&(halt.instantiation, halt.written)) == Some(&halt.stop)
-            });
-            if !reported {
-              self.report_unexpanded(at, def, stop);
-            }
+            self.report_unexpanded(at, def, stop);
             return Derivation {
               closure: building.closure,
               stopped: Some(root),
               stalled: building.stalled,
-              halted: building.halted,
             };
           }
         }
@@ -340,7 +328,6 @@ impl Coercion<'_, '_, '_> {
       closure: building.closure,
       stopped: None,
       stalled: building.stalled,
-      halted: None,
     }
   }
 
@@ -883,19 +870,7 @@ impl Coercion<'_, '_, '_> {
       let Some(&Position { place, ty, .. }) = building.positions.get(index as usize) else {
         break;
       };
-      let rebuilt = match self.rebuilt(ty, node.ty, node.def, false) {
-        Ok(rebuilt) => rebuilt,
-        Err(stop) => {
-          building.halted = Some(Halt {
-            instantiation: node.ty,
-            written: ty,
-            stop,
-            budget: Budget::Values,
-          });
-          return Err(stop);
-        }
-      };
-      if let Some(under) = rebuilt {
+      if let Some(under) = self.rebuilt(ty, node.ty, node.def, false)? {
         self.collect(building, under, place)?;
       }
     }
@@ -1062,10 +1037,11 @@ impl Coercion<'_, '_, '_> {
       return;
     }
     let blamed = closure.blame(&failing);
-    // The root whose expansion a limit stopped absorbs each check a limit stopped, its one
-    // `resource-limit` standing for them: it reports the first failure that is confirmed.
-    let absorbed = derivation.stopped.map(|_: u32| closure.blame(&confirmed));
-    let absorbed = absorbed.as_deref();
+    // A root that absorbs the checks a limit stopped reports the first failure that is confirmed:
+    // the root whose expansion a limit stopped, its one `resource-limit` standing for them, and a
+    // root where a `resource-limit` of the same kind was said already.
+    let confirmed = (confirmed.len() < failing.len()).then(|| closure.blame(&confirmed));
+    let confirmed = confirmed.as_deref();
     for index in 0..self.builder.type_expr_count() {
       let Some(occurrence) = self.builder.occurrence(TypeExprId::new(index)) else {
         continue;
@@ -1074,7 +1050,7 @@ impl Coercion<'_, '_, '_> {
         continue;
       };
       let at = occurrence.location;
-      self.report_derived(derivation, &blamed, absorbed, at, def, ty);
+      self.report_derived(derivation, &blamed, confirmed, at, def, ty);
     }
     for index in 0..self.builder.application_count() {
       let application = ApplicationId::new(index);
@@ -1092,7 +1068,7 @@ impl Coercion<'_, '_, '_> {
       else {
         continue;
       };
-      self.report_derived(derivation, &blamed, absorbed, at, def, ty);
+      self.report_derived(derivation, &blamed, confirmed, at, def, ty);
     }
   }
 
@@ -1152,15 +1128,17 @@ impl Coercion<'_, '_, '_> {
 
   /// Reports at `at`, an occurrence or an application of `ty`, an instantiation of `user`, the
   /// failing instantiation its expansion reaches first, as `blamed` keeps it, when a supplied
-  /// package writes it there, `ty` is a root, and its own verdict holds. The root whose expansion a
-  /// limit stopped reads `absorbed`, the blame of the confirmed failures alone: its
-  /// `resource-limit` stands for every check a limit stopped that it reaches, and what it reports
-  /// is the first failure that is confirmed.
+  /// package writes it there, `ty` is a root, and its own verdict holds. A root reads `confirmed`,
+  /// the blame of the confirmed failures alone, instead, when it absorbs the checks a limit
+  /// stopped: the root whose expansion a limit stopped, whose `resource-limit` stands for every
+  /// such check it reaches; and a root whose failure blamed is a stop of a kind already said where
+  /// it is, which would be said there no more. So a stop said once never hides a failure that is
+  /// confirmed.
   fn report_derived(
     &mut self,
     derivation: &Derivation,
     blamed: &[Option<Blame>],
-    absorbed: Option<&[Option<Blame>]>,
+    confirmed: Option<&[Option<Blame>]>,
     at: Location,
     user: DefId,
     ty: TyId,
@@ -1184,11 +1162,21 @@ impl Coercion<'_, '_, '_> {
     let Some(root) = derivation.closure.find(nullable) else {
       return;
     };
-    let blamed = match absorbed {
-      Some(confirmed) if derivation.stopped == Some(root) => confirmed,
-      _ => blamed,
-    };
-    let Some(&Some(Blame { node, place })) = blamed.get(root as usize) else {
+    let mut chosen = blamed.get(root as usize).copied().flatten();
+    if let Some(confirmed) = confirmed {
+      let stop = chosen
+        .and_then(|blame: Blame| derivation.closure.node(blame.node))
+        .and_then(|failed: Node| match self.checked.get(&failed.ty) {
+          Some(&Checked::Stopped(stop)) => Some(stop),
+          _ => None,
+        });
+      let absorbs = derivation.stopped == Some(root)
+        || stop.is_some_and(|stop: Stop| self.types.limit_said(at, stop.spent(Spent::Values)));
+      if absorbs {
+        chosen = confirmed.get(root as usize).copied().flatten();
+      }
+    }
+    let Some(Blame { node, place }) = chosen else {
       return;
     };
     let Some(failed) = derivation.closure.node(node) else {
@@ -1326,7 +1314,7 @@ impl Coercion<'_, '_, '_> {
       },
       Stop::Built(_) => self.stopped(stop, &format!("a value {what} holds takes")),
     };
-    self.limit(at, message);
+    self.limit(at, stop, message);
   }
 
   /// Reports, at `at`, where the root `user` whose expansion was running is first written, that
@@ -1381,7 +1369,7 @@ impl Coercion<'_, '_, '_> {
         help: Cow::Borrowed("raise the bound with `Limits::with_max_substitutions`"),
       },
     };
-    self.limit(at, message);
+    self.limit(at, stop, message);
   }
 }
 

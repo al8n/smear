@@ -1263,3 +1263,48 @@ fn an_argument_of_a_field_that_implements_nothing_makes_nothing_relevant() {
   quiet(&analyze_text(text, &Limits::new().with_max_value_steps(0)));
   quiet(&analyze_text(text, &Limits::new()));
 }
+
+/// A limit met at one place by two paths is said once: at depth 3, `@d<[[Int]]>` leaves out `x`,
+/// whose default `{}` would be a `Box<[[[Int]]]>`, one level too deep. Coercing the application
+/// says so at its path, and the closure, whose root it is, stops on the same rebuild there and says
+/// nothing more. Refuses one limit reported twice at one place.
+#[test]
+fn an_omitted_argument_and_the_closure_say_one_depth_stop_once() {
+  let text = "type Query @d<[[Int]]> {\n  x: Int\n}\n\
+              directive @d<T>(x: Box<[T]> = {}) on OBJECT\ninput Box<V> {\n  v: V = null\n}\n";
+  quiet(&analyze_text(text, &Limits::new()));
+  let analysis = analyze_text(text, &Limits::new().with_max_generic_depth(3));
+  let schema = schema_file(&analysis);
+  let path = named(schema, text, "@", "d", 0);
+  assert_eq!(found(&analysis), [(LIMIT, path)]);
+  assert!(
+    the(&analysis, LIMIT, path)
+      .to_string()
+      .contains("`Limits::max_generic_depth`, 3"),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+/// A limit on types met at one place by two phases is said once: at depth 3, `O` implements
+/// `I<[[Int]]>`, and `I<T>` implements `J<[T]>`, whose `J<[[[Int]]]>` nests one level too deep.
+/// The closure of `I<[[Int]]>`, which reads `J`'s default through that entry, stops there and says
+/// so; the implementation check, which needs the same type to check what `O` implements through
+/// `I`, says nothing more. Refuses one limit reported twice at one place.
+#[test]
+fn the_closure_and_the_implementation_check_say_one_depth_stop_once() {
+  let text = "type Query {\n  x: Int\n}\ninterface J<V> {\n  f(a: V = null): Int\n}\n\
+              interface I<T> implements J<[T]> {\n  f(a: [T] = null): Int\n}\n\
+              type O implements I<[[Int]]> {\n  f(a: [[[Int]]] = null): Int\n}\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_generic_depth(3));
+  let schema = schema_file(&analysis);
+  let entry = at(schema, text, "I<[[Int]]>", 0);
+  assert_eq!(found(&analysis), [(LIMIT, entry)]);
+  assert!(
+    the(&analysis, LIMIT, entry)
+      .to_string()
+      .contains("`Limits::max_generic_depth`, 3"),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}

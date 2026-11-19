@@ -26,7 +26,6 @@
 
 use std::{collections::BTreeMap, vec, vec::Vec};
 
-use super::Stop;
 use crate::graphqlx::id::{ApplicationId, DefId, PoolRange, TyId, TypeExprId, dense};
 
 /// The label at the type or the application that derives the instantiation a report names, in
@@ -64,41 +63,6 @@ pub(crate) struct Node {
 struct Edge {
   child: u32,
   place: Place,
-}
-
-/// The step budget a phase pays its rebuilds from.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Budget {
-  /// `Limits::max_value_steps`, coercion's.
-  Values,
-  /// `Limits::max_implementation_steps`, the implementation check's.
-  Implementation,
-}
-
-/// A rebuild that stopped: the instantiation it was made under, by its nullable form, the written
-/// type rebuilt under its arguments, what stopped it, and the budget it was paid from.
-#[derive(Clone, Copy)]
-pub(crate) struct Halt {
-  /// The instantiation it was made under.
-  pub(crate) instantiation: TyId,
-  /// The type rebuilt.
-  pub(crate) written: TyId,
-  /// What stopped it.
-  pub(crate) stop: Stop,
-  /// The budget it was paid from.
-  pub(crate) budget: Budget,
-}
-
-impl Halt {
-  /// Whether `other` is the same stop of the same rebuild: the same instantiation, type and cause,
-  /// and, for steps run out, the same budget, since each phase's is its own. A limit on types,
-  /// which every phase shares, is the same stop whichever phase met it.
-  pub(crate) fn same(&self, other: &Self) -> bool {
-    self.instantiation == other.instantiation
-      && self.written == other.written
-      && self.stop == other.stop
-      && (self.budget == other.budget || matches!(self.stop, Stop::Built(_)))
-  }
 }
 
 /// What a node's expansion reaches that fails: the failing node, and the place that derives it on
