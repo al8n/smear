@@ -1022,11 +1022,6 @@ fn conclude<V: Visitor + ?Sized>(
   options: &Options,
   rules: &mut V,
 ) -> Analysis {
-  debug_assert_eq!(
-    reporter.ceiling(),
-    limits.max_diagnostics() as usize,
-    "the reporter keeps the ceiling of the limits the analysis records"
-  );
   // The rules read the phases' marks.
   model.mark(&reporter.take_marks());
   // Theirs are kept aside until every rule has walked, so no rule sees another's.

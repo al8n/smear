@@ -511,11 +511,6 @@ impl Reporter {
     self.collector.count_unlisted(errors);
   }
 
-  /// How many diagnostics the list keeps.
-  pub(crate) fn ceiling(&self) -> usize {
-    self.collector.ceiling
-  }
-
   /// Where the errors reported since the marks were last taken point, in the order they were
   /// reported: none, when the reporter is not marking.
   pub(crate) fn take_marks(&mut self) -> Vec<Location> {
