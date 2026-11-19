@@ -1182,42 +1182,35 @@ fn a_refused_default_spends_no_step_at_an_instantiation() {
 }
 
 /// A default lowering refused, left out where a check counts a value, is one row that fits, and no
-/// type is rebuilt for it: under two values `Inner`'s `[true, true]` is refused, `Outer`'s `{}` and
-/// `0` are read, and `{}` cannot pay for its copy of `v`'s default, `resource-limit` at the
-/// literal. At depth two the check of `Outer<[Boolean]>`, written or derived through
-/// `Wrap<[Boolean]>`, counts `{}` under `Inner<[Boolean]>`, where `v` would take `[[[Boolean]]]`,
-/// one level too deep: it counts the refused default as one row and goes on to `0`, which does not
-/// fit `[Boolean]`. The closure reads nothing under `Inner`, which records nothing, so it says
-/// nothing. Refuses a refused default whose rebuild stops a check before a value that was read is
-/// judged.
+/// type is rebuilt for it: under two values `Inner`'s `[true, true]` is refused, and `Outer`'s `{}`
+/// and `0` are read, each kept as written where it is written, under a type that names `T`, so no
+/// copy of `v`'s default is made there. At depth two the check of `Outer<[Boolean]>`, written or
+/// derived through `Wrap<[Boolean]>`, counts `{}` under `Inner<[Boolean]>`, where `v` would take
+/// `[[[Boolean]]]`, one level too deep: it counts the refused default as one row and goes on to
+/// `0`, which does not fit `[Boolean]`. The closure reads nothing under `Inner`, which records
+/// nothing, so it says nothing. Refuses a refused default whose rebuild stops a check before a
+/// value that was read is judged.
 #[test]
 fn a_refused_default_left_out_is_one_row_in_a_check() {
   const TYPES: &str = "input Outer<T> {\n  i: Inner<T> = {}\n  bad: T = 0\n}\n\
                        input Inner<U> {\n  v: [[U]] = [true, true]\n}\n";
   let limits = Limits::new().with_max_values(2).with_max_generic_depth(2);
-  // In each program: the literal's report at `{}`, then lowering's at `[true, true]`, and nothing
-  // past the one `invalid-default-value`.
+  // In each program: lowering's report at `[true, true]`, and nothing past the one
+  // `invalid-default-value`.
   let said = |analysis: &Analysis, text: &str| {
     let schema = schema_file(analysis);
     assert_eq!(
       found(analysis, LIMIT),
-      [
-        (after(schema, text, "i: Inner<T> = ", "{}"), None),
-        (at(schema, text, "[true, true]", 0), None),
-      ],
+      [(at(schema, text, "[true, true]", 0), None)],
       "{:#?}",
       analysis.diagnostics()
     );
-    let reports = messages(analysis, LIMIT);
-    assert!(
-      reports[0].contains("the fields this literal leaves out"),
-      "{reports:#?}"
-    );
-    assert!(reports[0].contains(&format!("{VALUES}, 2")), "{reports:#?}");
-    assert!(reports[1].contains(UNREAD), "{reports:#?}");
+    let report = only(messages(analysis, LIMIT));
+    assert!(report.contains(UNREAD), "{report}");
+    assert!(report.contains(&format!("{VALUES}, 2")), "{report}");
     assert_eq!(
       analysis.diagnostics().len(),
-      3,
+      2,
       "{:#?}",
       analysis.diagnostics()
     );
@@ -1268,13 +1261,13 @@ fn a_refused_default_left_out_is_one_row_in_a_check() {
 
 /// A count pays a step for each default it passes, one lowering refused included, so the checks
 /// that count one value against many instantiations are bounded by `Limits::max_value_steps`
-/// however many refused defaults the value leaves out. Under one value `Holder`'s `{}` is read and
-/// each of `In`'s forty defaults is refused, so `{}` cannot pay for its copies, `resource-limit` at
-/// the literal. Each of five written instantiations of `Holder` counts `{}` against its own `In`:
-/// a step for the row, two for the rebuild, one for the literal and one for each of the forty
-/// defaults it passes. Under 64 steps the first check takes 44, the second runs out passing them,
-/// `resource-limit` at its occurrence, and so does each after it. Refuses refused defaults passed
-/// for nothing, which would let every instantiation walk them all.
+/// however many refused defaults the value leaves out. Under one value `Holder`'s `{}` is read,
+/// kept as written under `In<T>`, which names `T`, and each of `In`'s forty defaults is refused.
+/// Each of five written instantiations of `Holder` counts `{}` against its own `In`: a step for the
+/// row, two for the rebuild, one for the literal and one for each of the forty defaults it passes.
+/// Under 64 steps the first check takes 44, the second runs out passing them, `resource-limit` at
+/// its occurrence, and so does each after it. Refuses refused defaults passed for nothing, which
+/// would let every instantiation walk them all.
 #[test]
 fn a_count_pays_a_step_for_each_refused_default_it_passes() {
   const FIELDS: usize = 40;
@@ -1313,16 +1306,16 @@ fn a_count_pays_a_step_for_each_refused_default_it_passes() {
     "{:#?}",
     analysis.diagnostics()
   );
-  // Besides them, lowering's report at each refused default, and the literal's at `{}`.
+  // Besides them, lowering's report at each refused default, and nothing else.
   assert_eq!(
     found(&analysis, LIMIT).len(),
-    4 + FIELDS + 1,
+    4 + FIELDS,
     "{:#?}",
     analysis.diagnostics()
   );
   assert_eq!(
     analysis.diagnostics().len(),
-    4 + FIELDS + 1,
+    4 + FIELDS,
     "{:#?}",
     analysis.diagnostics()
   );
