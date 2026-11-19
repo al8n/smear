@@ -2107,6 +2107,53 @@ fn null_for_an_argument_a_collections_key_or_element_makes_required_is_refused_o
   );
 }
 
+/// A default stands in for an argument only where it is left out: `null` written for one typed by
+/// a collection's key or element is refused at the application, once, though it has a default, as
+/// `null` for a non-null type is, `invalid-directive-argument-value` at the `null`, and recorded
+/// for no instantiation: `@need<K>(v: null)` on the set `Bag`, whether nothing uses `Bag` or
+/// `Bag<Int>` and `Bag<String>` do, which report nothing more. Left out, `v` takes its default
+/// under `Bag<Int>` and `Bag<Float>`, silently. A map's value keeps its check at each
+/// instantiation, default or not: `@need<V>(v: null)` on `Vals` is refused under
+/// `Vals<Int, Int!>` alone, at that use. Refuses the `null` the default lets through to be judged
+/// only at each instantiation, which an unused collection never asks and each use repeats.
+#[test]
+fn null_for_a_collections_key_or_element_with_a_default_is_refused_once() {
+  let need = "directive @need<T>(v: T = 1) on SCALAR\nscalar Bag<K> @set @need<K>(v: null)\n";
+  for query in [
+    "type Query {\n  x: Int\n}\n",
+    "type Query {\n  a: Bag<Int>\n  b: Bag<String>\n}\n",
+  ] {
+    let text = format!("{query}{need}");
+    let analysis = analyze_text(&text, &Limits::new());
+    let schema = schema_file(&analysis);
+    let null = after(schema, &text, "@need<K>(v: ", "null");
+    assert_eq!(found(&analysis), [(ARGUMENT, null)], "{text}");
+    let report = the(&analysis, ARGUMENT, null);
+    assert_eq!(
+      report.to_string(),
+      "`null` is given where a non-null value is expected"
+    );
+    assert!(labels(report).is_empty(), "{:?}", labels(report));
+  }
+
+  quiet(&analyze_text(
+    "type Query {\n  a: Bag<Int>\n  b: Bag<Float>\n}\n\
+     directive @need<T>(v: T = 1) on SCALAR\nscalar Bag<K> @set @need<K>\n",
+    &Limits::new(),
+  ));
+
+  let text = "type Query {\n  a: Vals<Int, Int>\n  b: Vals<Int, Int!>\n}\n\
+              directive @need<T>(v: T = 1) on SCALAR\nscalar Vals<K, V> @map @need<V>(v: null)\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, text, "Vals<Int, Int!>", 0);
+  assert_eq!(found(&analysis), [(ARGUMENT, occurrence)]);
+  assert_eq!(
+    labels(the(&analysis, ARGUMENT, occurrence)),
+    [(after(schema, text, "@need<V>(v: ", "null"), "this value")]
+  );
+}
+
 /// A field an object literal of a generic definition leaves out, whose type there is its input
 /// object's bare nullable type parameter, is judged by the same rule: the literal is a value its
 /// definition records, and its count at each instantiation reads the field under that

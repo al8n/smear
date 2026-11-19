@@ -360,8 +360,8 @@ All notable changes to Smear are documented in this file.
     occurrence is typed, defaults filled, its count of type arguments and the bounds of every
     instantiation the program writes judged; every value is coerced to the type expected where
     it stands, defaults copied and a cycle of them refused, a generic definition's values at each
-    closed instantiation a supplied package writes, and an argument a collection's key or element
-    makes required where it is left out, or written null, once; each scalar is bound to its host
+    closed instantiation a supplied package writes, and an argument typed by a collection's key or
+    element, left out with no default or written null, once; each scalar is bound to its host
     types; each definition is checked against the interfaces it implements, transitively and under
     type arguments, its entries and members told apart as types; and every definition and type gets
     its tier, the definitions only compile-time metadata reaches marked first.
