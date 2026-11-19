@@ -124,6 +124,20 @@ fn only(mut messages: Vec<String>) -> String {
   messages.remove(0)
 }
 
+/// Each label of the diagnostic whose code is `code` and whose primary location is `at`, in order:
+/// where it is, and what it says.
+fn labels_at<'a>(analysis: &'a Analysis, code: &str, at: Location) -> Vec<(Location, &'a str)> {
+  let diagnostic = analysis
+    .diagnostics()
+    .iter()
+    .find(|diagnostic| diagnostic.code().as_str() == code && diagnostic.primary() == at)
+    .unwrap_or_else(|| panic!("no `{code}` at {at:?}"));
+  (0..diagnostic.labels())
+    .filter_map(|index: usize| diagnostic.label(index))
+    .map(|label| (label.location(), label.text()))
+    .collect()
+}
+
 /// Whether `analysis` says nothing but that the root package has no query root: the one thing a
 /// package with no file or no query says, which a consumer analyzing a library waives.
 fn clean(analysis: &Analysis) -> bool {
@@ -1165,6 +1179,91 @@ fn a_refused_default_spends_no_step_at_an_instantiation() {
     "{:#?}",
     analysis.diagnostics()
   );
+}
+
+/// A default lowering refused, left out where a check counts a value, is one row that fits, and no
+/// type is rebuilt for it: under two values `Inner`'s `[true, true]` is refused, `Outer`'s `{}` and
+/// `0` are read, and `{}` cannot pay for its copy of `v`'s default, `resource-limit` at the
+/// literal. At depth two the check of `Outer<[Boolean]>`, written or derived through
+/// `Wrap<[Boolean]>`, counts `{}` under `Inner<[Boolean]>`, where `v` would take `[[[Boolean]]]`,
+/// one level too deep: it counts the refused default as one row and goes on to `0`, which does not
+/// fit `[Boolean]`. The closure reads nothing under `Inner`, which records nothing, so it says
+/// nothing. Refuses a refused default whose rebuild stops a check before a value that was read is
+/// judged.
+#[test]
+fn a_refused_default_left_out_is_one_row_in_a_check() {
+  const TYPES: &str = "input Outer<T> {\n  i: Inner<T> = {}\n  bad: T = 0\n}\n\
+                       input Inner<U> {\n  v: [[U]] = [true, true]\n}\n";
+  let limits = Limits::new().with_max_values(2).with_max_generic_depth(2);
+  // In each program: the literal's report at `{}`, then lowering's at `[true, true]`, and nothing
+  // past the one `invalid-default-value`.
+  let said = |analysis: &Analysis, text: &str| {
+    let schema = schema_file(analysis);
+    assert_eq!(
+      found(analysis, LIMIT),
+      [
+        (after(schema, text, "i: Inner<T> = ", "{}"), None),
+        (at(schema, text, "[true, true]", 0), None),
+      ],
+      "{:#?}",
+      analysis.diagnostics()
+    );
+    let reports = messages(analysis, LIMIT);
+    assert!(
+      reports[0].contains("the fields this literal leaves out"),
+      "{reports:#?}"
+    );
+    assert!(reports[0].contains(&format!("{VALUES}, 2")), "{reports:#?}");
+    assert!(reports[1].contains(UNREAD), "{reports:#?}");
+    assert_eq!(
+      analysis.diagnostics().len(),
+      3,
+      "{:#?}",
+      analysis.diagnostics()
+    );
+  };
+
+  let written = format!("type Query {{\n  f(o: Outer<[Boolean]>): Int\n}}\n{TYPES}");
+  let analysis = analyze_text(&written, &limits, &Options::new());
+  let schema = schema_file(&analysis);
+  let root = at(schema, &written, "Outer<[Boolean]>", 0);
+  assert_eq!(
+    labels_at(&analysis, DEFAULT, root),
+    [(after(schema, &written, "bad: T = ", "0"), "this value")],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    only(messages(&analysis, DEFAULT)),
+    "`Outer` is instantiated here with type arguments under which `0`, a value it holds, does not \
+     fit the type it takes"
+  );
+  said(&analysis, &written);
+
+  let derived = format!(
+    "type Query {{\n  f(w: Wrap<[Boolean]>): Int\n}}\ninput Wrap<T> {{\n  o: Outer<T>\n}}\n{TYPES}"
+  );
+  let analysis = analyze_text(&derived, &limits, &Options::new());
+  let schema = schema_file(&analysis);
+  let root = at(schema, &derived, "Wrap<[Boolean]>", 0);
+  assert_eq!(
+    labels_at(&analysis, DEFAULT, root),
+    [
+      (
+        after(schema, &derived, "o: ", "Outer<T>"),
+        "this derives that instantiation"
+      ),
+      (after(schema, &derived, "bad: T = ", "0"), "this value"),
+    ],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    only(messages(&analysis, DEFAULT)),
+    "`Wrap` is instantiated here with type arguments that derive an instantiation of `Outer` \
+     under which `0`, a value it holds, does not fit the type it takes"
+  );
+  said(&analysis, &derived);
 }
 
 /// A copy `Limits::max_values` kept from being made is checked at no instantiation, so the check

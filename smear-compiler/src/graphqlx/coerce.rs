@@ -387,15 +387,18 @@
 //! charged each literal a supplied package writes to it before any of its value was read, and a
 //! value it could not pay for is one row here, unresolved whatever its type, none of its literals
 //! read and nothing spent on it or said of it: it fits every type, so no instantiation checks it,
-//! and no type is rebuilt for it under an application's type arguments. A copy of it is one row,
-//! charged as any copy is. Two kinds of row no literal writes are charged to the budget here,
-//! besides their steps: each list a written lone value stands for, one value each, and each row of
-//! a copy, its whole count at once. Each is charged to both budgets, all of it or none, the steps
-//! asked first, and a report names the budget that could not pay; the work stops as it stops past
-//! the steps, a lone value's level its one unresolved row, an application filled no further and an
-//! object literal given no more of its defaults. Nothing else this phase spends a step on makes a
-//! row, so the rows it makes are at most the built-in library's own, those `Limits::max_values`
-//! paid for, and one for each value lowering refused.
+//! and no type is rebuilt for it, under an application's type arguments or an object literal's.
+//! Where an application or an object literal leaves out the argument or field whose default it is,
+//! it is read under no type arguments: a count, a check's among them, counts it as one row that
+//! fits, with no read and no step, and a copy of it is one row of the type that argument or field
+//! is written with, charged as any copy is. Two kinds of row no literal writes are charged to the
+//! budget here, besides their steps: each list a written lone value stands for, one value each, and
+//! each row of a copy, its whole count at once. Each is charged to both budgets, all of it or none,
+//! the steps asked first, and a report names the budget that could not pay; the work stops as it
+//! stops past the steps, a lone value's level its one unresolved row, an application filled no
+//! further and an object literal given no more of its defaults. Nothing else this phase spends a
+//! step on makes a row, so the rows it makes are at most the built-in library's own, those
+//! `Limits::max_values` paid for, and one for each value lowering refused.
 //!
 //! # The arenas
 //!
@@ -1715,6 +1718,17 @@ impl<'p> Coercion<'_, 'p, '_> {
     self.member_occurrence(member).ty
   }
 
+  /// What `member`'s value takes read under no type arguments: the type it is written with, as
+  /// instantiation typed it, and its `!`, nothing rebuilt.
+  fn written_expected(&self, member: MemberId) -> Expected {
+    let MemberOccurrence { ty, non_null } = self.member_occurrence(member);
+    Expected {
+      ty,
+      rebuilt: false,
+      non_null,
+    }
+  }
+
   /// The type `member`'s value takes under `env`, when it is given: a named type of `owner`, the
   /// member's own definition, whose arguments the member's type is read under, `library` when the
   /// built-in library writes what asks. A type written closed, or with no `env`, is the type as
@@ -1729,16 +1743,8 @@ impl<'p> Coercion<'_, 'p, '_> {
     env: Option<(TyId, DefId)>,
     library: bool,
   ) -> Result<Expected, Stop> {
-    let MemberOccurrence {
-      ty: written,
-      non_null,
-    } = self.member_occurrence(member);
-    let unbuilt = Expected {
-      ty: written,
-      rebuilt: false,
-      non_null,
-    };
-    let (Some(written), Some((env, owner))) = (written, env) else {
+    let unbuilt = self.written_expected(member);
+    let (Some(written), Some((env, owner))) = (unbuilt.ty, env) else {
       return Ok(unbuilt);
     };
     if self.builder.ty_closed(written) {
@@ -2316,9 +2322,11 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// all the same, and for none when a budget keeps it from being made, the argument then absent
   /// and the application reported. A copy of a default its declaration refuses, such a `null`, is
   /// judged and charged as any other, but that declaration owns its report, and it is recorded for
-  /// none. Answers `false`, and reports the application once, when the budget, or
-  /// `Limits::max_values` for a copy's values, cannot pay, or when a type the argument takes cannot
-  /// be built under the arguments.
+  /// none. A default lowering refused is read under no type arguments: its copy is one row of the
+  /// type the argument is written with, which fits, and no type is rebuilt for it. Answers
+  /// `false`, and reports the application once, when the budget, or `Limits::max_values` for a
+  /// copy's values, cannot pay, or when a type the argument takes cannot be built under the
+  /// arguments.
   fn left_out(&mut self, applying: Applying, left: Listed, reported: &mut bool) -> bool {
     let Applying {
       application,
@@ -2366,11 +2374,18 @@ impl<'p> Coercion<'_, 'p, '_> {
         };
       }
     };
-    let expected = match self.under(left.argument, env, library) {
-      Ok(expected) => expected,
-      Err(stop) => {
-        self.starved(at, stop);
-        return false;
+    // A default lowering refused is read under no type arguments, as a written argument lowering
+    // refused is: its copy is one row of the type the argument is written with, and no type is
+    // rebuilt for it.
+    let expected = if self.refused_tree(tree) {
+      self.written_expected(left.argument)
+    } else {
+      match self.under(left.argument, env, library) {
+        Ok(expected) => expected,
+        Err(stop) => {
+          self.starved(at, stop);
+          return false;
+        }
       }
     };
     let ty = expected.ty;
@@ -2572,12 +2587,19 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// starved; a default that needs itself costs one step and is absent, and makes no value.
   /// Steps its count's reads paid stay spent whatever the copy. `judged` when `ty` is not the type
   /// the default is written against: the count then judges whether the copy fits it, and whether
-  /// what an absent one's count reached fits it.
+  /// what an absent one's count reached fits it. A default lowering refused is one row, which fits
+  /// whatever the type: no count of it is read or made, and its copy's row is charged as every
+  /// copy's rows are.
   fn ask(&mut self, tree: u32, ty: Option<TyId>, library: bool, judged: bool) -> Asked {
-    if !library && self.counts.contains_key(&CountKey { tree, ty }) && !self.charge(1) {
-      return Asked::Starved;
-    }
-    match self.count(tree, ty, !library, judged) {
+    let counted = if self.refused_tree(tree) {
+      Count::Rows(1)
+    } else {
+      if !library && self.counts.contains_key(&CountKey { tree, ty }) && !self.charge(1) {
+        return Asked::Starved;
+      }
+      self.count(tree, ty, !library, judged)
+    };
+    match counted {
       Count::Rows(rows) => {
         if !library && let Err(budget) = self.charge_rows(rows) {
           return match budget {
@@ -2612,8 +2634,9 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// copy makes them: one row each, a list's elements, a lone value's levels of list from its type
   /// and then the value against the type under them, and the fields an object literal sets; and
   /// for each default an object literal leaves out, a read of that default's count, a step charged
-  /// before it is pushed when `charged`. A read of a kept count adds its rows; of one not counted
-  /// yet, opens its frame.
+  /// before it is pushed when `charged`, but for a default lowering refused: one row, which fits,
+  /// with no read, no type rebuilt for it and no step. A read of a kept count adds its rows; of
+  /// one not counted yet, opens its frame.
   ///
   /// A frame with nothing left is exact, kept, and its rows added to the frame that read it. A
   /// verdict is every open frame's, each reading the one above it: a read of one past the budget,
@@ -3088,17 +3111,24 @@ impl<'p> Coercion<'_, 'p, '_> {
               }));
             }
             Next::Default(DefaultedField { field, tree }) => {
-              // A read is paid before it is pushed: no charge covers work pushed before it.
-              if charged && !self.charge(1) {
-                return Err(Count::Past);
+              if self.refused_tree(tree) {
+                // A default lowering refused is one row of the copy, which fits whatever the type:
+                // counted here, with no read, no type rebuilt for it and no step, as the copy
+                // makes it under no type arguments.
+                self.add_rows(1, charged)?;
+              } else {
+                // A read is paid before it is pushed: no charge covers work pushed before it.
+                if charged && !self.charge(1) {
+                  return Err(Count::Past);
+                }
+                let expected = self.under(field, env, !charged).map_err(unbuilt_count)?;
+                self.counting.push(Counted::Fill(FillCount {
+                  tree,
+                  ty: expected.ty,
+                  judged: expected.rebuilt,
+                  owned: self.owned(field, tree),
+                }));
               }
-              let expected = self.under(field, env, !charged).map_err(unbuilt_count)?;
-              self.counting.push(Counted::Fill(FillCount {
-                tree,
-                ty: expected.ty,
-                judged: expected.rebuilt,
-                owned: self.owned(field, tree),
-              }));
             }
           }
         }
@@ -4219,9 +4249,11 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// count of fields, and the required fields it leaves out, before any default is filled; a
   /// default is asked for as [`ask`](Self::ask) says, one left absent judged as a copy is, and once
   /// the budget, or `Limits::max_values` for a copy's values, cannot pay, the literal is reported
-  /// once and its written fields alone are read on. In a copy each default it leaves out is copied
-  /// with nothing asked and no count read: the count the copy was charged for read each of their
-  /// counts and found it exact, so their rows are among those it paid for.
+  /// once and its written fields alone are read on. A default lowering refused is read under no
+  /// type arguments: its copy is one row of the type its field is written with, which fits, and no
+  /// type is rebuilt for it. In a copy each default it leaves out is copied with nothing asked and
+  /// no count read: the count the copy was charged for read each of their counts and found it
+  /// exact, so their rows are among those it paid for.
   fn object(&mut self, id: ValueId, making: Making, def: DefId, first: u32) {
     let Making {
       node, tree, mode, ..
@@ -4285,16 +4317,22 @@ impl<'p> Coercion<'_, 'p, '_> {
       let Some(default_tree) = self.raw.trees.get(default as usize).copied() else {
         continue;
       };
-      // In a copy the type is the one its count read, and read already: the count would have
-      // stopped at a type that cannot be built, and no copy would be made.
-      let expected = match self.under(field, env, library) {
-        Ok(expected) => expected,
-        Err(stop) => {
-          if mode.written() {
-            self.object_starved(at, stop);
-            merge.default = merge.default_end;
+      // A default lowering refused is read under no type arguments, as a written argument lowering
+      // refused is: one row of the type its field is written with, which fits, no type rebuilt for
+      // it, as its count reads it. In a copy the type is the one its count read, and read already:
+      // the count would have stopped at a type that cannot be built, and no copy would be made.
+      let expected = if self.refused_tree(default) {
+        self.written_expected(field)
+      } else {
+        match self.under(field, env, library) {
+          Ok(expected) => expected,
+          Err(stop) => {
+            if mode.written() {
+              self.object_starved(at, stop);
+              merge.default = merge.default_end;
+            }
+            continue;
           }
-          continue;
         }
       };
       let ty = expected.ty;

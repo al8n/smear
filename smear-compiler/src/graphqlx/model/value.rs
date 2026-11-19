@@ -380,8 +380,10 @@ impl<'a> Value<'a> {
   /// The type it was coerced against.
   //
   // Coercion gives it the type expected where it stands, with its `!`, the list a lone value
-  // stands for included. A value whose expected type is unknown, which only a type that could not
-  // be written has, answers the one unresolved type.
+  // stands for included; an unresolved value lowering refused, or whose type could not be built
+  // under type arguments, the type its argument or field is written with. A value whose expected
+  // type is unknown, which only a type that could not be written has, answers the one unresolved
+  // type.
   #[inline]
   pub fn ty(&self) -> TyId {
     self.row().ty

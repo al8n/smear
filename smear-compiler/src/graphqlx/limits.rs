@@ -479,32 +479,34 @@ impl Limits {
   /// one, the copies of the defaults its own object literals leave out among them; a read, while a
   /// count is made, of the count of each default one of its object literals leaves out, and a read
   /// of a count made already, when a later copy of its default is asked for, each spent whether or
-  /// not a copy is made; a default left out whose copy would hold a copy of itself, which is not
-  /// made; a list that a written value stands for where a list is expected, one for each level of
-  /// list between the value and its type, as `tags: [[Int]] = 1` stands for a list of a list of
-  /// `1`; a required argument an application leaves out, and a required field an object literal
-  /// leaves out, each found left out, reported where it is written and not in a count; a node a
-  /// rebuild of a member's type under type arguments looks at, its root included, once for each
-  /// written type and instantiation; a node of a count made under a type its value is not written
-  /// against, each field that is or may be required that an object literal such a count reads
-  /// leaves out, up to the first found missing, and an identity of a set's element or of a map's
-  /// key that such a count renders to search them for one held twice, a step for each 64 bytes of
-  /// it or part, once for each literal and the type its identities are read against; a field an
-  /// object literal writes, one its input object does not declare included, when a count is the
-  /// first to read the literal against that input object; an argument that may be required, a bare
-  /// nullable type parameter of its directive, that an application with complete type arguments
-  /// leaves out, and a field that may be required that a written object literal of a generic input
-  /// object leaves out; a pair of a closed instantiation, of a type the program writes, of a
-  /// generic directive an application of it makes, or of one such an instantiation derives through
-  /// the definitions that do not grow, and what its definition records, checked under the
-  /// instantiation's arguments: a value whose type names its type parameters, or an argument an
-  /// application in it leaves out whose type is one of them; while what each written instantiation
-  /// derives is read, each node a rebuild of a type its definition holds looks at, its root
-  /// included, and each generic named type or list the reading meets; and converting a decimal
-  /// integer of more than 38 significant digits, the most `u128` arithmetic reads whatever they
-  /// spell, to an integer where an integer type expects one, charged before the conversion as an
-  /// upper bound of its work: `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for `d` digits, its
-  /// chunks of nine digits times the 32-bit limbs of its value.
+  /// not a copy is made, but none for a default lowering refused past
+  /// [`max_values`](Self::max_values), which is one row, read for nothing and rebuilt under no type
+  /// arguments; a default left out whose copy would hold a copy of itself, which is not made; a
+  /// list that a written value stands for where a list is expected, one for each level of list
+  /// between the value and its type, as `tags: [[Int]] = 1` stands for a list of a list of `1`; a
+  /// required argument an application leaves out, and a required field an object literal leaves
+  /// out, each found left out, reported where it is written and not in a count; a node a rebuild of
+  /// a member's type under type arguments looks at, its root included, once for each written type
+  /// and instantiation; a node of a count made under a type its value is not written against, each
+  /// field that is or may be required that an object literal such a count reads leaves out, up to
+  /// the first found missing, and an identity of a set's element or of a map's key that such a
+  /// count renders to search them for one held twice, a step for each 64 bytes of it or part, once
+  /// for each literal and the type its identities are read against; a field an object literal
+  /// writes, one its input object does not declare included, when a count is the first to read the
+  /// literal against that input object; an argument that may be required, a bare nullable type
+  /// parameter of its directive, that an application with complete type arguments leaves out, and a
+  /// field that may be required that a written object literal of a generic input object leaves out;
+  /// a pair of a closed instantiation, of a type the program writes, of a generic directive an
+  /// application of it makes, or of one such an instantiation derives through the definitions that
+  /// do not grow, and what its definition records, checked under the instantiation's arguments: a
+  /// value whose type names its type parameters, or an argument an application in it leaves out
+  /// whose type is one of them; while what each written instantiation derives is read, each node a
+  /// rebuild of a type its definition holds looks at, its root included, and each generic named
+  /// type or list the reading meets; and converting a decimal integer of more than 38 significant
+  /// digits, the most `u128` arithmetic reads whatever they spell, to an integer where an integer
+  /// type expects one, charged before the conversion as an upper bound of its work: `ceil(d / 9) ×
+  /// (d × 3322 / 32000 + 2)` steps for `d` digits, its chunks of nine digits times the 32-bit limbs
+  /// of its value.
   ///
   /// Nothing else takes a step, and [`max_source_bytes`](Self::max_source_bytes) bounds the rest of
   /// the work on what is written: a hexadecimal, octal or binary integer converts in one pass, and
@@ -569,14 +571,17 @@ impl Limits {
   /// The written values are charged first, each before any of it is read, all of it or none, in the
   /// order the model's walk reaches them. One whose literals are more than is left is
   /// `resource-limit` where it is written, and is one unresolved value, charged nothing, none of
-  /// its literals read; a later value that fits is still read. Then the lists and the copies are
-  /// charged as they are made, so an application early in the walk can be starved by a default
-  /// written after it. A list a value stands for that cannot be paid for is `resource-limit` where
-  /// the value is written, and is its one unresolved value, under the levels that were, as
-  /// [`max_value_steps`](Self::max_value_steps) says of one it cannot pay for. A copy is charged
-  /// its values before its first is made, all of them or none, as that bound charges its steps: an
-  /// application whose next copy cannot be paid for is `resource-limit` at its path, once, and is
-  /// filled no further, and an object literal likewise, at the literal.
+  /// its literals read; a later value that fits is still read. Where an application or an object
+  /// literal leaves out the argument or field whose default it is, it is read under no type
+  /// arguments: a count, a check's among them, counts it as one value that fits, and a copy of it
+  /// is one unresolved value of the type that argument or field is written with. Then the lists and
+  /// the copies are charged as they are made, so an application early in the walk can be starved by
+  /// a default written after it. A list a value stands for that cannot be paid for is
+  /// `resource-limit` where the value is written, and is its one unresolved value, under the levels
+  /// that were, as [`max_value_steps`](Self::max_value_steps) says of one it cannot pay for. A copy
+  /// is charged its values before its first is made, all of them or none, as that bound charges its
+  /// steps: an application whose next copy cannot be paid for is `resource-limit` at its path,
+  /// once, and is filled no further, and an object literal likewise, at the literal.
   ///
   /// So it holds every literal a value writes, the value's own included, the lists, and the copies.
   /// The model holds at most this many values plus the built-in library's own, plus one unresolved
