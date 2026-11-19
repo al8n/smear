@@ -348,10 +348,12 @@ All notable changes to Smear are documented in this file.
     type and complete type arguments, defaults filled; `Def::externs` a scalar's host types and
     `Extern::application` the `@extern` each is bound from; `Def::tier` and `Ty::tier` the tier
     each requires, and `Def::is_metadata` whether a definition is compile-time metadata, which
-    only type-system directives' types and applications' type arguments reach; and the `extent()`
-    of a contribution, a member and an inline module, where it is written. `Analysis` and `Model`
-    are `PartialEq` and `SourceMap` is `Eq`, `Source::is_complete` says whether a file was read
-    whole, and `SourceMap::bind` pairs an analysis with the caller's texts again for a renderer.
+    only type-system directives' types and applications' type arguments reach, and which no
+    definition is while an executable directive holds one of its own type parameters in an
+    argument's type, since an operation can fill it with any of them; and the `extent()` of a
+    contribution, a member and an inline module, where it is written. `Analysis` and `Model` are
+    `PartialEq` and `SourceMap` is `Eq`, `Source::is_complete` says whether a file was read whole,
+    and `SourceMap::bind` pairs an analysis with the caller's texts again for a renderer.
   - **The phases.** The package set is checked; every file is parsed; each package's module tree
     and declarations are collected, duplicate and reserved names refused; every scope, `use` item
     and path is resolved, with a "did you mean" help; each definition is lowered; every

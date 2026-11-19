@@ -44,6 +44,13 @@
 //! whatever the definition's kind: a definition of `reached` so named joins `runtime`, and its own
 //! occurrences are read in turn, first in, first out.
 //!
+//! An executable directive's own type parameter that one of its arguments' types holds, directly,
+//! in a list or as an argument of a named type, is filled by the operations that apply it, which a
+//! schema cannot know, and its bounds do not narrow what they choose: met there, it makes every
+//! definition `reached` holds runtime, each entered at that occurrence. A parameter only its
+//! defaults or its bounds name receives no value at run time, and a parameter of any other
+//! definition is filled by the schema's own types.
+//!
 //! A definition is metadata when `reached` holds it and `runtime` does not, and the tier rule
 //! judges nothing within it. A definition both reach is judged. A value names nothing either way:
 //! a `TypeRef` that names a definition neither makes it metadata nor makes a metadata definition
@@ -79,11 +86,13 @@
 //! most once by each, however many occurrences write it, so a bare `Big` whose thousand slots
 //! defaults fill is walked once for all its uses. An application's complete type is pushed whole,
 //! and not argument by argument, so the bare applications of one directive, which share the one
-//! complete type its defaults fill, read its arguments once between them. Each closure reads each
-//! definition's occurrences at most once. The work is linear in the definitions, their
-//! occurrences, the applications and the type arguments they write, the types and their
-//! arguments; nothing recurses, nothing is interned and nothing is reported. When `reached` holds
-//! nothing, `runtime` is not walked. Both are least sets, so the answer depends on no order.
+//! complete type its defaults fill, read its arguments once between them. What an executable
+//! directive's own parameter can receive is entered once, however many such parameters the walk
+//! meets: one look at each definition. Each closure reads each definition's occurrences at most
+//! once. The work is linear in the definitions, their occurrences, the applications and the type
+//! arguments they write, the types and their arguments; nothing recurses, nothing is interned and
+//! nothing is reported. When `reached` holds nothing, `runtime` is not walked. Both are least sets,
+//! so the answer depends on no order.
 
 use std::{vec, vec::Vec};
 
@@ -93,7 +102,7 @@ use crate::graphqlx::{
   id::{ApplicationId, DefId, TyId, TypeExprId, dense},
   model::{
     DefKind, DirectiveLocation, ModelBuilder, Occurrence, Origin, Root, Shape, TypeBound,
-    WrittenParam,
+    TypeParamRef, WrittenParam,
   },
 };
 
@@ -219,9 +228,11 @@ fn application_roots(builder: &ModelBuilder, seen: &mut [bool], types: &mut Vec<
 
 /// What is used outside metadata, by definition id, given what metadata reaches, `reached`: for
 /// each definition of `reached` that a type outside metadata names, through lists and every type
-/// argument, where that reach entered. The walk starts from each definition [`runtime_root`]
-/// answers for, in id order, and then from the schema's written roots, each occurrence the entry
-/// of what its type names; and reads each definition it makes runtime in turn, with its entry.
+/// argument, or that an executable directive's own type parameter can receive, where that reach
+/// entered. The walk starts from each definition [`runtime_root`] answers for, in id order, an
+/// executable directive's arguments' types first, and then from the schema's written roots, each
+/// occurrence the entry of what its type names; and reads each definition it makes runtime in
+/// turn, with its entry.
 fn used(builder: &ModelBuilder, reached: &[bool]) -> Vec<Option<Location>> {
   let mut walk = Walk {
     builder,
@@ -230,20 +241,32 @@ fn used(builder: &ModelBuilder, reached: &[bool]) -> Vec<Option<Location>> {
     looked: vec![false; builder.ty_count() as usize],
     stack: Vec::new(),
     queue: Vec::new(),
+    flooded: false,
   };
   let mut written: Vec<TypeExprId> = Vec::new();
   for index in 0..builder.def_count() {
     let def = DefId::new(index);
-    if runtime_root(builder, def, reached) {
-      occurrences(builder, def, &mut written);
-      for &occurrence in &written {
-        walk.occurrence(occurrence, None);
+    if !runtime_root(builder, def, reached) {
+      continue;
+    }
+    // A directive that is a root is executable: its arguments' types are walked with the
+    // directive as the one whose own parameters the operations fill. No other type holds those
+    // parameters, so no walk before this one has looked at a type that does.
+    if builder.def_kind(def) == Some(DefKind::Directive) {
+      for argument in builder.def_members(def) {
+        if let Some(occurrence) = builder.member_ty(argument) {
+          walk.occurrence(occurrence, None, Some(def));
+        }
       }
+    }
+    occurrences(builder, def, &mut written);
+    for &occurrence in &written {
+      walk.occurrence(occurrence, None, None);
     }
   }
   for root in builder.schema_roots().into_iter().flatten() {
     if let Root::Written(occurrence) = root {
-      walk.occurrence(occurrence, None);
+      walk.occurrence(occurrence, None, None);
     }
   }
   let mut head = 0usize;
@@ -251,7 +274,7 @@ fn used(builder: &ModelBuilder, reached: &[bool]) -> Vec<Option<Location>> {
     head = head.saturating_add(1);
     occurrences(builder, def, &mut written);
     for &occurrence in &written {
-      walk.occurrence(occurrence, Some(at));
+      walk.occurrence(occurrence, Some(at), None);
     }
   }
   walk.entered
@@ -272,12 +295,17 @@ struct Walk<'a> {
   /// Each definition the walk made runtime, with where that reach entered, in that order, each
   /// read in turn, first in, first out.
   queue: Vec<(DefId, Location)>,
+  /// Whether an executable directive's own type parameter made every definition of `reached`
+  /// runtime already.
+  flooded: bool,
 }
 
 impl Walk<'_> {
   /// Walks the type of the occurrence `written`, once a phase gave it one, with `at` as the entry
-  /// of what it names, or, when `at` is `None`, where `written` is written.
-  fn occurrence(&mut self, written: TypeExprId, at: Option<Location>) {
+  /// of what it names, or, when `at` is `None`, where `written` is written. `own` is the
+  /// executable directive whose argument's type it is, whose own type parameters the operations
+  /// fill.
+  fn occurrence(&mut self, written: TypeExprId, at: Option<Location>, own: Option<DefId>) {
     let builder = self.builder;
     let Some(occurrence) = builder.occurrence(written) else {
       return;
@@ -286,14 +314,15 @@ impl Walk<'_> {
       return;
     };
     let entry = at.unwrap_or(occurrence.location);
-    self.walk(ty, entry);
+    self.walk(ty, entry, own);
   }
 
   /// Walks `ty` and every type under it, each that the walk has not pushed before: a list leads to
   /// its element, and a named type to every argument, whatever its definition's kind. A definition
   /// of `reached` that a named type names is made runtime and queued, the first time, with `at` as
-  /// its entry.
-  fn walk(&mut self, ty: TyId, at: Location) {
+  /// its entry. A type parameter of `own`, the executable directive whose argument's type `ty` is,
+  /// can receive any of them, so meeting one makes them all runtime, with `at` as their entry.
+  fn walk(&mut self, ty: TyId, at: Location, own: Option<DefId>) {
     let builder = self.builder;
     push(&mut self.looked, &mut self.stack, ty);
     while let Some(ty) = self.stack.pop() {
@@ -312,7 +341,33 @@ impl Walk<'_> {
             push(&mut self.looked, &mut self.stack, argument);
           }
         }
-        Some(Shape::Param(_) | Shape::Unresolved) | None => {}
+        Some(Shape::Param(TypeParamRef { def, .. })) => {
+          if own == Some(def) {
+            self.flood(at);
+          }
+        }
+        Some(Shape::Unresolved) | None => {}
+      }
+    }
+  }
+
+  /// Makes runtime every definition of `reached` the walk has not, each with `at` as its entry and
+  /// queued: what an executable directive's own type parameter, which one of its arguments' types
+  /// holds at `at`, can receive from the operations that apply it. That is any of them, and no
+  /// schema bounds it. It runs once, since after it nothing of `reached` is left.
+  fn flood(&mut self, at: Location) {
+    if self.flooded {
+      return;
+    }
+    self.flooded = true;
+    let reached = self.reached;
+    for (index, &marked) in reached.iter().enumerate() {
+      if marked
+        && let Some(slot) = self.entered.get_mut(index)
+        && slot.is_none()
+      {
+        *slot = Some(at);
+        self.queue.push((DefId::new(dense(index)), at));
       }
     }
   }

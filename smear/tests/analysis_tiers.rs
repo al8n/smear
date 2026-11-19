@@ -1673,6 +1673,71 @@ fn an_executable_directives_arguments_are_a_runtime_use() {
   ));
 }
 
+/// What an executable directive's own type parameter can receive, where one of its arguments'
+/// types holds it, is the operations' to choose at run time: `@run<T>(v: T)` on `FIELD` can be
+/// applied as `@run<Payload>(v: $p)`, so `Payload`, which only `@meta`'s argument names, is judged,
+/// its `[Int]` refused and labelled at `T` in `@run`'s argument. So it is when a bound names `T`,
+/// which narrows nothing, and when the argument holds `T` in a list or as an argument of a named
+/// type, labelled at that type. A generic executable directive that holds its parameter in no
+/// argument's type, `T` unused, named only by a bound or only by another parameter's default,
+/// enters nothing, and neither does a generic directive no operation can apply: `Payload` stays
+/// metadata, and nothing is said. Refuses an executable directive's own parameter passed over, a
+/// bound taken to narrow what it receives, and a parameter no argument holds taken for one an
+/// operation fills.
+#[test]
+fn an_executable_directives_own_parameter_can_receive_any_metadata() {
+  let payload = "type Query {\n  ok: Int\n}\ninput Payload {\n  items: [Int]\n}\n\
+                 directive @meta(v: Payload) on OBJECT\n";
+  for (run, around, holds) in [
+    ("directive @run<T>(v: T) on FIELD\n", "(v: T)", "T"),
+    (
+      "directive @run<T>(v: T) on FIELD where T: MapKey\n",
+      "(v: T)",
+      "T",
+    ),
+    ("directive @run<T>(v: [T]) on FIELD\n", "(v: [T])", "[T]"),
+    (
+      "directive @run<T>(v: Box<T>) on FIELD\ninput Box<X> {\n  x: X\n}\n",
+      "(v: Box<T>)",
+      "Box<T>",
+    ),
+  ] {
+    let text = format!("{payload}{run}");
+    let analysis = analyze_at(&text, Tier::Core);
+    let schema = file(&analysis, 3, "schema.graphqlx");
+    let entered = within(schema, &text, around, holds);
+    assert_eq!(
+      found(&analysis, TIER),
+      [(at(schema, &text, "[Int]", 0), Some(entered))],
+      "{text}"
+    );
+    assert_eq!(
+      labels(&analysis, TIER),
+      [vec![(entered, entry("Payload"))]],
+      "{text}"
+    );
+    assert_eq!(messages(&analysis, TIER), [LIST], "{text}");
+    assert_eq!(
+      analysis.diagnostics().len(),
+      1,
+      "{text}: {:#?}",
+      analysis.diagnostics()
+    );
+    assert!(!metadata(analysis.model(), "^::app::Payload"), "{text}");
+  }
+  for run in [
+    "directive @run<T>(n: Int) on FIELD\n",
+    "interface Cmp<X> {\n  id: Int\n}\ndirective @run<T>(n: Int) on FIELD where T: Cmp<T>\n",
+    "directive @run<T, U = [T]>(n: Int) on FIELD\n",
+    "directive @tag<T>(v: T) on OBJECT\n",
+  ] {
+    let text = format!("{payload}{run}");
+    let analysis = analyze_at(&text, Tier::Core);
+    quiet(&analysis);
+    assert!(metadata(analysis.model(), "^::app::Payload"), "{text}");
+  }
+}
+
 /// A bound in a directive no operation can apply roots what its interface's arguments name: `Cfg`,
 /// named in `Sized<Cfg>`, is metadata, and nothing is said; `Sized`, an interface, is not. Refuses
 /// an output type's arguments not looked through.

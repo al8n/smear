@@ -515,9 +515,12 @@ impl<'a> Def<'a> {
   /// types name in turn, every package's together. A type written anywhere else that names a
   /// definition, through any type argument and in whatever package, makes it no metadata:
   /// `f(b: Binding)`, `Ref<Binding>` and `[Binding]` each do, and so does the argument type of a
-  /// directive an operation can apply, whose values arrive at run time. An object, an interface, a
-  /// union and a directive are never metadata, nor is a definition of `core`, `alloc` or `std`.
-  /// This is not the GraphQL meta-types, whose origin is [`Compat`](Origin::Compat).
+  /// directive an operation can apply, whose values arrive at run time. Such a directive that holds
+  /// one of its own type parameters in an argument's type, as `directive @run<T>(v: T) on FIELD`
+  /// does, makes no definition metadata at all: an operation can fill that parameter with any of
+  /// them, which no schema can know. An object, an interface, a union and a directive are never
+  /// metadata, nor is a definition of `core`, `alloc` or `std`. This is not the GraphQL
+  /// meta-types, whose origin is [`Compat`](Origin::Compat).
   ///
   /// The answer is the analyzed program's. A package analyzed alone can answer `true` for a
   /// definition that a dependant's field makes runtime, and `false` for one only a dependant's
