@@ -26,6 +26,7 @@
 
 use std::{collections::BTreeMap, vec, vec::Vec};
 
+use super::Stop;
 use crate::graphqlx::id::{ApplicationId, DefId, PoolRange, TyId, TypeExprId, dense};
 
 /// The label at the type or the application that derives the instantiation a report names, in
@@ -63,6 +64,18 @@ pub(crate) struct Node {
 struct Edge {
   child: u32,
   place: Place,
+}
+
+/// A rebuild that stopped the closure: the instantiation being expanded, by its nullable form, the
+/// written type rebuilt under its arguments, and what stopped it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Halt {
+  /// The instantiation being expanded.
+  pub(crate) instantiation: TyId,
+  /// The type of the position whose rebuild stopped.
+  pub(crate) written: TyId,
+  /// What stopped it.
+  pub(crate) stop: Stop,
 }
 
 /// What a node's expansion reaches that fails: the failing node, and the place that derives it on
@@ -153,6 +166,18 @@ impl Closure {
   /// one whose own derivers are answered no worse. Each node and each edge is read once: linear in
   /// the closure, and charged nothing, its edges having been paid for when they were derived.
   pub(crate) fn blame(&self, failing: &[u32]) -> Vec<Option<Blame>> {
+    self.blame_where(failing, |_: u32, _: u32, _: Place| true)
+  }
+
+  /// As [`blame`](Self::blame), but an edge into a failing node passes its failure on to the node
+  /// that derives it only when `carries` says so, given the failing node, that node and the place:
+  /// a failure a phase knows to be reported already where it is derived goes no further that way.
+  /// What `carries` costs is the caller's.
+  pub(crate) fn blame_where(
+    &self,
+    failing: &[u32],
+    mut carries: impl FnMut(u32, u32, Place) -> bool,
+  ) -> Vec<Option<Blame>> {
     let mut blamed: Vec<Option<Blame>> = vec![None; self.nodes.len()];
     if failing.is_empty() {
       return blamed;
@@ -195,6 +220,9 @@ impl Closure {
         for &(child, parent, place) in parents.get(from..).unwrap_or_default() {
           if child != below {
             break;
+          }
+          if below == failed && !carries(failed, parent, place) {
+            continue;
           }
           let Some(slot) = blamed.get_mut(parent as usize) else {
             continue;

@@ -17,8 +17,22 @@
 //! grows is not judged, nor is what only it derives. The report pass reads each occurrence and
 //! application once, finding its root by its type, whose nullable form is found once for each type
 //! and kept: so repeated occurrences of a wide type cost a lookup each.
+//!
+//! What was reported already is not reported again. A comparison stopped by the rebuild that
+//! stopped the closure is coercion's to report, which it did once. And a failure passes from an
+//! instantiation to the one that derives it only where it was derived there: not where the
+//! deriver's own arguments hold it, which whatever derived the deriver reaches too; nor where the
+//! type at that place holds an open instantiation that failed the same way where it is written,
+//! which reported it, and that the deriver's arguments make the failing one. What closing a type
+//! alone introduces is reported at each root that reaches it. Reading the deriver's arguments and
+//! the type at a place is a step of the phase's budget for each type, each read once.
 
-use std::{collections::BTreeMap, format, string::String, vec::Vec};
+use std::{
+  collections::{BTreeMap, BTreeSet},
+  format,
+  string::String,
+  vec::Vec,
+};
 
 use tokora::diagnostic::Location;
 
@@ -26,11 +40,37 @@ use super::{Comparison, Implementing, Latent, List, Made, Twin, Verdict, labelle
 use crate::graphqlx::{
   code::schema,
   diagnostic::{Diagnostic, Excerpt},
-  id::{ApplicationId, DefId, TyId, TypeExprId},
-  model::{Applied, DefKind, Occurrence, Resolution, Shape, Written},
+  id::{ApplicationId, DefId, PoolRange, TyId, TypeExprId, dense},
+  model::{Applied, DefKind, ModelBuilder, Occurrence, Resolution, Shape, Written},
   set::ROOT,
   types::closure::{Blame, Closure, DERIVES, Place},
 };
+
+/// One of the phase's two checks at a derived instantiation.
+#[derive(Clone, Copy)]
+enum Check {
+  /// Two entries, or two members, of one type.
+  Meeting,
+  /// An argument made required.
+  Making,
+}
+
+/// What the blame of the closure's edges reads, each read once and kept: the instantiations each
+/// deriver's own arguments hold, and the open instantiations each position's type holds.
+#[derive(Default)]
+struct Paths {
+  /// The nullable forms of the generic named types each deriver's arguments hold, by its node.
+  arguments: BTreeMap<u32, BTreeSet<TyId>>,
+  /// Each position's type, with its run of `instances`: the open generic named types it holds, by
+  /// their definitions.
+  positions: BTreeMap<TyId, PoolRange>,
+  /// The runs `positions` names.
+  instances: Vec<(DefId, TyId)>,
+  /// The types still to read.
+  stack: Vec<TyId>,
+  /// The types the reading being made has met.
+  seen: BTreeSet<TyId>,
+}
 
 /// What each node of the closure reaches that fails, for each of the phase's two checks.
 struct Blamed {
@@ -58,16 +98,16 @@ impl Implementing<'_> {
       if node.written || node.grows {
         continue;
       }
-      if let Some(listed) = self.listed(node.def)
-        && !matches!(
-          self.verdict(node.ty, node.def, listed),
+      if let Some(listed) = self.listed(node.def) {
+        match self.verdict(node.ty, node.def, listed) {
           Verdict::Compared(Comparison {
             entries: None,
-            members: None
-          })
-        )
-      {
-        meeting.push(at);
+            members: None,
+          }) => {}
+          // The rebuild that stopped the closure, which coercion reported: not again.
+          Verdict::Stopped(_) if self.repeats(node.ty) => {}
+          Verdict::Compared(_) | Verdict::Stopped(_) => meeting.push(at),
+        }
       }
       if !matches!(self.made_by(node.ty, node.def), Made::Nothing) {
         making.push(at);
@@ -76,9 +116,14 @@ impl Implementing<'_> {
     if meeting.is_empty() && making.is_empty() {
       return;
     }
+    let mut paths = Paths::default();
     let blamed = Blamed {
-      met: closure.blame(&meeting),
-      made: closure.blame(&making),
+      met: closure.blame_where(&meeting, |failed: u32, parent: u32, place: Place| {
+        self.carries(&mut paths, &closure, failed, parent, place, Check::Meeting)
+      }),
+      made: closure.blame_where(&making, |failed: u32, parent: u32, place: Place| {
+        self.carries(&mut paths, &closure, failed, parent, place, Check::Making)
+      }),
     };
     let supplied = self.sources.package_sources(ROOT).start();
     // The root of each type an occurrence or an application has, by that type, either nullness.
@@ -139,6 +184,190 @@ impl Implementing<'_> {
     let found = self.make(ty, from, to);
     self.made.insert(ty, found);
     found
+  }
+
+  /// Whether the edge from the deriver `parent` to the failing instantiation `failed`, at `place`,
+  /// passes on what `failed` fails of `check`. Not when `failed` is held in the deriver's own
+  /// arguments: whatever derived the deriver reached it too, by the edge where it was derived,
+  /// which says. Nor when the type at `place` holds an open instantiation that failed the same way
+  /// where it is written, which reported it, and that the deriver's arguments make `failed`:
+  /// closing the type changed neither the failure nor where it comes from. What closing alone
+  /// introduces passes on. Each reading is a step of the phase's budget, read once and kept; one
+  /// the budget cannot pay for passes the failure on.
+  fn carries(
+    &mut self,
+    paths: &mut Paths,
+    closure: &Closure,
+    failed: u32,
+    parent: u32,
+    place: Place,
+    check: Check,
+  ) -> bool {
+    let (Some(child), Some(deriver)) = (closure.node(failed), closure.node(parent)) else {
+      return true;
+    };
+    if !deriver.written {
+      match self.held_by_arguments(paths, parent, deriver.ty, child.ty) {
+        Some(true) => return false,
+        Some(false) => {}
+        None => return true,
+      }
+    }
+    let open = match place {
+      Place::Type(id) => self
+        .builder
+        .occurrence(id)
+        .and_then(|occurrence: Occurrence<'_>| occurrence.ty),
+      Place::Application(id) => self.builder.application_ty(id),
+    };
+    let Some(open) = open else {
+      return true;
+    };
+    let Some(run) = self.open_instances(paths, open) else {
+      return true;
+    };
+    let candidates = paths
+      .instances
+      .get(run.start as usize..run.end as usize)
+      .unwrap_or_default();
+    let from = candidates.partition_point(|&(def, _): &(DefId, TyId)| def < child.def);
+    let to = candidates.partition_point(|&(def, _): &(DefId, TyId)| def <= child.def);
+    for index in from..to {
+      let Some(&(_, instance)) = paths.instances.get(run.start as usize + index) else {
+        break;
+      };
+      if !self.reported_open(instance, child.ty, check) {
+        continue;
+      }
+      if let Ok(Some(made)) = self.rebuilt(instance, deriver.ty, deriver.def)
+        && self.same_instance(made, child.ty)
+      {
+        return false;
+      }
+    }
+    true
+  }
+
+  /// Whether the arguments of `ty`, the type of the deriver `node`, hold the instantiation whose
+  /// nullable form is `child`, at any depth: the nullable forms they hold read the first time the
+  /// deriver is asked about, each type a step of the phase's budget. `None` when the budget cannot
+  /// pay.
+  fn held_by_arguments(
+    &mut self,
+    paths: &mut Paths,
+    node: u32,
+    ty: TyId,
+    child: TyId,
+  ) -> Option<bool> {
+    if !paths.arguments.contains_key(&node) {
+      let mut held: BTreeSet<TyId> = BTreeSet::new();
+      paths.stack.clear();
+      paths.seen.clear();
+      paths.stack.extend_from_slice(self.builder.ty_args(ty));
+      while let Some(at) = paths.stack.pop() {
+        if !paths.seen.insert(at) {
+          continue;
+        }
+        if !self.steps.charge(1) {
+          return None;
+        }
+        let builder: &ModelBuilder = &*self.builder;
+        match builder.ty_shape(at) {
+          Some(Shape::Named(def)) => {
+            if builder.type_param_count(def) > 0 {
+              let nullable = if builder.ty_non_null(at) {
+                builder
+                  .find_named(def, builder.ty_args(at), false)
+                  .unwrap_or(at)
+              } else {
+                at
+              };
+              held.insert(nullable);
+            }
+            paths.stack.extend_from_slice(builder.ty_args(at));
+          }
+          Some(Shape::List(element)) => paths.stack.push(element),
+          Some(Shape::Param(_) | Shape::Unresolved) | None => {}
+        }
+      }
+      paths.arguments.insert(node, held);
+    }
+    Some(
+      paths
+        .arguments
+        .get(&node)
+        .is_some_and(|held: &BTreeSet<TyId>| held.contains(&child)),
+    )
+  }
+
+  /// The run of `paths.instances` that holds the open generic named types `open`, a position's
+  /// type, holds, itself among them, by their definitions: read the first time it is asked, each
+  /// type a step of the phase's budget. `None` when the budget cannot pay.
+  fn open_instances(&mut self, paths: &mut Paths, open: TyId) -> Option<PoolRange> {
+    if let Some(&run) = paths.positions.get(&open) {
+      return Some(run);
+    }
+    let start = paths.instances.len();
+    paths.stack.clear();
+    paths.seen.clear();
+    paths.stack.push(open);
+    while let Some(at) = paths.stack.pop() {
+      if self.builder.ty_closed(at) || !paths.seen.insert(at) {
+        continue;
+      }
+      if !self.steps.charge(1) {
+        paths.instances.truncate(start);
+        return None;
+      }
+      let builder: &ModelBuilder = &*self.builder;
+      match builder.ty_shape(at) {
+        Some(Shape::Named(def)) => {
+          if builder.type_param_count(def) > 0 {
+            paths.instances.push((def, at));
+          }
+          paths.stack.extend_from_slice(builder.ty_args(at));
+        }
+        Some(Shape::List(element)) => paths.stack.push(element),
+        Some(Shape::Param(_) | Shape::Unresolved) | None => {}
+      }
+    }
+    if let Some(run) = paths.instances.get_mut(start..) {
+      run.sort_unstable();
+    }
+    let run = PoolRange {
+      start: dense(start),
+      end: dense(paths.instances.len()),
+    };
+    paths.positions.insert(open, run);
+    Some(run)
+  }
+
+  /// Whether `instance`, an open type an occurrence has, failed `check` where it is written, as
+  /// `child`, an instantiation the closure derives, fails it: two entries or two members that are
+  /// the same two, or the same argument made required. The occurrences' pass reported it there.
+  fn reported_open(&self, instance: TyId, child: TyId, check: Check) -> bool {
+    match check {
+      Check::Meeting => match (self.verdicts.get(&instance), self.verdicts.get(&child)) {
+        (Some(Verdict::Compared(open)), Some(Verdict::Compared(closed))) => {
+          (open.entries.is_some() || open.members.is_some()) && open == closed
+        }
+        _ => false,
+      },
+      Check::Making => matches!(
+        (self.made.get(&instance), self.made.get(&child)),
+        (Some(Made::Required(open)), Some(Made::Required(closed))) if open == closed
+      ),
+    }
+  }
+
+  /// Whether `made` and `child` are one named type, whatever the nullness of either.
+  fn same_instance(&self, made: TyId, child: TyId) -> bool {
+    match (self.builder.ty_shape(made), self.builder.ty_shape(child)) {
+      (Some(Shape::Named(one)), Some(Shape::Named(other))) => {
+        one == other && self.builder.ty_args(made) == self.builder.ty_args(child)
+      }
+      _ => false,
+    }
   }
 
   /// Reports at `at`, an occurrence or an application of `ty`, an instantiation of `user`, what its

@@ -158,7 +158,7 @@ use super::{
     WrittenParam,
   },
   source::SourceMap,
-  types::{Counter, Limit, Stop, Types},
+  types::{Counter, Limit, Stop, Types, closure::Halt},
 };
 
 use subtype::{Alternative, Answer, Frame, TyPair};
@@ -221,6 +221,8 @@ pub(crate) fn implement(
     verdicts: BTreeMap::new(),
     latent: Vec::new(),
     made: BTreeMap::new(),
+    halt: None,
+    halts: BTreeMap::new(),
   };
   implementing.definitions();
   implementing.occurrences();
@@ -270,7 +272,7 @@ enum Verdict {
 }
 
 /// What the comparison found: [`Verdict::Compared`]'s payload.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 struct Comparison {
   /// The first two entries that are one type there.
   entries: Option<Twin>,
@@ -279,7 +281,7 @@ struct Comparison {
 }
 
 /// Two items of a list that are one type under an instantiation's arguments.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 struct Twin {
   /// The earlier of the two.
   earlier: TypeExprId,
@@ -412,6 +414,11 @@ struct Implementing<'p> {
   /// Each type an occurrence of a definition with latent arguments has, with what it makes
   /// required.
   made: BTreeMap<TyId, Made>,
+  /// The rebuild that stopped the comparison being made, when one did.
+  halt: Option<Halt>,
+  /// Each type whose comparison a rebuild stopped, by the type and by its nullable form, with that
+  /// rebuild: one the closure's own stop repeats says nothing more, coercion having reported it.
+  halts: BTreeMap<TyId, Halt>,
 }
 
 impl Implementing<'_> {
@@ -944,7 +951,7 @@ impl Implementing<'_> {
         }
       }
       Verdict::Stopped(stop) => {
-        if !self.stopped_roots.contains(&id) {
+        if !self.stopped_roots.contains(&id) && !self.repeats(ty) {
           self.report_uncompared(at, def, stop);
         }
       }
@@ -1138,6 +1145,7 @@ impl Implementing<'_> {
     let verdict = match self.verdicts.get(&nullable).copied() {
       Some(known) => known,
       None => {
+        self.halt = None;
         let made = match self.meeting(nullable, def, listed.entries) {
           Err(stop) => Verdict::Stopped(stop),
           Ok(entries) => match self.meeting(nullable, def, listed.members) {
@@ -1145,12 +1153,30 @@ impl Implementing<'_> {
             Ok(members) => Verdict::Compared(Comparison { entries, members }),
           },
         };
+        if matches!(made, Verdict::Stopped(_))
+          && let Some(halt) = self.halt.take()
+        {
+          self.halts.insert(nullable, halt);
+        }
         self.verdicts.insert(nullable, made);
         made
       }
     };
+    if let Some(&halt) = self.halts.get(&nullable) {
+      self.halts.insert(ty, halt);
+    }
     self.verdicts.insert(ty, verdict);
     verdict
+  }
+
+  /// Whether the comparison of `ty` stopped at the rebuild that stopped the closure, which coercion
+  /// reported once at the root whose expansion was running, the one root that reaches it: the same
+  /// rebuild says nothing more here.
+  fn repeats(&self, ty: TyId) -> bool {
+    self
+      .types
+      .halted
+      .is_some_and(|halted: Halt| self.halts.get(&ty) == Some(&halted))
   }
 
   /// The first two of the run `run` of `distinct`, each under the arguments of `ty`, a named type
@@ -1165,7 +1191,18 @@ impl Implementing<'_> {
       let Some(&(item, written)) = self.distinct.get(at as usize) else {
         break;
       };
-      if let Some(made) = self.rebuilt(written, ty, def)? {
+      let made = match self.rebuilt(written, ty, def) {
+        Ok(made) => made,
+        Err(stop) => {
+          self.halt = Some(Halt {
+            instantiation: ty,
+            written,
+            stop,
+          });
+          return Err(stop);
+        }
+      };
+      if let Some(made) = made {
         self.under.push((item, made));
       }
     }

@@ -241,12 +241,13 @@
 //! instantiation reaches among them. Each occurrence, or application, of a written instantiation
 //! whose own verdict holds reports the first that fails, with the code the same failure has at a
 //! written instantiation, labelled at the type or the application that derives it. Each mistake has
-//! one owner (W:979): a written object literal that reports its copy of a default, and an
-//! application that reports its copy of one, each own that copy's count and each count beneath it
-//! that does not fit, whether a copy is made or not; and the check of a derived instantiation
-//! passes over a row whose value's count, against the type it takes there, is owned, to its next
-//! row. A derived instantiation of a definition that grows is not checked, nor what only it
-//! derives: a value written under such a type is judged where it is written.
+//! one owner (W:979): a written object literal that reports its copy of a default owns that copy's
+//! count and each count beneath it that does not fit; an application that reports its copy of one
+//! owns each count beneath the default's, whether a copy is made or not, the default's own being
+//! its omission alone; and the check of a derived instantiation passes over a row whose value's
+//! count, against the type it takes there, is owned, to its next row. A derived instantiation of a
+//! definition that grows is not checked, nor what only it derives: a value written under such a
+//! type is judged where it is written.
 //!
 //! # The count of a copy
 //!
@@ -1484,9 +1485,10 @@ struct Coercion<'c, 'p, 'x> {
   /// to that check; of any other type it reports the copy itself.
   written: BTreeSet<TyId>,
   /// Each count that does not fit that a report already owns (W:979): the copy a written object
-  /// literal reports, or an application's default that one reports, and each count beneath it
-  /// that does not fit, as [`claim`](Self::claim) finds them. The check of a derived instantiation
-  /// passes over a row whose value, counted against the type it takes there, is one of them.
+  /// literal reports and each count beneath it that does not fit, as [`claim`](Self::claim) finds
+  /// them, and each count beneath the default an application reports. The check of a derived
+  /// instantiation passes over a row whose value, counted against the type it takes there, is one
+  /// of them.
   owned: BTreeSet<CountKey>,
   /// Each judged count that does not fit because a count it reads does not, with each such count:
   /// what a report that owns the first owns too.
@@ -2163,9 +2165,9 @@ impl<'p> Coercion<'_, 'p, '_> {
     if !fits && !*reported {
       *reported = true;
       self.unfit_default(at, left.argument, tree);
-      // The report owns the default's count, and each one beneath it that does not fit, whether
-      // or not a copy is made (W:979).
-      self.claim(CountKey { tree, ty });
+      // The report owns each count beneath the default's that does not fit, whether or not a copy
+      // is made (W:979); the default's own count is this application's omission alone.
+      self.claim_beneath(CountKey { tree, ty });
     }
     let Some(rows) = rows else {
       return true;
@@ -2582,6 +2584,24 @@ impl<'p> Coercion<'_, 'p, '_> {
       ty: frame.ty,
     };
     self.beneath.entry(parent).or_default().push(child);
+  }
+
+  /// Claims for an application's report of a default it leaves out each count beneath the
+  /// default's own, `key`, that does not fit, as [`claim`](Self::claim) does, but not `key`: a row
+  /// that holds that default under a definition is another application's omission, a mistake of its
+  /// own, which this report does not own.
+  fn claim_beneath(&mut self, key: CountKey) {
+    let count = self.beneath.get(&key).map_or(0, Vec::len);
+    for index in 0..count {
+      let Some(&child) = self
+        .beneath
+        .get(&key)
+        .and_then(|below: &Vec<CountKey>| below.get(index))
+      else {
+        break;
+      };
+      self.claim(child);
+    }
   }
 
   /// Claims for the report just made the count `key` and each count beneath it that does not fit,

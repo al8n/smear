@@ -993,3 +993,115 @@ fn many_occurrences_of_a_wide_type_beside_a_failure_are_read_once_each() {
     [(MEMBER, at(schema, &text, "Outer<User>", 0))]
   );
 }
+
+/// A derived instantiation of a definition that grows is neither judged nor expanded, so a default
+/// that fills one is no fill to walk, and costs nothing: `Holder<Int>` leaves `U` to `Nest<T>`,
+/// whose `null` only an instantiation the closure never judges would read, and with no step to
+/// spend the program says nothing. Refuses a fill walked for a check that cannot happen.
+#[test]
+fn a_fill_of_a_definition_that_grows_is_not_walked() {
+  let text = "type Query {\n  h: Holder<Int>\n}\n\
+              type Nest<T> {\n  next: Nest<[T]>\n  f(x: T = null): Int\n}\n\
+              type Holder<T, U = Nest<T>> {\n  v: T\n}\n";
+  quiet(&analyze_text(text, &Limits::new().with_max_value_steps(0)));
+  let analysis = analyze_text(text, &Limits::new());
+  quiet(&analysis);
+  let model = analysis.model();
+  assert!(model.def(type_def(model, "Nest")).grows());
+}
+
+/// The root whose expansion a limit stops absorbs the stopped checks it reaches, and still reports
+/// its first confirmed failure: at depth 3, `Pre<[[Int]]>` derives `A<[[Int]]>`, whose check stops
+/// on depth, and is told so at its occurrence; `S<[[Int]]>` reads `A<T>`, then `Bad<T>`, whose
+/// `"bad"` does not fit, then `A<[[T]]>`, which stops its expansion. `S<[[Int]]>` reports the stop
+/// and the confirmed failure. Refuses a stopped check that hides a confirmed one.
+#[test]
+fn a_stopped_root_reports_its_confirmed_failure_beside_the_stop() {
+  let text = "type Query {\n  p(a: Pre<[[Int]]>): Int\n  s(a: S<[[Int]]>): Int\n}\n\
+              input A<T> {\n  x: [[T]] = []\n}\ninput Bad<T> {\n  x: T = \"bad\"\n}\n\
+              input Pre<T> {\n  a: A<T>\n}\n\
+              input S<T> {\n  a: A<T>\n  b: Bad<T>\n  c: A<[[T]]>\n}\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_generic_depth(3));
+  let schema = schema_file(&analysis);
+  let pre = at(schema, text, "Pre<[[Int]]>", 0);
+  let s = at(schema, text, "S<[[Int]]>", 0);
+  assert_eq!(codes_at(&analysis, LIMIT), [pre, s]);
+  assert_eq!(codes_at(&analysis, DEFAULT), [s]);
+  assert_eq!(analysis.diagnostics().len(), 3);
+  assert_eq!(
+    labels(the(&analysis, DEFAULT, s)),
+    [
+      (after(schema, text, "b: ", "Bad<T>"), DERIVES),
+      (after(schema, text, "x: T = ", "\"bad\""), "this value"),
+    ]
+  );
+}
+
+/// An application's report of the default it leaves out owns what fails beneath that default, but
+/// not another application's omission of it: `@d<Int>` leaves out `x`, and so does the `@d<T>` on
+/// `Inner`, whose `Inner<Int>`, which `Outer<Int>` derives, is refused at `Outer<Int>` whether the
+/// first application leaves `x` out or writes it. Refuses one application owning another's
+/// omission.
+#[test]
+fn an_application_does_not_own_another_applications_omission() {
+  for (first, reported) in [("@d<Int>", true), ("@d<Int>(x: 1)", false)] {
+    let text = format!(
+      "type Query {first} {{\n  o: Outer<Int>\n}}\ndirective @d<T>(x: T = \"bad\") on OBJECT\n\
+       type Inner<T> @d<T> {{\n  v: T\n}}\ntype Outer<T> {{\n  i: Inner<T>\n}}\n"
+    );
+    let analysis = analyze_text(&text, &Limits::new());
+    let schema = schema_file(&analysis);
+    let outer = at(schema, &text, "Outer<Int>", 0);
+    let path = named(schema, &text, "@", "d", 0);
+    let expected: Vec<Location> = if reported {
+      vec![path, outer]
+    } else {
+      vec![outer]
+    };
+    assert_eq!(codes_at(&analysis, DEFAULT), expected, "{text}");
+    assert_eq!(analysis.diagnostics().len(), expected.len(), "{text}");
+    assert_eq!(
+      the(&analysis, DEFAULT, outer).to_string(),
+      "`Outer` is instantiated here with type arguments that derive an instantiation of `Inner` \
+       under which `\"bad\"`, a value it holds, does not fit the type it takes"
+    );
+  }
+}
+
+/// The rebuild that stops the closure is reported once: at depth 3, `Outer<[[Int]]>` derives
+/// `U<[[Int]]>`, whose member `Box<[[T]]>` cannot be rebuilt there. Coercion reports it, and the
+/// implementation check, which compares `U<[[Int]]>`'s members and meets the same rebuild, says
+/// nothing more. Refuses one failed rebuild reported by two phases.
+#[test]
+fn a_rebuild_that_stops_the_closure_is_reported_once() {
+  let text = "type Query {\n  o: Outer<[[Int]]>\n}\ntype Box<T> {\n  f(x: T = null): Int\n}\n\
+              union U<T> = Box<[[T]]> | Box<T>\ntype Outer<T> {\n  u: U<T>\n}\n";
+  let analysis = analyze_text(text, &Limits::new().with_max_generic_depth(3));
+  let schema = schema_file(&analysis);
+  let outer = at(schema, text, "Outer<[[Int]]>", 0);
+  assert_eq!(found(&analysis), [(LIMIT, outer)]);
+  assert!(
+    the(&analysis, LIMIT, outer)
+      .to_string()
+      .starts_with("what `Outer` derives under the type arguments it is instantiated with here"),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+/// A failure reported where an open instantiation is written is not reported again at each closed
+/// root that derives it: `Outer<T>`'s `Either<T, T>` has two members of one type however it is
+/// closed, reported there once, and neither `Outer<User>` nor `Outer<Order>` reports it again.
+/// Refuses one declaration's mistake copied to every use.
+#[test]
+fn a_failure_an_open_occurrence_reported_is_not_reported_at_each_use() {
+  let text = "type Query {\n  a: Outer<User>\n  b: Outer<Order>\n}\ntype User {\n  id: ID\n}\n\
+              type Order {\n  id: ID\n}\nunion Either<A, B> = A | B\n\
+              type Outer<T> {\n  e: Either<T, T>\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(MEMBER, at(schema, text, "Either<T, T>", 0))]
+  );
+}

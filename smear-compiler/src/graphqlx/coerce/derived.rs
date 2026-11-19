@@ -27,14 +27,17 @@
 //! or a union member that names its type parameters, or, where an object or an interface implements
 //! one, a field argument typed by its own bare nullable type parameter with no default, which may
 //! be required. A definition is relevant when it has something judged, or when one of its positions
-//! holds, at any depth and through any definition, a named type of a relevant definition that no
-//! supplied package writes, open or closed, a type a default fills among them; and a position is
-//! read only when it holds such a type. That is a least fixpoint, and so transitive: a definition
-//! is relevant exactly when an expansion of an instantiation of it can reach an instantiation of a
-//! definition with something judged, since the walk that finds it reads below each position what
-//! an expansion walks below its rebuild, a written instantiation ending both, and what a rebuild
-//! puts in a type parameter's place is written or was met above. So a program whose generic
-//! definitions hold nothing to judge derives nothing, and pays nothing.
+//! holds, at any depth and through any definition, a named type of a relevant definition that does
+//! not grow and that no supplied package writes, open or closed, a type a default fills among them,
+//! or a type whose arguments hold one; and a position is read only when it holds such a type. A
+//! derived instantiation of a definition that grows is neither judged nor expanded, so its own
+//! definition makes it reach nothing: it reaches through what its arguments hold alone. That is a
+//! least fixpoint, and so transitive: a definition is relevant exactly when an expansion of an
+//! instantiation of it can reach an instantiation of a definition with something judged, since the
+//! walk that finds it reads below each position what an expansion walks below its rebuild, a
+//! written instantiation ending both, and what a rebuild puts in a type parameter's place is
+//! written or was met above. So a program whose generic definitions hold nothing to judge derives
+//! nothing, and pays nothing.
 //!
 //! # What it costs, and what ends it
 //!
@@ -67,10 +70,11 @@
 //! A limit that stops an expansion is `resource-limit`, once, at where the root whose expansion was
 //! running is first written, and the closure ends there. The stopped expansion keeps what it
 //! derived before the stop, and what the closure derived is judged, each instantiation as it was
-//! derived: a failing one the stopped root reaches is reported as well. A check a limit stopped
-//! while that root's expansion was running says nothing more, the one `resource-limit` standing for
-//! it; one a limit stopped while an earlier root's expansion was running is reported at that root's
-//! occurrences. What the closure did not reach is not judged.
+//! derived. The stopped root absorbs each check a limit stopped that it reaches, its one
+//! `resource-limit` standing for them, and reports the first failure that is confirmed; a check a
+//! limit stopped while an earlier root's expansion was running is reported at that root's
+//! occurrences. The rebuild that stopped the closure is handed to the implementation check, which
+//! says nothing of it again. What the closure did not reach is not judged.
 //!
 //! # The check, and its report
 //!
@@ -79,15 +83,16 @@
 //! step for each pair of the instantiation and a row. Each mistake has one owner (W:979): a row
 //! whose value's count, against the type it takes there, a report already owns is that report's,
 //! and the check passes over it to the next row. A written object literal that reports its copy of
-//! a default, and an application that reports its copy of one, each own that copy's count, and
-//! each count beneath it that does not fit, as the count kept it, whether a copy is made or not.
-//! Each occurrence of a root, and each application of one, in id order, whose own verdict holds,
-//! reports the failing instantiation of least index its expansion reaches, as `Closure::blame`
-//! finds it: with the code the same failure has at a written instantiation, labelled at the type or
-//! the application that derives the failing instantiation and at the value or the application that
-//! fails; or, stopped by a limit, `resource-limit`. A root whose own verdict fails was reported as
-//! written, and says nothing more. A derived instantiation of a definition that grows is not
-//! judged, nor is what only it derives.
+//! a default owns that copy's count, and each count beneath it that does not fit, as the count kept
+//! it. An application that reports its copy of a default owns each count beneath the default's,
+//! whether a copy is made or not, but not the default's own: a row that holds that default is
+//! another application's omission, a mistake of its own. Each occurrence of a root, and each
+//! application of one, in id order, whose own verdict holds, reports the failing instantiation of
+//! least index its expansion reaches, as `Closure::blame` finds it: with the code the same failure
+//! has at a written instantiation, labelled at the type or the application that derives the failing
+//! instantiation and at the value or the application that fails; or, stopped by a limit,
+//! `resource-limit`. A root whose own verdict fails was reported as written, and says nothing more.
+//! A derived instantiation of a definition that grows is not judged, nor is what only it derives.
 
 use std::{
   borrow::Cow,
@@ -107,7 +112,7 @@ use crate::graphqlx::{
   raw::RawTree,
   types::{
     Limit, Stop,
-    closure::{Blame, Closure, DERIVES, Node, Place},
+    closure::{Blame, Closure, DERIVES, Halt, Node, Place},
   },
 };
 
@@ -163,6 +168,8 @@ struct Building {
   root: u32,
   /// Each derived instantiation whose check a limit stopped, by the root whose expansion judged it.
   stalled: BTreeMap<u32, u32>,
+  /// The rebuild that stopped the expansion, when a rebuild did.
+  halted: Option<Halt>,
 }
 
 /// The roots of the closure, as the type occurrences and the applications are read.
@@ -184,6 +191,8 @@ struct Derivation {
   stopped: Option<u32>,
   /// Each derived instantiation whose check a limit stopped, by the root whose expansion judged it.
   stalled: BTreeMap<u32, u32>,
+  /// The rebuild that stopped the closure, when a rebuild did.
+  halted: Option<Halt>,
 }
 
 impl Derivation {
@@ -203,6 +212,7 @@ impl Coercion<'_, '_, '_> {
   pub(super) fn derived(&mut self) {
     let derivation = self.derive_closure();
     self.judge_derived(&derivation);
+    self.types.halted = derivation.halted;
     self.types.closure = derivation.closure;
   }
 
@@ -246,6 +256,7 @@ impl Coercion<'_, '_, '_> {
         closure,
         stopped: None,
         stalled: BTreeMap::new(),
+        halted: None,
       };
     }
     let mut building = Building {
@@ -264,6 +275,7 @@ impl Coercion<'_, '_, '_> {
       queue: Vec::new(),
       root: 0,
       stalled: BTreeMap::new(),
+      halted: None,
     };
     self.relevance(&mut building, &roots);
     if building.relevant.iter().any(|relevant: &bool| *relevant) {
@@ -280,6 +292,7 @@ impl Coercion<'_, '_, '_> {
               closure: building.closure,
               stopped: Some(root),
               stalled: building.stalled,
+              halted: building.halted,
             };
           }
         }
@@ -289,6 +302,7 @@ impl Coercion<'_, '_, '_> {
       closure: building.closure,
       stopped: None,
       stalled: building.stalled,
+      halted: None,
     }
   }
 
@@ -491,7 +505,13 @@ impl Coercion<'_, '_, '_> {
     let mut reaching: Vec<bool> = vec![false; types.len()];
     let mut work: Vec<u32> = Vec::new();
     while let Some(def) = defs.pop() {
-      let from = instances.partition_point(|&(of, _): &(DefId, u32)| of < def);
+      // A derived instantiation of a definition that grows is neither judged nor expanded: its
+      // definition makes it reach nothing, and it reaches through what its arguments hold alone.
+      let from = if self.builder.def_grows(def) {
+        instances.len()
+      } else {
+        instances.partition_point(|&(of, _): &(DefId, u32)| of < def)
+      };
       for &(of, at) in instances.get(from..).unwrap_or_default() {
         if of != def {
           break;
@@ -717,7 +737,18 @@ impl Coercion<'_, '_, '_> {
       let Some(&Position { place, ty, .. }) = building.positions.get(index as usize) else {
         break;
       };
-      if let Some(under) = self.rebuilt(ty, node.ty, node.def, false)? {
+      let rebuilt = match self.rebuilt(ty, node.ty, node.def, false) {
+        Ok(rebuilt) => rebuilt,
+        Err(stop) => {
+          building.halted = Some(Halt {
+            instantiation: node.ty,
+            written: ty,
+            stop,
+          });
+          return Err(stop);
+        }
+      };
+      if let Some(under) = rebuilt {
         self.collect(building, under, place)?;
       }
     }
@@ -850,6 +881,7 @@ impl Coercion<'_, '_, '_> {
     }
     let closure = &derivation.closure;
     let mut failing: Vec<u32> = Vec::new();
+    let mut confirmed: Vec<u32> = Vec::new();
     for at in 0..closure.len() {
       let Some(node) = closure.node(at) else {
         break;
@@ -859,14 +891,22 @@ impl Coercion<'_, '_, '_> {
       }
       match self.derived_verdict(node.def, node.ty) {
         Checked::Fits => {}
+        Checked::Unfit(_) => {
+          failing.push(at);
+          confirmed.push(at);
+        }
         Checked::Stopped(_) if derivation.covers(at) => {}
-        Checked::Unfit(_) | Checked::Stopped(_) => failing.push(at),
+        Checked::Stopped(_) => failing.push(at),
       }
     }
     if failing.is_empty() {
       return;
     }
     let blamed = closure.blame(&failing);
+    // The root whose expansion a limit stopped absorbs each check a limit stopped, its one
+    // `resource-limit` standing for them: it reports the first failure that is confirmed.
+    let absorbed = derivation.stopped.map(|_: u32| closure.blame(&confirmed));
+    let absorbed = absorbed.as_deref();
     for index in 0..self.builder.type_expr_count() {
       let Some(occurrence) = self.builder.occurrence(TypeExprId::new(index)) else {
         continue;
@@ -875,7 +915,7 @@ impl Coercion<'_, '_, '_> {
         continue;
       };
       let at = occurrence.location;
-      self.report_derived(derivation, &blamed, at, def, ty);
+      self.report_derived(derivation, &blamed, absorbed, at, def, ty);
     }
     for index in 0..self.builder.application_count() {
       let application = ApplicationId::new(index);
@@ -893,7 +933,7 @@ impl Coercion<'_, '_, '_> {
       else {
         continue;
       };
-      self.report_derived(derivation, &blamed, at, def, ty);
+      self.report_derived(derivation, &blamed, absorbed, at, def, ty);
     }
   }
 
@@ -953,13 +993,15 @@ impl Coercion<'_, '_, '_> {
 
   /// Reports at `at`, an occurrence or an application of `ty`, an instantiation of `user`, the
   /// failing instantiation its expansion reaches first, as `blamed` keeps it, when a supplied
-  /// package writes it there, `ty` is a root, and its own verdict holds. A check a limit stopped
-  /// is not reported again at the root whose expansion that limit stopped: its `resource-limit`
-  /// stands for what it reaches.
+  /// package writes it there, `ty` is a root, and its own verdict holds. The root whose expansion a
+  /// limit stopped reads `absorbed`, the blame of the confirmed failures alone: its
+  /// `resource-limit` stands for every check a limit stopped that it reaches, and what it reports
+  /// is the first failure that is confirmed.
   fn report_derived(
     &mut self,
     derivation: &Derivation,
     blamed: &[Option<Blame>],
+    absorbed: Option<&[Option<Blame>]>,
     at: Location,
     user: DefId,
     ty: TyId,
@@ -982,6 +1024,10 @@ impl Coercion<'_, '_, '_> {
     }
     let Some(root) = derivation.closure.find(nullable) else {
       return;
+    };
+    let blamed = match absorbed {
+      Some(confirmed) if derivation.stopped == Some(root) => confirmed,
+      _ => blamed,
     };
     let Some(&Some(Blame { node, place })) = blamed.get(root as usize) else {
       return;

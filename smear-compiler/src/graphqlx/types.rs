@@ -106,7 +106,7 @@ impl Counter {
 }
 
 /// The limit a type passed, which its report names.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Limit {
   /// `Limits::max_generic_depth`.
   Depth,
@@ -117,7 +117,7 @@ pub(crate) enum Limit {
 }
 
 /// What stopped a rebuild, or the judging that asked for one.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Stop {
   /// The budget it charges.
   Steps,
@@ -138,6 +138,9 @@ pub(crate) struct Types {
   pub(crate) derived: Derived,
   /// What each written instantiation derives: built by coercion, read by the implementation check.
   pub(crate) closure: closure::Closure,
+  /// The rebuild that stopped the closure, which coercion reported, when one did: the
+  /// implementation check says nothing of the same rebuild stopping it again.
+  pub(crate) halted: Option<closure::Halt>,
 }
 
 impl Types {
@@ -148,6 +151,7 @@ impl Types {
       substitutions: Counter::new(limits.max_substitutions()),
       bound_steps: Counter::new(limits.max_bound_steps()),
       closure: closure::Closure::default(),
+      halted: None,
       derived: Derived {
         max_depth: limits.max_generic_depth(),
         max_instantiations: limits.max_instantiations(),
