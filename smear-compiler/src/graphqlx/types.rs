@@ -206,7 +206,6 @@ impl Types {
         slots: Vec::new(),
         rebuilt: BTreeMap::new(),
         frames: Vec::new(),
-        completed: Vec::new(),
       },
     }
   }
@@ -250,9 +249,6 @@ pub(crate) struct Derived {
   rebuilt: BTreeMap<TyId, TyId>,
   /// While one type is rebuilt: the nodes being rebuilt, each with its next child to look at.
   frames: Vec<TyCursor>,
-  /// What the last rebuild a limit on types stopped completed below the node it could not build:
-  /// empty for any other rebuild.
-  completed: Vec<TyId>,
 }
 
 impl Derived {
@@ -316,8 +312,7 @@ impl Derived {
   /// as it is looked at; `library` says that the type is the built-in library's.
   ///
   /// `Err` when `steps`, or a limit on what it derives, stopped it; `Ok(None)` for a type parameter
-  /// of another definition, and for a node that cannot be rebuilt. A limit on types that stops it
-  /// at a node leaves in `completed` what it rebuilt below that node and the ones above it.
+  /// of another definition, and for a node that cannot be rebuilt.
   pub(crate) fn rebuild(
     &mut self,
     builder: &mut ModelBuilder,
@@ -329,7 +324,6 @@ impl Derived {
   ) -> Result<Option<TyId>, Stop> {
     self.rebuilt.clear();
     self.frames.clear();
-    self.completed.clear();
     if !steps.charge(1) {
       return Err(Stop::Steps);
     }
@@ -354,13 +348,8 @@ impl Derived {
         continue;
       }
       self.frames.pop();
-      let made = match self.rebuilt_node(builder, library, node, ty, def) {
-        Ok(Some(made)) => made,
-        Ok(None) => return Ok(None),
-        Err(stop) => {
-          self.complete(builder, node);
-          return Err(stop);
-        }
+      let Some(made) = self.rebuilt_node(builder, library, node, ty, def)? else {
+        return Ok(None);
       };
       if self.frames.is_empty() {
         return Ok(Some(made));
@@ -368,38 +357,6 @@ impl Derived {
       self.rebuilt.insert(node, made);
     }
     Ok(None)
-  }
-
-  /// What the last rebuild a limit on types stopped completed below the node it could not build:
-  /// each type an argument or the element of that node, or of a node above it, became, in order,
-  /// the outermost node's first. Empty after any other rebuild.
-  pub(crate) fn completed(&self) -> &[TyId] {
-    &self.completed
-  }
-
-  /// Keeps in `completed` what the rebuild a limit on types stopped at `failed` had rebuilt below
-  /// it and below each node above it: each of their open arguments, or elements, rebuilt before the
-  /// stop, as `rebuilt` holds them. The nodes looked at are the rebuild's own, which it paid for.
-  fn complete(&mut self, builder: &ModelBuilder, failed: TyId) {
-    self.completed.clear();
-    let above = self.frames.iter().map(|frame: &TyCursor| frame.ty);
-    for node in above.chain(core::iter::once(failed)) {
-      match builder.ty_shape(node) {
-        Some(Shape::Named(_)) => {
-          for child in builder.ty_args(node) {
-            if let Some(&made) = self.rebuilt.get(child) {
-              self.completed.push(made);
-            }
-          }
-        }
-        Some(Shape::List(element)) => {
-          if let Some(&made) = self.rebuilt.get(&element) {
-            self.completed.push(made);
-          }
-        }
-        Some(Shape::Param(_) | Shape::Unresolved) | None => {}
-      }
-    }
   }
 
   /// What `node`, an open node of a type that names `def`'s type parameters, whose arguments or

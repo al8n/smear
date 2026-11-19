@@ -1436,34 +1436,35 @@ fn an_entry_says_each_kind_of_stop_its_checks_meet() {
   }
 }
 
-/// What a rebuild a limit on types stops completed below the type it could not build is derived
-/// all the same: at depth 2, `Outer<[i32]>` reads `Envelope<Bad<T>>`, whose `Bad<[i32]>` is built
-/// and whose `Envelope<Bad<[i32]>>` is one level too deep. The closure says the depth at
-/// `Outer<[i32]>`, and derives `Bad<[i32]>` at that position all the same, whose `"text"` does not
-/// fit, reported there too. Refuses a completed child lost with the type above it.
+/// A limit on types that stops a rebuild ends the expansion there, a boundary of this version: what
+/// fails inside the types that rebuild had built in part is not guaranteed a report, and raising
+/// the limit shows it. At depth 2, `Outer<[i32]>` reads `Envelope<Bad<T>>`, whose `Bad<[i32]>` is
+/// built and whose `Envelope<Bad<[i32]>>` is one level too deep: `Outer<[i32]>` is
+/// `resource-limit`, and `Bad<[i32]>`'s `"text"`, which does not fit, is not reported. Under the
+/// default limits it is, at `Outer<[i32]>`. Refuses a report that walks a stopped rebuild's parts.
 #[test]
-fn a_type_a_stopped_rebuild_completed_is_derived_and_judged() {
+fn what_a_stopped_rebuild_built_in_part_is_not_judged() {
   let text = "type Query {\n  f(a: Outer<[i32]>): Int\n}\ninput Bad<U> {\n  v: U = \"text\"\n}\n\
               input Envelope<E> {\n  e: E\n}\ninput Outer<T> {\n  x: Envelope<Bad<T>>\n}\n";
   let analysis = analyze_text(text, &Limits::new());
   let schema = schema_file(&analysis);
   let outer = at(schema, text, "Outer<[i32]>", 0);
   assert_eq!(found(&analysis), [(DEFAULT, outer)]);
+  assert_eq!(
+    labels(the(&analysis, DEFAULT, outer)),
+    [
+      (after(schema, text, "x: ", "Envelope<Bad<T>>"), DERIVES),
+      (after(schema, text, "v: U = ", "\"text\""), "this value"),
+    ]
+  );
   let short = analyze_text(text, &Limits::new().with_max_generic_depth(2));
-  assert_eq!(found(&short), [(LIMIT, outer), (DEFAULT, outer)]);
+  assert_eq!(found(&short), [(LIMIT, outer)]);
   assert!(
     the(&short, LIMIT, outer)
       .to_string()
       .contains("`Limits::max_generic_depth`, 2"),
     "{:#?}",
     short.diagnostics()
-  );
-  assert_eq!(
-    labels(the(&short, DEFAULT, outer)),
-    [
-      (after(schema, text, "x: ", "Envelope<Bad<T>>"), DERIVES),
-      (after(schema, text, "v: U = ", "\"text\""), "this value"),
-    ]
   );
 }
 

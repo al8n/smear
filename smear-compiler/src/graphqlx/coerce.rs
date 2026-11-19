@@ -515,8 +515,6 @@ pub(crate) fn coerce(
     supplied: sources.package_sources(ROOT).start(),
     values: Counter::new(max_steps),
     rebuilds: BTreeMap::new(),
-    stopped_rebuilds: BTreeMap::new(),
-    completions: Vec::new(),
     nullables: BTreeMap::new(),
     kept: Vec::new(),
     spellings: BTreeMap::new(),
@@ -1435,11 +1433,6 @@ struct Coercion<'c, 'p, 'x> {
   /// with and the instantiation's nullable form: the type rebuilt, `None` for a type that is not
   /// rebuilt, or what stopped the rebuild.
   rebuilds: BTreeMap<RebuildKey, Result<Option<TyId>, Stop>>,
-  /// Each rebuild a limit on types stopped, by the same key, with its run of `completions`: what it
-  /// completed below the type it could not build.
-  stopped_rebuilds: BTreeMap<RebuildKey, PoolRange>,
-  /// The runs `stopped_rebuilds` names.
-  completions: Vec<TyId>,
   /// Each non-null instantiation read so far, an environment or a written occurrence's type, by
   /// its id: its nullable form, found once off its arguments.
   nullables: BTreeMap<TyId, TyId>,
@@ -1676,30 +1669,8 @@ impl<'p> Coercion<'_, 'p, '_> {
       nullable,
       owner,
     );
-    let completed = self.types.derived.completed();
-    if made.is_err() && !completed.is_empty() {
-      let start = dense(self.completions.len());
-      self.completions.extend_from_slice(completed);
-      let end = dense(self.completions.len());
-      self.stopped_rebuilds.insert(key, PoolRange { start, end });
-    }
     self.rebuilds.insert(key, made);
     made
-  }
-
-  /// What the rebuild of `written` under `env`, an instantiation of `owner`, completed below the
-  /// type it could not build, when a limit on types stopped it: a run of `completions`, empty for
-  /// any other rebuild. The rebuild was asked for already.
-  fn completed(&mut self, written: TyId, env: TyId, owner: DefId) -> PoolRange {
-    let instantiation = self.nullable(env, owner);
-    self
-      .stopped_rebuilds
-      .get(&RebuildKey {
-        written,
-        instantiation,
-      })
-      .copied()
-      .unwrap_or(PoolRange { start: 0, end: 0 })
   }
 
   /// The nullable form of `ty`, a named type of `def`: itself when it is nullable; otherwise

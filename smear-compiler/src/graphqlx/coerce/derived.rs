@@ -18,11 +18,9 @@
 //! instantiation rebuilds a member's type, through the same remembered rebuild. Each instantiation
 //! of a generic definition the rebuilt types hold, at any depth, is derived, with the type or the
 //! application that derives it; a written one is no child, being judged where it is written and
-//! expanded as a root, and what it holds is its own. A rebuild that a limit on types stops has
-//! built the types below the one it could not: what it completed is derived at the position all the
-//! same, before the expansion ends. A root's expansion reads the arguments its type parameters'
-//! defaults fill too, past the most any occurrence of it writes: what a default fills is derived by
-//! that default.
+//! expanded as a root, and what it holds is its own. A root's expansion reads the arguments its
+//! type parameters' defaults fill too, past the most any occurrence of it writes: what a default
+//! fills is derived by that default.
 //!
 //! The expansion reads only toward what can be judged. What an instantiation is judged for is a
 //! value recorded under its definition, here, and in the implementation check an `implements` entry
@@ -62,9 +60,7 @@
 //!   read generously, what the closure then reads of it being charged as everything it reads is;
 //! - each position an expansion reads is a rebuild, a step for its root and one for each argument
 //!   or element it looks at, as the check at a written instantiation pays for its own; a position
-//!   whose rebuild the check of its instantiation made already is met by the walk, a step. A
-//!   rebuild a limit on types stops keeps what it completed below the nodes it could not build,
-//!   among the nodes it looked at, and each is walked as any type is;
+//!   whose rebuild the check of its instantiation made already is met by the walk, a step;
 //! - a walk meets generic named types and lists alone, each a step as it is met, and each reached
 //!   as soon as it is paid for, before the next is charged, so that a budget that stops the walk
 //!   loses nothing it paid for. A type's distinct such arguments, or its element, are read the
@@ -79,14 +75,13 @@
 //! So the closure does work linear in the model's size and in the steps it pays, but for sorting.
 //!
 //! A limit that stops an expansion is `resource-limit` at where the root whose expansion was
-//! running is first written, and the closure ends there; the budget run out while a stopped
-//! rebuild's completed types were walked is said there beside it. As every `resource-limit`, it is
-//! said once for each written occurrence and kind of limit, whichever phase or path meets it there
-//! first, each phase's step budget a kind of its own and a limit on types, which every phase
-//! shares, one kind: so the same limit met at the same place by the written check of that root, by
-//! an application's omitted argument, or later by the implementation check, is said once. The
-//! stopped expansion keeps what it derived before the stop, and what the closure derived is judged,
-//! each instantiation as it was derived. Each occurrence of a root reports the first failure its
+//! running is first written, and the closure ends there. As every `resource-limit`, it is said once
+//! for each written occurrence and kind of limit, whichever phase or path meets it there first,
+//! each phase's step budget a kind of its own and a limit on types, which every phase shares, one
+//! kind: so the same limit met at the same place by the written check of that root, by an
+//! application's omitted argument, or later by the implementation check, is said once. The stopped
+//! expansion keeps what it derived before the stop, and what the closure derived is judged, each
+//! instantiation as it was derived. Each occurrence of a root reports the first failure its
 //! expansion reaches, a check a limit stopped among them, which is `resource-limit` there; but
 //! where a `resource-limit` of that kind was said already, at the root's first occurrence when the
 //! same limit stopped its expansion among them, the occurrence reports its first confirmed failure
@@ -109,7 +104,10 @@
 //! has at a written instantiation, labelled at the type or the application that derives the failing
 //! instantiation and at the value or the application that fails; or, stopped by a limit,
 //! `resource-limit`. A root whose own verdict fails was reported as written, and says nothing more.
-//! A derived instantiation of a definition that grows is not judged, nor is what only it derives.
+//! Likewise, where a limit on types stops a rebuild at a position, the expansion ends there with
+//! its `resource-limit`: what fails inside the types that rebuild had built in part is not
+//! guaranteed a report, and raising the limit shows it. A derived instantiation of a definition
+//! that grows is not judged, nor is what only it derives.
 
 use std::{
   borrow::Cow,
@@ -181,9 +179,6 @@ struct Building {
   /// The instantiations still to expand from the root being expanded, in order, and those already
   /// expanded before them.
   queue: Vec<u32>,
-  /// The budget run out while an expansion a limit on types stopped walked what its rebuild had
-  /// completed: said beside that limit.
-  starved: Option<Stop>,
 }
 
 /// The roots of the closure, as the type occurrences and the applications are read.
@@ -283,7 +278,6 @@ impl Coercion<'_, '_, '_> {
       derived: BTreeSet::new(),
       stack: Vec::new(),
       queue: Vec::new(),
-      starved: None,
     };
     self.relevance(&mut building, &roots);
     if building.relevant.iter().any(|relevant: &bool| *relevant) {
@@ -295,9 +289,6 @@ impl Coercion<'_, '_, '_> {
           next += 1;
           if let Err(stop) = self.expand(&mut building, expanding) {
             self.report_unexpanded(at, def, stop);
-            if let Some(starved) = building.starved.take() {
-              self.report_unexpanded(at, def, starved);
-            }
             return building.closure;
           }
         }
@@ -874,24 +865,8 @@ impl Coercion<'_, '_, '_> {
       let Some(&Position { place, ty, .. }) = building.positions.get(index as usize) else {
         break;
       };
-      match self.rebuilt(ty, node.ty, node.def, false) {
-        Ok(Some(under)) => self.collect(building, under, place)?,
-        Ok(None) => {}
-        Err(stop) => {
-          // What the rebuild completed below the type it could not build is derived at the
-          // position all the same, its walk paid for as any is, before the expansion ends.
-          let completed = self.completed(ty, node.ty, node.def);
-          for index in completed.start..completed.end {
-            let Some(&child) = self.completions.get(index as usize) else {
-              break;
-            };
-            if let Err(starved) = self.collect(building, child, place) {
-              building.starved = Some(starved);
-              break;
-            }
-          }
-          return Err(stop);
-        }
+      if let Some(under) = self.rebuilt(ty, node.ty, node.def, false)? {
+        self.collect(building, under, place)?;
       }
     }
     if node.written {
