@@ -349,7 +349,7 @@
 //! | `smear::schema`: `root-operation-type-not-object` | A root operation type that is no object type |
 //! | `smear::schema`: `shared-root-operation-type` | Two roots of one type |
 //! | `smear::schema`: `schema-extension-without-schema` | A schema extension the root package writes when it writes no schema definition and no query root is presumed |
-//! | `smear::schema`: `missing-query-root-operation-type` | A schema with no query root, neither written nor presumed |
+//! | `smear::schema`: `missing-query-root-operation-type` | A schema with no query root, neither written nor presumed, while every file of the root package was read whole |
 //! | `smear::graphqlx`: `extern-misuse` | An `@extern` whose `lang` an earlier one of its scalar has, and one the root package writes on a GraphQL built-in it replaces |
 //! | `smear::graphqlx`: `repr-misuse` | An `@repr` on the schema with no `for`, one elsewhere that writes `for`, and one that chooses twice for a language at a position, or for a type and a language on the schema |
 //! | `smear::graphqlx`: `tier` | Below `std`, a use above the tier its package declares: a list in a `core` package, another package's definition that needs more, `@heap` in a `core` package, an extern's `tier` above its package's. What a directive definition writes, an application's type arguments, and what a definition holds that only those of a directive no operation can apply and application type arguments reach, [`is_metadata`](Def::is_metadata), are compile-time metadata and count nowhere; a definition a type outside metadata names too is judged where it is written |
@@ -366,8 +366,9 @@
 //!
 //! Every package has a package source, numbered before its files, and every file is a source. A
 //! [`SourceId`] numbers them densely, and the [`SourceMap`] records each one's package, path and
-//! length, never its text: the texts stay with the caller, and [`SourceMap::bind`] pairs the map
-//! with them again for a renderer, finding each file by its package and its path. The built-in
+//! length, and whether the analysis read it whole ([`Source::is_complete`]), never its text: the
+//! texts stay with the caller, and [`SourceMap::bind`] pairs the map with them again for a
+//! renderer, finding each file by its package and its path. The built-in
 //! packages `core`, `alloc` and `std` have [`PackageId`]s and sources like any other, and smear
 //! supplies their texts itself. A renderer is handed each source's path and, when it can be read,
 //! its text through [`SourceMap::bind`]'s [`Bound`], in id order, the consumer's own sources after

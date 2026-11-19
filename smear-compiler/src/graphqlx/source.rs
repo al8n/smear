@@ -9,6 +9,7 @@ use tokora::diagnostic::Location;
 use super::{
   id::{IdRange, PackageId, SourceId, dense},
   package::Package,
+  parse::Documents,
   set::{self, PackageView, ROOT},
   text::SourceText,
 };
@@ -21,9 +22,10 @@ use super::{
 /// text and no path: it is where a diagnostic about the package as a whole points, with
 /// [`Location::entire`](tokora::diagnostic::Location::entire).
 ///
-/// The map keeps each source's package, path and length, and never its text, which stays with the
-/// caller. [`SourceMap::bind`] pairs the map with the packages it was made from again, and that is
-/// what a renderer reads texts through.
+/// The map keeps each source's package, path and length, and whether the analysis read it whole
+/// ([`Source::is_complete`]), and never its text, which stays with the caller.
+/// [`SourceMap::bind`] pairs the map with the packages it was made from again, and that is what a
+/// renderer reads texts through.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SourceMap {
   packages: Vec<PackageSlot>,
@@ -60,6 +62,8 @@ struct SourceSlot {
   shared: bool,
   /// Whether this is its package's package source.
   package_source: bool,
+  /// Whether the analysis read it whole: never a package source's.
+  complete: bool,
 }
 
 impl SourceSlot {
@@ -95,6 +99,7 @@ impl SourceMap {
         len: 0,
         shared: false,
         package_source: true,
+        complete: false,
       });
       for file in &view.files {
         let (path, raw) = spell(file.path);
@@ -105,6 +110,7 @@ impl SourceMap {
           len: file.text.bytes().len(),
           shared: false,
           package_source: false,
+          complete: false,
         });
       }
       slots.push(PackageSlot {
@@ -129,6 +135,10 @@ impl SourceMap {
   /// package with two or more is shared, and `bind` answers none of them a text. A package's only
   /// file is answered a text only when the package given for it holds one file at the empty path,
   /// and that file is empty.
+  ///
+  /// Each file stands for a document read whole, so a rule over the model reads as it would over
+  /// an analysis of files that parsed: [`Source::is_complete`] answers `true` for every file and
+  /// `false` for every package source.
   #[cfg(feature = "test-support")]
   pub(crate) fn of_model(model: &super::model::Model) -> Self {
     let mut packages: Vec<PackageSlot> = Vec::with_capacity(model.packages().len() as usize);
@@ -144,6 +154,7 @@ impl SourceMap {
           len: 0,
           shared: false,
           package_source: source.get() == range.start(),
+          complete: source.get() != range.start(),
         });
       }
       packages.push(PackageSlot {
@@ -155,6 +166,15 @@ impl SourceMap {
     let mut map = Self { packages, sources };
     map.share();
     map
+  }
+
+  /// Records which files the parse read whole: each `documents` answered a document for, with a
+  /// complete recovery. `documents` covers every source of the analysis, so each source's record is
+  /// set, a package source's to `false`.
+  pub(crate) fn note_read(&mut self, documents: &Documents<'_>) {
+    for (index, slot) in self.sources.iter_mut().enumerate() {
+      slot.complete = !slot.package_source && documents.is_whole(SourceId::new(dense(index)));
+    }
   }
 
   /// Marks what `bind` cannot tell apart: both of every two dependencies with one name, and both
@@ -379,6 +399,21 @@ impl<'a> Source<'a> {
     self.slot().package_source
   }
 
+  /// Whether the analysis read it whole: a document was answered for it, and every element of its
+  /// text has an image in that document. True for a file the parser read with nothing dropped: a
+  /// blank file, and a file the lossless layer repaired without dropping anything, such as a
+  /// definition missing its `}`, which is judged as its repair. False for a package source, which
+  /// has no text; for a file the parser refused, which under the syntactic layer `analyze` reads
+  /// with is any file with a syntax error; for a file the lossless layer recovered by dropping an
+  /// element; for a byte text that is not UTF-8; and for every supplied file when the supplied
+  /// sources were over [`Limits::max_source_bytes`](super::Limits::max_source_bytes) and none was
+  /// parsed. A file not read whole contributes less than it writes, and a diagnostic says why: at
+  /// the file, or, past the source size limit, at the root package's package source.
+  #[inline]
+  pub fn is_complete(&self) -> bool {
+    self.slot().complete
+  }
+
   /// The map's record of this source.
   fn slot(&self) -> &'a SourceSlot {
     let map: &'a SourceMap = self.map;
@@ -394,6 +429,7 @@ impl core::fmt::Debug for Source<'_> {
       .field("path", &self.path())
       .field("len", &self.len())
       .field("package_source", &self.is_package_source())
+      .field("complete", &self.is_complete())
       .finish()
   }
 }

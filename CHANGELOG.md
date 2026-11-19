@@ -350,8 +350,8 @@ All notable changes to Smear are documented in this file.
     each requires, and `Def::is_metadata` whether a definition is compile-time metadata, which
     only type-system directives' types and applications' type arguments reach; and the `extent()`
     of a contribution, a member and an inline module, where it is written. `Analysis` and `Model`
-    are `PartialEq` and `SourceMap` is `Eq`, and `SourceMap::bind` pairs an analysis with the
-    caller's texts again for a renderer.
+    are `PartialEq` and `SourceMap` is `Eq`, `Source::is_complete` says whether a file was read
+    whole, and `SourceMap::bind` pairs an analysis with the caller's texts again for a renderer.
   - **The phases.** The package set is checked; every file is parsed; each package's module tree
     and declarations are collected, duplicate and reserved names refused; every scope, `use` item
     and path is resolved, with a "did you mean" help; each definition is lowered; every
@@ -378,7 +378,8 @@ All notable changes to Smear are documented in this file.
     the schema builder gives, but for three capacity ceilings of the schema representation that
     GraphQLx does not have; a differential test holds that, counting each of GraphQL's codes on
     both sides, and beside the three ceilings lists by document each count it lets differ, every
-    one on a document both refuse. A root package with no query root is not ok.
+    one on a document both refuse. A root package with no query root is not ok, unless a file of
+    the root package was not read whole, whose own diagnostic stands.
   - **Codes.** `DiagnosticKind` lists the 39 codes of the analyzer's own family, `smear::graphqlx`,
     in `DiagnosticKind::ALL`, all errors but the warning `shadowed-primitive`; `graphqlx::schema`
     holds the 68 `smear::schema` codes it shares with GraphQL's own validator as public constants,

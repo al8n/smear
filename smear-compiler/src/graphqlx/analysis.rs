@@ -552,7 +552,10 @@ impl Analysis {
 ///   with no query root, neither written nor presumed, is `missing-query-root-operation-type`,
 ///   once: at the `schema` of the root package's first schema definition, silent when a phase
 ///   refused something in it, or with none at the root package's package source, where it marks
-///   nothing.
+///   nothing. It is silent while a file of the root package was not read whole, as
+///   [`Source::is_complete`](super::Source::is_complete) says: such a file could have held the
+///   query root, or the schema definition that writes it, and its own diagnostic says why it
+///   contributes less than it writes.
 ///   So a root package with no query root is not ok, as in GraphQL, and a consumer that analyzes a
 ///   library as the root package filters that code. A rule says nothing about a contribution a
 ///   phase already refused something in, and the two rules on the roots' types,
@@ -628,8 +631,10 @@ pub fn analyze<S: SourceText>(
 /// For a package set no layer reports a syntax error for, every layer answers an equal
 /// [`Analysis`], the rules' diagnostics and marks included: the layers hand the same phases the
 /// same documents in the same order. Where a layer reports a syntax error, the package ids and the
-/// source ids are still those every other layer answers, and nothing else is promised. The trees
-/// are beside the analysis, and no part of its equality.
+/// source ids are still those every other layer answers, and nothing else is promised. The source
+/// map records which files a layer read whole, [`Source::is_complete`](super::Source::is_complete),
+/// so on a package set a layer reports a syntax error for, the maps can differ only there, as the
+/// analyses do. The trees are beside the analysis, and no part of its equality.
 pub fn analyze_with<'a, P, S>(
   parser: &P,
   root: &'a Package<S>,
@@ -701,7 +706,7 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
   let Prepared {
     packages,
     mut reporter,
-    sources,
+    mut sources,
     dependencies,
     within: _,
   } = prepared;
@@ -710,6 +715,9 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
     sources.len() as usize,
     "one document entry per source"
   );
+  // Which files were read whole, for the rules: the one place that serves `analyze` and
+  // `analyze_with`.
+  sources.note_read(documents);
 
   let mut builder = builder_of(&packages, &sources, &dependencies);
   let collected = collect::items(&packages, &sources, documents, limits, &mut reporter);
