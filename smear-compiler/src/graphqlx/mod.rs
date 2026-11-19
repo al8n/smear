@@ -117,7 +117,9 @@
 //! object's fields are found by name, a set's elements and a map's entries are each coerced against
 //! their collection's types, a `TypeRef` value is the definition its path names, and a value of a
 //! custom scalar that is no collection but `null`, of a type that still names a type parameter, or
-//! of a type that can take none is kept as written, a [`ValueKind::Literal`].
+//! of a type that can take none is kept as written, a [`ValueKind::Literal`], but a whole `null` at
+//! a type that still names a type parameter and that no instantiation takes, which is refused and
+//! [`ValueKind::Unresolved`].
 //!
 //! [`Model::application`] answers each directive application, an [`Application`]: its directive,
 //! its type arguments and its path as written, its location, and its arguments in its directive's

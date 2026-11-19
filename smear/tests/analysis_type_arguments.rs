@@ -1856,6 +1856,32 @@ fn null_for_an_argument_required_under_open_arguments_is_refused_once() {
   );
 }
 
+/// A default stands in for an argument only where it is left out: `null` written for one whose
+/// type under an application's open type arguments is non-null is refused at the application, once,
+/// though it has a default, as `null` for a non-null type is, `invalid-directive-argument-value` at
+/// the `null`, and recorded for no instantiation: `@d<T>`'s `a` takes `T!` on `G`, with a default,
+/// whether nothing uses `G` or `G<Int>` and `G<String>` do, which report nothing more. Refuses the
+/// `null` the default lets through to be judged only at each instantiation, which an unused
+/// definition never asks and each use repeats.
+#[test]
+fn null_for_a_defaulted_argument_non_null_under_open_arguments_is_refused_once() {
+  let generic = "directive @d<X>(a: X! = 1) on OBJECT\ntype G<T> @d<T>(a: null) {\n  f: Int\n}\n";
+  for query in [
+    "type Query {\n  x: Int\n}\n",
+    "type Query {\n  g: G<Int>\n  h: G<String>\n}\n",
+  ] {
+    let text = format!("{query}{generic}");
+    let analysis = analyze_text(&text, &Limits::new());
+    let schema = schema_file(&analysis);
+    let null = after(schema, &text, "@d<T>(a: ", "null");
+    assert_eq!(found(&analysis), [(ARGUMENT, null)], "{text}");
+    assert_eq!(
+      the(&analysis, ARGUMENT, null).to_string(),
+      "`null` is given where a non-null value is expected"
+    );
+  }
+}
+
 /// An argument an application on a generic definition leaves out, whose type there is the
 /// definition's bare nullable type parameter, is required wherever an instantiation makes that
 /// parameter non-null. `@need<T>` on `Box` leaves out `v`, whose type there is `Box`'s `T`:
@@ -2115,6 +2141,383 @@ fn null_for_an_argument_a_collections_key_or_element_makes_required_is_refused_o
   assert_eq!(
     labels(report),
     [(after(schema, text, "@need<V>(v: ", "null"), "this value")]
+  );
+}
+
+/// A default stands in for an argument only where it is left out: `null` written for one typed by
+/// a collection's key or element is refused at the application, once, though it has a default, as
+/// `null` for a non-null type is, `invalid-directive-argument-value` at the `null`, and recorded
+/// for no instantiation: `@need<K>(v: null)` on the set `Bag`, whether nothing uses `Bag` or
+/// `Bag<Int>` and `Bag<String>` do, which report nothing more. Left out, `v` takes its default
+/// under `Bag<Int>` and `Bag<Float>`, silently. A map's value keeps its check at each
+/// instantiation, default or not: `@need<V>(v: null)` on `Vals` is refused under
+/// `Vals<Int, Int!>` alone, at that use. Refuses the `null` the default lets through to be judged
+/// only at each instantiation, which an unused collection never asks and each use repeats.
+#[test]
+fn null_for_a_collections_key_or_element_with_a_default_is_refused_once() {
+  let need = "directive @need<T>(v: T = 1) on SCALAR\nscalar Bag<K> @set @need<K>(v: null)\n";
+  for query in [
+    "type Query {\n  x: Int\n}\n",
+    "type Query {\n  a: Bag<Int>\n  b: Bag<String>\n}\n",
+  ] {
+    let text = format!("{query}{need}");
+    let analysis = analyze_text(&text, &Limits::new());
+    let schema = schema_file(&analysis);
+    let null = after(schema, &text, "@need<K>(v: ", "null");
+    assert_eq!(found(&analysis), [(ARGUMENT, null)], "{text}");
+    let report = the(&analysis, ARGUMENT, null);
+    assert_eq!(
+      report.to_string(),
+      "`null` is given where a non-null value is expected"
+    );
+    assert!(labels(report).is_empty(), "{:?}", labels(report));
+  }
+
+  quiet(&analyze_text(
+    "type Query {\n  a: Bag<Int>\n  b: Bag<Float>\n}\n\
+     directive @need<T>(v: T = 1) on SCALAR\nscalar Bag<K> @set @need<K>\n",
+    &Limits::new(),
+  ));
+
+  let text = "type Query {\n  a: Vals<Int, Int>\n  b: Vals<Int, Int!>\n}\n\
+              directive @need<T>(v: T = 1) on SCALAR\nscalar Vals<K, V> @map @need<V>(v: null)\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, text, "Vals<Int, Int!>", 0);
+  assert_eq!(found(&analysis), [(ARGUMENT, occurrence)]);
+  assert_eq!(
+    labels(the(&analysis, ARGUMENT, occurrence)),
+    [(after(schema, text, "@need<V>(v: ", "null"), "this value")]
+  );
+}
+
+/// A copy of a directive's default that is a whole `null` no instantiation takes does not fit, and
+/// is the application's to report, once, whatever uses its definition has: `@d<T>` on the set
+/// `Tags` leaves out `v`, whose default `null` fills `T`, the set's element, non-null in every
+/// instantiation. It is `invalid-default-value` at the application, labelled at the default, and
+/// recorded for no instantiation: `Tags<Int>` reached only through `Box<Int>`, which no check
+/// reads, and a direct `Tags<Int>` beside it add nothing. Refuses the copy recorded and judged only
+/// at each instantiation a supplied package writes, which never asks through `Box<Int>` and
+/// repeats it at each use.
+#[test]
+fn a_copied_null_default_for_a_collections_key_or_element_is_refused_once() {
+  let tags = "directive @d<X>(v: X = null) on SCALAR\nscalar Tags<T> @set @d<T>\n\
+              type Box<T> {\n  tags: Tags<T>\n}\n";
+  for query in [
+    "type Query {\n  box: Box<Int>\n}\n",
+    "type Query {\n  box: Box<Int>\n  tags: Tags<Int>\n}\n",
+  ] {
+    let text = format!("{query}{tags}");
+    let analysis = analyze_text(&text, &Limits::new());
+    let schema = schema_file(&analysis);
+    let path = named(schema, &text, "@", "d", 1);
+    assert_eq!(found(&analysis), [(DEFAULT, path)], "{text}");
+    let report = the(&analysis, DEFAULT, path);
+    assert_eq!(
+      report.to_string(),
+      "under this application's type arguments, the default `null` of `v` does not fit the type \
+       `v` takes"
+    );
+    assert_eq!(
+      labels(report),
+      [(after(schema, &text, "v: X = ", "null"), "this default")]
+    );
+  }
+}
+
+/// A `null` nested in a value is left to the instantiations, though none takes it: a boundary of
+/// this version, which reads a value's root alone. Here it is an element of the list `[X]` that
+/// `T`, the set's element, fills. Copied from `@d`'s default `[null]`, where `@d<T>` leaves `v`
+/// out, nothing is said at the application, and `Tags<Int>` refuses the copy at that use, with the
+/// default's code, labelled at the default; written, `@e<T>(v: [null])`, nothing is said at the
+/// `null`, and `Tags<Int>` refuses the value at that use, with the argument's code. A map's value
+/// is no such place either: `@e<V>(v: [null])` on `Vals` holds under `Vals<Int, Int>`, and is
+/// refused under `Vals<Int, Int!>` alone. Refuses a nested `null` reported where it is written.
+#[test]
+fn a_nested_null_keeps_its_check_at_each_instantiation() {
+  let copied = "type Query {\n  a: Tags<Int>\n}\n\
+                directive @d<X>(v: [X] = [null]) on SCALAR\nscalar Tags<T> @set @d<T>\n";
+  let analysis = analyze_text(copied, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, copied, "Tags<Int>", 0);
+  assert_eq!(found(&analysis), [(DEFAULT, occurrence)]);
+  assert_eq!(
+    labels(the(&analysis, DEFAULT, occurrence)),
+    [(after(schema, copied, "v: [X] = ", "[null]"), "this value")]
+  );
+
+  let written = "type Query {\n  a: Tags<Int>\n}\n\
+                 directive @e<X>(v: [X]) on SCALAR\nscalar Tags<T> @set @e<T>(v: [null])\n";
+  let analysis = analyze_text(written, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, written, "Tags<Int>", 0);
+  assert_eq!(found(&analysis), [(ARGUMENT, occurrence)]);
+  assert_eq!(
+    labels(the(&analysis, ARGUMENT, occurrence)),
+    [(after(schema, written, "@e<T>(v: ", "[null]"), "this value")]
+  );
+
+  let text = "type Query {\n  a: Vals<Int, Int>\n  b: Vals<Int, Int!>\n}\n\
+              directive @e<X>(v: [X]) on SCALAR\nscalar Vals<K, V> @map @e<V>(v: [null])\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, text, "Vals<Int, Int!>", 0);
+  assert_eq!(found(&analysis), [(ARGUMENT, occurrence)]);
+  assert_eq!(
+    labels(the(&analysis, ARGUMENT, occurrence)),
+    [(after(schema, text, "@e<V>(v: ", "[null]"), "this value")]
+  );
+}
+
+/// A `null` in a field an object literal writes is nested too, and keeps its check at each
+/// instantiation: in `@e<T>(v: { tail: null })` on the set `Tags`, `I<T>`'s `tail`, written `U`,
+/// is the set's element `T`, and in `{ tail: 1, head: [null] }`, `head` is written `[Int!]`.
+/// Neither is reported at the literal, and `Tags<Int>` refuses each at that use, labelled at the
+/// literal. Refuses an object literal's fields read for a `null` where it is written.
+#[test]
+fn an_object_literals_nested_null_keeps_its_check_at_each_instantiation() {
+  let input = "type Query {\n  a: Tags<Int>\n}\ninput I<U> {\n  tail: U\n  head: [Int!]\n}\n\
+               directive @e<X>(v: I<X>) on SCALAR\n";
+  for literal in ["{ tail: null }", "{ tail: 1, head: [null] }"] {
+    let text = format!("{input}scalar Tags<T> @set @e<T>(v: {literal})\n");
+    let analysis = analyze_text(&text, &Limits::new());
+    let schema = schema_file(&analysis);
+    let occurrence = at(schema, &text, "Tags<Int>", 0);
+    assert_eq!(found(&analysis), [(ARGUMENT, occurrence)], "{text}");
+    assert_eq!(
+      labels(the(&analysis, ARGUMENT, occurrence)),
+      [(after(schema, &text, "@e<T>(v: ", literal), "this value")]
+    );
+  }
+}
+
+/// A default of a generic input object's field that is a whole `null` no instantiation takes is
+/// refused where it is written, once, and recorded for no instantiation: `In<T>`'s `a`, written
+/// `T!`, defaults to `null`, `invalid-default-value` at it, whether nothing uses `In` or
+/// `In<Int>` does, which reports nothing more of it. `b`, written `[T!]`, defaults to `[null]`,
+/// whose `null` is nested, and keeps its check: `In<Int>` refuses it at that use, labelled at the
+/// default. `c`, written `T`, holds under `In<Int>`, which gives it `Int`. Refuses `a`'s default
+/// recorded and judged only at each instantiation.
+#[test]
+fn a_generic_input_fields_whole_null_default_is_refused_where_declared() {
+  let input = "input In<T> {\n  a: T! = null\n  b: [T!] = [null]\n  c: T = null\n}\n";
+  let unused = format!("type Query {{\n  x: Int\n}}\n{input}");
+  let analysis = analyze_text(&unused, &Limits::new());
+  let schema = schema_file(&analysis);
+  let a = after(schema, &unused, "a: T! = ", "null");
+  assert_eq!(found(&analysis), [(DEFAULT, a)]);
+  assert_eq!(
+    the(&analysis, DEFAULT, a).to_string(),
+    "`null` is given where a non-null value is expected"
+  );
+
+  let used = format!("type Query {{\n  f(x: In<Int>): Int\n}}\n{input}");
+  let analysis = analyze_text(&used, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, &used, "In<Int>", 0);
+  assert_eq!(
+    found(&analysis),
+    [
+      (DEFAULT, occurrence),
+      (DEFAULT, after(schema, &used, "a: T! = ", "null")),
+    ]
+  );
+  assert_eq!(
+    labels(the(&analysis, DEFAULT, occurrence)),
+    [(after(schema, &used, "b: [T!] = ", "[null]"), "this value")]
+  );
+}
+
+/// The copies of a default that holds a `null` inside it are judged, and charged for every node
+/// their counts read, so the work stays within a budget linear in the program: `@d`'s
+/// `[T!] = [null, 1, …]`, `N` elements, left out by `M` applications of distinct closed types,
+/// under `Limits::max_value_steps` of `4 × (N + M)`. Each copy whose count is paid for, a step for
+/// each node and its rows again, is `invalid-default-value` at its application, and each one past
+/// the budget is `resource-limit` there, so no more copies are judged than the budget pays twice
+/// over. Refuses copies counted without a step for each node, whose work grows as `M × N`.
+#[test]
+fn copies_of_a_default_holding_a_null_are_charged_for_each_node() {
+  const N: usize = 64;
+  const M: usize = 16;
+  let elements = vec!["1"; N - 1].join(", ");
+  let applied: Vec<String> = (0..M).map(|i: usize| format!("@d<S{i}>")).collect();
+  let scalars: String = (0..M).map(|i: usize| format!("scalar S{i}\n")).collect();
+  let text = format!(
+    "type Query {} {{\n  x: Int\n}}\n\
+     directive @d<T>(v: [T!] = [null, {elements}]) repeatable on OBJECT\n{scalars}",
+    applied.join(" ")
+  );
+  let budget = 4 * (N + M);
+  let limits = Limits::new().with_max_value_steps(u32::try_from(budget).expect("a small budget"));
+  let analysis = analyze_text(&text, &limits);
+  let schema = schema_file(&analysis);
+  let (mut judged, mut starved) = (0, 0);
+  for nth in 0..M {
+    let path = named(schema, &text, "@", "d", nth);
+    let codes: Vec<&str> = found(&analysis)
+      .into_iter()
+      .filter(|&(_, at): &(&'static str, Location)| at == path)
+      .map(|(code, _): (&'static str, Location)| code)
+      .collect();
+    match codes.as_slice() {
+      [DEFAULT] => judged += 1,
+      [LIMIT] => starved += 1,
+      other => panic!("{other:?} at the application {nth}"),
+    }
+  }
+  assert!(
+    judged >= 1 && starved >= 1,
+    "{judged} judged, {starved} starved"
+  );
+  assert!(
+    judged * 2 * (N + 1) <= budget,
+    "{judged} copies judged within {budget} steps"
+  );
+}
+
+/// A copy that is a whole `null` no instantiation takes is recorded for no instantiation, whatever
+/// the budget answers: `@d<X!>` on `Box` leaves out `v`, whose default `null` fills `X!`. With the
+/// fewest steps that judge and copy it, the application alone is `invalid-default-value`; with one
+/// fewer, the count judges the `null` and the copy's row cannot be paid for, and the application
+/// alone is `resource-limit`. Neither `Box<Int>` written in `Query` reports anything, and `Query`
+/// is marked by no error. Refuses the copy recorded when its row's charge fails, which each use
+/// then reports again, `resource-limit` at it.
+#[test]
+fn a_copied_whole_null_is_recorded_for_no_instantiation_whatever_the_budget() {
+  let text = "type Query {\n  f(a: Box<Int>): Int\n  g(b: Box<Int>): Int\n}\n\
+              directive @d<T>(v: T = null) on INPUT_OBJECT\ninput Box<X> @d<X!> {\n  x: X\n}\n";
+  let enough = (0..64)
+    .find(|&steps: &u32| {
+      let analysis = analyze_text(text, &Limits::new().with_max_value_steps(steps));
+      found_of(&analysis, &[LIMIT]).is_empty()
+    })
+    .expect("a budget that judges and copies the default");
+  assert!(enough >= 2, "{enough} steps judge and copy it");
+
+  let analysis = analyze_text(text, &Limits::new().with_max_value_steps(enough));
+  let schema = schema_file(&analysis);
+  let path = named(schema, text, "@", "d", 1);
+  assert_eq!(found(&analysis), [(DEFAULT, path)]);
+
+  let short = analyze_text(text, &Limits::new().with_max_value_steps(enough - 1));
+  let schema = schema_file(&short);
+  assert_eq!(found(&short), [(LIMIT, named(schema, text, "@", "d", 1))]);
+  let model = short.model();
+  assert!(!model.def(type_def(model, "Query")).has_errors());
+}
+
+/// A copy refused whole, its root a `null` no instantiation takes, is one unresolved row, typed and
+/// not written, as the written one is one unresolved row: on the set `Tags`, `@d<K>` leaves out
+/// `v`, whose default `null` fills `K`, the set's element, and `@e<K>(v: null)` writes it, `v`
+/// having a default. Each is reported once, and each value is `ValueKind::Unresolved`, typed with
+/// `Tags`'s `K`, the copy not written and the other written. Refuses a refused copy kept in the
+/// model as the literal `null`, a value deferred to the instantiations.
+#[test]
+fn a_copied_null_no_instantiation_takes_is_one_unresolved_row() {
+  let text = "type Query {\n  x: Int\n}\n\
+              directive @d<X>(v: X = null) on SCALAR\ndirective @e<X>(v: X = 1) on SCALAR\n\
+              scalar Tags<K> @set @d<K> @e<K>(v: null)\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (DEFAULT, named(schema, text, "@", "d", 1)),
+      (ARGUMENT, after(schema, text, "@e<K>(v: ", "null")),
+    ]
+  );
+  let model = analysis.model();
+  let values: Vec<ValueId> = model
+    .def(type_def(model, "Tags"))
+    .applications()
+    .iter()
+    .filter_map(|application: &ApplicationId| argument(model, *application, "v"))
+    .collect();
+  assert_eq!(values.len(), 2);
+  for (value, written) in values.into_iter().zip([false, true]) {
+    assert!(
+      matches!(model.value(value).kind(), ValueKind::Unresolved),
+      "{}",
+      valued(model, value)
+    );
+    assert_eq!(shown(model, model.value(value).ty()), "Tags#0");
+    assert_eq!(model.value(value).written(), written);
+  }
+}
+
+/// A default its declaration refuses for a `null` no instantiation takes is that declaration's to
+/// report, and no copy of it reports it again: `In<T>`'s `a`, written `T!`, defaults to `null`,
+/// refused where it is written, and `@d<Int>(v: {})` leaves `a` out of a literal whose type a
+/// rebuild made, which no occurrence writes, and adds nothing. Refuses the literal's own report of
+/// the copy beside the declaration's.
+#[test]
+fn a_copy_of_a_default_its_declaration_refuses_reports_nothing_again() {
+  let text = "type Query @d<Int>(v: {}) {\n  x: Int\n}\n\
+              directive @d<X>(v: In<X>) on OBJECT\ninput In<T> {\n  a: T! = null\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(DEFAULT, after(schema, text, "a: T! = ", "null"))]
+  );
+}
+
+/// A generic directive's own default that is a whole `null` no instantiation takes is refused
+/// where it is declared, once, whether or not anything applies the directive: `@d`'s `v`, written
+/// `X!`, defaults to `null`. An application that leaves `v` out, under closed type arguments or
+/// under a generic definition's own, adds nothing: the declaration owns the copy. Refuses the
+/// default judged only where an application leaves it out, and its copy reported again at each.
+#[test]
+fn a_generic_directives_null_default_no_instantiation_takes_is_refused_where_declared() {
+  let directive = "directive @d<X>(v: X! = null) on OBJECT\n";
+  for query in [
+    "type Query {\n  x: Int\n}\n",
+    "type Query @d<Int> {\n  x: Int\n}\n",
+    "type Query {\n  g: G<Int>\n}\ntype G<T> @d<T> {\n  f: Int\n}\n",
+  ] {
+    let text = format!("{query}{directive}");
+    let analysis = analyze_text(&text, &Limits::new());
+    let schema = schema_file(&analysis);
+    let null = after(schema, &text, "v: X! = ", "null");
+    assert_eq!(found(&analysis), [(DEFAULT, null)], "{text}");
+    assert_eq!(
+      the(&analysis, DEFAULT, null).to_string(),
+      "`null` is given where a non-null value is expected"
+    );
+  }
+}
+
+/// A field an object literal leaves out is not read for a `null` no instantiation takes: its
+/// default's copy keeps its check at each instantiation, a boundary of this version. `I<U>`'s
+/// `tail` defaults to `null`, and the literal's type `I<T>` gives `tail` the set's element `T`.
+/// Written, `@d<T>(v: {})` says nothing at the literal, and `Tags<Int>` refuses the value at that
+/// use, with the argument's code, labelled at the literal; copied, `@e<T>` leaving out `v`, whose
+/// default is `{}`, says nothing at the application, and `Tags<Int>` refuses the copy at that use,
+/// with the default's code. Refuses a report at the literal or at the application, which the
+/// boundary leaves to the instantiation, and a check that drops the value.
+#[test]
+fn a_field_an_object_literal_leaves_out_keeps_its_check_at_each_instantiation() {
+  let input = "type Query {\n  a: Tags<Int>\n}\ninput I<U> {\n  tail: U = null\n}\n";
+  let written =
+    format!("{input}directive @d<X>(v: I<X>) on SCALAR\nscalar Tags<T> @set @d<T>(v: {{}})\n");
+  let analysis = analyze_text(&written, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, &written, "Tags<Int>", 0);
+  assert_eq!(found(&analysis), [(ARGUMENT, occurrence)]);
+  assert_eq!(
+    labels(the(&analysis, ARGUMENT, occurrence)),
+    [(after(schema, &written, "@d<T>(v: ", "{}"), "this value")]
+  );
+
+  let copied =
+    format!("{input}directive @e<X>(v: I<X> = {{}}) on SCALAR\nscalar Tags<T> @set @e<T>\n");
+  let analysis = analyze_text(&copied, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, &copied, "Tags<Int>", 0);
+  assert_eq!(found(&analysis), [(DEFAULT, occurrence)]);
+  assert_eq!(
+    labels(the(&analysis, DEFAULT, occurrence)),
+    [(after(schema, &copied, "v: I<X> = ", "{}"), "this value")]
   );
 }
 

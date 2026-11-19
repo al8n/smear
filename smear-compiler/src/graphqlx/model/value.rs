@@ -86,7 +86,9 @@ impl ObjectEntry {
 /// value of a custom scalar that is no collection, an extern one included, but `null`, which is
 /// `null` where the scalar is nullable; a value whose expected type still names a type parameter,
 /// inside a generic definition or under a directive application with no complete type arguments,
-/// which only an instantiation can check; and a value whose expected type can take none, an output
+/// which only an instantiation can check, but a whole `null` that no instantiation takes, its type
+/// written non-null or a collection's key or element, which is refused and
+/// [`ValueKind::Unresolved`]; and a value whose expected type can take none, an output
 /// type or a path that names nothing among them, which is another rule's or phase's to refuse. A
 /// value under a generic directive's application with complete type arguments is coerced against
 /// its type under them, and so is a field's value of an instantiation of a generic input object,
@@ -134,7 +136,8 @@ pub enum ValueKind<'a> {
   /// copy. A OneOf input object's fields left out are never filled.
   Object(&'a [ObjectEntry]),
   /// A value kept as written: of a custom scalar that is no collection, but `null`; of a type that
-  /// still names a type parameter; or of a type that can take no value.
+  /// still names a type parameter, but a whole `null` no instantiation takes, which is
+  /// [`ValueKind::Unresolved`]; or of a type that can take no value.
   Literal(Literal<'a>),
   /// A value that did not coerce or resolve. Only an analysis that is not ok has one. It lies
   /// within the extent of the error that says why, but for a copy of a default: its error is where

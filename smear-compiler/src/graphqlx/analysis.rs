@@ -306,26 +306,34 @@ impl Analysis {
 ///   where the instantiation's arguments make it non-null, it is
 ///   `missing-required-directive-argument` at the occurrence, labelled at the application; but
 ///   where that parameter is a collection's key or element, which every instantiation makes
-///   non-null, the argument is required at the application itself: left out, or written `null`,
-///   it is reported there once, and recorded for no instantiation. The
+///   non-null, the argument left out with no default is reported at the application, once. A
+///   value that is a whole `null` no instantiation takes, its type written non-null or a
+///   collection's key or element, is not left to the instantiations: written, it is refused once,
+///   at the `null`, with the site's code, or, for a required argument,
+///   `missing-required-directive-argument` at its name; a member's default's, a generic directive's
+///   argument's among them, at its declaration, which owns every copy of it; in a copy of a
+///   directive's default that an application leaves out, the application is
+///   `invalid-default-value`, once, labelled at the default; and the value is recorded for no
+///   instantiation. A `null` nested in a value, and one a field an object literal leaves out
+///   copies, keep the check at each instantiation. The
 ///   values of the applications on a generic directive and on its arguments are checked likewise
 ///   at each closed application of the directive, reported at its path; the directive's own
-///   arguments' defaults are judged only where an application leaves them out. So are the
-///   instantiations a written one derives, through the definitions that do not grow, its own
-///   argument types and an application's among them: what a copy of it needs, its definition's
-///   members' types, `implements` entries, union members and applications' complete types, each
-///   read under its arguments, and each instantiation they hold that no supplied package writes,
-///   in turn, each rebuild and each generic type the reading walks a step of
-///   [`Limits::max_value_steps`], each type depth-checked and counted as every type is. Each
-///   occurrence of a written instantiation, or application, whose own verdict holds reports the
-///   first that fails, with its code, labelled at the type or the application that derives it,
-///   but for a value a report owns already: a written object literal's report of its copy of a
-///   default, or an application's of its copy of one, owns the value that copy counts, and each
-///   one beneath it that does not fit; a limit that stops the reading is
-///   `resource-limit` once, at the written instantiation whose reading it stopped, what was read
-///   is judged all the same, and what was not read is not judged. A derived instantiation of a
-///   definition that grows, [`Def::grows`](super::Def::grows), is not judged, nor what only it
-///   derives. A copy is
+///   arguments' defaults are judged only where an application leaves them out, but for such a
+///   `null`, refused at their declaration. The instantiations a written one derives are checked
+///   likewise, through the definitions that do not grow, its own argument types and an
+///   application's among them: what a copy of it needs, its definition's members' types,
+///   `implements` entries, union members and applications' complete types, each read under its
+///   arguments, and each instantiation they hold that no supplied package writes, in turn, each
+///   rebuild and each generic type the reading walks a step of [`Limits::max_value_steps`], each
+///   type depth-checked and counted as every type is. Each occurrence of a written instantiation,
+///   or application, whose own verdict holds reports the first that fails, with its code, labelled
+///   at the type or the application that derives it, but for a value a report owns already: a
+///   written object literal's report of its copy of a default, or an application's of its copy of
+///   one, owns the value that copy counts, and each one beneath it that does not fit; a limit that
+///   stops the reading is `resource-limit` once, at the written instantiation whose reading it
+///   stopped, what was read is judged all the same, and what was not read is not judged. A derived
+///   instantiation of a definition that grows, [`Def::grows`](super::Def::grows), is not judged,
+///   nor what only it derives. A copy is
 ///   counted before it is made, each default's count kept, and a default whose copy would hold a
 ///   copy of itself is not copied: the argument, or the field, is absent, and under type arguments
 ///   what its count reached is judged as a copy is. The first time a count meets itself, that

@@ -363,18 +363,20 @@ All notable changes to Smear are documented in this file.
     instantiation the program writes judged, and the generic definitions that grow found; every
     value is coerced to the type expected where it stands, defaults copied and a cycle of them
     refused, a generic definition's values at each closed instantiation a supplied package writes,
-    and an argument a collection's key or element makes required where it is left out, or written
-    null, once; each scalar is bound to its host types; each definition is checked against the
-    interfaces it implements, transitively and under type arguments, its entries and members told
-    apart as types; and every definition and type gets its tier, the definitions only compile-time
-    metadata reaches marked first. An instantiation a written one derives, through a fill or a
-    substitution, is judged for its definition's values, the arguments it makes required and its
-    entries and members wherever its definition does not grow, each reported at the written
-    occurrence that derives it, labelled at the type that derives it, unless the report of a copy
-    that holds that value owns it already; a derived instantiation of a definition that grows, and
-    what only it derives, is not. A `resource-limit` is said once for each written occurrence and
-    kind of limit, whichever phase meets it there first: each phase's step budget is a kind of its
-    own, and a limit on types one kind across the phases.
+    but a whole null no instantiation takes, written or copied, once, a default's at its
+    declaration, which owns its copies, and any other where it is coerced, and an argument a
+    collection's key or element makes required, left out with no default, once; each scalar is bound
+    to its host types; each definition is checked against the interfaces it implements, transitively
+    and under type arguments, its entries and members told apart as types; and every definition and
+    type gets its tier, the definitions only compile-time metadata reaches marked first. An
+    instantiation a written one derives, through a fill or a substitution, is judged for its
+    definition's values, the arguments it makes required and its entries and members wherever its
+    definition does not grow, each reported at the written occurrence that derives it, labelled at
+    the type that derives it, unless the report of a copy that holds that value owns it already; a
+    derived instantiation of a definition that grows, and what only it derives, is not. A
+    `resource-limit` is said once for each written occurrence and kind of limit, whichever phase
+    meets it there first: each phase's step budget is a kind of its own, and a limit on types one
+    kind across the phases.
   - **The rules.** 33 rules, each a visitor on the public trait, judge what the supplied packages
     wrote once the phases have written the model: smear's own rules on GraphQLx, under eleven
     `smear::graphqlx` codes, and the type-system rules GraphQLx shares with GraphQL in this
