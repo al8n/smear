@@ -24,21 +24,22 @@
 //!
 //! The expansion reads only toward what can be judged. What an instantiation is judged for is a
 //! value recorded under its definition, here, and in the implementation check an `implements` entry
-//! or a union member that names its type parameters, or an argument a field of an object or an
-//! interface adds beside the field of its name of an interface one of the definition's own entries
-//! names, typed by its own bare nullable type parameter with no default, which may be required. A
-//! definition is relevant when it has something judged, or when one of its positions holds, at any
-//! depth and through any definition, a named type of a relevant definition that does not grow and
-//! that no supplied package writes, open or closed, a type a default fills among them, or a type
-//! whose arguments hold one; and a position is read only when it holds such a type. A derived
-//! instantiation of a definition that grows is neither judged nor expanded, so its own definition
-//! makes it reach nothing: it reaches through what its arguments hold alone. That is a least
-//! fixpoint, and so transitive: a definition is relevant exactly when an expansion of an
-//! instantiation of it can reach an instantiation of a definition with something judged, since the
-//! walk that finds it reads below each position what an expansion walks below its rebuild, a
-//! written instantiation ending both, and what a rebuild puts in a type parameter's place is
-//! written or was met above. So a program whose generic definitions hold nothing to judge derives
-//! nothing, and pays nothing.
+//! or a union member that names its type parameters, or an argument typed by its own bare nullable
+//! type parameter with no default, which may be required, that a field of an object or an interface
+//! adds beside the field of its name of an interface one of the definition's entries names: each
+//! entry and member one its own package writes, as the check reads them, and each field one its
+//! definition's package writes. A definition is relevant when it has something judged, or when one
+//! of its positions holds, at any depth and through any definition, a named type of a relevant
+//! definition that does not grow and that no supplied package writes, open or closed, a type a
+//! default fills among them, or a type whose arguments hold one; and a position is read only when
+//! it holds such a type. A derived instantiation of a definition that grows is neither judged nor
+//! expanded, so its own definition makes it reach nothing: it reaches through what its arguments
+//! hold alone. That is a least fixpoint, and so transitive: a definition is relevant exactly when
+//! an expansion of an instantiation of it can reach an instantiation of a definition with something
+//! judged, since the walk that finds it reads below each position what an expansion walks below its
+//! rebuild, a written instantiation ending both, and what a rebuild puts in a type parameter's
+//! place is written or was met above. So a program whose generic definitions hold nothing to judge
+//! derives nothing, and pays nothing.
 //!
 //! # What it costs, and what ends it
 //!
@@ -122,7 +123,7 @@ use super::{Checked, Coercion, CountKey, OmittedArgument, Owed, OwedValue, Recor
 use crate::graphqlx::{
   code::schema,
   diagnostic::{Diagnostic, Excerpt, Message},
-  id::{ApplicationId, DefId, MemberId, PoolRange, Sym, TyId, TypeExprId, dense},
+  id::{ApplicationId, DefId, MemberId, PackageId, PoolRange, Sym, TyId, TypeExprId, dense},
   model::{Applied, DefKind, Occurrence, Resolution, Shape, Written, WrittenParam},
   raw::RawTree,
   types::{
@@ -659,52 +660,64 @@ impl Coercion<'_, '_, '_> {
   /// Whether the implementation check judges something at an instantiation of `def`, read
   /// generously: an `implements` entry or a union member whose type names a type parameter, or, for
   /// an object or an interface, an argument one of its fields adds beside the field of its name of
-  /// an interface one of its own entries names, typed by its own bare nullable type parameter with
-  /// no default, which may be required. An argument of a field that implements no interface's
-  /// field, or that the interface's field declares, is the check's never.
+  /// an interface one of its entries names, typed by its own bare nullable type parameter with no
+  /// default, which may be required. An argument of a field that implements no interface's field,
+  /// or that the interface's field declares, is the check's never. Entries and members are those
+  /// the check reads, as [`own_item`](Self::own_item) finds them: what another package writes into
+  /// the definition is that package's mistake, and makes nothing relevant.
   ///
   /// Of the definition's own fields, the first of each name is read, the one the implementation
   /// check finds to implement an interface's field of that name. Then, for each interface its
-  /// entries name, the fewer of the fields that add such an argument and of the interface's fields
-  /// is read, and the other side looked up in `declared`, and so for the arguments of each field of
-  /// one name on both sides, each lookup paid from what `declared` has left: so the questions read
-  /// the model's definitions once each, and, across their entries, no more than four lookups for
-  /// each type occurrence and definition the model holds. A definition asked about past them is
-  /// relevant.
+  /// entries name, the fewer of the fields that add such an argument and of the interface's own
+  /// fields is read, and the other side looked up in `declared`, and so for the arguments of each
+  /// field of one name on both sides, each lookup paid from what `declared` has left: so the
+  /// questions read the model's definitions once each, and, across their entries, no more than four
+  /// lookups for each type occurrence and definition the model holds. A definition asked about past
+  /// them is relevant.
   fn judged_when_implemented(&self, def: DefId, declared: &mut Declared) -> bool {
-    for &item in self
-      .builder
-      .def_implements(def)
-      .iter()
-      .chain(self.builder.def_union_members(def))
-    {
+    // A definition no package wrote, which no analysis holds, is checked by nothing.
+    let Some(own) = self.sources.written_by(self.builder.def_location(def)) else {
+      return false;
+    };
+    let kind = self.builder.def_kind(def);
+    let members: &[TypeExprId] = if kind == Some(DefKind::Union) {
+      self.builder.def_union_members(def)
+    } else {
+      &[]
+    };
+    for &item in self.builder.def_implements(def).iter().chain(members) {
       if self
-        .builder
-        .occurrence(item)
-        .and_then(|occurrence: Occurrence<'_>| occurrence.ty)
+        .own_item(item, own)
         .is_some_and(|ty: TyId| !self.builder.ty_closed(ty))
       {
         return true;
       }
     }
     // An argument the interface's field does not declare is the check's only where the definition
-    // implements one.
-    if !matches!(
-      self.builder.def_kind(def),
-      Some(DefKind::Object | DefKind::Interface)
-    ) || self.builder.def_implements(def).is_empty()
-    {
+    // implements one: the interfaces its entries name, each once.
+    if !matches!(kind, Some(DefKind::Object | DefKind::Interface)) {
+      return false;
+    }
+    declared.interfaces.clear();
+    for &entry in self.builder.def_implements(def) {
+      if let Some(ty) = self.own_item(entry, own)
+        && let Some(Shape::Named(interface)) = self.builder.ty_shape(ty)
+        && interface != def
+        && self.builder.def_kind(interface) == Some(DefKind::Interface)
+      {
+        declared.interfaces.push(interface);
+      }
+    }
+    if declared.interfaces.is_empty() {
       return false;
     }
     // Its own fields, the first of each name, as the implementation check indexes them.
-    let own = self.sources.written_by(self.builder.def_location(def));
     declared.own.clear();
     for field in self.builder.def_members(def) {
       if let (Some(name), Some(at)) = (
         self.builder.member_name(field),
         self.builder.member_location(field),
-      ) && own.is_some()
-        && self.sources.written_by(at) == own
+      ) && self.sources.written_by(at) == Some(own)
       {
         declared.own.push((name, field));
       }
@@ -737,18 +750,6 @@ impl Coercion<'_, '_, '_> {
     }
     if declared.adding.is_empty() {
       return false;
-    }
-    declared.interfaces.clear();
-    for &entry in self.builder.def_implements(def) {
-      if let Some(Occurrence {
-        written: Written::Named(interface),
-        ..
-      }) = self.builder.occurrence(entry)
-        && interface != def
-        && self.builder.def_kind(interface) == Some(DefKind::Interface)
-      {
-        declared.interfaces.push(interface);
-      }
     }
     declared.interfaces.sort_unstable();
     declared.interfaces.dedup();
@@ -803,8 +804,21 @@ impl Coercion<'_, '_, '_> {
     false
   }
 
-  /// Fills `declared` with every interface's fields, and each one's arguments, by name, and with
-  /// what its lookups may read: once.
+  /// The type of `item`, an `implements` entry or a union member of a definition `own` wrote, when
+  /// `own` writes it too and its type resolved: the items the implementation check reads, as it
+  /// gathers them.
+  fn own_item(&self, item: TypeExprId, own: PackageId) -> Option<TyId> {
+    let occurrence = self.builder.occurrence(item)?;
+    if self.sources.written_by(occurrence.location) != Some(own) {
+      return None;
+    }
+    let ty = occurrence.ty?;
+    (!matches!(self.builder.ty_shape(ty), Some(Shape::Unresolved) | None)).then_some(ty)
+  }
+
+  /// Fills `declared` with every interface's own fields, those its own package writes, as the
+  /// implementation check compares them, and each one's arguments, by name, and with what its
+  /// lookups may read: once.
   fn declare(&self, declared: &mut Declared) {
     if declared.built {
       return;
@@ -820,10 +834,22 @@ impl Coercion<'_, '_, '_> {
       if self.builder.def_kind(interface) != Some(DefKind::Interface) {
         continue;
       }
+      let Some(own) = self
+        .sources
+        .written_by(self.builder.def_location(interface))
+      else {
+        continue;
+      };
       for field in self.builder.def_members(interface) {
-        let Some(name) = self.builder.member_name(field) else {
+        let (Some(name), Some(at)) = (
+          self.builder.member_name(field),
+          self.builder.member_location(field),
+        ) else {
           continue;
         };
+        if self.sources.written_by(at) != Some(own) {
+          continue;
+        }
         declared.fields.push((interface, name, field));
         for argument in self.builder.member_arguments(field) {
           if let Some(name) = self.builder.member_name(argument) {

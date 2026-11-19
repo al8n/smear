@@ -1485,3 +1485,29 @@ fn a_default_its_declaration_refuses_is_not_reported_through_a_derived_instantia
     [(DEFAULT, after(schema, text, "a: T! = ", "null"))]
   );
 }
+
+/// What another package writes into a definition is not the implementation check's, nor the
+/// relevance scan's: the dependency `dep`'s `P<T>`, whose `f` takes `extra: T`, implements `I` only
+/// through the root package's extension, an orphan the check does not read, so `extra` is no
+/// argument the check ever judges, and `P` is not relevant. With no value step to spend,
+/// `Outer<Int>`, which holds a `P<T>`, says nothing of what it derives. Refuses a foreign entry
+/// read as the definition's own.
+#[test]
+fn a_foreign_implements_entry_makes_nothing_relevant() {
+  let theirs = "interface I {\n  f: Int\n}\ntype P<T> {\n  f(extra: T): Int\n}\n";
+  let ours = "type Query {\n  o: Outer<Int>\n}\ntype Outer<T> {\n  p: ^::dep::P<T>\n}\n\
+              extend type ^::dep::P<T> implements ^::dep::I\n";
+  let root = Package::new("app", Layout::Flat, Tier::Std)
+    .with_files([SourceFile::new("schema.graphqlx", ours)])
+    .with_dependencies(["dep"]);
+  let dependencies = [Package::new("dep", Layout::Flat, Tier::Std)
+    .with_files([SourceFile::new("dep.graphqlx", theirs)])];
+  for limits in [Limits::new().with_max_value_steps(0), Limits::new()] {
+    let analysis = analyze(&root, &dependencies, &limits);
+    assert!(
+      codes_at(&analysis, LIMIT).is_empty(),
+      "{:#?}",
+      analysis.diagnostics()
+    );
+  }
+}
