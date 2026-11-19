@@ -494,14 +494,17 @@ impl Limits {
   /// first to read the literal against that input object; an argument that may be required, a bare
   /// nullable type parameter of its directive, that an application with complete type arguments
   /// leaves out, and a field that may be required that a written object literal of a generic input
-  /// object leaves out; a pair of a closed instantiation, of a type the program writes or of a
-  /// generic directive an application of it makes, and what its definition records, checked under
-  /// the instantiation's arguments: a value whose type names its type parameters, or an argument an
-  /// application in it leaves out whose type is one of them; and converting a decimal integer of
-  /// more than 38 significant digits, the most `u128` arithmetic reads whatever they spell, to an
-  /// integer where an integer type expects one, charged before the conversion as an upper bound of
-  /// its work: `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for `d` digits, its chunks of nine
-  /// digits times the 32-bit limbs of its value.
+  /// object leaves out; a pair of a closed instantiation, of a type the program writes, of a
+  /// generic directive an application of it makes, or of one such an instantiation derives through
+  /// the definitions that do not grow, and what its definition records, checked under the
+  /// instantiation's arguments: a value whose type names its type parameters, or an argument an
+  /// application in it leaves out whose type is one of them; while what each written instantiation
+  /// derives is read, each node a rebuild of a type its definition holds looks at, its root
+  /// included, and each generic named type or list the reading meets; and converting a decimal
+  /// integer of more than 38 significant digits, the most `u128` arithmetic reads whatever they
+  /// spell, to an integer where an integer type expects one, charged before the conversion as an
+  /// upper bound of its work: `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for `d` digits, its
+  /// chunks of nine digits times the 32-bit limbs of its value.
   ///
   /// Nothing else takes a step, and [`max_source_bytes`](Self::max_source_bytes) bounds the rest of
   /// the work on what is written: a hexadecimal, octal or binary integer converts in one pass, and
@@ -529,10 +532,14 @@ impl Limits {
   /// `resource-limit` at the literal, once; what it writes is still made, what was filled stays,
   /// and none of the rest of its required fields and defaults is read. Its required fields are
   /// asked for before its defaults. A closed instantiation whose definition's values cannot all be
-  /// checked within it is `resource-limit` at each use of it that a supplied package writes. At
-  /// `0`, nothing a supplied package leaves out is filled from a default or found missing, a bare
-  /// `@deprecated`'s reason among them; no list is made for a lone value it writes; no type is
-  /// rebuilt, and no generic definition checked at an instantiation, for its values; and no decimal
+  /// checked within it is `resource-limit` at each use of it that a supplied package writes, and so
+  /// is a written instantiation whose reading of what it derives, or whose check of an
+  /// instantiation it derives, cannot be paid for, as [`analyze`](crate::graphqlx::analyze) says:
+  /// what was read is judged all the same, and what was not is not judged. At `0`, nothing a
+  /// supplied package leaves out is filled from a default or found missing, a bare `@deprecated`'s
+  /// reason among them; no list is made for a lone value it writes; no type is rebuilt, and no
+  /// generic definition checked at an instantiation, for its values; nothing a written
+  /// instantiation derives is read, for coercion or for the implementation check; and no decimal
   /// integer of more than 38 significant digits is converted to an integer: a decimal `u128::MAX`
   /// is `resource-limit` where a `u128` is expected, and is still read where a float is.
   ///
