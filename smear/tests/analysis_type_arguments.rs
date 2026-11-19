@@ -926,9 +926,9 @@ fn a_field_that_may_be_required_costs_a_step_when_left_out() {
 /// A literal whose type a rebuild made reports the copy of a default it leaves out that does not
 /// fit: `@w<String>(a: {})` gives `{}` the type `Box<String>`, under which `Box`'s `1` does not
 /// fit, reported once at `{}`, labelled at the `1`. Refuses a copy silent under a derived type.
-/// The application's own instantiation, `w<String>`, derives that `Box<String>` through `a`'s type,
-/// and reports it at its path too (D11): the literal's copy and the derived instantiation are two
-/// uses of the one default, and no supplied package writes `Box<String>`.
+/// The application's own instantiation, `w<String>`, derives that `Box<String>` through `a`'s type
+/// (D11), and its check passes over the `1`: the literal reported it as its own copy, and each
+/// mistake has one owner (W:979). Refuses a second report of it, at the path.
 #[test]
 fn a_copy_inside_a_written_argument_is_judged_at_its_literal() {
   let text = "type Query @w<String>(a: {}) {\n  x: Int\n}\ninput Box<U> {\n  v: U = 1\n}\n\
@@ -936,18 +936,7 @@ fn a_copy_inside_a_written_argument_is_judged_at_its_literal() {
   let analysis = analyze_text(text, &Limits::new());
   let schema = schema_file(&analysis);
   let literal = at(schema, text, "{}", 0);
-  let path = named(schema, text, "@", "w", 0);
-  assert_eq!(found(&analysis), [(DEFAULT, path), (DEFAULT, literal)]);
-  assert_eq!(
-    labels(the(&analysis, DEFAULT, path)),
-    [
-      (
-        after(schema, text, "a: ", "Box<T>"),
-        "this derives that instantiation"
-      ),
-      (after(schema, text, "U = ", "1"), "this value"),
-    ]
-  );
+  assert_eq!(found(&analysis), [(DEFAULT, literal)]);
   let report = the(&analysis, DEFAULT, literal);
   assert_eq!(
     report.to_string(),
@@ -967,8 +956,9 @@ fn a_copy_inside_a_written_argument_is_judged_at_its_literal() {
 /// A literal under derived arguments, a field's type rebuilt under the enclosing literal's, reports
 /// its copy that does not fit, though no application is near and no occurrence writes its type:
 /// `Box<String>` is derived from `Wrap<String>`. Refuses a silent `Unresolved` copy in an ok
-/// analysis. `Wrap<String>` is written, and its expansion derives that `Box<String>`, whose `1`
-/// does not fit, so it reports it too, at `Wrap<String>`, labelled at `w`'s type (D11).
+/// analysis. `Wrap<String>` is written, and its expansion derives that `Box<String>` (D11), whose
+/// check passes over the `1`: the literal reported it as its own copy, and each mistake has one
+/// owner (W:979). Refuses a second report of it, at `Wrap<String>`.
 #[test]
 fn a_literal_under_derived_arguments_reports_its_copy() {
   let text = "type Query {\n  x: Int\n}\ninput Box<U> {\n  v: U = 1\n}\n\
@@ -976,18 +966,7 @@ fn a_literal_under_derived_arguments_reports_its_copy() {
   let analysis = analyze_text(text, &Limits::new());
   let schema = schema_file(&analysis);
   let literal = after(schema, text, "{ w: ", "{}");
-  let wrap = at(schema, text, "Wrap<String>", 0);
-  assert_eq!(found(&analysis), [(DEFAULT, wrap), (DEFAULT, literal)]);
-  assert_eq!(
-    labels(the(&analysis, DEFAULT, wrap)),
-    [
-      (
-        after(schema, text, "w: ", "Box<W>"),
-        "this derives that instantiation"
-      ),
-      (after(schema, text, "U = ", "1"), "this value"),
-    ]
-  );
+  assert_eq!(found(&analysis), [(DEFAULT, literal)]);
   assert_eq!(
     labels(the(&analysis, DEFAULT, literal)),
     [(after(schema, text, "U = ", "1"), "this default")]
@@ -1004,8 +983,9 @@ fn a_literal_under_derived_arguments_reports_its_copy() {
 /// under `K = string!`, `In<string!>`, which no type occurrence writes. `{}` leaves out `In`'s `1`,
 /// which `string!` does not take: `invalid-default-value`, at `{}`, labelled at the `1`, and the
 /// analysis is not ok. Refuses an ok analysis that holds an unresolved copy. The written
-/// `Dict<String>` derives that `In<string!>` through the default that fills `V`, so its check
-/// reports the same `1` at `Dict<String>`, labelled at the default (D11).
+/// `Dict<String>` derives that `In<string!>` through the default that fills `V` (D11), and its
+/// check passes over the `1`: the literal reported it as its own copy, and each mistake has one
+/// owner (W:979). Refuses a second report of it, at `Dict<String>`.
 #[test]
 fn a_literal_under_a_filled_type_reports_its_copy() {
   let text = "type Query {\n  x: Int\n}\ninput In<T> {\n  a: T = 1\n}\n\
@@ -1014,18 +994,7 @@ fn a_literal_under_a_filled_type_reports_its_copy() {
   let analysis = analyze_text(text, &Limits::new());
   let schema = schema_file(&analysis);
   let literal = at(schema, text, "{}", 0);
-  let dict = at(schema, text, "Dict<String>", 0);
-  assert_eq!(found(&analysis), [(DEFAULT, dict), (DEFAULT, literal)]);
-  assert_eq!(
-    labels(the(&analysis, DEFAULT, dict)),
-    [
-      (
-        after(schema, text, "V = ", "In<K>"),
-        "this derives that instantiation"
-      ),
-      (after(schema, text, "T = ", "1"), "this value"),
-    ]
-  );
+  assert_eq!(found(&analysis), [(DEFAULT, literal)]);
   assert_eq!(
     labels(the(&analysis, DEFAULT, literal)),
     [(after(schema, text, "T = ", "1"), "this default")]
@@ -1401,8 +1370,9 @@ fn what_a_count_reaches_after_it_meets_itself_is_judged() {
 /// default, at its path. `H.h`'s `{ r: {} }` gives its `{}` the type `Rec<Int>`, rebuilt under
 /// `Wrap<Int>`; `{}` leaves out `next`, whose count reads itself, and whose `"bad"` is counted
 /// after: the literal reports it, at the `{}`. Refuses an absent default taken to fit. The written
-/// `Wrap<Int>` derives that `Rec<Int>` through `r`, whose check reads the same count, and reports
-/// it at `Wrap<Int>` too, labelled at `r`'s type (D11).
+/// `Wrap<Int>` derives that `Rec<Int>` through `r` (D11), whose check reads the same count and
+/// passes over the `"bad"` default: the literal reported it as its own copy, and each mistake has
+/// one owner (W:979). Refuses a second report of it, at `Wrap<Int>`.
 #[test]
 fn a_default_that_meets_itself_is_judged_where_it_is_left_out() {
   let applied = "type Query @d<Int> {\n  x: Int\n}\n\
@@ -1433,24 +1403,7 @@ fn a_default_that_meets_itself_is_judged_where_it_is_left_out() {
   let analysis = analyze_text(literal, &Limits::new());
   let schema = schema_file(&analysis);
   let object = after(schema, literal, "{ r: ", "{}");
-  let wrap = at(schema, literal, "Wrap<Int>", 0);
-  assert_eq!(
-    found_of(&analysis, &PHASE),
-    [(DEFAULT, wrap), (DEFAULT, object)]
-  );
-  assert_eq!(
-    labels(the(&analysis, DEFAULT, wrap)),
-    [
-      (
-        after(schema, literal, "r: ", "Rec<W>"),
-        "this derives that instantiation"
-      ),
-      (
-        after(schema, literal, "next: Rec<T> = ", "{ value: \"bad\" }"),
-        "this value"
-      ),
-    ]
-  );
+  assert_eq!(found_of(&analysis, &PHASE), [(DEFAULT, object)]);
   let report = the(&analysis, DEFAULT, object);
   assert_eq!(
     report.to_string(),

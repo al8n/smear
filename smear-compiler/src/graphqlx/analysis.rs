@@ -315,13 +315,16 @@ impl Analysis {
 ///   argument types and an application's among them: what a copy of it needs, its definition's
 ///   members' types, `implements` entries, union members and applications' complete types, each
 ///   read under its arguments, and each instantiation they hold that no supplied package writes,
-///   in turn, each reading a step of [`Limits::max_value_steps`], each a type depth-checked and
-///   counted as every type is. Each occurrence of a written instantiation, or application, whose
-///   own verdict holds reports the first that fails, with its code, labelled at the type or the
-///   application that derives it; a limit that stops the reading is `resource-limit` once, at the
-///   written instantiation whose reading it stopped, and what was not read is not judged. A derived
-///   instantiation of a definition that grows, [`Def::grows`](super::Def::grows), is not judged,
-///   nor what only it derives. A copy is
+///   in turn, each rebuild and each generic type the reading walks a step of
+///   [`Limits::max_value_steps`], each type depth-checked and counted as every type is. Each
+///   occurrence of a written instantiation, or application, whose own verdict holds reports the
+///   first that fails, with its code, labelled at the type or the application that derives it,
+///   but for a value a written object literal of that derived instantiation reported already as
+///   its own copy, which is the literal's alone; a limit that stops the reading is
+///   `resource-limit` once, at the written instantiation whose reading it stopped, what was read
+///   is judged all the same, and what was not read is not judged. A derived instantiation of a
+///   definition that grows, [`Def::grows`](super::Def::grows), is not judged, nor what only it
+///   derives. A copy is
 ///   counted before it is made, each default's count kept, and a default whose copy would hold a
 ///   copy of itself is not copied: the argument, or the field, is absent, and under type arguments
 ///   what its count reached is judged as a copy is. The first time a count meets itself, that

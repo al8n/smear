@@ -24,6 +24,10 @@ const DEFAULT: &str = "smear::schema::invalid-default-value";
 const MEMBER: &str = "smear::schema::duplicate-union-member";
 /// GraphQL's code for an argument a field requires that its interface's field does not declare.
 const UNEXPECTED: &str = "smear::schema::unexpected-required-argument";
+/// GraphQL's code for a directive argument's value that does not fit.
+const ARGUMENT: &str = "smear::schema::invalid-directive-argument-value";
+/// GraphQL's code for a required directive argument left out, or given `null`.
+const MISSING: &str = "smear::schema::missing-required-directive-argument";
 /// The label at the type that derives the instantiation a report names.
 const DERIVES: &str = "this derives that instantiation";
 
@@ -91,6 +95,16 @@ fn found(analysis: &Analysis) -> Vec<(&'static str, Location)> {
     .diagnostics()
     .iter()
     .map(|diagnostic: &Diagnostic| (diagnostic.code().as_str(), diagnostic.primary()))
+    .collect()
+}
+
+/// The primary location of each diagnostic with the code `code`, in the list's order.
+fn codes_at(analysis: &Analysis, code: &str) -> Vec<Location> {
+  analysis
+    .diagnostics()
+    .iter()
+    .filter(|diagnostic: &&Diagnostic| diagnostic.code().as_str() == code)
+    .map(|diagnostic: &Diagnostic| diagnostic.primary())
     .collect()
 }
 
@@ -378,7 +392,9 @@ fn a_growing_definitions_derived_instantiation_is_not_judged() {
 /// past it with one `resource-limit`, at where the written instantiation whose expansion was
 /// running is first written, however many occurrences it has. `A1<Int>` derives `A2<[Int]>`,
 /// `A3<[[Int]]>` and `A4<[[[Int]]]>`, each new: under the least bound the program is ok at, less
-/// one, the last cannot be built. Refuses a closure uncounted, and a report at each occurrence.
+/// one, the last cannot be built. `A1`, `A2` and `A3` judge nothing: each is expanded because its
+/// expansion reaches `A4`, which does. Refuses a closure uncounted, a report at each occurrence,
+/// and a pruning that is not transitive.
 #[test]
 fn the_closure_stops_at_max_instantiations_with_one_resource_limit() {
   let text = "type Query {\n  f(a: A1<Int>): Int\n  g(a: A1<Int>): Int\n}\n\
@@ -530,4 +546,209 @@ fn a_written_instantiation_whose_own_values_fail_reports_them_alone() {
     labels(the(&analysis, DEFAULT, occurrence)),
     [(after(schema, text, "u: U = ", "2"), "this value")]
   );
+}
+
+/// A value a written object literal of a derived instantiation reported already, as its own copy
+/// that does not fit, is the literal's (W:979): the check of that instantiation passes over it to
+/// its next row, which the written occurrence that derives it reports. `{ w: "s" }`, a
+/// `Box<String>` under `Wrap<String>`, leaves out `v`, whose `1` it reports; `Wrap<String>`
+/// derives that `Box<String>` through `b`, and reports its `true`, which no literal reported.
+/// Refuses a second report of one mistake, and a check that ends at a row it passes over.
+#[test]
+fn a_value_a_literal_reported_is_passed_over_where_it_is_derived() {
+  let text = "type Query {\n  x: Int\n}\ninput Box<U> {\n  v: U = 1\n  w: U = true\n}\n\
+              input Wrap<W> {\n  b: Box<W>\n}\n\
+              input H {\n  h: Wrap<String> = { b: { w: \"s\" } }\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let wrap = at(schema, text, "Wrap<String>", 0);
+  let literal = after(schema, text, "{ b: ", "{ w: \"s\" }");
+  assert_eq!(found(&analysis), [(DEFAULT, wrap), (DEFAULT, literal)]);
+  let report = the(&analysis, DEFAULT, wrap);
+  assert_eq!(
+    report.to_string(),
+    "`Wrap` is instantiated here with type arguments that derive an instantiation of `Box` under \
+     which `true`, a value it holds, does not fit the type it takes"
+  );
+  assert_eq!(
+    labels(report),
+    [
+      (after(schema, text, "b: ", "Box<W>"), DERIVES),
+      (after(schema, text, "w: U = ", "true"), "this value"),
+    ]
+  );
+  assert_eq!(
+    labels(the(&analysis, DEFAULT, literal)),
+    [(after(schema, text, "v: U = ", "1"), "this default")]
+  );
+}
+
+/// `null` written for an argument a collection's element makes required is the application's own
+/// mistake, refused where it is written and recorded for no instantiation, so no derived
+/// instantiation reports it again: `Holder<Int>` and `Holder<String>` derive `Tags<Int>` and
+/// `Tags<String>`, each judged for `Tags`'s other value, the `1` of `@fine`, which `String` does
+/// not take. Refuses the `null` reported at a derivation.
+#[test]
+fn a_null_for_an_argument_a_collections_element_makes_required_derives_nothing() {
+  let text = "type Query {\n  a: Holder<Int>\n  b: Holder<String>\n}\n\
+              directive @need<T>(v: T) on SCALAR\ndirective @fine<T>(w: T) on SCALAR\n\
+              scalar Tags<K> @set @need<K>(v: null) @fine<K>(w: 1)\n\
+              type Holder<T> {\n  t: Tags<T>\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let derives = at(schema, text, "Holder<String>", 0);
+  let argument = after(schema, text, "@need<K>(", "v");
+  assert_eq!(found(&analysis), [(ARGUMENT, derives), (MISSING, argument)]);
+  assert_eq!(
+    the(&analysis, MISSING, argument).to_string(),
+    "the argument `v` of `@need` is required, and `null` is given"
+  );
+  let report = the(&analysis, ARGUMENT, derives);
+  assert_eq!(
+    report.to_string(),
+    "`Holder` is instantiated here with type arguments that derive an instantiation of `Tags` \
+     under which `1`, a value it holds, does not fit the type it takes"
+  );
+  assert_eq!(
+    labels(report),
+    [
+      (after(schema, text, "t: ", "Tags<T>"), DERIVES),
+      (after(schema, text, "@fine<K>(w: ", "1"), "this value"),
+    ]
+  );
+}
+
+/// What a default fills is derived wherever it stands, closed or not, and a definition that holds
+/// one is expanded though it judges nothing itself: `D`'s `Conn<Int, T>` is completed with
+/// `Edge<Int>`, which `E`'s default fills and no occurrence writes, so `D<String>` derives it,
+/// through `Conn`, which judges nothing, and reports its `"s"`, labelled at `c`'s type. Refuses a
+/// pruning that follows open types alone.
+#[test]
+fn a_closed_instantiation_a_default_fills_is_derived() {
+  let text = "type Query {\n  f(d: D<String>): Int\n}\ninput Edge<N> {\n  v: N = \"s\"\n}\n\
+              input Conn<A, B, E = Edge<A>> {\n  b: B\n  e: E\n}\n\
+              input D<T> {\n  c: Conn<Int, T>\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, text, "D<String>", 0);
+  assert_eq!(found(&analysis), [(DEFAULT, occurrence)]);
+  let report = the(&analysis, DEFAULT, occurrence);
+  assert_eq!(
+    report.to_string(),
+    "`D` is instantiated here with type arguments that derive an instantiation of `Edge` under \
+     which `\"s\"`, a value it holds, does not fit the type it takes"
+  );
+  assert_eq!(
+    labels(report),
+    [
+      (after(schema, text, "c: ", "Conn<Int, T>"), DERIVES),
+      (after(schema, text, "v: N = ", "\"s\""), "this value"),
+    ]
+  );
+}
+
+/// The steps of `Limits::max_value_steps` end the closure with one `resource-limit`, at where the
+/// written instantiation whose expansion was running is first written, and what it derived before
+/// is judged all the same, each instantiation as it was derived: under the least budget that
+/// judges `Bad<Int>`, which `A1<Int>` derives first, the rebuild of `A2<[T]>` cannot be paid for,
+/// and `Bad<Int>`'s `"s"` is still reported at both occurrences of `A1<Int>`. Refuses a stop that
+/// leaves what was derived unjudged, and a stop reported at each occurrence.
+#[test]
+fn the_closure_stops_at_max_value_steps_and_judges_what_it_derived() {
+  let text = "type Query {\n  f(a: A1<Int>): Int\n  g(a: A1<Int>): Int\n}\n\
+              input Bad<T> {\n  v: T = \"s\"\n}\ninput A1<T> {\n  b: Bad<T>\n  n: A2<[T]>\n}\n\
+              input A2<T> {\n  b: Bad<T>\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let first = at(schema, text, "A1<Int>", 0);
+  let second = at(schema, text, "A1<Int>", 1);
+  assert_eq!(found(&analysis), [(DEFAULT, first), (DEFAULT, second)]);
+  let least = (0..256_u32)
+    .find(|&steps: &u32| {
+      let analysis = analyze_text(text, &Limits::new().with_max_value_steps(steps));
+      codes_at(&analysis, DEFAULT).contains(&first)
+    })
+    .expect("a budget that judges `Bad<Int>`");
+  let short = analyze_text(text, &Limits::new().with_max_value_steps(least));
+  assert_eq!(codes_at(&short, LIMIT), [first]);
+  assert_eq!(codes_at(&short, DEFAULT), [first, second]);
+  assert_eq!(short.diagnostics().len(), 3);
+  assert_eq!(
+    the(&short, LIMIT, first).to_string(),
+    format!(
+      "what `A1` derives under the type arguments it is instantiated with here could not be read \
+       within `Limits::max_value_steps`, {least}, the steps the analysis may take to complete \
+       values"
+    )
+  );
+  assert_eq!(
+    labels(the(&short, DEFAULT, first)),
+    [
+      (after(schema, text, "b: ", "Bad<T>"), DERIVES),
+      (after(schema, text, "v: T = ", "\"s\""), "this value"),
+    ]
+  );
+}
+
+/// A type the closure would derive past `Limits::max_generic_depth` ends it with one
+/// `resource-limit`, at where the root whose expansion was running is first written, and what it
+/// derived before is judged all the same: under the least depth the program says no limit at, less
+/// one, `A3<[[Int]]>` cannot be built, though every written type can, and `Bad<Int>`'s `"s"` is
+/// still reported at both occurrences of `A1<Int>`. Refuses a stop that leaves what was derived
+/// unjudged.
+#[test]
+fn the_closure_stops_at_max_generic_depth_and_judges_what_it_derived() {
+  let text = "type Query {\n  f(a: A1<Int>): Int\n  g(a: A1<Int>): Int\n}\n\
+              input Bad<T> {\n  v: T = \"s\"\n}\ninput A1<T> {\n  b: Bad<T>\n  n: A2<[T]>\n}\n\
+              input A2<T> {\n  n: A3<[T]>\n}\ninput A3<T> {\n  b: Bad<T>\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let first = at(schema, text, "A1<Int>", 0);
+  let second = at(schema, text, "A1<Int>", 1);
+  assert_eq!(found(&analysis), [(DEFAULT, first), (DEFAULT, second)]);
+  let least = (0..64_u32)
+    .find(|&depth: &u32| {
+      let analysis = analyze_text(text, &Limits::new().with_max_generic_depth(depth));
+      codes_at(&analysis, LIMIT).is_empty()
+    })
+    .expect("a depth the program says no limit at");
+  assert!(least > 0);
+  let short = analyze_text(text, &Limits::new().with_max_generic_depth(least - 1));
+  assert_eq!(codes_at(&short, LIMIT), [first]);
+  assert_eq!(codes_at(&short, DEFAULT), [first, second]);
+  assert_eq!(short.diagnostics().len(), 3);
+  assert_eq!(
+    the(&short, LIMIT, first).to_string(),
+    format!(
+      "what `A1` derives under the type arguments it is instantiated with here could not be read: \
+       a type it derives nests deeper than `Limits::max_generic_depth`, {}, admits",
+      least - 1
+    )
+  );
+}
+
+/// The closure fills nothing, and so never stops at `Limits::max_substitutions`: a stop there is
+/// the fill's, one `resource-limit` at the written occurrence it could not complete, which then
+/// derives nothing, and what the other written instantiations derive is judged all the same.
+/// Under the least bound the program says no limit at, less one, `Fill<Int>` cannot be filled,
+/// and `A1<Int>` still reports `Bad<Int>`'s `"s"`. Refuses a closure that a fill's stop silences.
+#[test]
+fn a_stop_at_max_substitutions_is_the_fills_and_leaves_the_closure_judging() {
+  let text = "type Query {\n  f(a: A1<Int>): Int\n  h(x: Fill<Int>): Int\n}\n\
+              input Bad<T> {\n  v: T = \"s\"\n}\ninput A1<T> {\n  b: Bad<T>\n}\n\
+              input Fill<T, U = [T]> {\n  u: U\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let derives = at(schema, text, "A1<Int>", 0);
+  let fill = at(schema, text, "Fill<Int>", 0);
+  assert_eq!(found(&analysis), [(DEFAULT, derives)]);
+  let least = (0..64_u32)
+    .find(|&bound: &u32| {
+      let analysis = analyze_text(text, &Limits::new().with_max_substitutions(bound));
+      codes_at(&analysis, LIMIT).is_empty()
+    })
+    .expect("a bound the program says no limit at");
+  assert!(least > 0);
+  let short = analyze_text(text, &Limits::new().with_max_substitutions(least - 1));
+  assert_eq!(found(&short), [(DEFAULT, derives), (LIMIT, fill)]);
 }

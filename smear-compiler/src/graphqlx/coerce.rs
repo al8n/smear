@@ -240,9 +240,12 @@
 //! definition they hold that no supplied package writes, in turn, an application only an
 //! instantiation reaches among them. Each occurrence, or application, of a written instantiation
 //! whose own verdict holds reports the first that fails, with the code the same failure has at a
-//! written instantiation, labelled at the type or the application that derives it. A derived
-//! instantiation of a definition that grows is not checked, nor what only it derives: a value
-//! written under such a type is judged where it is written.
+//! written instantiation, labelled at the type or the application that derives it. Each mistake
+//! has one owner (W:979): a value a written object literal of that very instantiation already
+//! reported, as its own copy that does not fit, is the literal's, and the check of the derived
+//! instantiation passes over it to its next row. A derived instantiation of a definition that
+//! grows is not checked, nor what only it derives: a value written under such a type is judged
+//! where it is written.
 //!
 //! # The count of a copy
 //!
@@ -320,7 +323,7 @@
 //! closed instantiation checked, written, applied or derived, and a row recorded under its
 //! definition; and, building the closure of derived instantiations, each node a rebuild of a
 //! position under an instantiation's arguments looks at, once for each type and instantiation, and
-//! each instantiation an expansion derives, once for each instantiation that derives it. So
+//! each generic named type or list an expansion walks, once for each expansion that walks it. So
 //! is the one reading that is more than linear: a decimal integer of more than 38
 //! significant digits, the most `u128` arithmetic reads whatever they spell, is converted nine
 //! digits at a time over a vector of limbs, and that is charged first, an upper bound of its limb
@@ -513,6 +516,7 @@ pub(crate) fn coerce(
     recorded: Vec::new(),
     checked: BTreeMap::new(),
     written: BTreeSet::new(),
+    owned: BTreeSet::new(),
     paid: 0,
     copied: 0,
     levels: BTreeMap::new(),
@@ -1476,6 +1480,10 @@ struct Coercion<'c, 'p, 'x> {
   /// where it is written. A written object literal of one of them leaves a copy that does not fit
   /// to that check; of any other type it reports the copy itself.
   written: BTreeSet<TyId>,
+  /// Each copy a written object literal of a type no occurrence writes reported as not fitting, by
+  /// the nullable form of the literal's type and the tree of the default it leaves out: the
+  /// literal's mistake, which the check of a derived instantiation passes over (W:979).
+  owned: BTreeSet<(TyId, u32)>,
   /// The rows of every count a copy was made of, charged or not.
   paid: u64,
   /// The rows made of copies: what `paid` is when the phase ends, since a copy and its count are
@@ -3904,6 +3912,11 @@ impl<'p> Coercion<'_, 'p, '_> {
           met = true;
           if !self.checked_where_written(making.ty, def) {
             self.unfit_field(at, field, default);
+            // The literal owns this mistake: a derived instantiation of its type passes over it.
+            if let Some(ty) = making.ty {
+              let nullable = self.nullable(ty, def);
+              self.owned.insert((nullable, default));
+            }
           }
         }
         if !made {
