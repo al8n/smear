@@ -14,6 +14,14 @@
 //!
 //! The built-in packages' files are read by the syntactic layer under its default limits, whatever
 //! layer the analysis was given, and have no tree.
+//!
+//! Each file is also recorded as read whole or not: a document was answered for it, and that
+//! document's recovery is complete, every element of the text having an image in it. The syntactic
+//! layer answers a document only for a text it read whole, so a file it read is whole; a blank
+//! file is; a file the lossless layer repaired without dropping an element is; and a file a layer
+//! refused, a file the lossless layer dropped an element of, a byte text that is not UTF-8, and
+//! every supplied file past the size limit are not. `SourceMap::note_read` hands the record to the
+//! source map, where `Source::is_complete` answers it.
 
 use core::ops::ControlFlow;
 use std::{
@@ -48,6 +56,10 @@ pub(crate) struct Documents<'a> {
   /// `None` for a package source, a file the parser refused, a byte text that is not UTF-8, and
   /// every supplied file when the supplied sources were over their size limit.
   entries: Vec<Option<TypeSystemDocument<&'a str>>>,
+  /// Whether each source was read whole: a document was answered for it, and its recovery is
+  /// complete, every element of the text having an image in it. Never for a package source, and
+  /// never for a file with no document.
+  whole: Vec<bool>,
 }
 
 impl<'a> Documents<'a> {
@@ -61,6 +73,30 @@ impl<'a> Documents<'a> {
   pub(crate) fn get(&self, source: SourceId) -> Option<&TypeSystemDocument<&'a str>> {
     self.entries.get(source.get() as usize)?.as_ref()
   }
+
+  /// Whether `source` was read whole: a document was answered for it, and every element of its
+  /// text has an image in that document. A blank file is; a file the lossless layer repaired
+  /// without dropping anything is. A package source, a file the parser refused, a byte text that
+  /// is not UTF-8, a file the lossless layer recovered by dropping an element, and a supplied file
+  /// past the size limit are not.
+  pub(crate) fn is_whole(&self, source: SourceId) -> bool {
+    self
+      .whole
+      .get(source.get() as usize)
+      .copied()
+      .unwrap_or(false)
+  }
+}
+
+/// What parsing one file answered.
+struct ReadFile<'a, T> {
+  /// Its document, when a document was answered.
+  document: Option<TypeSystemDocument<&'a str>>,
+  /// Whether a document was answered and its recovery is complete: every element of the text has
+  /// an image in it.
+  whole: bool,
+  /// What the layer kept for it.
+  tree: Option<T>,
 }
 
 /// Parses every file of `packages`, which are in id order and numbered by `sources`, reporting
@@ -84,41 +120,47 @@ where
   let built_in = Syntactic::new();
   let mut entries: Vec<Option<TypeSystemDocument<&'a str>>> =
     Vec::with_capacity(sources.len() as usize);
+  let mut whole: Vec<bool> = Vec::with_capacity(sources.len() as usize);
   for (index, package) in packages.iter().enumerate() {
     // The package source comes first, then the files in the order the map numbered them.
     entries.push(None);
+    whole.push(false);
     let first = sources.package_sources(index).start() + 1;
     for (offset, file) in package.files.iter().enumerate() {
       let source = SourceId::new(first + dense(offset));
-      let document = if index < ROOT {
-        parse(&built_in, file.text, source, reporter).0
+      let (document, read) = if index < ROOT {
+        let found = parse(&built_in, file.text, source, reporter);
+        (found.document, found.whole)
       } else if supplied {
-        let (document, tree) = parse(parser, file.text, source, reporter);
-        if let (Some(kept), Some(tree)) = (trees.as_deref_mut(), tree) {
+        let found = parse(parser, file.text, source, reporter);
+        if let (Some(kept), Some(tree)) = (trees.as_deref_mut(), found.tree) {
           kept.push((source, tree));
         }
-        document
+        (found.document, found.whole)
       } else {
-        None
+        (None, false)
       };
       entries.push(document);
+      whole.push(read);
     }
   }
-  Documents { entries }
+  Documents { entries, whole }
 }
 
-/// Parses one file with `parser`, reporting its syntax errors at `source`: the file's document, and
-/// what `parser` kept for it.
+/// Parses one file with `parser`, reporting its syntax errors at `source`: the file's document,
+/// whether it was read whole, and what `parser` kept for it.
 ///
-/// A blank text holds a document with no item, and a byte text that is not UTF-8 holds none: its
-/// syntax errors are read by the syntactic layer over its bytes. Neither reaches `parser`, and
-/// neither has a tree.
+/// A blank text holds a document with no item, read whole, and a byte text that is not UTF-8 holds
+/// none: its syntax errors are read by the syntactic layer over its bytes. Neither reaches
+/// `parser`, and neither has a tree. A document is read whole when its recovery is complete, as the
+/// syntactic layer's always is: a file the lossless layer repaired without dropping an element is
+/// whole, and one it dropped an element of is not.
 fn parse<'a, P>(
   parser: &P,
   text: View<'a>,
   source: SourceId,
   reporter: &mut Reporter,
-) -> (Option<TypeSystemDocument<&'a str>>, Option<P::Tree>)
+) -> ReadFile<'a, P::Tree>
 where
   P: Layer<'a>,
 {
@@ -128,29 +170,45 @@ where
       Ok(text) => text,
       Err(_) => {
         read_bytes(bytes, source, reporter);
-        return (None, None);
+        return ReadFile {
+          document: None,
+          whole: false,
+          tree: None,
+        };
       }
     },
   };
   if blank(text.as_bytes()) {
     let document = TypeSystemDocument::<&'a str>::new(SimpleSpan::new(0, text.len()), Vec::new());
-    return (Some(document), None);
+    return ReadFile {
+      document: Some(document),
+      whole: true,
+      tree: None,
+    };
   }
   let mut sink = Syntax::new(reporter, source);
   match parser.type_system_document(text, &mut sink) {
     Ok(parsed) => {
       let ParsedComponents {
         document,
+        recovery,
         errors,
         tree,
-        ..
       } = parsed.into_components();
       sink.found(errors);
-      (Some(document), Some(tree))
+      ReadFile {
+        document: Some(document),
+        whole: recovery.is_complete(),
+        tree: Some(tree),
+      }
     }
     Err(_) => {
       sink.unread();
-      (None, None)
+      ReadFile {
+        document: None,
+        whole: false,
+        tree: None,
+      }
     }
   }
 }

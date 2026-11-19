@@ -63,7 +63,7 @@
 //! | Coercion | Every value, by the type expected where it stands, an argument or a field left out filled from its default; and a generic definition's values, at each closed instantiation of it a supplied package writes | `smear::schema`: `invalid-default-value`, `invalid-directive-argument-value`, `missing-required-directive-argument`, `undefined-input-object-field`, `missing-required-input-object-field`, `input-object-default-value-cycle`; `smear::graphqlx`: `width-overflow`, `nonzero-zero`, `collection-literal`, `resource-limit` |
 //! | Binding | Each scalar's host types, from the `@extern`s its own package writes on it | none |
 //! | Implementation | What each definition says it is: its `implements` entries, transitively, with the fields and arguments each interface asks for, and a union's members; and each written instantiation's entries and members, and the arguments it makes required | `smear::schema`: `duplicate-implements-interface`, `duplicate-union-member`, `missing-transitive-interface`, `missing-interface-field`, `invalid-interface-field-type`, `interface-field-not-deprecated`, `missing-interface-field-argument`, `invalid-interface-field-argument-type`, `unexpected-required-argument`; `smear::graphqlx`: `resource-limit` |
-//! | Tiers | The tier every definition and every type requires | none |
+//! | Tiers | The definitions only compile-time metadata reaches, marked; and the tier every definition and every type requires | none |
 //!
 //! # The model
 //!
@@ -86,11 +86,14 @@
 //! locations and whether it is repeatable; its members, by kind; what the language makes of it, an
 //! intrinsic primitive, or a marker or a collection when its own package says so; a scalar's host
 //! types, each `@extern` its own package writes on it whose values fit, an [`Extern`], a built-in
-//! having none; and its [`tier`](Def::tier), the least of `core`, `alloc` and `std` that holds what
+//! having none; its [`tier`](Def::tier), the least of `core`, `alloc` and `std` that holds what
 //! its members, its union members and its host types need, a built-in's being its package's and a
-//! directive's `core`. A definition, a contribution and a member each answer `has_errors()`:
-//! whether a phase or a rule reported an error in it, a syntax error aside. GraphQL's
-//! introspection meta-types are definitions of [`Origin::Compat`], which a code generator skips.
+//! directive's `core`; and whether it is compile-time metadata, which only the types of a
+//! directive no operation can apply and applications' type arguments reach,
+//! [`is_metadata`](Def::is_metadata). A definition, a contribution and a member each answer
+//! `has_errors()`: whether a phase or a rule reported an error in it, a syntax error aside.
+//! GraphQL's introspection meta-types are definitions of [`Origin::Compat`], which a code
+//! generator skips.
 //!
 //! [`Model::member`] answers each field, argument, input field and enum value, a [`Member`]: its
 //! kind, name, owner, parent, location, extent and description, its type, its default, a field's
@@ -112,7 +115,9 @@
 //! object's fields are found by name, a set's elements and a map's entries are each coerced against
 //! their collection's types, a `TypeRef` value is the definition its path names, and a value of a
 //! custom scalar that is no collection but `null`, of a type that still names a type parameter, or
-//! of a type that can take none is kept as written, a [`ValueKind::Literal`].
+//! of a type that can take none is kept as written, a [`ValueKind::Literal`], but a whole `null` at
+//! a type that still names a type parameter and that no instantiation takes, which is refused and
+//! [`ValueKind::Unresolved`].
 //!
 //! [`Model::application`] answers each directive application, an [`Application`]: its directive,
 //! its type arguments and its path as written, its location, and its arguments in its directive's
@@ -149,7 +154,8 @@
 //! - every application's arguments are its directive's, in its order, each at most once, every
 //!   required one present, each value coerced to its argument's type under the application's type
 //!   arguments, or kept as written while that type still names a type parameter;
-//! - every definition's [`tier`](Def::tier) is at most its package's, GraphQL's meta-types aside;
+//! - every definition's [`tier`](Def::tier) is at most its package's, GraphQL's meta-types and
+//!   the definitions only compile-time metadata reaches, [`is_metadata`](Def::is_metadata), aside;
 //! - every rule of the table under "Rules" holds, the type-system rules GraphQLx shares with
 //!   GraphQL in this release among them.
 //!
@@ -345,10 +351,10 @@
 //! | `smear::schema`: `root-operation-type-not-object` | A root operation type that is no object type |
 //! | `smear::schema`: `shared-root-operation-type` | Two roots of one type |
 //! | `smear::schema`: `schema-extension-without-schema` | A schema extension the root package writes when it writes no schema definition and no query root is presumed |
-//! | `smear::schema`: `missing-query-root-operation-type` | A schema with no query root, neither written nor presumed |
+//! | `smear::schema`: `missing-query-root-operation-type` | A schema with no query root, neither written nor presumed, while every file of the root package was read whole |
 //! | `smear::graphqlx`: `extern-misuse` | An `@extern` whose `lang` an earlier one of its scalar has, and one the root package writes on a GraphQL built-in it replaces |
 //! | `smear::graphqlx`: `repr-misuse` | An `@repr` on the schema with no `for`, one elsewhere that writes `for`, and one that chooses twice for a language at a position, or for a type and a language on the schema |
-//! | `smear::graphqlx`: `tier` | Below `std`, a use above the tier its package declares: a list in a `core` package, another package's definition that needs more, `@heap` in a `core` package, an extern's `tier` above its package's. What a directive definition writes and an application's type arguments are compile-time metadata and count nowhere, an input object a directive's argument names being judged where it is written |
+//! | `smear::graphqlx`: `tier` | Below `std`, a use above the tier its package declares: a list in a `core` package, another package's definition that needs more, `@heap` in a `core` package, an extern's `tier` above its package's. What a directive definition writes, an application's type arguments, and what a definition holds that only those of a directive no operation can apply and application type arguments reach, [`is_metadata`](Def::is_metadata), are compile-time metadata and count nowhere; a definition a type outside metadata names too is judged where it is written, and while a directive an operation can apply holds one of its own type parameters in an argument's type, every such definition is judged, since an operation can fill that parameter with any of them |
 //! | `smear::schema`: `circular-non-null-input-field`, `circular-one-of-input-field` | An input object that requires a value of itself, through fields each non-null and no list, or by way of a OneOf none of whose fields can be given a finite value, a generic input object requiring what its type arguments must hold; never one a finite value satisfies, and in a program with type parameters it may miss one |
 //!
 //! # A rule a backend composes
@@ -362,8 +368,9 @@
 //!
 //! Every package has a package source, numbered before its files, and every file is a source. A
 //! [`SourceId`] numbers them densely, and the [`SourceMap`] records each one's package, path and
-//! length, never its text: the texts stay with the caller, and [`SourceMap::bind`] pairs the map
-//! with them again for a renderer, finding each file by its package and its path. The built-in
+//! length, and whether the analysis read it whole ([`Source::is_complete`]), never its text: the
+//! texts stay with the caller, and [`SourceMap::bind`] pairs the map with them again for a
+//! renderer, finding each file by its package and its path. The built-in
 //! packages `core`, `alloc` and `std` have [`PackageId`]s and sources like any other, and smear
 //! supplies their texts itself. A renderer is handed each source's path and, when it can be read,
 //! its text through [`SourceMap::bind`]'s [`Bound`], in id order, the consumer's own sources after

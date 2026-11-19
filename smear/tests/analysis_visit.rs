@@ -1423,6 +1423,27 @@ fn the_context_says_where_the_walk_is_and_who_wrote_each_member() {
   assert_eq!(extensions, [false, true]);
 }
 
+/// A model the test-support door builds has no texts, and its files stand for documents read
+/// whole: each file's source is complete and each package source is not, so that a rule over such
+/// a model reads as it would over files that parsed. Refuses a hand-built file read as unread,
+/// which silences a rule that asks whether the root package's files were read whole.
+#[test]
+fn a_hand_built_models_files_are_read_whole() {
+  let analysis = analysis_of(fixture(), &Limits::new());
+  let sources = analysis.sources();
+  let mut files = 0usize;
+  for id in sources.sources() {
+    let source = sources.source(id);
+    assert_eq!(
+      source.is_complete(),
+      !source.is_package_source(),
+      "{source:?}"
+    );
+    files += usize::from(!source.is_package_source());
+  }
+  assert!(files > 0, "the fixture holds no file");
+}
+
 /// Reports an error at every definition it enters, holding the definition's view while it
 /// reports.
 struct EveryDef;

@@ -390,13 +390,14 @@ fn a_syntax_error_is_reported_at_its_file_and_the_other_files_are_still_parsed()
 }
 
 /// Everything an analysis answers that does not depend on the text type: the diagnostics, every
-/// source's package, path and length, and the text each source binds to.
+/// source's package, path and length, the text each source binds to, and whether it was read
+/// whole.
 #[allow(clippy::type_complexity)]
 fn summary<S: SourceText>(
   package: &Package<S>,
 ) -> (
   Diagnostics,
-  Vec<(PackageId, String, usize, bool, Option<String>)>,
+  Vec<(PackageId, String, usize, bool, Option<String>, bool)>,
 ) {
   let analysis = analyze(package, &[], &Limits::new());
   let texts = analysis.sources().bind(package, &[]);
@@ -412,9 +413,10 @@ fn summary<S: SourceText>(
         source.len(),
         source.is_package_source(),
         texts.text(id).map(String::from),
+        source.is_complete(),
       )
     })
-    .collect::<Vec<(PackageId, String, usize, bool, Option<String>)>>();
+    .collect::<Vec<(PackageId, String, usize, bool, Option<String>, bool)>>();
   (analysis.diagnostics().clone(), described)
 }
 
@@ -512,6 +514,123 @@ fn every_text_type_gives_the_same_ids_diagnostics_and_texts() {
       baseline,
       "compact::Utf8Bytes"
     );
+  }
+}
+
+/// Whether the file `path` of the package `package` was read whole.
+fn whole(analysis: &Analysis, package: u32, path: &str) -> bool {
+  let id = file(analysis, package, path);
+  analysis.sources().source(id).is_complete()
+}
+
+/// A source says whether the analysis read it whole: a document was answered for it, and every
+/// element of its text has an image in that document.
+///
+/// Under `analyze`: a package source is not, whatever its package; a text file is; a blank file is;
+/// a file with a syntax error is not, since the syntactic layer answers no document for it; bytes
+/// that are not UTF-8 are not; and over `Limits::max_source_bytes` every supplied file is not,
+/// while every file of a built-in package still is. Under the lossless layer, a file missing its
+/// `}` is, as its repair, and a file with a stray token between two definitions is not: the layer's
+/// own recovery says which, and the source says the same. Refuses a source read off whether a
+/// document was answered, which calls the lossless layer's stray token read whole, and one read
+/// off whether the file has a syntax error, which calls the repaired file unread.
+#[test]
+fn a_source_says_whether_it_was_read_whole() {
+  let blank = "# Only a comment.\n";
+  let broken = "type B {\n";
+  let root = package(
+    "app",
+    &[
+      ("a.graphqlx", OK),
+      ("blank.graphqlx", blank),
+      ("b.graphqlx", broken),
+    ],
+  );
+  let analysis = analyze(&root, &[], &Limits::new());
+  let sources = analysis.sources();
+  let model = analysis.model();
+  assert!(whole(&analysis, 3, "a.graphqlx"));
+  assert!(whole(&analysis, 3, "blank.graphqlx"));
+  assert!(!whole(&analysis, 3, "b.graphqlx"));
+  // Every package source, the built-ins' included, is no file read: never whole. Every file of a
+  // built-in package, which the syntactic layer reads, is.
+  for owner in model.packages() {
+    let mut own = model.package(owner).sources().into_iter();
+    let first = sources.source(own.next().expect("a package source"));
+    assert!(
+      first.is_package_source() && !first.is_complete(),
+      "{first:?}"
+    );
+    if owner.get() < 3 {
+      for id in own {
+        let source = sources.source(id);
+        assert!(source.is_complete(), "{source:?}");
+      }
+    }
+  }
+
+  // Bytes: the text that is UTF-8 is read whole, the one that is not is no document.
+  let good: &'static [u8] = b"type A { ok: Int }\n";
+  let not_utf8: &'static [u8] = b"type B { ok: Int }\n\xff\n";
+  let bytes = Package::new("app", Layout::Directory, Tier::Std).with_files([
+    SourceFile::new("a.graphqlx", good),
+    SourceFile::new("b.graphqlx", not_utf8),
+  ]);
+  let analysis = analyze(&bytes, &[], &Limits::new());
+  assert!(whole(&analysis, 3, "a.graphqlx"));
+  assert!(!whole(&analysis, 3, "b.graphqlx"));
+
+  // Over the size limit no supplied file is parsed, and none is whole; a built-in file still is.
+  let files = [("a.graphqlx", OK), ("b.graphqlx", "type B {\n")];
+  let total = OK.len() + "type B {\n".len();
+  let over = Limits::new().with_max_source_bytes(u32::try_from(total - 1).expect("small"));
+  let analysis = analyze(&package("app", &files), &[], &over);
+  assert!(!whole(&analysis, 3, "a.graphqlx"));
+  assert!(!whole(&analysis, 3, "b.graphqlx"));
+  let built_in = analysis.model().package(PackageId::new(0)).sources();
+  let library = built_in.into_iter().nth(1).expect("`core` holds a file");
+  assert!(analysis.sources().source(library).is_complete());
+  // At the limit the same files are parsed: the whole one is read whole.
+  let at = Limits::new().with_max_source_bytes(u32::try_from(total).expect("small"));
+  let analysis = analyze(&package("app", &files), &[], &at);
+  assert!(whole(&analysis, 3, "a.graphqlx"));
+  assert!(!whole(&analysis, 3, "b.graphqlx"));
+
+  // The lossless layer recovers, and says what it kept of each file: a definition missing its `}`
+  // is repaired and loses nothing, a stray token between two definitions is dropped.
+  #[cfg(all(feature = "rowan_0_17", feature = "std"))]
+  {
+    use smear::{analysis::graphqlx::analyze_with, parser::graphqlx::Lossless};
+
+    let repaired = "type A { x: Int\n";
+    let stray = "type A { x: Int }\nfoo\ntype B { y: Int }\n";
+    let recovery = |text: &str| {
+      Lossless::new()
+        .type_system_document(text, &mut ())
+        .expect("short enough for a tree")
+        .recovery()
+    };
+    assert!(recovery(repaired).is_complete(), "{}", recovery(repaired));
+    assert!(recovery(stray).skipped() > 0, "{}", recovery(stray));
+
+    let root = package(
+      "app",
+      &[
+        ("a.graphqlx", OK),
+        ("blank.graphqlx", blank),
+        ("repaired.graphqlx", repaired),
+        ("stray.graphqlx", stray),
+      ],
+    );
+    let (analysis, _trees) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
+    assert!(whole(&analysis, 3, "a.graphqlx"));
+    assert!(whole(&analysis, 3, "blank.graphqlx"));
+    assert!(whole(&analysis, 3, "repaired.graphqlx"));
+    assert!(!whole(&analysis, 3, "stray.graphqlx"));
+    // Both files hold a syntax error, which the syntactic layer answers no document for.
+    let alone = analyze(&root, &[], &Limits::new());
+    assert!(!whole(&alone, 3, "repaired.graphqlx"));
+    assert!(!whole(&alone, 3, "stray.graphqlx"));
   }
 }
 

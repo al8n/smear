@@ -12,7 +12,8 @@ use crate::graphqlx::{
     dense,
   },
   model::{
-    ApplicationArgument, Collection, DefKind, Origin, Resolution, TypeBound, TypeParamRef,
+    ApplicationArgument, Collection, DefKind, DirectiveLocation, Origin, Resolution, Root,
+    TypeBound, TypeParamRef,
     satisfy::{Keys, Steps, Wanted},
     table::{
       DefRow, ExternRow, KIND_LIST, KIND_NAMED, KIND_PARAM, MemberRow, PackageRow, TyRow, UNSET_TY,
@@ -226,6 +227,20 @@ impl ModelBuilder {
       .schema
       .applications
       .of(&self.model.listed_applications)
+  }
+
+  /// The schema's roots, query, mutation and subscription, as written or presumed so far.
+  pub(crate) fn schema_roots(&self) -> [Option<Root>; 3] {
+    self.model.schema.roots
+  }
+
+  /// The locations the directive definition `def` lists, as written: none for a definition of any
+  /// other kind, and for an id the builder did not issue.
+  pub(crate) fn def_locations(&self, def: DefId) -> &[DirectiveLocation] {
+    match self.model.defs.get(def.get() as usize) {
+      Some(row) => row.locations.of(&self.model.locations),
+      None => &[],
+    }
   }
 
   /// How many type parameters `def` has: 0 for an id the builder did not issue.

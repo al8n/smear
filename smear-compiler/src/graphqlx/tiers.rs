@@ -16,6 +16,10 @@
 //!   requires `alloc` at least, and its element's; a type parameter and the unresolved type require
 //!   `core`. So for a type that names a parameter it is a lower bound.
 //!
+//! The phase first marks the definitions only compile-time metadata reaches, which the tier rule
+//! does not judge: the `metadata` module says which they are. No tier computation reads the marks,
+//! so every tier below is the same with them or without them.
+//!
 //! Definitions and types that name one another in a cycle share the greatest tier any of them
 //! reaches: the tiers are the least fixed point of those rules. It is found with one worklist over
 //! the definitions and the types together, each a node, and an edge from each node to each node
@@ -31,7 +35,8 @@
 //! It runs last: after binding, whose externs it reads, and after every phase that interns a type,
 //! so that every type has its tier but the unresolved type the model's finishing may intern, whose
 //! `core` is its tier. A phase that interns types goes before it. It reports nothing, and writes
-//! only the tiers above `core`, onto rows already appended.
+//! only the tiers above `core` and which definitions are metadata, onto rows already appended, and
+//! where a type outside metadata first reaches each definition metadata reaches too.
 
 use std::{vec, vec::Vec};
 
@@ -44,9 +49,19 @@ use crate::graphqlx::{
   package::Tier,
 };
 
+mod metadata;
+
 /// Gives every definition and every type of `builder`, whose declarations are `declarations`, the
 /// tier it requires.
 pub(crate) fn tiers(declarations: &Declarations<'_, '_>, builder: &mut ModelBuilder) {
+  let found = metadata::metadata(builder);
+  for (index, &flag) in found.flags.iter().enumerate() {
+    if flag {
+      builder.set_metadata(DefId::new(dense(index)));
+    }
+  }
+  builder.set_runtime_entries(found.entries);
+
   let heap = binding(declarations, builder, CORE, DIRECTIVE, b"heap");
   let defs = builder.def_count() as usize;
   let nodes = defs.saturating_add(builder.ty_count() as usize);

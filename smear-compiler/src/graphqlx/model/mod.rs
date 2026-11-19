@@ -110,6 +110,10 @@ pub struct Model {
   /// Every second name, sorted by module, then the namespace of the definition it names, then
   /// name.
   aliases: Vec<AliasRow>,
+  /// Each definition compile-time metadata reaches that a type outside it reaches too, with where
+  /// that reach entered from outside metadata, by definition: where the tier rule labels its
+  /// reports within it.
+  runtime_entries: Vec<(DefId, tokora::diagnostic::Location)>,
 
   members: Vec<MemberRow>,
   member_applications: Vec<ApplicationId>,
@@ -182,6 +186,7 @@ impl Model {
       externs: Vec::new(),
       instantiations: Vec::new(),
       aliases: Vec::new(),
+      runtime_entries: Vec::new(),
       members: Vec::new(),
       member_applications: Vec::new(),
       type_exprs: Vec::new(),

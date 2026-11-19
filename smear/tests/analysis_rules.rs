@@ -1143,6 +1143,154 @@ fn a_schema_has_a_query_root() {
   }
 }
 
+/// Asserts that `analysis` holds syntax errors at the file `source` and nothing else, the whole
+/// list read, the missing query root among it.
+fn syntax_errors_alone(analysis: &Analysis, source: SourceId) {
+  let all = unwaived(analysis);
+  assert!(!all.is_empty(), "no syntax error is reported");
+  for (code, at, _) in &all {
+    assert!(
+      code.starts_with("smear::syntax::") && at.source() == source.get(),
+      "{:#?}",
+      analysis.diagnostics()
+    );
+  }
+  assert!(!analysis.is_ok());
+}
+
+/// Asserts that `analysis` holds the missing query root at the root package's package source,
+/// first in the list, and syntax errors at the file `source` after it and nothing else.
+fn missing_root_and_syntax_errors(analysis: &Analysis, source: SourceId) {
+  let all = unwaived(analysis);
+  assert_eq!(
+    all.first().copied(),
+    Some((NO_QUERY_ROOT, root_package_source(analysis), None)),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert!(all.len() > 1, "{:#?}", analysis.diagnostics());
+  for (code, at, _) in &all[1..] {
+    assert!(
+      code.starts_with("smear::syntax::") && at.source() == source.get(),
+      "{:#?}",
+      analysis.diagnostics()
+    );
+  }
+}
+
+/// The missing query root says nothing while a file of the root package was not read whole: such a
+/// file could have held `type Query`, or the schema definition that writes the query root, and its
+/// own diagnostic says why it contributes less than it writes. Each case reads the whole list.
+///
+/// Under `analyze`: an unclosed `type Query {` beside a file with no query root, the syntax errors
+/// alone; the root's files as bytes, the one that holds `type Query` not UTF-8; supplied sources
+/// over `Limits::max_source_bytes`, the `resource-limit` at the root's package source alone; and
+/// the other way, a dependency's file broken beside root files read whole, the syntax error and
+/// the missing root, and a blank root file beside one with no `Query`, the missing root. Under the
+/// lossless layer: a root file that recovery dropped `Query`'s definition from, the syntax errors
+/// alone; and one it repaired without dropping anything, whose text holds no `Query`, the syntax
+/// error and the missing root, each text's own recovery read first. Refuses silence on any syntax
+/// error anywhere, silence read off the package source, and silence read off whether a document
+/// was answered, which the lossless layer answers for both texts.
+#[test]
+fn a_root_file_not_read_whole_silences_the_missing_query_root() {
+  let query = "type Query {\n  x: Int\n";
+  let other = "type Other { y: Int }\n";
+  let root = package(
+    "app",
+    Layout::Flat,
+    &[("a.graphqlx", query), ("b.graphqlx", other)],
+  );
+  let analysis = analyze(&root, &[], &Limits::new());
+  syntax_errors_alone(&analysis, file(&analysis, 3, "a.graphqlx"));
+
+  // The same, a file that is not UTF-8 and holds `type Query`.
+  let bytes: &'static [u8] = b"type Query { x: Int }\n\xff\n";
+  let beside: &'static [u8] = b"type Other { y: Int }\n";
+  let root = Package::new("app", Layout::Flat, Tier::Std).with_files([
+    SourceFile::new("a.graphqlx", bytes),
+    SourceFile::new("b.graphqlx", beside),
+  ]);
+  let analysis = analyze(&root, &[], &Limits::new());
+  syntax_errors_alone(&analysis, file(&analysis, 3, "a.graphqlx"));
+
+  // Over the size limit no file is parsed: the one diagnostic is the limit's, at the root's package
+  // source, which says why every file contributes nothing.
+  let files = [
+    ("a.graphqlx", "type Query {\n  x: Int\n}\n"),
+    ("b.graphqlx", other),
+  ];
+  let total: usize = files.iter().map(|(_, text)| text.len()).sum();
+  let over = Limits::new().with_max_source_bytes(u32::try_from(total - 1).expect("small"));
+  let analysis = analyze(&package("app", Layout::Flat, &files), &[], &over);
+  assert_eq!(
+    unwaived(&analysis),
+    [(
+      DiagnosticKind::ResourceLimit.code().as_str(),
+      root_package_source(&analysis),
+      None
+    )],
+    "{:#?}",
+    analysis.diagnostics()
+  );
+
+  // A dependency's file that is broken is not the root's: its syntax error, and the missing root,
+  // since every file of the root package was read whole.
+  let root = package("app", Layout::Flat, &[("a.graphqlx", other)]).with_dependencies(["geo"]);
+  let geo = package("geo", Layout::Flat, &[("g.graphqlx", "type G {\n")]);
+  let analysis = analyze(&root, &[geo], &Limits::new());
+  missing_root_and_syntax_errors(&analysis, file(&analysis, 4, "g.graphqlx"));
+
+  // A blank root file is read whole, and so is every file of a root that holds no query root.
+  for files in [
+    [("a.graphqlx", "# Nothing here.\n"), ("b.graphqlx", other)],
+    [
+      ("a.graphqlx", other),
+      ("b.graphqlx", "type More { z: Int }\n"),
+    ],
+  ] {
+    let analysis = analyze(&package("app", Layout::Flat, &files), &[], &Limits::new());
+    assert_eq!(
+      unwaived(&analysis),
+      [(NO_QUERY_ROOT, root_package_source(&analysis), None)],
+      "{:#?}",
+      analysis.diagnostics()
+    );
+  }
+
+  // The lossless layer recovers, and the rule follows what it kept of each file.
+  #[cfg(all(feature = "rowan_0_17", feature = "std"))]
+  {
+    use smear::{analysis::graphqlx::analyze_with, parser::graphqlx::Lossless};
+
+    let recovery = |text: &str| {
+      Lossless::new()
+        .type_system_document(text, &mut ())
+        .expect("short enough for a tree")
+        .recovery()
+    };
+
+    // A misspelt keyword costs `Query`'s definition: nothing of it has an image, and it could have
+    // been the query root.
+    let dropped = "typ Query { x: Int }\n";
+    assert!(!recovery(dropped).is_complete(), "{}", recovery(dropped));
+    let root = package("app", Layout::Flat, &[("schema.graphqlx", dropped)]);
+    let (analysis, _trees) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
+    syntax_errors_alone(&analysis, schema_file(&analysis));
+
+    // A definition missing its `}` is repaired and loses nothing: the file is read whole, holds no
+    // `Query`, and the missing root is reported beside the syntax error. The syntactic layer
+    // refuses the same text, and reads no file whole.
+    let repaired = "type Other { y: Int\n";
+    assert!(recovery(repaired).is_complete(), "{}", recovery(repaired));
+    let root = package("app", Layout::Flat, &[("schema.graphqlx", repaired)]);
+    let (analysis, _trees) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
+    missing_root_and_syntax_errors(&analysis, schema_file(&analysis));
+    let analysis = analyze(&root, &[], &Limits::new());
+    syntax_errors_alone(&analysis, schema_file(&analysis));
+  }
+}
+
 #[test]
 fn a_schema_definition_with_no_query_root_is_reported_at_its_keyword() {
   // A schema definition that writes no query root: at its `schema`, with no label.

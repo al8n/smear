@@ -2375,42 +2375,31 @@ fn a_collections_key_a_deprecated_member_takes_is_refused_once() {
     forced_words
   );
 
-  // Where each application leaves `v` out, a use whose instantiation makes it required, `@d<Int!>`
-  // under it, is the coercion phase's `missing-required-directive-argument`, at the use, labelled
-  // at the application that leaves `v` out and at `v`: another rule, on another mistake. A use only
-  // a derivation reaches, the `S<Int!>` of `Box<Int!>`, is not checked. The phase's error marks
-  // `Query`, where the rule then says nothing, at `N<Int, Int!>` either; the definitions' mistakes
-  // are reported as before.
+  // Where each application leaves `v` out, the coercion phase's
+  // `missing-required-directive-argument` speaks, another rule's, on another mistake. `S`'s `@d<T>`
+  // and `M`'s `@d<K>` give `v` a set's element and a map's key, non-null in every instantiation:
+  // each application's own mistake, reported once, at its path, labelled at `v`, and no use
+  // repeats it, `S<Int>`, `S<Int!>` and `M<Int, Int>` among them. `N`'s value is no key: `@d<V>`
+  // makes `v` required under `N<Int, Int!>` alone, reported at that use, labelled at the
+  // application that leaves `v` out and at `v`. A use only a derivation reaches, the `S<Int!>` of
+  // `Box<Int!>`, is not checked. The phase's error marks `S` and `M`, and `Query` at
+  // `N<Int, Int!>`, where this rule then says nothing: the definitions' mistakes are the phase's,
+  // and no deprecated-member report is left for an application that leaves `v` out.
   let text = FORCED;
   let analysis = analyze_one(text);
   let schema = schema_file(&analysis);
-  let deprecated = Some(at(schema, text, "deprecated", 0));
-  let path = |nth: usize| -> Option<Location> { Some(named(schema, text, "@", "d", nth)) };
+  let path = |nth: usize| -> Location { named(schema, text, "@", "d", nth) };
+  let argument = Some(named(schema, text, "(", "v", 0));
   assert_eq!(
     found(&analysis),
     [
-      (MISSING_ARGUMENT, at(schema, text, "S<Int>", 0), path(1)),
-      (MISSING_ARGUMENT, at(schema, text, "S<Int!>", 0), path(1)),
-      (
-        MISSING_ARGUMENT,
-        at(schema, text, "M<Int, Int>", 0),
-        path(2)
-      ),
       (
         MISSING_ARGUMENT,
         at(schema, text, "N<Int, Int!>", 0),
-        path(3)
+        Some(path(3))
       ),
-      (
-        DEPRECATED_ARGUMENT,
-        named(schema, text, "@d<", "T", 0),
-        deprecated
-      ),
-      (
-        DEPRECATED_ARGUMENT,
-        named(schema, text, "@d<", "K", 0),
-        deprecated
-      ),
+      (MISSING_ARGUMENT, path(1), argument),
+      (MISSING_ARGUMENT, path(2), argument),
     ],
     "{:#?}",
     analysis.diagnostics()
@@ -2421,22 +2410,25 @@ fn a_collections_key_a_deprecated_member_takes_is_refused_once() {
        argument `v`, and an application it holds leaves it out"
     )
   };
+  let forced_omitted = |part: &str, kind: &str, collection: &str, parameter: &str| -> String {
+    format!(
+      "`{parameter}`, the {part} of the {kind} `{collection}`, is non-null in every \
+       instantiation, so `@d` requires its argument `v`, and this application leaves it out"
+    )
+  };
   assert_eq!(
     messages(&analysis),
     [
-      missing("S"),
-      missing("S"),
-      missing("M"),
       missing("N"),
-      forced_message("element", "set", "S", "T"),
-      forced_message("key", "map", "M", "K"),
+      forced_omitted("element", "set", "S", "T"),
+      forced_omitted("key", "map", "M", "K"),
     ]
   );
   let first = analysis
     .diagnostics()
     .iter()
     .next()
-    .expect("six diagnostics");
+    .expect("three diagnostics");
   assert_eq!(
     (
       first.primary_label(),
@@ -2456,11 +2448,24 @@ fn a_collections_key_a_deprecated_member_takes_is_refused_once() {
   let forced = analysis
     .diagnostics()
     .iter()
-    .nth(4)
-    .expect("six diagnostics");
+    .nth(1)
+    .expect("three diagnostics");
   assert_eq!(
-    (forced.primary_label(), forced.labels(), forced.help()),
-    forced_words
+    (
+      forced.primary_label(),
+      forced.labels(),
+      forced.label(0).map(|label| label.text()),
+      forced.help()
+    ),
+    (
+      Some("missing required directive argument"),
+      1,
+      Some("required here"),
+      Some(
+        "a set's element and a map's key are non-null however they are written: write the \
+         argument, give it a default, or do not pass the key or element to it"
+      ),
+    )
   );
 
   // An input field, through the input object `W` the directive's argument names: the element is
@@ -2487,11 +2492,11 @@ fn a_collections_key_a_deprecated_member_takes_is_refused_once() {
     ]
   );
 
-  // Where a default fills the slot, at the application's path; and where an `implements` entry
-  // passes the element on, at the entry. Each once, and `S<Int>` adds nothing of this rule's. The
-  // application with the default leaves `v` out, so `S<Int>` is the phase's
-  // `missing-required-directive-argument`, as in `FORCED`; the one on `Mk` is reached at `S<Int>`
-  // only through a derivation, which the phase does not check.
+  // Where a default fills the slot, `v`'s type there, `Y`, takes the element, and the application
+  // leaves `v` out: the application's own mistake, the phase's, once, at its path, labelled at
+  // `v`, and `S<Int>` adds nothing. Where an `implements` entry passes the element on, this rule
+  // reports at the entry, once; the one on `Mk` is reached at `S<Int>` only through a derivation,
+  // which the phase does not check.
   let deprecated_message = "`T`, the element of the set `S`, is non-null in every instantiation, \
                             and here it makes the deprecated argument `v` of the directive `@d` \
                             required";
@@ -2501,24 +2506,17 @@ fn a_collections_key_a_deprecated_member_takes_is_refused_once() {
   let schema = schema_file(&analysis);
   assert_eq!(
     found(&analysis),
-    [
-      (
-        MISSING_ARGUMENT,
-        at(schema, text, "S<Int>", 0),
-        Some(named(schema, text, "@", "d", 1))
-      ),
-      (
-        DEPRECATED_ARGUMENT,
-        named(schema, text, "@", "d", 1),
-        Some(at(schema, text, "deprecated", 0))
-      ),
-    ],
+    [(
+      MISSING_ARGUMENT,
+      named(schema, text, "@", "d", 1),
+      Some(named(schema, text, "(", "v", 0))
+    )],
     "{:#?}",
     analysis.diagnostics()
   );
   assert_eq!(
     messages(&analysis),
-    [missing("S"), String::from(deprecated_message)]
+    [forced_omitted("element", "set", "S", "T")]
   );
   let text = "type Query {\n  s: S<Int>\n}\ndirective @d<X>(v: X @deprecated) on INTERFACE\n\
               interface Mk<X> @marker @d<X>\nscalar S<T> implements Mk<T> @set\n";
@@ -2540,15 +2538,17 @@ fn a_collections_key_a_deprecated_member_takes_is_refused_once() {
 #[test]
 fn a_member_many_collections_make_required_is_read_once() {
   // `@d`'s argument `v` applies `@tag` `tags` times and then `@deprecated`, and each of `sets`
-  // sets gives `v` its element through `@d<T>`: each is its definition's mistake, refused once, at
-  // the `T` of its `@d<T>`, labelled at the one `@deprecated`. The counts vary, and each program
-  // runs again under a diagnostic ceiling of zero, which keeps no report and still builds and
-  // counts each. A test sees the diagnostics, not the work, which holds by construction: where `v`
-  // applies `@deprecated` is found in the one look the table of where each type parameter stands
-  // takes at `v`'s applications, and kept with each set's mistake, so each report reads it in one
-  // lookup. Read from `v`'s applications again for each report, the largest program here would
-  // pass its 3,000 `@tag`s for each of its 3,000 sets, 9 million steps, where the rule now takes a
-  // few for each set.
+  // sets gives `v` its element through `@d<T>(v: 1)`: each is its definition's mistake, refused
+  // once, at the `T` of its `@d<T>`, labelled at the one `@deprecated`. Each application writes
+  // `v`: one that left it out would be the coercion phase's mistake, `v` required of a set's
+  // element in every instantiation, and its error would silence this rule within the set. The
+  // counts vary, and each program runs again under a diagnostic ceiling of zero, which keeps no
+  // report and still builds and counts each. A test sees the diagnostics, not the work, which
+  // holds by construction: where `v` applies `@deprecated` is found in the one look the table of
+  // where each type parameter stands takes at `v`'s applications, and kept with each set's
+  // mistake, so each report reads it in one lookup. Read from `v`'s applications again for each
+  // report, the largest program here would pass its 3,000 `@tag`s for each of its 3,000 sets, 9
+  // million steps, where the rule now takes a few for each set.
   const SETS: usize = 3_000;
   const TAGS: usize = 3_000;
   let limits = Limits::new();
@@ -2564,7 +2564,7 @@ fn a_member_many_collections_make_required_is_read_once() {
       let head = format!("scalar S{index}<T> @set @d<");
       written.push(text.len() + head.len());
       text.push_str(&head);
-      text.push_str("T>\n");
+      text.push_str("T>(v: 1)\n");
     }
     let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
       .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);

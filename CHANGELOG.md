@@ -347,19 +347,26 @@ All notable changes to Smear are documented in this file.
     what a type satisfies. `Application::ty` and `Application::ty_args` answer an application's
     type and complete type arguments, defaults filled; `Def::externs` a scalar's host types and
     `Extern::application` the `@extern` each is bound from; `Def::tier` and `Ty::tier` the tier
-    each requires; and the `extent()` of a contribution, a member and an inline module, where it
-    is written. `Analysis` and `Model` are `PartialEq` and `SourceMap` is `Eq`, and
-    `SourceMap::bind` pairs an analysis with the caller's texts again for a renderer.
+    each requires, and `Def::is_metadata` whether a definition is compile-time metadata, which
+    only type-system directives' types and applications' type arguments reach, and which no
+    definition is while an executable directive holds one of its own type parameters in an
+    argument's type, since an operation can fill it with any of them; and the `extent()` of a
+    contribution, a member and an inline module, where it is written. `Analysis` and `Model` are
+    `PartialEq` and `SourceMap` is `Eq`, `Source::is_complete` says whether a file was read whole,
+    and `SourceMap::bind` pairs an analysis with the caller's texts again for a renderer.
   - **The phases.** The package set is checked; every file is parsed; each package's module tree
     and declarations are collected, duplicate and reserved names refused; every scope, `use` item
     and path is resolved, with a "did you mean" help; each definition is lowered; every
     occurrence is typed, defaults filled, its count of type arguments and the bounds of every
     instantiation the program writes judged; every value is coerced to the type expected where
     it stands, defaults copied and a cycle of them refused, a generic definition's values at each
-    closed instantiation a supplied package writes; each scalar is bound to its host types; each
-    definition is checked against the interfaces it implements, transitively and under type
-    arguments, its entries and members told apart as types; and every definition and type gets its
-    tier.
+    closed instantiation a supplied package writes, but a whole null no instantiation takes, written
+    or copied, once, a default's at its declaration, which owns its copies, and any other where it
+    is coerced, and an argument a collection's key or element makes required, left out with no
+    default, once; each scalar is bound to its host types; each definition is checked against the
+    interfaces it implements, transitively and under type arguments, its entries and members told
+    apart as types; and every definition and type gets its tier, the definitions only compile-time
+    metadata reaches marked first.
   - **The rules.** 33 rules, each a visitor on the public trait, judge what the supplied packages
     wrote once the phases have written the model: smear's own rules on GraphQLx, under eleven
     `smear::graphqlx` codes, and the type-system rules GraphQLx shares with GraphQL in this
@@ -375,7 +382,8 @@ All notable changes to Smear are documented in this file.
     the schema builder gives, but for three capacity ceilings of the schema representation that
     GraphQLx does not have; a differential test holds that, counting each of GraphQL's codes on
     both sides, and beside the three ceilings lists by document each count it lets differ, every
-    one on a document both refuse. A root package with no query root is not ok.
+    one on a document both refuse. A root package with no query root is not ok, unless a file of
+    the root package was not read whole, whose own diagnostic stands.
   - **Codes.** `DiagnosticKind` lists the 39 codes of the analyzer's own family, `smear::graphqlx`,
     in `DiagnosticKind::ALL`, all errors but the warning `shadowed-primitive`; `graphqlx::schema`
     holds the 68 `smear::schema` codes it shares with GraphQL's own validator as public constants,

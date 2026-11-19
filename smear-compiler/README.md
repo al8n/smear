@@ -124,7 +124,7 @@ and checks a GraphQLx program against smear's own rules and the rules GraphQLx s
 | Coercion | Coerces every value to the type expected where it stands, filling what is left out from its default; a value of a custom scalar that is no collection but `null`, or of a type that still names a type parameter, is kept as written | `smear::schema`: 6; `smear::graphqlx`: 4 |
 | Binding | Binds each scalar to its host types | none |
 | Implementation | Checks what each definition says it implements, transitively and field by field, and a union's members | `smear::schema`: 9; `smear::graphqlx`: 1 |
-| Tiers | Gives every definition and every type the tier it requires | none |
+| Tiers | Marks what only compile-time metadata reaches, and gives every definition and every type the tier it requires | none |
 | smear's rules | 33 rules, each a visitor over the model: smear's own on GraphQLx, and the type-system rules GraphQLx shares with GraphQL | `smear::graphqlx`: 11; `smear::schema`: 39 |
 
 `graphqlx::DiagnosticKind::ALL` lists the 39 codes of the analyzer's own family, and

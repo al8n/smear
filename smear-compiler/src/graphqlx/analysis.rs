@@ -299,10 +299,22 @@ impl Analysis {
 ///   occurrence of it, with the value's site code, labelled at the value. So is an argument such
 ///   an application leaves out, its type there the definition's bare nullable type parameter:
 ///   where the instantiation's arguments make it non-null, it is
-///   `missing-required-directive-argument` at the occurrence, labelled at the application. The
+///   `missing-required-directive-argument` at the occurrence, labelled at the application; but
+///   where that parameter is a collection's key or element, which every instantiation makes
+///   non-null, the argument left out with no default is reported at the application, once. A
+///   value that is a whole `null` no instantiation takes, its type written non-null or a
+///   collection's key or element, is not left to the instantiations: written, it is refused once,
+///   at the `null`, with the site's code, or, for a required argument,
+///   `missing-required-directive-argument` at its name; a member's default's, a generic directive's
+///   argument's among them, at its declaration, which owns every copy of it; in a copy of a
+///   directive's default that an application leaves out, the application is
+///   `invalid-default-value`, once, labelled at the default; and the value is recorded for no
+///   instantiation. A `null` nested in a value, and one a field an object literal leaves out
+///   copies, keep the check at each instantiation. The
 ///   values of the applications on a generic directive and on its arguments are checked likewise
 ///   at each closed application of the directive, reported at its path; the directive's own
-///   arguments' defaults are judged only where an application leaves them out. A copy is
+///   arguments' defaults are judged only where an application leaves them out, but for such a
+///   `null`, refused at their declaration. A copy is
 ///   counted before it is made, each default's count kept, and a default whose copy would hold a
 ///   copy of itself is not copied: the argument, or the field, is absent, and under type arguments
 ///   what its count reached is judged as a copy is. The first time a count meets itself, that
@@ -388,7 +400,8 @@ impl Analysis {
 ///   `alloc` at least; a named type its definition's and its arguments', a list `alloc` at least
 ///   and its element's, and a type parameter `core`. Definitions and types that hold one another
 ///   share the greatest tier any of them reaches, found by one worklist, each rising at most
-///   twice.
+///   twice. It first marks the definitions only compile-time metadata reaches, which no tier
+///   reads.
 /// - Runs smear's own rules through [`visit`](super::visit)'s driver, over every supplied package
 ///   ([`Packages::Supplied`]), and keeps what they report in the same list, under the same ceiling.
 ///   Each schema definition the root package writes after its first is
@@ -441,18 +454,28 @@ impl Analysis {
 ///   extern's `tier` above its package's, at that `tier`. A use of a definition of the package's
 ///   own is not reported, what raises it being reported where it is written. Compile-time metadata
 ///   counts nowhere and is not judged: every type occurrence under a directive definition, its
-///   arguments' types and its type parameters' defaults and bounds, and every type argument of an
-///   application of any directive, the written ones and those its directive's defaults fill. The
-///   exemption is shallow: an input object a directive's argument names is a definition like any
-///   other, and its fields are judged where they are written. GraphQL's own rules judge what a
-///   definition a supplied package wrote holds, a GraphQL built-in the root package replaces among
-///   them, with GraphQL's codes: a member whose name begins with `__` is `reserved-field-name`,
-///   `reserved-argument-name`, `reserved-enum-value-name`, `reserved-input-field-name` or
-///   `reserved-directive-argument-name`, by what it is, at its name. A member whose name an
-///   earlier member of its list has, the definition's own and its extensions' members being one
-///   list and each field's arguments another, is `duplicate-field-name`,
-///   `duplicate-argument-name`, `duplicate-enum-value`, `duplicate-input-field-name` or
-///   `duplicate-directive-argument-name`, at its name, with a label at the first. An object, or
+///   arguments' types and its type parameters' defaults and bounds; every type argument of an
+///   application of any directive, the written ones and those its directive's defaults fill; and
+///   everything within a definition only compile-time metadata reaches,
+///   [`Def::is_metadata`](super::Def::is_metadata): a scalar, an enum or an input object that the
+///   types of a directive with no executable location, or an application's type arguments, name,
+///   through lists and every type argument, or that such a definition's own types name in turn,
+///   and that no type written anywhere else names, every package's together. A definition both
+///   reach is judged where it is written, and so is what the argument types of a directive an
+///   operation can apply name, whose values arrive at run time; and while such a directive holds
+///   one of its own type parameters in an argument's type, every such definition is judged, since
+///   an operation can fill that parameter with any of them. A report within a definition both
+///   reach has a last label at where the reach from outside metadata entered, which for what such
+///   a parameter can receive is that argument's type. GraphQL's own rules
+///   judge what a definition a supplied package wrote holds, a GraphQL built-in the root package
+///   replaces among them, with GraphQL's codes: a member whose name begins with `__` is
+///   `reserved-field-name`, `reserved-argument-name`, `reserved-enum-value-name`,
+///   `reserved-input-field-name` or `reserved-directive-argument-name`, by what it is, at its name.
+///   A member whose name an earlier member of its list has, the definition's own and its
+///   extensions' members being one list and each field's arguments another, is
+///   `duplicate-field-name`, `duplicate-argument-name`, `duplicate-enum-value`,
+///   `duplicate-input-field-name` or `duplicate-directive-argument-name`, at its name, with a label
+///   at the first. An object, or
 ///   an interface that is no marker, with no field, a union with no member, an enum with no value
 ///   and an input object with no field, its extensions' members counted, is
 ///   `empty-fields-definition`, `empty-union-members`, `empty-enum-values` or
@@ -542,7 +565,10 @@ impl Analysis {
 ///   with no query root, neither written nor presumed, is `missing-query-root-operation-type`,
 ///   once: at the `schema` of the root package's first schema definition, silent when a phase
 ///   refused something in it, or with none at the root package's package source, where it marks
-///   nothing.
+///   nothing. It is silent while a file of the root package was not read whole, as
+///   [`Source::is_complete`](super::Source::is_complete) says: such a file could have held the
+///   query root, or the schema definition that writes it, and its own diagnostic says why it
+///   contributes less than it writes.
 ///   So a root package with no query root is not ok, as in GraphQL, and a consumer that analyzes a
 ///   library as the root package filters that code. A rule says nothing about a contribution a
 ///   phase already refused something in, and the two rules on the roots' types,
@@ -618,8 +644,10 @@ pub fn analyze<S: SourceText>(
 /// For a package set no layer reports a syntax error for, every layer answers an equal
 /// [`Analysis`], the rules' diagnostics and marks included: the layers hand the same phases the
 /// same documents in the same order. Where a layer reports a syntax error, the package ids and the
-/// source ids are still those every other layer answers, and nothing else is promised. The trees
-/// are beside the analysis, and no part of its equality.
+/// source ids are still those every other layer answers, and nothing else is promised. The source
+/// map records which files a layer read whole, [`Source::is_complete`](super::Source::is_complete),
+/// so on a package set a layer reports a syntax error for, the maps can differ only there, as the
+/// analyses do. The trees are beside the analysis, and no part of its equality.
 pub fn analyze_with<'a, P, S>(
   parser: &P,
   root: &'a Package<S>,
@@ -691,7 +719,7 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
   let Prepared {
     packages,
     mut reporter,
-    sources,
+    mut sources,
     dependencies,
     within: _,
   } = prepared;
@@ -700,6 +728,9 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
     sources.len() as usize,
     "one document entry per source"
   );
+  // Which files were read whole, for the rules: the one place that serves `analyze` and
+  // `analyze_with`.
+  sources.note_read(documents);
 
   let mut builder = builder_of(&packages, &sources, &dependencies);
   let collected = collect::items(&packages, &sources, documents, limits, &mut reporter);

@@ -60,7 +60,10 @@
 //! the names an extension's own list writes, which no public view holds. `DuplicateMember` reads
 //! another, `IdRange::start`, to name the member at a position of a list. `ExternMisuse` and
 //! `TierViolation` read the public `Extern::application`, the application an extern is bound from.
-//! `supplied` and `one_of` are this module's own, and read the public model alone.
+//! `TierViolation` reads one crate-private accessor too, `Def::runtime_entry`: where a type
+//! outside compile-time metadata first reaches a definition metadata reaches too, which no public
+//! view answers, and which is a candidate for a public one. `supplied` and `one_of` are this
+//! module's own, and read the public model alone.
 //!
 //! One rule is in no set: `UnboundedInstantiation`, which is public, which `analyze` never runs,
 //! and which a backend composes into its own walk. It reads the public model alone.

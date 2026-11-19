@@ -245,8 +245,8 @@ impl<'a> Cx<'a> {
     self.model
   }
 
-  /// The analysis's sources: each one's package, path and length. A visitor never needs a
-  /// source's text, because the model owns every spelling it answers with.
+  /// The analysis's sources: each one's package, path and length, and whether it was read whole. A
+  /// visitor never needs a source's text, because the model owns every spelling it answers with.
   #[inline]
   pub fn sources(&self) -> &'a SourceMap {
     self.sources

@@ -496,11 +496,87 @@ impl<'a> Def<'a> {
   /// hold one another share the greatest tier any of them reaches.
   ///
   /// In an analysis that [`is_ok`](crate::graphqlx::Analysis::is_ok), it is at most its package's
-  /// [`tier`](crate::graphqlx::PackageInfo::tier), a meta-type aside: a use above a package's
-  /// tier is [`Tier`](crate::graphqlx::DiagnosticKind::Tier).
+  /// [`tier`](crate::graphqlx::PackageInfo::tier), a meta-type and a
+  /// [metadata](Self::is_metadata) definition aside: a use above a package's tier is
+  /// [`Tier`](crate::graphqlx::DiagnosticKind::Tier).
   #[inline]
   pub fn tier(&self) -> Tier {
     self.row().tier
+  }
+
+  /// Whether it is compile-time metadata: a scalar, an enum or an input object a supplied package
+  /// defines that compile-time metadata reaches and that nothing outside it reaches.
+  ///
+  /// Compile-time metadata is every type a type-system directive writes, its arguments' types and
+  /// its type parameters' defaults and bounds, a type-system directive being one that lists no
+  /// executable location such as `FIELD` or `QUERY`; and every type argument of a directive
+  /// application, written or filled from its directive's defaults. It reaches each definition such
+  /// a type names, through lists and every type argument, and what each metadata definition's own
+  /// types name in turn, every package's together. A type written anywhere else that names a
+  /// definition, through any type argument and in whatever package, makes it no metadata:
+  /// `f(b: Binding)`, `Ref<Binding>` and `[Binding]` each do, and so does the argument type of a
+  /// directive an operation can apply, whose values arrive at run time. Such a directive that holds
+  /// one of its own type parameters in an argument's type, as `directive @run<T>(v: T) on FIELD`
+  /// does, makes no definition metadata at all: an operation can fill that parameter with any of
+  /// them, which no schema can know. An object, an interface, a union and a directive are never
+  /// metadata, nor is a definition of `core`, `alloc` or `std`. This is not the GraphQL
+  /// meta-types, whose origin is [`Compat`](Origin::Compat).
+  ///
+  /// The answer is the analyzed program's. A package analyzed alone can answer `true` for a
+  /// definition that a dependant's field makes runtime, and `false` for one only a dependant's
+  /// directive takes, so a backend that compiles a package apart from its dependants cannot leave a
+  /// definition out on this answer. A type that names a metadata definition is written only in
+  /// metadata, though [`Model::instantiations`] lists it under its definition, which need not be
+  /// metadata: `Pair<Note>` under `Pair`. A backend that leaves metadata out leaves such an
+  /// instantiation out too. In an analysis that is not ok, an occurrence a phase left with no
+  /// complete type, or with the unresolved type, names nothing, so a definition compile-time
+  /// metadata reaches can answer `true` when its only use outside metadata is such an occurrence.
+  /// An occurrence a phase refused but kept the complete type of, as one whose bound fails, still
+  /// reaches what that type names.
+  ///
+  /// The tier rule judges nothing a metadata definition holds, so in an analysis that is ok its
+  /// [`tier`](Self::tier) may be above its package's. A backend that emits only what runs leaves it
+  /// out, and one that emits it for a compiler reads its tier. It is computed whatever the verdict.
+  ///
+  /// # Examples
+  ///
+  /// An input object only a directive's argument takes is metadata, and a `core` package may hold
+  /// it though it needs `alloc`:
+  ///
+  /// ```
+  /// use smear_compiler::graphqlx::{Layout, Limits, Namespace, Package, SourceFile, Tier, analyze};
+  ///
+  /// let text = "type Query { ok: Int }\n\
+  ///             input Binding { lang: string! }\n\
+  ///             directive @bind(b: Binding) on OBJECT\n";
+  /// let root = Package::new("app", Layout::Flat, Tier::Core)
+  ///   .with_files([SourceFile::new("schema.graphqlx", text)]);
+  /// let analysis = analyze(&root, &[], &Limits::new());
+  /// assert!(analysis.is_ok());
+  /// let model = analysis.model();
+  /// let binding = model.lookup(Namespace::Type, "^::app::Binding").expect("defined");
+  /// assert!(model.def(binding).is_metadata());
+  /// assert_eq!(model.def(binding).tier(), Tier::Alloc);
+  /// ```
+  #[inline]
+  pub fn is_metadata(&self) -> bool {
+    self.row().metadata
+  }
+
+  /// Where a type outside compile-time metadata first reaches it, when compile-time metadata
+  /// reaches it too: where the tier rule labels its reports within it. `None` for every other
+  /// definition.
+  //
+  // Crate-private: no public view answers where a reach entered, and the tier rule reads it here.
+  #[inline]
+  pub(crate) fn runtime_entry(&self) -> Option<Location> {
+    let entries = &self.model.runtime_entries;
+    let at = entries
+      .binary_search_by_key(&self.id, |&(def, _): &(DefId, Location)| def)
+      .ok()?;
+    entries
+      .get(at)
+      .map(|&(_, location): &(DefId, Location)| location)
   }
 
   /// The intrinsic primitive it is, or `None` for every definition but `core`'s primitives.
