@@ -36,6 +36,11 @@
 //! default is followed where it fills, since an occurrence's type, and an application's, holds what
 //! it filled. Nor an interface's instantiation into the types that implement it.
 //!
+//! A contribution the orphan rule refuses, which another package writes into a definition, grows
+//! nothing: each followed position is read from the contributions the rule accepts, as
+//! `rules::accepted` answers, the one test `coerce`'s closure of derived instantiations reads too.
+//! So what the rule refuses changes no definition's growth, nor what the closure derives.
+//!
 //! It costs time linear in the model's definitions, members, applications and types, and has no
 //! limit of its own. When its graph has more nodes than a `u32` numbers, which only a model of tens
 //! of gigabytes reaches, it is not built, and nothing is found to grow.
@@ -45,8 +50,9 @@ use std::{vec, vec::Vec};
 
 use crate::{
   graphqlx::{
-    ApplicationId, DefId, MemberId, Model, NamedTy, NamedTypeExpr, Ty, TyId, TyKind, TypeExprId,
-    TypeExprKind, TypeParam, TypeParamRef,
+    ApplicationId, DefId, MemberId, Model, NamedTy, NamedTypeExpr, SourceMap, Ty, TyId, TyKind,
+    TypeExprId, TypeExprKind, TypeParam, TypeParamRef,
+    rules::{Accepted, accepted, accepts_application},
   },
   kernel::scc,
 };
@@ -60,11 +66,11 @@ pub(crate) struct Grown {
   pub(crate) types: Vec<Found>,
 }
 
-/// The graph over `model` and what it finds there: the definitions that grow, and, when `marks`,
-/// which types are marked and which hold a marked one. `Err` when the graph cannot be numbered in
-/// a `u32`.
-pub(crate) fn grown(model: &Model, marks: bool) -> Result<Grown, Overflow> {
-  let mut build = Build::new(model)?;
+/// The graph over `model`, whose files `sources` holds, and what it finds there: the definitions
+/// that grow, and, when `marks`, which types are marked and which hold a marked one. `Err` when the
+/// graph cannot be numbered in a `u32`.
+pub(crate) fn grown(model: &Model, sources: &SourceMap, marks: bool) -> Result<Grown, Overflow> {
+  let mut build = Build::new(model, sources)?;
   build.roots()?;
   if build.growing.is_empty() {
     // No edge grows, so no definition does, and nothing is marked.
@@ -186,6 +192,8 @@ struct Edge {
 struct Build<'a> {
   /// The model it is built over.
   model: &'a Model,
+  /// The model's files: which package wrote each contribution, which the orphan rule judges.
+  sources: &'a SourceMap,
   /// The node of each definition's first type parameter, by definition, then one past the last.
   prefix: Vec<u32>,
   /// The node the next type to be named is given, which is also the count of nodes so far.
@@ -208,7 +216,7 @@ impl<'a> Build<'a> {
   /// The build over `model`, its type parameters numbered: one pass over the definitions. The
   /// kernel numbers its discoveries from one in a `u32`, so the count of nodes stays below
   /// `u32::MAX`.
-  fn new(model: &'a Model) -> Result<Self, Overflow> {
+  fn new(model: &'a Model, sources: &'a SourceMap) -> Result<Self, Overflow> {
     let defs = model.defs();
     let mut prefix: Vec<u32> = Vec::with_capacity((defs.len() as usize).saturating_add(1));
     let mut next: u32 = 0;
@@ -223,6 +231,7 @@ impl<'a> Build<'a> {
     prefix.push(next);
     Ok(Self {
       model,
+      sources,
       prefix,
       next,
       entries: Vec::new(),
@@ -377,39 +386,42 @@ impl<'a> Build<'a> {
   /// The followed positions of every definition that has a type parameter: each field's type and
   /// its arguments' types, each input field's and each directive argument's type, each
   /// `implements` entry and union member, and the type arguments and the type of each application
-  /// written on the definition and on each of its members, an enum's values among them.
+  /// written on the definition and on each of its members, an enum's values among them. Each is
+  /// read from the contributions the orphan rule accepts, as `rules::accepted` answers, alone: what
+  /// a contribution it refuses writes grows nothing.
   fn roots(&mut self) -> Result<(), Overflow> {
     let model: &'a Model = self.model;
+    let sources: &'a SourceMap = self.sources;
     for id in model.defs() {
       if self.param(id, 0).is_none() {
         continue;
       }
-      let def = model.def(id);
-      for entry in def.implements() {
-        self.walk(*entry)?;
-      }
-      for member in def.union_members() {
-        self.walk(*member)?;
-      }
-      for application in def.applications() {
-        self.applied(*application)?;
-      }
-      for field in def.fields() {
-        self.member(field)?;
-        for argument in model.member(field).arguments() {
-          self.member(argument)?;
+      for part in model.def(id).contributions() {
+        let judged = accepted(model, sources, id, &part);
+        if judged == Accepted::Refused {
+          continue;
         }
-      }
-      for members in [def.input_fields(), def.enum_values(), def.arguments()] {
-        for member in members {
+        for &item in part.implements().iter().chain(part.union_members()) {
+          self.walk(item)?;
+        }
+        for &application in part.applications() {
+          if accepts_application(model, judged, application) {
+            self.applied(application)?;
+          }
+        }
+        for member in part.members() {
           self.member(member)?;
+          for argument in model.member(member).arguments() {
+            self.member(argument)?;
+          }
         }
       }
     }
     Ok(())
   }
 
-  /// A member's type, and the type arguments and the type of each of its applications.
+  /// A member's type, and the type arguments and the type of each of its applications: what the
+  /// contribution that wrote the member wrote with it, which `roots` read as accepted.
   fn member(&mut self, id: MemberId) -> Result<(), Overflow> {
     let model: &'a Model = self.model;
     let member = model.member(id);
@@ -424,7 +436,8 @@ impl<'a> Build<'a> {
 
   /// An application's type arguments as written, each walked whatever their count; then its type,
   /// its directive's instantiation with every type argument, written or filled, entered as a named
-  /// type is. An application whose count of type arguments was refused has no type.
+  /// type is. An application whose count of type arguments was refused has no type. Each is one an
+  /// accepted contribution wrote, as `roots` and `member` find them.
   fn applied(&mut self, id: ApplicationId) -> Result<(), Overflow> {
     let model: &'a Model = self.model;
     let application = model.application(id);

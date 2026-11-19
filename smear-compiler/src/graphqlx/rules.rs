@@ -134,6 +134,7 @@ use super::{
   SourceMap, TypeExprId, TypeExprKind, id::dense,
 };
 
+pub(crate) use self::orphan_extension::{Accepted, accepted, accepts_application};
 pub use self::unbounded_instantiation::UnboundedInstantiation;
 
 /// The definition `def`'s own contribution, its first, which is no extension, and the package that

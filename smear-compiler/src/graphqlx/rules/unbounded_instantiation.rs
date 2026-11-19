@@ -23,7 +23,7 @@ use tokora::diagnostic::Location;
 
 use crate::graphqlx::{
   ApplicationId, Cx, Diagnostic, DiagnosticKind, Model, NamedTy, NamedTypeExpr, Resolution, Site,
-  TyKind, TypeExprId, TypeExprKind, Visitor,
+  SourceMap, TyKind, TypeExprId, TypeExprKind, Visitor,
   diagnostic::Excerpt,
   types::growth::{self, Found, holds},
 };
@@ -143,10 +143,14 @@ impl UnboundedInstantiation {
     Self { types: Vec::new() }
   }
 
-  /// What the rule's `begin` finds over `model`: the graph, with its marks, or `Err` when it cannot
-  /// be numbered. The test-support door reads the definitions it finds to grow from here.
-  pub(crate) fn graph(model: &Model) -> Result<growth::Grown, growth::Overflow> {
-    growth::grown(model, true)
+  /// What the rule's `begin` finds over `model`, whose files `sources` holds: the graph, with its
+  /// marks, or `Err` when it cannot be numbered. The test-support door reads the definitions it
+  /// finds to grow from here.
+  pub(crate) fn graph(
+    model: &Model,
+    sources: &SourceMap,
+  ) -> Result<growth::Grown, growth::Overflow> {
+    growth::grown(model, sources, true)
   }
 }
 
@@ -169,7 +173,7 @@ impl Visitor for UnboundedInstantiation {
     self.types = Vec::new();
     // Only a model of tens of gigabytes has more nodes than a `u32` numbers: the rule then keeps
     // nothing, and says nothing in this walk.
-    if let Ok(grown) = Self::graph(cx.model()) {
+    if let Ok(grown) = Self::graph(cx.model(), cx.sources()) {
       self.types = grown.types;
     }
   }

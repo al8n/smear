@@ -34,6 +34,8 @@ const CYCLE: &str = "smear::schema::input-object-default-value-cycle";
 const MARKER_MISUSE: &str = "smear::graphqlx::marker-misuse";
 /// GraphQL's code for two arguments of one name.
 const DUPLICATE_ARGUMENT: &str = "smear::schema::duplicate-argument-name";
+/// The code of an extension a package may not write.
+const ORPHAN: &str = "smear::graphqlx::orphan-extension";
 /// The label at the type that derives the instantiation a report names.
 const DERIVES: &str = "this derives that instantiation";
 
@@ -281,7 +283,7 @@ fn def_grows_agrees_with_the_opt_in_rule_on_every_definition_of_the_corpus() {
     let model = analysis.model();
     assert_eq!(
       grown(model),
-      test_support::grown_by_the_rule(model),
+      test_support::grown_by_the_rule(model, analysis.sources()),
       "{}",
       path.display()
     );
@@ -294,7 +296,11 @@ fn def_grows_agrees_with_the_opt_in_rule_on_every_definition_of_the_corpus() {
     let analysis = analyze_text(text, &Limits::new());
     let model = analysis.model();
     let ours = grown(model);
-    assert_eq!(ours, test_support::grown_by_the_rule(model), "{text}");
+    assert_eq!(
+      ours,
+      test_support::grown_by_the_rule(model, analysis.sources()),
+      "{text}"
+    );
     assert_eq!(names(model, &ours), expected, "{text}");
     growing += ours.len();
   }
@@ -1566,30 +1572,156 @@ fn an_argument_name_written_twice_is_one_name_to_the_relevance_scan() {
   }
 }
 
-/// What another package writes into a definition derives nothing: the dependency `dep` writes
-/// `Box<Boolean>`, and the root package's extension, an orphan, adds `implements I<T>` to `Box`,
-/// where `I<X>`'s `f` defaults `arg` to `0`, which `Boolean` does not take, and which makes `I`
-/// relevant on its own. The implementation check reads no such entry, and the closure follows none:
-/// `dep`'s `Box<Boolean>` derives no `I<Boolean>`, and nothing is said of it, under the default
-/// limits or with no value step to spend. Refuses a foreign entry the closure expands.
-#[test]
-fn a_foreign_implements_entry_derives_nothing() {
-  let theirs = "type Box<T> {\n  v: T\n}\ntype Holder {\n  b: Box<Boolean>\n}\n";
-  let ours = "type Query {\n  x: Int\n}\ninterface I<X> {\n  f(arg: X = 0): Int\n}\n\
-              extend type ^::dep::Box<T> implements I<T>\n";
+/// An analysis of the root package `app`, its one file `schema.graphqlx` holding `ours`, beside the
+/// dependency `dep`, its one file `dep.graphqlx` holding `theirs`, within `limits`.
+fn analyze_beside(ours: &str, theirs: &str, limits: &Limits) -> Analysis {
   let root = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", ours)])
     .with_dependencies(["dep"]);
   let dependencies = [Package::new("dep", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("dep.graphqlx", theirs)])];
+  analyze(&root, &dependencies, limits)
+}
+
+/// Each diagnostic of `analysis` in the dependency `dep`'s file, its code and where it is, in the
+/// list's order.
+fn in_dependency(analysis: &Analysis) -> Vec<(&'static str, Location)> {
+  let sources = analysis.sources();
+  let file = analysis
+    .model()
+    .package(PackageId::new(4))
+    .sources()
+    .into_iter()
+    .find(|id: &SourceId| sources.source(*id).path() == "dep.graphqlx")
+    .expect("the dependency's file");
+  found(analysis)
+    .into_iter()
+    .filter(|&(_, at): &(&'static str, Location)| at.source() == file.get())
+    .collect()
+}
+
+/// Asserts that `orphan`, an extension the root package writes of a definition of the dependency
+/// holding `theirs`, beside `ours`, is refused by the orphan rule and changes nothing said in the
+/// dependency's file, under the default limits and with no value step to spend.
+fn an_orphan_changes_nothing_in_the_dependency(theirs: &str, ours: &str, orphan: &str) {
+  let extended = format!("{ours}{orphan}");
   for limits in [Limits::new(), Limits::new().with_max_value_steps(0)] {
-    let analysis = analyze(&root, &dependencies, &limits);
-    for code in [DEFAULT, LIMIT] {
-      assert!(
-        codes_at(&analysis, code).is_empty(),
-        "{:#?}",
-        analysis.diagnostics()
-      );
-    }
+    let without = analyze_beside(ours, theirs, &limits);
+    let with = analyze_beside(&extended, theirs, &limits);
+    assert!(
+      !codes_at(&with, ORPHAN).is_empty(),
+      "{:#?}",
+      with.diagnostics()
+    );
+    assert_eq!(
+      in_dependency(&with),
+      in_dependency(&without),
+      "{orphan}{:#?}",
+      with.diagnostics()
+    );
   }
+}
+
+/// A field, with an argument, that another package's extension adds to a dependency's generic type
+/// derives nothing: `arg: Bad<T>` of the root package's `extra` on `^::dep::Box<T>` would derive
+/// `Bad<Int>` from the dependency's `Box<Int>`, whose `"text"` does not fit. Refuses a refused
+/// member, or its argument, read as a position.
+#[test]
+fn an_orphan_field_with_an_argument_derives_nothing_in_the_dependency() {
+  an_orphan_changes_nothing_in_the_dependency(
+    "type Box<T> {\n  v: T\n}\ntype Holder {\n  b: Box<Int>\n}\n",
+    "type Query {\n  x: Int\n}\ninput Bad<U> {\n  v: U = \"text\"\n}\n",
+    "extend type ^::dep::Box<T> {\n  extra(arg: Bad<T>): Int\n}\n",
+  );
+}
+
+/// An `implements` entry another package's extension adds to a dependency's generic type derives
+/// nothing: `implements I<T>` on `^::dep::Box<T>` would derive `I<Boolean>` from the dependency's
+/// `Box<Boolean>`, whose `arg` defaults to `0`. Refuses a refused entry read as a position.
+#[test]
+fn an_orphan_implements_entry_derives_nothing_in_the_dependency() {
+  an_orphan_changes_nothing_in_the_dependency(
+    "type Box<T> {\n  v: T\n}\ntype Holder {\n  b: Box<Boolean>\n}\n",
+    "type Query {\n  x: Int\n}\ninterface I<X> {\n  f(arg: X = 0): Int\n}\n",
+    "extend type ^::dep::Box<T> implements I<T>\n",
+  );
+}
+
+/// A directive application another package's extension adds to a dependency's generic type derives
+/// nothing: `@d<T>` on `^::dep::Box<T>` would derive `d<Int>`, and through `v`'s type `Bad<Int>`,
+/// from the dependency's `Box<Int>`. Refuses a refused application read as a position.
+#[test]
+fn an_orphan_application_on_a_type_derives_nothing_in_the_dependency() {
+  an_orphan_changes_nothing_in_the_dependency(
+    "type Box<T> {\n  v: T\n}\ntype Holder {\n  b: Box<Int>\n}\n",
+    "type Query {\n  x: Int\n}\ninput Bad<U> {\n  v: U = \"text\"\n}\n\
+     directive @d<X>(v: Bad<X>) on OBJECT\n",
+    "extend type ^::dep::Box<T> @d<T>\n",
+  );
+}
+
+/// An application on a field another package's extension adds to a dependency's generic type
+/// derives nothing: `@d<T>` on the root package's `extra` would derive `d<Int>`, and `Bad<Int>`,
+/// from the dependency's `Box<Int>`. Refuses a refused member's application read as a position.
+#[test]
+fn an_orphan_application_on_a_field_derives_nothing_in_the_dependency() {
+  an_orphan_changes_nothing_in_the_dependency(
+    "type Box<T> {\n  v: T\n}\ntype Holder {\n  b: Box<Int>\n}\n",
+    "type Query {\n  x: Int\n}\ninput Bad<U> {\n  v: U = \"text\"\n}\n\
+     directive @d<X>(v: Bad<X>) on FIELD_DEFINITION\n",
+    "extend type ^::dep::Box<T> {\n  extra: Int @d<T>\n}\n",
+  );
+}
+
+/// What another package writes into a dependency's definition grows nothing: the root package's
+/// `implements Loop<[T]>` on `^::dep::I<T>`, where `Loop<X>` holds an `I<X>`, would close a cycle
+/// that wraps `T`, and make `I` grow, so that the `I<Boolean>` the dependency's `Wrap<Boolean>`
+/// derives, whose `x` defaults to `0`, would no longer be judged. `I` grows in neither analysis,
+/// and the dependency's `invalid-default-value` is said in both. Refuses a refused entry read by
+/// the growth graph.
+#[test]
+fn an_orphan_implements_entry_grows_nothing_in_the_dependency() {
+  let theirs = "interface I<T> {\n  f(x: T = 0): Int\n}\ntype Wrap<T> {\n  i: I<T>\n}\n\
+                type Holder {\n  w: Wrap<Boolean>\n}\n";
+  let ours = "type Query {\n  x: Int\n}\ninterface Loop<X> {\n  item: ^::dep::I<X>\n}\n";
+  let orphan = "extend interface ^::dep::I<T> implements Loop<[T]>\n";
+  an_orphan_changes_nothing_in_the_dependency(theirs, ours, orphan);
+  for text in [ours.to_owned(), format!("{ours}{orphan}")] {
+    let analysis = analyze_beside(&text, theirs, &Limits::new());
+    assert!(
+      in_dependency(&analysis)
+        .iter()
+        .any(|&(code, _): &(&'static str, Location)| code == DEFAULT),
+      "{:#?}",
+      analysis.diagnostics()
+    );
+    let model = analysis.model();
+    let interface = model
+      .lookup(Namespace::Type, "^::dep::I")
+      .expect("the dependency's `I`");
+    assert!(!model.def(interface).grows(), "{text}");
+  }
+}
+
+/// The one extension of another package's definition the orphan rule accepts, the root package's
+/// of a built-in that adds directives and nothing else, is read as the definition's own: the root
+/// package's `@tag<U>` on `std`'s `HashSet<U>` has the open type `tag<T>`, so `HashSet<Int>`
+/// derives `tag<Int>`, and through `extra`'s type `Wrap<Int>`, whose `"s"` does not fit, reported
+/// at `HashSet<Int>`. Refuses an accepted application on a built-in left out of the closure.
+#[test]
+fn the_root_packages_application_on_a_generic_built_in_is_still_expanded() {
+  let text = "type Query {\n  f(s: HashSet<Int>): Int\n}\ninput Wrap<W> {\n  w: W = \"s\"\n}\n\
+              directive @tag<X>(value: X, extra: Wrap<X>) on SCALAR\n\
+              extend scalar HashSet<U> @tag<U>(value: 1)\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let set = at(schema, text, "HashSet<Int>", 0);
+  assert_eq!(found(&analysis), [(DEFAULT, set)]);
+  assert_eq!(
+    labels(the(&analysis, DEFAULT, set)),
+    [
+      (after(schema, text, "extra: ", "Wrap<X>"), DERIVES),
+      (after(schema, text, "w: W = ", "\"s\""), "this value"),
+    ]
+  );
 }

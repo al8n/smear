@@ -38,6 +38,7 @@ use crate::graphqlx::{
   id::{DefId, TyId},
   limits::Limits,
   model::{ModelBuilder, Shape, TypeParamRef},
+  source::SourceMap,
 };
 
 pub(crate) mod closure;
@@ -46,13 +47,14 @@ pub(crate) mod growth;
 /// Marks each definition of `builder` that grows, once instantiation has typed every occurrence
 /// and completed every application: one of its type parameters reaches itself, through the
 /// positions a copy of an instantiation needs, with a type argument that wraps what it was given.
-/// The graph is read off the model as instantiation left it, which holds everything it reads.
+/// The graph is read off the model as instantiation left it, which holds everything it reads, and
+/// off `sources`, which tells the contributions the orphan rule refuses, which grow nothing.
 ///
 /// A graph too large to number in a `u32`, which only a model of tens of gigabytes holds, marks
 /// nothing: what a derived instantiation costs is then bounded by the limits alone, as it is
 /// everywhere.
-pub(crate) fn grow(builder: &mut ModelBuilder) {
-  let Ok(grown) = growth::grown(builder.so_far(), false) else {
+pub(crate) fn grow(builder: &mut ModelBuilder, sources: &SourceMap) {
+  let Ok(grown) = growth::grown(builder.so_far(), sources, false) else {
     return;
   };
   for def in grown.defs {

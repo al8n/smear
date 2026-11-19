@@ -782,7 +782,7 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
     &mut builder,
     &mut reporter,
   );
-  types::grow(&mut builder);
+  types::grow(&mut builder, &sources);
   coerce::coerce(
     raw,
     &declarations,

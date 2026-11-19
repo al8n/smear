@@ -24,6 +24,7 @@ use super::{
   package::Package,
   resolve::{NonZeroAlias, Resolved},
   rules::Rules,
+  source::SourceMap,
   text::SourceText,
 };
 
@@ -65,11 +66,11 @@ pub fn text_len(model: &Model) -> usize {
 }
 
 /// The definitions that grow by the graph [`UnboundedInstantiation`] builds in its `begin` over
-/// the finished `model`, in id order: empty when that graph cannot be numbered. For the test that
-/// holds the rule and `Def::grows`, which the analysis reads off the same graph once instantiation
-/// has typed every occurrence, to one answer.
-pub fn grown_by_the_rule(model: &Model) -> Vec<DefId> {
-  match UnboundedInstantiation::graph(model) {
+/// the finished `model`, whose files `sources` holds, in id order: empty when that graph cannot be
+/// numbered. For the test that holds the rule and `Def::grows`, which the analysis reads off the
+/// same graph once instantiation has typed every occurrence, to one answer.
+pub fn grown_by_the_rule(model: &Model, sources: &SourceMap) -> Vec<DefId> {
+  match UnboundedInstantiation::graph(model, sources) {
     Ok(grown) => grown.defs,
     Err(_) => Vec::new(),
   }

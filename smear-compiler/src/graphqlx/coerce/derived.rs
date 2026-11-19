@@ -13,33 +13,35 @@
 //! is expanded once.
 //!
 //! An instantiation's expansion reads what a copy of it needs under its arguments: each of its
-//! definition's members' types, its `implements` entries and union members its own package writes,
-//! as the implementation check reads them, and the complete type of each application on the
-//! definition or on one of its members, rebuilt as the check at a written instantiation rebuilds a
-//! member's type, through the same remembered rebuild. Each instantiation of a generic definition
-//! the rebuilt types hold, at any depth, is derived, with the type or the application that derives
-//! it; a written one is no child, being judged where it is written and expanded as a root, and what
-//! it holds is its own. A root's expansion reads the arguments its type parameters' defaults fill
-//! too, past the most any occurrence of it writes: what a default fills is derived by that default.
+//! definition's members' types, its `implements` entries and union members, and the complete type
+//! of each application on the definition or on one of its members, rebuilt as the check at a
+//! written instantiation rebuilds a member's type, through the same remembered rebuild. Each
+//! instantiation of a generic definition the rebuilt types hold, at any depth, is derived, with the
+//! type or the application that derives it; a written one is no child, being judged where it is
+//! written and expanded as a root, and what it holds is its own. A root's expansion reads the
+//! arguments its type parameters' defaults fill too, past the most any occurrence of it writes:
+//! what a default fills is derived by that default. A contribution the orphan rule refuses, which
+//! another package writes into a definition, derives nothing, grows nothing and makes nothing
+//! relevant: every walk over a definition's contributions, here and in the growth graph, reads
+//! those the rule accepts alone, as `rules::accepted` answers, the rule's own test.
 //!
 //! The expansion reads only toward what can be judged. What an instantiation is judged for is a
 //! value recorded under its definition, here, and in the implementation check an `implements` entry
 //! or a union member that names its type parameters, or an argument typed by its own bare nullable
 //! type parameter with no default, which may be required, that a field of an object or an interface
 //! adds beside the field of its name of an interface, no marker, that one of the definition's
-//! entries names: each entry and member one its own package writes, as the check reads them, and
-//! each field one its definition's package writes. A definition is relevant when it has something
-//! judged, or when one of its positions holds, at any depth and through any definition, a named
-//! type of a relevant definition that does not grow and that no supplied package writes, open or
-//! closed, a type a default fills among them, or a type whose arguments hold one; and a position is
-//! read only when it holds such a type. A derived instantiation of a definition that grows is
-//! neither judged nor expanded, so its own definition makes it reach nothing: it reaches through
-//! what its arguments hold alone. That is a least fixpoint, and so transitive: a definition is
-//! relevant exactly when an expansion of an instantiation of it can reach an instantiation of a
-//! definition with something judged, since the walk that finds it reads below each position what an
-//! expansion walks below its rebuild, a written instantiation ending both, and what a rebuild puts
-//! in a type parameter's place is written or was met above. So a program whose generic definitions
-//! hold nothing to judge derives nothing, and pays nothing.
+//! entries names. A definition is relevant when it has something judged, or when one of its
+//! positions holds, at any depth and through any definition, a named type of a relevant definition
+//! that does not grow and that no supplied package writes, open or closed, a type a default fills
+//! among them, or a type whose arguments hold one; and a position is read only when it holds such a
+//! type. A derived instantiation of a definition that grows is neither judged nor expanded, so its
+//! own definition makes it reach nothing: it reaches through what its arguments hold alone. That is
+//! a least fixpoint, and so transitive: a definition is relevant exactly when an expansion of an
+//! instantiation of it can reach an instantiation of a definition with something judged, since the
+//! walk that finds it reads below each position what an expansion walks below its rebuild, a
+//! written instantiation ending both, and what a rebuild puts in a type parameter's place is
+//! written or was met above. So a program whose generic definitions hold nothing to judge derives
+//! nothing, and pays nothing.
 //!
 //! # What it costs, and what ends it
 //!
@@ -123,9 +125,10 @@ use super::{Checked, Coercion, CountKey, OmittedArgument, Owed, OwedValue, Recor
 use crate::graphqlx::{
   code::schema,
   diagnostic::{Diagnostic, Excerpt, Message},
-  id::{ApplicationId, DefId, MemberId, PackageId, PoolRange, Sym, TyId, TypeExprId, dense},
+  id::{ApplicationId, DefId, MemberId, PoolRange, Sym, TyId, TypeExprId, dense},
   model::{Applied, DefKind, Occurrence, Resolution, Shape, Written, WrittenParam},
   raw::RawTree,
+  rules::{Accepted, accepted, accepts_application},
   types::{
     Limit, Spent, Stop,
     closure::{Blame, Closure, DERIVES, Node, Place},
@@ -595,36 +598,41 @@ impl Coercion<'_, '_, '_> {
     building.positions = compact;
   }
 
-  /// Appends to `into` each open position of `def`: its `implements` entries and, for a union, its
-  /// members, those the implementation check reads alone, as [`own_item`](Self::own_item) finds
-  /// them; the complete types of its applications; and each member's type and its applications'
-  /// complete types, a field's arguments' too. An entry another package writes into `def` is that
-  /// package's mistake, and derives nothing.
+  /// Appends to `into` each open position of `def` that a contribution the orphan rule accepts
+  /// writes, as `rules::accepted` answers: its `implements` entries and, for a union, its members,
+  /// those whose types resolved, as the implementation check reads them; the complete types of its
+  /// applications the rule accepts; and each of its members' types and their applications' complete
+  /// types, a field's arguments' too. What a contribution the rule refuses writes derives nothing.
   fn push_positions(&self, def: DefId, into: &mut Vec<Position>) {
-    if let Some(own) = self.sources.written_by(self.builder.def_location(def)) {
-      let members: &[TypeExprId] = if self.builder.def_kind(def) == Some(DefKind::Union) {
-        self.builder.def_union_members(def)
-      } else {
-        &[]
-      };
-      for &item in self.builder.def_implements(def).iter().chain(members) {
-        if self.own_item(item, own).is_some() {
+    let model = self.builder.so_far();
+    let union = self.builder.def_kind(def) == Some(DefKind::Union);
+    for part in model.def(def).contributions() {
+      let judged = accepted(model, self.sources, def, &part);
+      if judged == Accepted::Refused {
+        continue;
+      }
+      let members: &[TypeExprId] = if union { part.union_members() } else { &[] };
+      for &item in part.implements().iter().chain(members) {
+        if self.resolved(item).is_some() {
           self.push_type(def, item, into);
         }
       }
-    }
-    for &application in self.builder.def_applications(def) {
-      self.push_application(def, application, into);
-    }
-    for member in self.builder.def_members(def) {
-      self.push_member(def, member, into);
-      for argument in self.builder.member_arguments(member) {
-        self.push_member(def, argument, into);
+      for &application in part.applications() {
+        if accepts_application(model, judged, application) {
+          self.push_application(def, application, into);
+        }
+      }
+      for member in part.members() {
+        self.push_member(def, member, into);
+        for argument in self.builder.member_arguments(member) {
+          self.push_member(def, argument, into);
+        }
       }
     }
   }
 
-  /// Appends to `into` the type and the applications of `member`, of `def`, that are open.
+  /// Appends to `into` the type and the applications of `member`, of `def`, that are open: what the
+  /// contribution that wrote the member wrote with it, which `push_positions` read as accepted.
   fn push_member(&self, def: DefId, member: MemberId, into: &mut Vec<Position>) {
     if let Some(written) = self.builder.member_ty(member) {
       self.push_type(def, written, into);
@@ -671,9 +679,10 @@ impl Coercion<'_, '_, '_> {
   /// an interface one of its entries names, but a marker, whose fields the check does not compare,
   /// typed by its own bare nullable type parameter with no default, which may be required, each
   /// name once. An argument of a field that implements no interface's field, or that the
-  /// interface's field declares, is the check's never. Entries and members are those the check
-  /// reads, as [`own_item`](Self::own_item) finds them: what another package writes into the
-  /// definition is that package's mistake, and makes nothing relevant.
+  /// interface's field declares, is the check's never. Entries, members and fields are those of the
+  /// contributions the orphan rule accepts, as `rules::accepted` answers, entries and members whose
+  /// types resolved, as the check reads them: what a contribution the rule refuses writes makes
+  /// nothing relevant.
   ///
   /// Of the definition's own fields, the first of each name is read, the one the implementation
   /// check finds to implement an interface's field of that name. Then, for each interface its
@@ -684,54 +693,47 @@ impl Coercion<'_, '_, '_> {
   /// lookups for each type occurrence and definition the model holds. A definition asked about past
   /// them is relevant.
   fn judged_when_implemented(&self, def: DefId, declared: &mut Declared) -> bool {
-    // A definition no package wrote, which no analysis holds, is checked by nothing.
-    let Some(own) = self.sources.written_by(self.builder.def_location(def)) else {
-      return false;
-    };
+    let model = self.builder.so_far();
     let kind = self.builder.def_kind(def);
-    let members: &[TypeExprId] = if kind == Some(DefKind::Union) {
-      self.builder.def_union_members(def)
-    } else {
-      &[]
-    };
-    for &item in self.builder.def_implements(def).iter().chain(members) {
-      if self
-        .own_item(item, own)
-        .is_some_and(|ty: TyId| !self.builder.ty_closed(ty))
-      {
-        return true;
-      }
-    }
+    let union = kind == Some(DefKind::Union);
+    let wide = matches!(kind, Some(DefKind::Object | DefKind::Interface));
     // An argument the interface's field does not declare is the check's only where the definition
     // implements one: the interfaces its entries name, each once, but a marker, whose fields the
-    // check does not compare.
-    if !matches!(kind, Some(DefKind::Object | DefKind::Interface)) {
-      return false;
-    }
+    // check does not compare; and its own fields, the first of each name, as the check indexes
+    // them. Each from the contributions the orphan rule accepts.
     declared.interfaces.clear();
-    for &entry in self.builder.def_implements(def) {
-      if let Some(ty) = self.own_item(entry, own)
-        && let Some(Shape::Named(interface)) = self.builder.ty_shape(ty)
-        && interface != def
-        && self.builder.def_kind(interface) == Some(DefKind::Interface)
-        && !self.builder.def_marker(interface)
-      {
-        declared.interfaces.push(interface);
+    declared.own.clear();
+    for part in model.def(def).contributions() {
+      if accepted(model, self.sources, def, &part) == Accepted::Refused {
+        continue;
+      }
+      let members: &[TypeExprId] = if union { part.union_members() } else { &[] };
+      for &item in part.implements().iter().chain(members) {
+        let Some(ty) = self.resolved(item) else {
+          continue;
+        };
+        if !self.builder.ty_closed(ty) {
+          return true;
+        }
+        if wide
+          && let Some(Shape::Named(interface)) = self.builder.ty_shape(ty)
+          && interface != def
+          && self.builder.def_kind(interface) == Some(DefKind::Interface)
+          && !self.builder.def_marker(interface)
+        {
+          declared.interfaces.push(interface);
+        }
+      }
+      if wide {
+        for field in part.members() {
+          if let Some(name) = self.builder.member_name(field) {
+            declared.own.push((name, field));
+          }
+        }
       }
     }
     if declared.interfaces.is_empty() {
       return false;
-    }
-    // Its own fields, the first of each name, as the implementation check indexes them.
-    declared.own.clear();
-    for field in self.builder.def_members(def) {
-      if let (Some(name), Some(at)) = (
-        self.builder.member_name(field),
-        self.builder.member_location(field),
-      ) && self.sources.written_by(at) == Some(own)
-      {
-        declared.own.push((name, field));
-      }
     }
     declared.own.sort_unstable();
     declared
@@ -819,21 +821,16 @@ impl Coercion<'_, '_, '_> {
     false
   }
 
-  /// The type of `item`, an `implements` entry or a union member of a definition `own` wrote, when
-  /// `own` writes it too and its type resolved: the items the implementation check reads, as it
-  /// gathers them.
-  fn own_item(&self, item: TypeExprId, own: PackageId) -> Option<TyId> {
-    let occurrence = self.builder.occurrence(item)?;
-    if self.sources.written_by(occurrence.location) != Some(own) {
-      return None;
-    }
-    let ty = occurrence.ty?;
+  /// The type of `item`, an `implements` entry or a union member, when it resolved: the items the
+  /// implementation check reads, as it gathers them, of a contribution the orphan rule accepts.
+  fn resolved(&self, item: TypeExprId) -> Option<TyId> {
+    let ty = self.builder.occurrence(item)?.ty?;
     (!matches!(self.builder.ty_shape(ty), Some(Shape::Unresolved) | None)).then_some(ty)
   }
 
-  /// Fills `declared` with every interface's own fields, those its own package writes, as the
-  /// implementation check compares them, and each one's arguments, by name, and with what its
-  /// lookups may read: once.
+  /// Fills `declared` with every interface's fields that a contribution the orphan rule accepts
+  /// writes, those the implementation check compares, and each one's arguments, by name, and with
+  /// what its lookups may read: once.
   fn declare(&self, declared: &mut Declared) {
     if declared.built {
       return;
@@ -844,31 +841,25 @@ impl Coercion<'_, '_, '_> {
       .type_expr_count()
       .saturating_add(self.builder.def_count())
       .saturating_mul(4);
+    let model = self.builder.so_far();
     for index in 0..self.builder.def_count() {
       let interface = DefId::new(index);
       if self.builder.def_kind(interface) != Some(DefKind::Interface) {
         continue;
       }
-      let Some(own) = self
-        .sources
-        .written_by(self.builder.def_location(interface))
-      else {
-        continue;
-      };
-      for field in self.builder.def_members(interface) {
-        let (Some(name), Some(at)) = (
-          self.builder.member_name(field),
-          self.builder.member_location(field),
-        ) else {
-          continue;
-        };
-        if self.sources.written_by(at) != Some(own) {
+      for part in model.def(interface).contributions() {
+        if accepted(model, self.sources, interface, &part) == Accepted::Refused {
           continue;
         }
-        declared.fields.push((interface, name, field));
-        for argument in self.builder.member_arguments(field) {
-          if let Some(name) = self.builder.member_name(argument) {
-            declared.arguments.push((field, name));
+        for field in part.members() {
+          let Some(name) = self.builder.member_name(field) else {
+            continue;
+          };
+          declared.fields.push((interface, name, field));
+          for argument in self.builder.member_arguments(field) {
+            if let Some(name) = self.builder.member_name(argument) {
+              declared.arguments.push((field, name));
+            }
           }
         }
       }

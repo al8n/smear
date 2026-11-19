@@ -52,11 +52,95 @@
 use std::{format, string::String};
 
 use crate::graphqlx::{
-  Contribution, Cx, DefId, DefKind, Diagnostic, DiagnosticKind, Origin, PackageId, PackageKind,
-  Resolution, Visitor, code::schema, diagnostic::Excerpt,
+  ApplicationId, Contribution, Cx, DefId, DefKind, Diagnostic, DiagnosticKind, Model, Origin,
+  PackageId, PackageKind, Resolution, SourceMap, Visitor, code::schema, diagnostic::Excerpt,
 };
 
-use super::own_contribution;
+use super::{own_contribution, own_in};
+
+/// What the orphan rule accepts of one contribution of a definition, as the module says: what the
+/// phases that read a definition's contributions after the rule's judgement, the closure of derived
+/// instantiations, its relevance and the growth graph, read of it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Accepted {
+  /// Refused whole: nothing it writes is read, its applications included.
+  Refused,
+  /// Accepted whole: everything it writes is read.
+  Whole,
+  /// The root package's extension of a built-in definition it did not write, adding directives
+  /// and nothing else: each of its applications is read, but one of `core`'s `@marker`, `@set`,
+  /// `@map` and `@extern`.
+  Directives,
+}
+
+/// What the orphan rule accepts of `part`, a contribution of `def` of `model`, whose files
+/// `sources` holds, as the module says.
+///
+/// - The definition's own contribution, its first, which is no extension: whole.
+/// - An extension the package of the definition's module wrote: whole.
+/// - The root package's extension of a built-in package's definition that adds directives and
+///   nothing else: its applications but `@marker`, `@set`, `@map` and `@extern`; or whole, when the
+///   root package wrote the definition, a GraphQL built-in it replaces, as `own_contribution`
+///   finds it.
+/// - Any other extension: refused whole.
+pub(crate) fn accepted(
+  model: &Model,
+  sources: &SourceMap,
+  def: DefId,
+  part: &Contribution<'_>,
+) -> Accepted {
+  if !part.is_extension() {
+    return Accepted::Whole;
+  }
+  let home = model.module(model.def(def).module()).package();
+  let Some(writer) = sources.written_by(part.location()) else {
+    return Accepted::Refused;
+  };
+  if writer == home {
+    return Accepted::Whole;
+  }
+  let directives_alone =
+    part.members().is_empty() && part.implements().is_empty() && part.union_members().is_empty();
+  if model.package(home).kind() != PackageKind::BuiltIn
+    || writer != model.root_package()
+    || !directives_alone
+  {
+    return Accepted::Refused;
+  }
+  let definer = own_in(model, sources, def).map(|(_, wrote): (Contribution<'_>, PackageId)| wrote);
+  if definer == Some(writer) {
+    Accepted::Whole
+  } else {
+    Accepted::Directives
+  }
+}
+
+/// Whether the orphan rule accepts `application`, which a contribution it answers `accepted` for
+/// writes: none of a refused one, each of a whole one, and each of the root package's extension of
+/// a built-in but an application of `core`'s `@marker`, `@set`, `@map` or `@extern`.
+pub(crate) fn accepts_application(
+  model: &Model,
+  accepted: Accepted,
+  application: ApplicationId,
+) -> bool {
+  match accepted {
+    Accepted::Refused => false,
+    Accepted::Whole => true,
+    Accepted::Directives => {
+      let builtins = model.builtins();
+      let meanings = [
+        builtins.marker(),
+        builtins.set(),
+        builtins.map(),
+        builtins.r#extern(),
+      ];
+      !matches!(
+        model.application(application).directive(),
+        Resolution::Resolved(directive) if meanings.contains(&directive)
+      )
+    }
+  }
+}
 
 /// Reports each extension of a definition that the package that wrote the extension may not
 /// extend, and each application of `core`'s `@marker`, `@set`, `@map` or `@extern` in the root
