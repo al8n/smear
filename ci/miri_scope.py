@@ -235,8 +235,10 @@ WORKFLOW = REPO_ROOT / ".github" / "workflows" / "miri.yml"
 #   graphql-proto/tests/response_order.rs    the two 226 800-order sweeps; the named cases run
 #   smear-parser/tests/syntactic_terminal_reads.rs
 #                                            two source censuses; the positive control runs
-#   smear-schema/src/builder/tests.rs        a price at a ceiling
-#   smear-schema/src/repr/name/tests.rs      the hash's four output properties
+#   smear-compiler/src/schema/builder/tests.rs
+#                                            a price at a ceiling
+#   smear-compiler/src/schema/repr/name/tests.rs
+#                                            the hash's four output properties
 MIRI_DECLARED_IGNORES = {
     "smear/tests/syntactic_span_extent.rs": 2,
     "smear/tests/syntactic_x_span_extent.rs": 2,
@@ -245,8 +247,8 @@ MIRI_DECLARED_IGNORES = {
     "graphql-proto/src/request/error/tests.rs": 1,
     "graphql-proto/tests/response_order.rs": 2,
     "smear-parser/tests/syntactic_terminal_reads.rs": 2,
-    "smear-schema/src/builder/tests.rs": 1,
-    "smear-schema/src/repr/name/tests.rs": 4,
+    "smear-compiler/src/schema/builder/tests.rs": 1,
+    "smear-compiler/src/schema/repr/name/tests.rs": 4,
 }
 
 # The same decision as one number, because `.github/workflows/miri.yml` states a total and every
@@ -279,22 +281,19 @@ MIRI_IGNORE_BUDGET = sum(MIRI_DECLARED_IGNORES.values())
 # entire lossless tower entered a Miri cell that nobody widened. Checked for each of the four:
 # `smear-lexer` and `smear-compiler` declare no `rowan` feature at all; `smear-parser` declares one
 # but it is not in its `default` and these scripts pass no `--features`, so the resolve leaves it
-# off; `graphql-proto` declares only `std`. `smear-semantics`, added since, declares its
-# two tiers and nothing else and depends on nothing. `smear-analysis`, added when its first lib unit
-# tests were, declares no `rowan` feature and takes `smear-parser` with `graphqlx` and without
-# `rowan`. This file's own feature-set guard prints what actually resolved, so none of that is
-# taken on trust.
+# off; `graphql-proto` declares only `std`. `smear-compiler` takes `smear-parser` with `graphql`
+# and `graphqlx` and without `rowan`. `smear-semantics`, `smear-schema` and `smear-analysis` are
+# not packages here any more: they are modules of `smear-compiler`, and its cell carries their
+# lib unit tests. This file's own feature-set guard prints what actually resolved, so none of that
+# is taken on trust.
 #
 # `ci/feature_reachability.py` requires every publishable member to be in this tuple or in
 # `MIRI_NOT_SELECTED` below, so the account grows with the workspace instead of being remembered.
 MIRI_PACKAGES = (
     "smear-lexer",
     "smear-parser",
-    "smear-semantics",
-    "smear-schema",
     "smear-compiler",
     "graphql-proto",
-    "smear-analysis",
 )
 
 # ONE MEMBER PER CELL, AND THE FEATURES THAT KEEP THAT A SCHEDULING CHANGE.
@@ -305,46 +304,47 @@ MIRI_PACKAGES = (
 # runs first, so no other member had been interpreted on a push since 2026-08-21.
 #
 # A SELECTION IS ALSO A RESOLVE, and a member selected alone loses every feature another member
-# was asking for on its behalf. Measured with `cargo +nightly test --unit-graph -Z unstable-options`
-# on all four targets, the five-member selection against each one-member one: four members resolve
-# exactly the set they resolved together, and `smear-schema` resolves `default, std` where the
-# five resolved `build, default, std` — `smear-compiler` and `graphql-proto`'s dev-dependency both
-# ask for `build`, and its lib unit tests are behind it. Its cells pass `--features build`, which
-# restores that set and nothing past it. `--selftest` fails if any shard resolves `rowan`.
+# was asking for on its behalf. Selected alone, `smear-compiler` resolves `default, std`, and every
+# one of its lib unit tests but the representation's sits behind a capability. Its cells pass
+# `--features graphql,graphqlx`, which resolves `default, graphql, graphqlx, std`: the union of
+# what the cells of its three predecessors resolved — the schema crate with `build`, the validator,
+# and the analyzer. `introspection` stays off, as it was. `--selftest` fails if any shard resolves
+# `rowan`.
 #
-# What this does NOT restore is a DEPENDENCY's features. Selected alone, the `smear-schema`,
-# `smear-compiler` and `graphql-proto` cells resolve `smear-lexer` and `smear-parser` without
-# `graphqlx`, a dialect none of the three calls (and without the `default` label, which no cfg
-# reads). Each member's OWN code is compiled exactly as the five compiled it, and the lexer's and
-# the parser's cells still interpret their default set.
-MIRI_SHARD_FEATURES = {"smear-schema": ("build",)}
+# What this does NOT restore is a DEPENDENCY's features. Selected alone, the `graphql-proto` cell
+# resolves `smear-lexer` and `smear-parser` without `graphqlx`, a dialect it does not call (and
+# without the `default` label, which no cfg reads). Each member's OWN code is compiled as the
+# members compiled together, and the lexer's and the parser's cells still interpret their default
+# set.
+MIRI_SHARD_FEATURES = {"smear-compiler": ("graphql", "graphqlx")}
 
 # The publishable members deliberately NOT selected, each with the behaviour that keeps it out.
 #
-# `smear-schema` used to be here, excused by "0 lib unit tests at the feature set these scripts
-# build" — measured with an isolated `cargo test -p smear-schema --lib`, which is not that feature
-# set. Under the resolve the cells actually build, `smear-compiler` takes `smear-schema` WITH
-# `build`, and behind `build` it has three lib unit tests. Measured: the four-member selection lists
-# 505 tests and the five-member one 508. Those three were interpreted by nothing, and an isolated
-# re-measurement said zero every time. Feature unification decides the answer, and the measurement
-# was being taken somewhere unification does not apply — the third time on this branch.
+# `smear-schema`, then a crate of its own, was here once, excused by "0 lib unit tests at the
+# feature set these scripts build" — measured with an isolated `cargo test -p smear-schema --lib`,
+# which is not that feature set. Under the resolve the cells actually built, `smear-compiler` took
+# `smear-schema` WITH `build`, and behind `build` it had three lib unit tests. Measured: the
+# four-member selection listed 505 tests and the five-member one 508. Those three were interpreted
+# by nothing, and an isolated re-measurement said zero every time. Feature unification decides the
+# answer, and the measurement was being taken somewhere unification does not apply — the third time
+# on this branch.
 #
 # `smear` cannot be selected at all, and that is a stronger fact than a test count. Co-selecting it
-# with `smear-compiler` does not COMPILE: the compiler forces `smear-schema/build` on, `smear` at
-# default features has `validator` off, and the equivalence assertion in `smear/src/lib.rs` refuses
-# the graph. Measured: `cargo test -p smear -p smear-compiler --lib` exits 101 on
-# `smear-schema/build` and `smear/validator` disagree. It also has no lib unit tests at any feature
-# set, but that is now the second reason rather than the only one.
-#
-# `smear-analysis` was here as an "empty" exclusion until its first lib unit tests, which moved it
-# into `MIRI_PACKAGES`, as the exclusion said they would.
+# with the other members does not COMPILE: `graphql-proto`'s dev-dependency turns
+# `smear-compiler/graphql` on, `smear` at default features has `validator` off, and the equivalence
+# assertion in `smear/src/lib.rs` refuses the graph. Measured in this exclusion's own selection:
+# `smear-compiler [default, graphql, std, test-support]` beside
+# `smear [default, graphql, graphqlx, parser, std, test-support]`, so the assertion on
+# `smear-compiler/graphql` fires. It also has no lib unit tests at any feature set, but that is
+# the second reason rather than the only one.
 MIRI_NOT_SELECTED = {
     "smear": {
         "outcome": "forbidden",
-        "why": "co-selecting the umbrella with `smear-compiler` does not compile — the compiler "
-               "forces `smear-schema/build`, the umbrella at default features has `validator` off, "
-               "and `smear/src/lib.rs`'s equivalence assertion refuses that graph. It carries no "
-               "lib unit tests at any feature set either",
+        "why": "co-selecting the umbrella with the other members does not compile — "
+               "`graphql-proto`'s dev-dependency turns `smear-compiler/graphql` on, the umbrella "
+               "at default features has `validator` off, and `smear/src/lib.rs`'s equivalence "
+               "assertion refuses that graph. It carries no lib unit tests at any feature set "
+               "either",
     },
 }
 
@@ -364,7 +364,7 @@ def verify_exclusions(cargo: str = "cargo") -> int:
 
     THE FIRST VERSION MEASURED IN ISOLATION AND THAT WAS THE DEFECT. It ran
     `cargo test -p <member> --lib` with the entry's own flags, which is a different graph from the
-    one the cells build: `smear-compiler` is selected there and takes `smear-schema` WITH `build`,
+    one the cells build: `smear-compiler` was selected there and took `smear-schema` WITH `build`,
     so `smear-schema` had three lib unit tests that no selected root interpreted while an isolated
     re-measurement returned zero, every time. Feature unification decides this, and the measurement
     was taken where unification does not apply.

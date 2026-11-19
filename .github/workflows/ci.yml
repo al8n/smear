@@ -75,10 +75,9 @@ on:
     # below. Ignoring them meant the one job that can catch such a break never ran for the one
     # change class that causes it.
     #
-    # `smear-schema`, `smear-compiler`, `graphql-proto`, `smear-semantics` and `smear-analysis` carry
-    # a README that is NOT included: their crate roots have hand-written `//!` headers, the first
-    # three as the modules they came from did. Those five are crates.io landing pages only, and
-    # nothing compiles them — a stated bound, not a claim that the `docs` job covers them.
+    # `smear-compiler` and `graphql-proto` carry a README that is NOT included: their crate roots
+    # have hand-written `//!` headers. Those two are crates.io landing pages only, and nothing
+    # compiles them — a stated bound, not a claim that the `docs` job covers them.
     #
     # Only the markdown no crate compiles is ignored, which is the root `docs/` notes tree.
     #
@@ -421,11 +420,10 @@ jobs:
 
   # ── WHAT CROSS-COMPILES, AND FOR WHOM ───────────────────────────────────────────────────────
   #
-  # Fifteen targets, one question: does the crate a consumer installs build for them. Since the
-  # crate split that is all eight of `smear`, `smear-lexer`, `smear-parser`, `smear-semantics`,
-  # `smear-schema`, `smear-compiler`, `graphql-proto` and `smear-analysis` — the publishable
-  # members, a property of the manifests rather than an opinion, and the step below re-reads it out
-  # of `cargo metadata` so the list cannot go stale in silence. The other three are
+  # Fifteen targets, one question: does the crate a consumer installs build for them. That is all
+  # five of `smear`, `smear-lexer`, `smear-parser`, `smear-compiler` and `graphql-proto` — the
+  # publishable members, a property of the manifests rather than an opinion, and the step below
+  # re-reads it out of `cargo metadata` so the list cannot go stale in silence. The other three are
   # `publish = false`: two tripwires and the `source-genericity` gate's `syn` reader, none of which
   # any target here will ever run.
   #
@@ -519,8 +517,8 @@ jobs:
           PUBLISHABLE="$(cargo metadata --no-deps --format-version 1 \
             | python3 -c 'import json,sys; print(",".join(sorted(p["name"] for p in json.load(sys.stdin)["packages"] if p.get("publish") != [])))')"
           echo "publishable members: $PUBLISHABLE"
-          if [ "$PUBLISHABLE" != "graphql-proto,smear,smear-analysis,smear-compiler,smear-lexer,smear-parser,smear-schema,smear-semantics" ]; then
-            echo "::error::this matrix cross-compiles '-p smear -p smear-lexer -p smear-parser -p smear-semantics -p smear-schema -p smear-compiler -p graphql-proto -p smear-analysis', but the publishable members are now: $PUBLISHABLE"
+          if [ "$PUBLISHABLE" != "graphql-proto,smear,smear-compiler,smear-lexer,smear-parser" ]; then
+            echo "::error::this matrix cross-compiles '-p smear -p smear-lexer -p smear-parser -p smear-compiler -p graphql-proto', but the publishable members are now: $PUBLISHABLE"
             echo "::error::add the new one to the build below, or mark it publish = false if it does not ship"
             exit 1
           fi
@@ -531,8 +529,7 @@ jobs:
       - name: cargo build (every publishable member) --all-features --target ${{ matrix.target }}
         run: |
           rustup target add ${{ matrix.target }}
-          cargo build -p smear -p smear-lexer -p smear-parser -p smear-semantics -p smear-schema \
-            -p smear-compiler -p graphql-proto -p smear-analysis \
+          cargo build -p smear -p smear-lexer -p smear-parser -p smear-compiler -p graphql-proto \
             --all-features --target ${{ matrix.target }}
 
   # The validator's schema representation, on a core with no compare-and-swap.
@@ -568,53 +565,109 @@ jobs:
       - name: Install Rust
         run: rustup update stable && rustup default stable
       # The same tier claim from the crate's own side, and it is a CELL rather than a sentence.
-      # `smear-schema`'s reader tier is `core` + `alloc` with `tokora` as its dependency, plus
-      # smol-bytes where the target has pointer-width atomics — the owned-text seam's buffer, which
-      # both tiers turn on and nothing else does — and it needs `std` or `alloc`: with no tier
-      # feature the crate keeps only `diagnostic` and `builtin`. This cell is the reader tier
-      # without the standard library, `alloc` alone. `build` and `introspection` are what raise it
-      # further, and neither is in `default`. `cargo hack --each-feature` reaches this
+      # `smear-compiler`'s runtime layer, its `schema` module, is `core` + `alloc` with `tokora` and
+      # `derive_more` as its dependencies, plus smol-bytes where the target has pointer-width
+      # atomics — the owned-text seam's buffer, which both tiers turn on and nothing else does —
+      # and it needs `std` or `alloc`: with no tier feature the crate keeps only
+      # `schema::diagnostic` and `schema::builtin`. This cell is the runtime layer without the
+      # standard library, `alloc` alone. `graphql`, `introspection` and `graphqlx` are what raise
+      # it further, and none is in `default`. `cargo hack --each-feature` reaches this
       # configuration too, but only as one row of a matrix — naming it here means a regression says
       # which claim broke.
-      - name: cargo check -p smear-schema --no-default-features --features alloc
-        run: cargo check -p smear-schema --no-default-features --features alloc
+      - name: cargo check -p smear-compiler --no-default-features --features alloc
+        run: cargo check -p smear-compiler --no-default-features --features alloc
       # The seam's other arm. On a target without pointer-width compare-and-swap,
-      # `smear-schema/src/text.rs` is a `Box<str>` and a `String`, and no target this job builds
-      # selects that arm: `thumbv6m-none-eabi` builds `smear-noatomic` alone, and whether `tokora`
-      # builds there is not established. `--cfg smear_seam_fallback` selects the arm on the host,
-      # where the rest of the graph builds, and `graphql-proto` is checked with it as the seam's
-      # first user. Appended to the workflow's `RUSTFLAGS`, so `-Dwarnings` still holds.
+      # `smear-compiler/src/schema/text.rs` is a `Box<str>` and a `String`, and no target this job
+      # builds selects that arm: `thumbv6m-none-eabi` builds `smear-noatomic` alone, and whether
+      # `tokora` builds there is not established. `--cfg smear_seam_fallback` selects the arm on
+      # the host, where the rest of the graph builds, and `graphql-proto` is checked with it as the
+      # seam's first user. Appended to the workflow's `RUSTFLAGS`, so `-Dwarnings` still holds.
       - name: the owned-text seam's fallback arm (--cfg smear_seam_fallback)
         run: |
           RUSTFLAGS="$RUSTFLAGS --cfg smear_seam_fallback" \
-            cargo check -p smear-schema --no-default-features --features alloc
+            cargo check -p smear-compiler --no-default-features --features alloc
           RUSTFLAGS="$RUSTFLAGS --cfg smear_seam_fallback" \
             cargo check -p graphql-proto --no-default-features --features alloc
       # ASSERT THE GRAPH, not only that the code compiles. `cargo check` passing says nothing about
-      # what is in the dependency graph, and the claim `smear-schema`'s `build` feature exists to
-      # support is exactly a graph claim: a machine that READS a schema at execution time does not
-      # get the parser through that edge. The spec's own §6 makes this point about the `client`
-      # feature, which is unwritten; this is the same assertion in the form available today.
+      # what is in the dependency graph, and the claim `smear-compiler`'s capabilities exist to
+      # support is exactly a graph claim: a machine that READS a schema at execution time takes
+      # `smear-compiler` with its runtime layer and nothing else, so it gets neither the builder
+      # nor either compiler through that edge, and no parser with them. The spec's own §6 makes
+      # this point about the `client` feature, which is unwritten; this is the same assertion in
+      # the form available today.
       #
-      # `--edges normal` excludes the dev edge deliberately. `graphql-proto`'s unit tests build a
-      # schema from SDL and therefore DO ask for `smear-schema/build` — through a dev-dependency,
-      # which cargo unifies only into targets that need dev-dependencies. Measured on this tree:
-      # `--edges normal,features` shows `smear-schema` with no features; `--edges all,features`
-      # shows `smear-schema feature "build"`. If those two ever agree, the dev request has leaked.
-      - name: graphql-proto does not take smear-schema's builder through a normal edge
+      # `graphql-proto`'s unit tests build a schema from SDL and therefore DO ask for
+      # `smear-compiler/graphql`, through a dev-dependency, which cargo unifies only into targets
+      # that need dev-dependencies. So the step reads the same edge twice: through normal edges the
+      # four capabilities must be absent, and through all edges `graphql` must be present. If the
+      # two ever agree, the dev request has leaked, or the control is gone.
+      #
+      # `--all-features`, because a forward can sit in any of `graphql-proto`'s four features and
+      # with all of them on one graph shows every one. And `--format '{p} [{f}]'`, not
+      # `--edges features`, for the reason the `tiers` job records: the features view draws what an
+      # edge's own declaration names and not what the root's `[features]` table forwards.
+      - name: graphql-proto takes smear-compiler's runtime layer only, through a normal edge
         run: |
           set -euo pipefail
-          NORMAL="$(cargo tree -p graphql-proto --no-default-features --edges normal,features \
-            | grep -c 'smear-schema feature "build"' || true)"
-          DEV="$(cargo tree -p graphql-proto --no-default-features --edges all,features \
-            | grep -c 'smear-schema feature "build"' || true)"
-          echo "smear-schema/build through normal edges: $NORMAL, through all edges: $DEV"
-          if [ "$NORMAL" != "0" ]; then
-            echo "::error::graphql-proto now pulls smear-schema's builder into a consumer's graph"
+          # One reader, two graphs.
+          compiler_line() {
+            cargo tree -p graphql-proto --all-features --edges "$1" --prefix none --format '{p} [{f}]' \
+              | { grep -E '^smear-compiler v' || true; } | sed -E 's/ \(\*\)$//' | sort -u
+          }
+          NORMAL="$(compiler_line normal)"
+          ALL="$(compiler_line all)"
+          echo "through normal edges: $NORMAL"
+          echo "through all edges:    $ALL"
+          if [ "$(grep -c . <<<"$NORMAL")" != 1 ]; then
+            echo "::error::the graph reader did not find exactly one smear-compiler under graphql-proto"
             exit 1
           fi
-          if [ "$DEV" = "0" ]; then
+          if grep -qE '\[([^]]*,)?(graphql|graphqlx|introspection|test-support)(,[^]]*)?\]' <<<"$NORMAL"; then
+            echo "::error::graphql-proto now pulls a compiler into a consumer's graph"
+            exit 1
+          fi
+          if ! grep -qE '\[([^]]*,)?graphql(,[^]]*)?\]' <<<"$ALL"; then
             echo "::error::the dev-dependency that gives graphql-proto's tests a schema builder is gone, so the check above is comparing nothing"
+            exit 1
+          fi
+      # The other half of the same claim, from `smear-compiler`'s own side, and the umbrella's
+      # oldest promise with it: a build that did not ask for a front end has none. `smear-parser`
+      # and `smear-lexer` are optional dependencies that only `graphql`, `introspection` (through
+      # `graphql`) and `graphqlx` turn on, so every other feature must leave both out of the graph.
+      #
+      # The feature list is READ from the manifest, every feature the crate declares but its three
+      # capabilities, so a feature added later is in this graph without an edit, and one that pulls
+      # a front end fails here. Both tiers are in it: a strong forward such as `smear-lexer/std` in
+      # the `std` tier would pull the lexer in under every build that has a tier. Each graph is
+      # captured before it is searched, so a `cargo tree` that fails stops the step instead of
+      # reading as "nothing found", and the control must see the parser when a capability asks for
+      # it, so the reader is known to see one.
+      - name: the runtime layer has no parser
+        run: |
+          set -euo pipefail
+          tree() { cargo tree "$@" --edges normal --prefix none; }
+          RUNTIME_FEATURES="$(cargo metadata --no-deps --format-version 1 | python3 -c '
+          import json, sys
+          package = next(p for p in json.load(sys.stdin)["packages"] if p["name"] == "smear-compiler")
+          print(",".join(sorted(f for f in package["features"] if f not in ("graphql", "graphqlx", "introspection"))))')"
+          echo "smear-compiler without its capabilities: $RUNTIME_FEATURES"
+          RUNTIME="$(tree -p smear-compiler --no-default-features --features "$RUNTIME_FEATURES")"
+          if grep -E '^smear-(parser|lexer) ' <<<"$RUNTIME"; then
+            echo "::error::smear-compiler's runtime layer pulls a front-end crate"
+            exit 1
+          fi
+          # The umbrella's promise, which now runs through an unconditional edge: no `parser`, no
+          # parser. Every feature that does not imply `parser` is on, so this also fails if
+          # `smear/graphqlx` is ever wired to the compiler's capability of the same name.
+          NO_PARSER="$(tree -p smear --no-default-features \
+            --features alloc,std,graphql,graphqlx,serde,bytes_1,bstr_1,hipstr_0_8,smol-bytes_0_2,test-support)"
+          if grep -E '^smear-parser ' <<<"$NO_PARSER"; then
+            echo "::error::a smear without \`parser\` pulls smear-parser"
+            exit 1
+          fi
+          CONTROL="$(tree -p smear-compiler --no-default-features --features alloc,graphqlx)"
+          if ! grep -qE '^smear-parser ' <<<"$CONTROL"; then
+            echo "::error::the graph reader saw no parser under graphqlx"
             exit 1
           fi
       - name: cargo build -p smear-noatomic --target thumbv6m-none-eabi
@@ -1174,9 +1227,15 @@ jobs:
   # `needs:` chain — it blocks nothing and nothing blocks it, so no failure elsewhere in the lane
   # can stop this verdict from being produced.
   #
-  # Default features on purpose. That is the configuration the registry verifies and the one
-  # `cargo add smear` resolves to; `--all-features` is a different question and `docs` above
-  # already asks it.
+  # The first dry run is the registry's configuration, on purpose: default features, which is what
+  # `cargo add smear` resolves to. Under them `smear-compiler` compiles only its runtime layer,
+  # about 3,000 of its 80,000 lines, so no verification build of that run compiles `graphql/`,
+  # `graphqlx/`, the kernel, the builder or the introspection door from a tarball, and a source
+  # file the package left out of those modules, or a path that reaches outside it, would pass
+  # here and fail at docs.rs or for the first `graphqlx` user. The second dry run, after the
+  # README assertion, is that question: the compiler and the two crates it depends on, packaged
+  # together and verified with `--all-features`. `docs` above asks the same of the workspace tree,
+  # and not of a tarball.
   publish-dry-run:
     name: publish-dry-run
     runs-on: ubuntu-latest
@@ -1279,6 +1338,15 @@ jobs:
           exit 1
         fi
         echo "ok: packaged README is byte-identical to the workspace-root README ($(wc -c < "$packaged") bytes)"
+    # The compiler's own sources, every one of them, from a tarball. `-p` and not a filter, by this
+    # job's own rule: cargo hard-errors on a package that does not exist. The two siblings are
+    # selected so that the compiler is verified against the lexer and the parser packaged in this
+    # same run, through the temporary registry, and not against what crates.io has under the same
+    # version. If cargo refuses this three-package form, or resolves a sibling from crates.io, the
+    # fallback is `cargo publish --dry-run --workspace --all-features`, which also verifies
+    # `graphql-proto` and `smear` once more.
+    - name: cargo publish --dry-run, every packaged source of the compiler
+      run: cargo publish --dry-run -p smear-lexer -p smear-parser -p smear-compiler --all-features
 
   # Build with exactly the MSRV declared in Cargo.toml's `rust-version`, so
   # a floor that silently drifts above the declared value is caught here

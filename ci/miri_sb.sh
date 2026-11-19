@@ -218,25 +218,28 @@ export MIRIFLAGS
 # WHAT THIS CELL COVERS, and it is measured rather than claimed. The half where this project's own
 # `unsafe` lives — the SIMD lexer and the syntactic parser, through `tokora`'s substrate — and all
 # four of those `unsafe` sites are in `smear-lexer/src/string_lexer/`. The members are
-# `smear-lexer`, `smear-parser`, `smear-schema`, `smear-compiler` and `graphql-proto`, and a cell
-# runs ONE of them (see below): 144, 367, 21, 16 and 64 lib unit tests, each counted at its own
-# cell's feature set on 2026-09-25. `smear-semantics` joined them later, with the 14 lib unit
-# tests that left `smear-schema` alongside the builder's three kernels. `smear-analysis` joined
-# with its first lib unit tests, the rule-set macro's.
+# `smear-lexer`, `smear-parser`, `smear-compiler` and `graphql-proto`, and a cell runs ONE of them
+# (see below). Counted at each cell's feature set on 2026-09-25, when the schema crate, the
+# validator crate, the kernel and the analyzer were crates of their own: `smear-lexer` 144,
+# `smear-parser` 367, `smear-schema` 21, `smear-compiler` 16 and `graphql-proto` 64 lib unit tests;
+# `smear-semantics` joined them later with 14, and `smear-analysis` with its first, the rule-set
+# macro's. All three are modules of `smear-compiler` now, and its one cell runs their lib unit
+# tests together.
 #
 # THAT DISTINCTION COST A ROUND. `smear-schema` was excluded on "0 lib unit tests", measured with an
 # isolated `cargo test -p smear-schema --lib` — but the five-member selection contained
-# `smear-compiler`, which takes `smear-schema` WITH `build`, and behind `build` it has three. Feature
+# `smear-compiler`, which took `smear-schema` WITH `build`, and behind `build` it had three. Feature
 # unification decides the count, and an isolated measurement is taken where unification does not
-# apply. A one-member cell IS that isolated build, so its selection restores `build` by name;
-# `ci/miri_scope.py`'s `MIRI_SHARD_FEATURES` carries the measurement and the one thing it does not
-# restore.
+# apply. A one-member cell IS that isolated build, so a member whose tests sit behind a capability
+# has the capability restored by name: `smear-compiler`'s cell passes `--features
+# graphql,graphqlx`. `ci/miri_scope.py`'s `MIRI_SHARD_FEATURES` carries the measurement and the one
+# thing it does not restore.
 #
-# `smear` IS DELIBERATELY OUT, and not for a test count: co-selecting it with `smear-compiler` does
-# not COMPILE. The compiler forces `smear-schema/build`, the umbrella at default features has
-# `validator` off, and the equivalence assertion in `smear/src/lib.rs` refuses that graph. It has no
-# lib unit tests either. `MIRI_NOT_SELECTED` records that behaviour, and `--verify-exclusions`
-# re-runs it under this same selection.
+# `smear` IS DELIBERATELY OUT, and not for a test count: co-selecting it with the other members
+# does not COMPILE. `graphql-proto`'s dev-dependency turns `smear-compiler/graphql` on, the umbrella
+# at default features has `validator` off, and the equivalence assertion in `smear/src/lib.rs`
+# refuses that graph. It has no lib unit tests either. `MIRI_NOT_SELECTED` records that behaviour,
+# and `--verify-exclusions` re-runs it under this same selection.
 #
 # THE SELECTION BELOW IS NOT WRITTEN HERE. It is read from `MIRI_PACKAGES`. Those were two
 # hand-maintained lists and they drifted: the constant grew to six members through the split while

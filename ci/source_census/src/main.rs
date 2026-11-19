@@ -74,10 +74,12 @@ use rule::Cost;
 /// Every crate root the default run reads, each mounted at the path a consumer of the umbrella
 /// writes for it.
 ///
-/// One row per workspace member the umbrella mounts, and the mount name is the umbrella's
-/// spelling rather than the member's own crate name — `smear::lexer`, not `smear_lexer`. The
-/// census's question is "what can a dependent reach", a dependent reaches all of this through
-/// `smear`, and both exemption tables and D2's generated probe are written in that vocabulary.
+/// One row per root the umbrella mounts, and the mount name is the umbrella's spelling rather than
+/// the member's own crate name — `smear::lexer`, not `smear_lexer`. `smear-compiler` is three rows,
+/// because the umbrella mounts three of its modules at three paths: its `schema` and `graphql`
+/// modules, whose roots are `mod.rs` files, and its `graphqlx` module. The census's question is
+/// "what can a dependent reach", a dependent reaches all of this through `smear`, and both
+/// exemption tables and D2's generated probe are written in that vocabulary.
 ///
 /// NOT DERIVED, because the mount name cannot be: `smear-lexer` is published by the umbrella as
 /// `lexer`, and only the umbrella's `lib.rs` knows that. What IS derived is the table's
@@ -85,16 +87,20 @@ use rule::Cost;
 /// publishable workspace member is missing from it, so a member added and not mounted here is a
 /// red gate rather than a surface the census quietly stops reading. Miri losing the lexer, and
 /// this census going blind, were both that defect; the check exists so neither recurs by growth.
-/// `smear-semantics` is the one publishable member with no row: the umbrella mounts nothing of it,
-/// and that check's exemption table carries the argument.
 const DEFAULT_ROOTS: &[(&str, &str)] = &[
   ("smear/src/lib.rs", "smear"),
   ("smear-lexer/src/lib.rs", "smear::lexer"),
   ("smear-parser/src/lib.rs", "smear::parser"),
-  ("smear-schema/src/lib.rs", "smear::validator::schema"),
-  ("smear-compiler/src/lib.rs", "smear::validator"),
+  (
+    "smear-compiler/src/schema/mod.rs",
+    "smear::validator::schema",
+  ),
+  ("smear-compiler/src/graphql/mod.rs", "smear::validator"),
   ("graphql-proto/src/lib.rs", "smear::proto"),
-  ("smear-analysis/src/lib.rs", "smear::analysis"),
+  (
+    "smear-compiler/src/graphqlx/mod.rs",
+    "smear::analysis::graphqlx",
+  ),
 ];
 
 fn main() -> ExitCode {

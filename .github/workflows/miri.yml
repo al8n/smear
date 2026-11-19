@@ -166,9 +166,9 @@ name: Miri
 #    6  of the members' own targets, excluded by their cell's partition: `smear-parser`'s two
 #       rowan-gated `deep_projection` targets, its two behind `materialized-numbers`, which it
 #       does not default to, and `enum_attribute_parity`, a source census that excludes itself
-#       with `not(miri)`; and `smear-schema`'s `introspection_allocation`, behind `introspection`.
-#       Excluded / compiled per cell: smear-lexer 0/0, smear-parser 5/1, smear-semantics 0/0,
-#       smear-schema 1/0, smear-compiler 0/0, graphql-proto 0/2, smear-analysis 0/0.
+#       with `not(miri)`; and `smear-compiler`'s `introspection_allocation`, behind `introspection`.
+#       Excluded / compiled per cell: smear-lexer 0/0, smear-parser 5/1, smear-compiler 1/0,
+#       graphql-proto 0/2.
 #   36  individual tests, not targets, and not all of them in `smear/tests/`:
 #
 #       * the two corpus sweeps in each of `tests/syntactic_span_extent.rs` and
@@ -205,9 +205,9 @@ name: Miri
 #         `graphql-proto/src/request/error/tests.rs` 1 (an allocation gate),
 #         `graphql-proto/tests/response_order.rs` 2 (the two exhaustive arrival-order sweeps),
 #         `smear-parser/tests/syntactic_terminal_reads.rs` 2 (source censuses),
-#         `smear-schema/src/builder/tests.rs` 1 (a price at a ceiling) and
-#         `smear-schema/src/repr/name/tests.rs` 4 (the hash's output properties). One whole target
-#         goes the same way at the crate level, where the guard prints it:
+#         `smear-compiler/src/schema/builder/tests.rs` 1 (a price at a ceiling) and
+#         `smear-compiler/src/schema/repr/name/tests.rs` 4 (the hash's output properties). One
+#         whole target goes the same way at the crate level, where the guard prints it:
 #         `smear-parser/tests/enum_attribute_parity.rs` is one source census, past five minutes
 #         under Tree Borrows, and carries `#![cfg(not(miri))]` because a target whose every test is
 #         skipped should say so as a target.
@@ -236,7 +236,7 @@ name: Miri
 # nothing. The row above exists because that gap was found while adding it.
 #
 # What is left in a cell is its member's lib unit tests and the member's integration targets its
-# partition compiles, three across the six. The SIMD lexer's own tests are among them, and that
+# partition compiles, three across the four. The SIMD lexer's own tests are among them, and that
 # is where this project's `unsafe` is and what the job exists for.
 #
 # This is an exclusion, not a silence. `ci/miri_scope.py` derives every line above by parsing
@@ -251,7 +251,7 @@ name: Miri
 # ── ONE MEMBER PER CELL, AND A CEILING ON EACH ──────────────────────────────────────────────
 #
 # A cell selects ONE member of `ci/miri_scope.py`'s `MIRI_PACKAGES`, and the matrix is target x
-# member: 4 x 7 cells per aliasing model, 56 in all, named `miri-{sb,tb}-<target>-<member>`. The
+# member: 4 x 4 cells per aliasing model, 32 in all, named `miri-{sb,tb}-<target>-<member>`. The
 # first five used to share one `cargo miri test` per cell, and run 35944196326 (at c964a6a) is why
 # they no longer do: all eight cells were cancelled at the six-hour job ceiling inside
 # `graphql-proto`'s lib binary, which cargo runs first — six of its 64 tests done under Stacked
@@ -259,16 +259,16 @@ name: Miri
 # 2026-08-21. A cell of one member finishes or fails on its own clock.
 #
 # IT IS A SCHEDULING CHANGE, NOT A COVERAGE ONE, and that was measured. Cargo unifies features over
-# the selected packages, so a member alone may resolve less than it did beside the other four.
-# `cargo +nightly test --unit-graph` on all four targets, the five-member selection against each
-# one-member one: four members resolve the same set alone, and `smear-schema` loses `build` — which
-# `smear-compiler` and `graphql-proto`'s dev-dependency were asking for, and which its lib tests
-# sit behind — so its cells pass `--features build` and nothing else. `MIRI_SHARD_FEATURES` in
-# `ci/miri_scope.py` carries that measurement and the one thing it leaves different: two
-# DEPENDENCIES' features, not any member's own. `rowan` is off in every cell.
+# the selected packages, so a member alone may resolve less than it did beside the others.
+# `smear-compiler` alone resolves `default, std`, and every one of its lib unit tests but the
+# representation's sits behind a capability, so its cells pass `--features graphql,graphqlx` and
+# nothing else. That resolves `default, graphql, graphqlx, std`, the union of what the cells of the
+# three crates it absorbed resolved, and `introspection` stays off, as it was. `MIRI_SHARD_FEATURES`
+# in `ci/miri_scope.py` carries that and the one thing it leaves different: two DEPENDENCIES'
+# features, not any member's own. `rowan` is off in every cell.
 #
 # `--verify-exclusions` runs in ONE cell: `miri-sb-x86_64-unknown-linux-gnu-smear-compiler`. It is
-# a native host build of the seven members plus the excluded one, `smear`, so it answers the same
+# a native host build of the four members plus the excluded one, `smear`, so it answers the same
 # on every target, member and model, and it was most of what each cell of that
 # run spent before its first test — 5 to 6 minutes on Linux and 18 to 24 on macOS. The `include:`
 # entry below is the designation.
@@ -297,10 +297,15 @@ name: Miri
 # 1.45x, and `smear-parser` under Tree Borrows 2.8x on aarch64-apple-darwin. `graphql-proto` under
 # Tree Borrows measured 23.7 at worst, so it is one cell.
 #
-# `smear-semantics` is not in the table: it joined after that run, carrying the 14 lib unit tests
-# that left `smear-schema`'s lib binary with its kernels, and it takes the floor, 60, under both
-# models until a run measures it. `smear-analysis` joined later still, with its first lib unit
-# tests, and takes the same floor.
+# The table is that run's, when the schema crate, the validator crate and the analyzer were
+# crates of their own; `smear-semantics` and `smear-analysis` joined after it and were never
+# measured. `smear-compiler` is the merged cell now, and it runs in ONE step the lib unit tests that
+# those four cells ran. Its ceilings are PROVISIONAL: Tree Borrows 240, the cap, and Stacked
+# Borrows 120. The schema's cell alone measured 58.7 minutes under Tree Borrows, and the kernel's
+# and the analyzer's were never measured, so by this table's own rule — twice the worst measured
+# wall — the first run after these lanes return sets the real number. If the merged cell passes
+# the cap, it splits by feature into a `graphql` cell and a `graphqlx` cell, which needs the cell's
+# key to become a member and a shard.
 
 # `push`/`pull_request` triggers and `paths-ignore` are deliberately identical to
 # `.github/workflows/ci.yml`, `.github/workflows/windows.yml` and `.github/workflows/macos.yml`;
@@ -420,11 +425,8 @@ jobs:
         package:
           - smear-lexer
           - smear-parser
-          - smear-semantics
-          - smear-schema
           - smear-compiler
           - graphql-proto
-          - smear-analysis
         # `timeout` is the Miri step's ceiling in minutes, per member: the worst Miri-step wall
         # measured on run 36141578092 across the four targets x2, floor 60, cap 240. The header's
         # "ONE MEMBER PER CELL" section carries the measurements and why it is on the
@@ -434,15 +436,9 @@ jobs:
             timeout: 60
           - package: smear-parser
             timeout: 130
-          - package: smear-semantics
-            timeout: 60
-          - package: smear-schema
-            timeout: 120
           - package: smear-compiler
-            timeout: 60
+            timeout: 240
           - package: graphql-proto
-            timeout: 60
-          - package: smear-analysis
             timeout: 60
     # `aarch64-apple-darwin` cannot be built from a Linux host — `criterion` -> `alloca` -> a C
     # build script; see the header. Every other target here builds on Linux and should stay
@@ -527,11 +523,8 @@ jobs:
         package:
           - smear-lexer
           - smear-parser
-          - smear-semantics
-          - smear-schema
           - smear-compiler
           - graphql-proto
-          - smear-analysis
         # `timeout` is the Miri step's ceiling in minutes, per member: the worst Miri-step wall
         # measured on run 36141578092 across the four targets x2, floor 60, cap 240. The header's
         # "ONE MEMBER PER CELL" section carries the measurements and why it is on the
@@ -542,15 +535,9 @@ jobs:
             timeout: 60
           - package: smear-parser
             timeout: 60
-          - package: smear-semantics
-            timeout: 60
-          - package: smear-schema
-            timeout: 60
           - package: smear-compiler
-            timeout: 60
+            timeout: 120
           - package: graphql-proto
-            timeout: 60
-          - package: smear-analysis
             timeout: 60
           - target: x86_64-unknown-linux-gnu
             package: smear-compiler
