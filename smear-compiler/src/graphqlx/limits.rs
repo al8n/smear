@@ -584,7 +584,7 @@ impl Limits {
   /// already holds. At `0`, no value a supplied package writes is read, each is one unresolved
   /// value, and nothing a supplied package leaves out is filled from a default.
   ///
-  /// The default is 2^20. GitLab's schema, the largest of smear's fixtures, makes {N}.
+  /// The default is 2^20. GitLab's schema, the largest of smear's fixtures, makes 1,547.
   #[inline]
   pub const fn max_values(&self) -> u32 {
     self.max_values

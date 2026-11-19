@@ -18,8 +18,6 @@
 //! uses is readable beside the number it tests.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
-use std::io::Write as _;
-
 use smear::{
   analysis::graphqlx::{
     Analysis, ApplicationArgument, DefId, Layout, Limits, MemberId, Model, Namespace, ObjectEntry,
@@ -1322,11 +1320,11 @@ fn an_earlier_copy_is_starved_by_a_later_default() {
   assert_eq!(applied(analysis.model(), "Query", "x"), ["a= List [Int 1]"]);
 }
 
-/// GitLab's schema, the largest of smear's fixtures, makes fewer values than the default bound: no
-/// report names `Limits::max_values`, and the values its model holds beyond the built-in library's
-/// own are fewer than 2^20.
+/// GitLab's schema, the largest of smear's fixtures, makes the 1,547 values `Limits::max_values`'
+/// documentation says, the values its model holds beyond the built-in library's own, far below the
+/// default bound, and no report names the bound. Refuses a documented count that no longer holds.
 #[test]
-fn gitlabs_schema_makes_fewer_values_than_the_default() {
+fn gitlabs_schema_makes_the_values_the_doc_says() {
   let gitlab = include_str!("fixtures/schemas/gitlab_schema.graphql");
   let analysis = analyze_text(
     gitlab,
@@ -1339,11 +1337,6 @@ fn gitlabs_schema_makes_fewer_values_than_the_default() {
     .collect();
   assert!(reports.is_empty(), "{reports:#?}");
   let count = made(&analysis, library_values());
-  // The count `Limits::max_values`' documentation states, read from CI's log until it is pinned
-  // there: written past the test harness's capture, which shows no output of a test that passes.
-  let _ = writeln!(std::io::stderr(), "GitLab's schema makes {count} values");
-  assert!(
-    (1..Limits::new().max_values()).contains(&count),
-    "GitLab's schema makes {count} values"
-  );
+  assert_eq!(count, 1547);
+  assert!(count < Limits::new().max_values(), "{count}");
 }
