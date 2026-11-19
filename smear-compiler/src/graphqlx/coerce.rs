@@ -214,11 +214,13 @@
 //! its path, with a label at the argument, reported once whatever uses the collection has, and
 //! recorded nowhere. Nor is a whole `null` no instantiation takes recorded: it is refused at once,
 //! as the next section says. Nor is anything a contribution the orphan rule refuses writes, nor an
-//! application it refuses, as `rules::accepted` answers: such a contribution adds nothing to the
-//! definition it extends, so what it writes is coerced where it is written all the same, and judged
-//! at no instantiation, written or derived. A generic directive's own arguments' defaults are
-//! judged where its applications leave them out, but for such a `null`, and recorded nowhere. When
-//! the walk has ended, each type
+//! application it refuses, as `rules::accepted` answers: what it writes is coerced where it is
+//! written all the same, and judged at no instantiation, written or derived. Its members still
+//! shape the definition every check reads, where a value is written and at each instantiation,
+//! written or derived alike: an input object's fields and an enum's values are indexed from every
+//! contribution, a refused extension's among them. A generic directive's own arguments' defaults
+//! are judged where its applications leave them out, but for such a `null`, and recorded nowhere.
+//! When the walk has ended, each type
 //! occurrence a supplied package writes, in id order, whose type is a closed named type of a
 //! definition with recorded rows, and then each application a supplied package writes, in id
 //! order, whose type is a closed instantiation of its directive, asks that instantiation's

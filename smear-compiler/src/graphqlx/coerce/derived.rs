@@ -25,8 +25,16 @@
 //! relevant: every walk over a definition's contributions, here, in the growth graph and where
 //! coercion records a value, reads those the rule accepts alone, as `rules::accepted` answers, the
 //! rule's own test. A type written inside a refused contribution is a written occurrence like any
-//! other, judged and expanded where it is written; a refused contribution adds nothing to the
-//! definition it extends.
+//! other, judged and expanded where it is written; a refused contribution adds nothing these walks
+//! read to the definition it extends.
+//!
+//! What this module keeps a refused contribution out of is its own walks, relevance, expansion and
+//! growth, and what coercion records. A derived instantiation is judged against its definition's
+//! shape as the written check reads it, every contribution's members included, a refused
+//! extension's among them: an input object's fields, by name, required or defaulted, and an enum's
+//! values, by name, are read off the indexes coercion builds once from every contribution, which
+//! the check where a value is written reads too. So a derived instantiation and a written one are
+//! judged against one shape.
 //!
 //! The expansion reads only toward what can be judged. What an instantiation is judged for is a
 //! value recorded under its definition, here, and in the implementation check an `implements` entry
