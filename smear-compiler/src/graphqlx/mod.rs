@@ -63,10 +63,10 @@
 //! | Declaration | Every module and every definition, numbered, the built-in library's and the primitives the program writes included; a GraphQL built-in the root package's root module defines again, replaced; each module's names | `smear::schema`: `duplicate-type-name`, `duplicate-directive-definition`, `reserved-type-name`, `reserved-directive-name`, `redefined-built-in-type`; `smear::graphqlx`: `module-type-collision` |
 //! | Name resolution | Every module's scope, its `use` items resolved to a fixpoint; and each path, resolved where it stands for the phases after it | `smear::schema`: `undefined-type`, `undefined-directive`, `undefined-extension-target`, `undefined-implements-interface`, `undefined-union-member`, `undefined-root-operation-type`; `smear::graphqlx`: `unknown-package`, `unresolved-path`, `ambiguous-glob`, `url-unsupported`, `file-path-use`, `use-resolution-changed`, `use-declaration-collision`, `use-name-collision`, `shadowed-primitive`, `unknown-item`, `resource-limit` |
 //! | Lowering | What each definition holds beyond its identity: its contributions, its type parameters and bounds, a directive's locations, and its members; every type occurrence and application, its path resolved where it is written; every value, as written; and the schema's contributions and roots | `smear::schema`: `extension-kind-mismatch`, `undefined-extension-target`, `undefined-directive-argument`, `duplicate-root-operation-type`; `smear::graphqlx`: `generic-arity`, `invalid-bound`, `unresolved-path`, `unknown-item`, `resource-limit` |
-//! | Instantiation | Each definition's built-in meaning and its defaults; every occurrence's type, each type interned once; each application's complete type arguments; and the bounds of every instantiation the program writes | `smear::graphqlx`: `generic-arity`, `generic-default`, `unsatisfied-bound`, `resource-limit` |
-//! | Coercion | Every value, by the type expected where it stands, an argument or a field left out filled from its default; and a generic definition's values, at each closed instantiation of it a supplied package writes | `smear::schema`: `invalid-default-value`, `invalid-directive-argument-value`, `missing-required-directive-argument`, `undefined-input-object-field`, `missing-required-input-object-field`, `input-object-default-value-cycle`; `smear::graphqlx`: `width-overflow`, `nonzero-zero`, `collection-literal`, `resource-limit` |
+//! | Instantiation | Each definition's built-in meaning and its defaults; every occurrence's type, each type interned once; each application's complete type arguments; the bounds of every instantiation the program writes; and, last, which generic definitions grow | `smear::graphqlx`: `generic-arity`, `generic-default`, `unsatisfied-bound`, `resource-limit` |
+//! | Coercion | Every value, by the type expected where it stands, an argument or a field left out filled from its default; and a generic definition's values, at each closed instantiation of it a supplied package writes, and at each one such an instantiation derives through the definitions that do not grow | `smear::schema`: `invalid-default-value`, `invalid-directive-argument-value`, `missing-required-directive-argument`, `undefined-input-object-field`, `missing-required-input-object-field`, `input-object-default-value-cycle`; `smear::graphqlx`: `width-overflow`, `nonzero-zero`, `collection-literal`, `resource-limit` |
 //! | Binding | Each scalar's host types, from the `@extern`s its own package writes on it | none |
-//! | Implementation | What each definition says it is: its `implements` entries, transitively, with the fields and arguments each interface asks for, and a union's members; and each written instantiation's entries and members, and the arguments it makes required | `smear::schema`: `duplicate-implements-interface`, `duplicate-union-member`, `missing-transitive-interface`, `missing-interface-field`, `invalid-interface-field-type`, `interface-field-not-deprecated`, `missing-interface-field-argument`, `invalid-interface-field-argument-type`, `unexpected-required-argument`; `smear::graphqlx`: `resource-limit` |
+//! | Implementation | What each definition says it is: its `implements` entries, transitively, with the fields and arguments each interface asks for, and a union's members; and each written instantiation's entries and members, and the arguments it makes required, and each derived one's, as coercion does | `smear::schema`: `duplicate-implements-interface`, `duplicate-union-member`, `missing-transitive-interface`, `missing-interface-field`, `invalid-interface-field-type`, `interface-field-not-deprecated`, `missing-interface-field-argument`, `invalid-interface-field-argument-type`, `unexpected-required-argument`; `smear::graphqlx`: `resource-limit` |
 //! | Tiers | The definitions only compile-time metadata reaches, marked; and the tier every definition and every type requires | none |
 //!
 //! # The model
@@ -92,9 +92,11 @@
 //! types, each `@extern` its own package writes on it whose values fit, an [`Extern`], a built-in
 //! having none; its [`tier`](Def::tier), the least of `core`, `alloc` and `std` that holds what
 //! its members, its union members and its host types need, a built-in's being its package's and a
-//! directive's `core`; and whether it is compile-time metadata, which only the types of a
+//! directive's `core`; whether it is compile-time metadata, which only the types of a
 //! directive no operation can apply and applications' type arguments reach,
-//! [`is_metadata`](Def::is_metadata). A definition, a contribution and a member each answer
+//! [`is_metadata`](Def::is_metadata); and whether it grows, one of its type parameters reaching
+//! itself with a type argument that wraps what it was given, [`grows`](Def::grows), read off the
+//! graph [`UnboundedInstantiation`] builds. A definition, a contribution and a member each answer
 //! `has_errors()`: whether a phase or a rule reported an error in it, a syntax error aside.
 //! GraphQL's introspection meta-types are definitions of [`Origin::Compat`], which a code
 //! generator skips.
@@ -165,13 +167,22 @@
 //! - every rule of the table under "Rules" holds, the type-system rules GraphQLx shares with
 //!   GraphQL in this release among them.
 //!
-//! An instantiation that only a default's filling derives, which no occurrence writes, is not
-//! judged for itself, neither its bounds, nor its entries and members, nor the arguments it makes
-//! required, nor its definition's values under it, each default being judged where it is written;
-//! the rules on the kinds a type parameter takes, on `TypeRef`, on a OneOf's fields and on
-//! deprecated members judge what it derives, at the occurrence that leaves the slot out, but for a
-//! default such a rule refuses as written, which it reports where it is written and at no use; and
-//! a code generator that monomorphises judges the closure it computes.
+//! An instantiation that only a default's filling or a substitution derives, which no occurrence
+//! writes, is judged for its entries and members, for the arguments it makes required and for its
+//! definition's values under it, where its definition does not grow: each such instantiation a
+//! written one derives, through what a copy of it needs, is judged once, and what fails is reported
+//! at each occurrence of the written one, labelled at the type that derives it, unless a report
+//! owns that value already: a written object literal's report of its copy of a default, or an
+//! application's of its copy of one, owns each value that copy counts that does not fit. Its bounds
+//! are not judged, each default's being judged where it is written, and holding at the
+//! instantiation by what the implementation check holds. What stays unjudged is a derived
+//! instantiation of a definition that [grows](Def::grows), and what only such an instantiation
+//! derives: `Nest<[i32]>` of `type Nest<T> { v: Box<T>, deeper: Nest<[T]> }`, where the `Box<i32>`
+//! that a written `Nest<i32>` derives is judged. The rules on the kinds a type parameter takes, on
+//! `TypeRef`, on a OneOf's fields and on deprecated members judge what a fill derives, at the
+//! occurrence that leaves the slot out, but for a default such a rule refuses as written, which it
+//! reports where it is written and at no use; and a code generator that monomorphises judges what
+//! it derives beyond what is judged here.
 //!
 //! # When it is not ok
 //!
@@ -274,7 +285,10 @@
 //! bound passed stops that work, is reported as `smear::graphqlx::resource-limit`, and the
 //! analysis goes on, but for the diagnostic ceiling and the near-miss budget, which limit what the
 //! analysis says and not what it accepts, and the three bounds on a field's and a directive's
-//! arguments and a written type's wrappers, which refuse a shape and stop no work.
+//! arguments and a written type's wrappers, which refuse a shape and stop no work. From
+//! instantiation on, a written occurrence reports one for each kind of bound, whichever phase or
+//! path passes it there first: each phase's step budget is a kind of its own, and a bound on the
+//! types the phases build one kind across them.
 //!
 //! Before any bound applies, the diagnostic ceiling aside, the analysis reads what the caller
 //! supplied, to number and order it. It sorts each package's files by path, and orders two files
@@ -309,7 +323,7 @@
 //! | [`max_instantiations`](Limits::max_instantiations) | 2^16 | The distinct instantiations of generic definitions the analysis interns | No instantiation a supplied package needs |
 //! | [`max_substitutions`](Limits::max_substitutions) | 2^20 | The steps of filling the type arguments a use leaves out, the first time each definition's set of written arguments is filled: one for each argument left out, and one for each node of a default the filling walks | No type argument a supplied package leaves out is filled |
 //! | [`max_bound_steps`](Limits::max_bound_steps) | 2^20 | The steps of judging bounds: one for each bound taken under an instantiation's arguments, each node a rebuild of a bound's interface type looks at, each `implements` entry or type parameter's bound looked at, and each pair of types or argument compared | No bound is taken: each written instantiation of a definition with a bound is reported, a `HashMap` among them, and so is each application of a directive with one whose type arguments are complete |
-//! | [`max_value_steps`](Limits::max_value_steps) | 2^20 | The steps of completing values beyond what is written: counting and copying a default for what an application or an object literal leaves out, making the lists a lone written value stands for, finding an argument or field left out that is or may be required, rebuilding an argument's or field's type under type arguments, checking a generic definition's values, and the arguments its applications leave out, at each closed instantiation of it, and converting a decimal integer of more than 38 significant digits to an integer | Nothing a supplied package leaves out is filled from a default or found missing, a bare `@deprecated`'s reason among them; no list is made for a lone value it writes; no type is rebuilt, and no generic definition checked at an instantiation, for its values; and no decimal integer of more than 38 significant digits is converted to an integer, though one is still read where a float is expected |
+//! | [`max_value_steps`](Limits::max_value_steps) | 2^20 | The steps of completing values beyond what is written: counting and copying a default for what an application or an object literal leaves out, making the lists a lone written value stands for, finding an argument or field left out that is or may be required, rebuilding an argument's or field's type under type arguments, checking a generic definition's values, and the arguments its applications leave out, at each closed instantiation of it, written or derived, reading what each written instantiation derives, and converting a decimal integer of more than 38 significant digits to an integer | Nothing a supplied package leaves out is filled from a default or found missing, a bare `@deprecated`'s reason among them; no list is made for a lone value it writes; no type is rebuilt, and no generic definition checked at an instantiation, for its values; nothing a written instantiation derives is read, for coercion or for the implementation check; and no decimal integer of more than 38 significant digits is converted to an integer, though one is still read where a float is expected |
 //! | [`max_values`](Limits::max_values) | 2^20 | The values read and made: each literal a value writes, the value's own included, each list a value stands for, and each value of a copy of a default. The model holds at most this many plus the built-in library's own, plus one unresolved value for each written default or argument refused past it | No value a supplied package writes is read, each one unresolved, and nothing a supplied package leaves out is filled from a default |
 //! | [`max_implementation_steps`](Limits::max_implementation_steps) | 2^20 | The steps of checking implementations, and of comparing entries and members under an instantiation's arguments: one for each `implements` entry, field, argument, bound or union member looked at, each node a rebuild under type arguments looks at, and each pair of types compared | Each check that would take a step stops and is reported, a definition's at the entry it was checking |
 //! | [`max_source_bytes`](Limits::max_source_bytes) | 2^26, 64 MiB | The bytes of the supplied files' texts, together; not their paths | No byte of a supplied text is parsed |
@@ -388,7 +402,9 @@
 //! [`UnboundedInstantiation`] refuses a generic definition that reaches itself with a type argument
 //! that grows, which a backend that makes one copy per instantiation could never finish.
 //! [`analyze`] never runs it, so [`Analysis::is_ok`] means what it meant. A backend composes it into
-//! its own [`visit`], and its verdict is the conjunction of the two.
+//! its own [`visit`], and its verdict is the conjunction of the two. The analysis builds the rule's
+//! graph once itself, after instantiation, and [`Def::grows`] answers which definitions it finds
+//! to grow.
 //!
 //! # Sources and rendering
 //!
@@ -455,9 +471,11 @@
 //! stable numbers; GraphQLx's own introspection; a type that keeps the source texts beside the
 //! analysis; a canonical coordinate for a member, since canonical names are definitions'; and the
 //! closure of instantiations under substitution: [`Model::instantiations`] lists the ones the
-//! program writes, a code generator that monomorphises computes the rest, and
+//! program writes, the analysis judges what they derive through the definitions that do not grow
+//! and keeps none of it, a code generator that monomorphises computes the rest, and
 //! [`UnboundedInstantiation`], walked over every supplied package, refuses every growth that could
-//! make that closure infinite.
+//! make that closure infinite. A contribution the orphan rule refuses grows nothing, so a growth
+//! only it writes is not refused there; the orphan rule reports the extension.
 //!
 //! # Stability
 //!

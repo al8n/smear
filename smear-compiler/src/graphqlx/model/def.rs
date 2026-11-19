@@ -585,6 +585,58 @@ impl<'a> Def<'a> {
       .map(|&(_, location): &(DefId, Location)| location)
   }
 
+  /// Whether it grows: one of its type parameters reaches itself, through what a copy of an
+  /// instantiation of it needs, with a type argument that wraps what it was given, so that each
+  /// instantiation of it needs a larger one. `type Nest<T> { v: T, deeper: Nest<[T]> }` grows:
+  /// `Nest<i32>` needs `Nest<[i32]>`, which needs `Nest<[[i32]]>`, and so on without end.
+  ///
+  /// The graph this is read off is the one
+  /// [`UnboundedInstantiation`](crate::graphqlx::UnboundedInstantiation) builds, over every
+  /// package's definitions: a definition grows when one of its type parameters lies on a cycle of
+  /// that graph that holds an edge that grows. Every definition whose parameter lies on such a
+  /// cycle grows, where the rule reports the occurrence that writes the growing argument:
+  /// with `type A<T> { b: B<[T]> }` and `type B<U> { a: A<U> }` both grow, and the rule reports
+  /// `B<[T]>`. Passing a type parameter on as it is, `Swap<U, T>` inside `type Swap<T, U>`, is no
+  /// growth, and a definition with no type parameter never grows. A contribution the orphan rule
+  /// refuses grows nothing, so a growth only it writes is not counted here and the rule does not
+  /// report it; the orphan rule reports the extension.
+  ///
+  /// It is what a derived instantiation of the definition is not judged for. The analysis judges a
+  /// generic definition's values, the arguments it makes required, and its entries and members, at
+  /// each closed instantiation a supplied package writes, and at each one such an instantiation
+  /// derives, through a fill or a substitution, whose definition does not grow, reporting what
+  /// fails at the written occurrence that derives it. A derived instantiation of a definition that
+  /// grows, and what only it derives, is not judged: `Nest<[i32]>` of
+  /// `type Nest<T> { v: Box<T>, deeper: Nest<[T]> }` is one, and the `Box<i32>` that a written
+  /// `Nest<i32>` derives is judged.
+  ///
+  /// It is computed once instantiation has typed every occurrence, whatever the verdict. In an
+  /// analysis that is not ok, an occurrence or an application a phase could not type gives the
+  /// graph nothing, so a definition whose growth only such an occurrence writes answers `false`.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use smear_compiler::graphqlx::{Layout, Limits, Namespace, Package, SourceFile, Tier, analyze};
+  ///
+  /// let text = "type Query { nest: Nest<i32> }\n\
+  ///             type Nest<T> { v: Box<T> deeper: Nest<[T]> }\n\
+  ///             type Box<T> { v: T }\n";
+  /// let root = Package::new("app", Layout::Flat, Tier::Std)
+  ///   .with_files([SourceFile::new("schema.graphqlx", text)]);
+  /// let analysis = analyze(&root, &[], &Limits::new());
+  /// assert!(analysis.is_ok());
+  /// let model = analysis.model();
+  /// let nest = model.lookup(Namespace::Type, "^::app::Nest").expect("defined");
+  /// let boxed = model.lookup(Namespace::Type, "^::app::Box").expect("defined");
+  /// assert!(model.def(nest).grows());
+  /// assert!(!model.def(boxed).grows());
+  /// ```
+  #[inline]
+  pub fn grows(&self) -> bool {
+    self.row().grows
+  }
+
   /// The intrinsic primitive it is, or `None` for every definition but `core`'s primitives.
   #[inline]
   pub fn intrinsic(&self) -> Option<Primitive> {

@@ -190,6 +190,9 @@ pub(super) struct DefRow {
   pub(super) tier: Tier,
   /// Whether only compile-time metadata reaches it: `false` until the tier phase computes it.
   pub(super) metadata: bool,
+  /// Whether one of its type parameters reaches itself with a type argument that grows: `false`
+  /// until the type services compute it, once instantiation has typed every occurrence.
+  pub(super) grows: bool,
   pub(super) intrinsic: Option<Primitive>,
   pub(super) marker: bool,
   pub(super) collection: Option<Collection>,

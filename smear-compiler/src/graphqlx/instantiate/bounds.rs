@@ -79,7 +79,7 @@ use crate::graphqlx::{
   model::{
     Applied, DefKind, Keys, Occurrence, Resolution, Shape, Steps, TypeBound, Written, WrittenParam,
   },
-  types::{Limit, Stop},
+  types::{Limit, Spent, Stop},
 };
 
 use super::Typing;
@@ -451,8 +451,11 @@ impl Typing<'_> {
   }
 
   /// Reports, at `at`, an occurrence of an instantiation whose bounds `stop` kept from being
-  /// judged.
+  /// judged: once for each place and kind of limit, as every phase says a `resource-limit`.
   fn report_unjudged(&mut self, at: Location, stop: Stop) {
+    if !self.types.say_limit(at, stop.spent(Spent::Bounds)) {
+      return;
+    }
     let max_steps = self.types.bound_steps.max();
     let limits = self.types.limits();
     let (message, help): (String, &'static str) = match stop {
