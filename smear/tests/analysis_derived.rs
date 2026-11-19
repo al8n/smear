@@ -1214,3 +1214,52 @@ fn a_rebuild_the_written_check_reported_is_not_reported_again_by_the_closure() {
   let schema = schema_file(&short);
   assert_eq!(found(&short), [(LIMIT, at(schema, text, "Outer<i32>", 0))]);
 }
+
+/// A type the walk paid for is reached before the next is charged, so a budget that stops the walk
+/// loses nothing it paid for: `Outer<Int!>` reads `Pair<Page<U>, Box<U>>`, whose `Page<Int!>` makes
+/// `items`'s `after` required. Under the least budget the program says no limit at, less one, the
+/// walk pays for `Page<Int!>` and not for `Box<Int!>`, which ends the closure at `Outer<Int!>`; the
+/// `Page<Int!>` it paid for is derived all the same, and refused there by the implementation
+/// check, which pays from its own budget. Refuses a paid child lost when a later sibling cannot
+/// pay.
+#[test]
+fn a_type_the_walk_paid_for_is_derived_though_the_next_cannot_be_paid() {
+  let text = "type Query {\n  o: Outer<Int!>\n}\ninterface Paged {\n  items: [Int]\n}\n\
+              type Page<T> implements Paged {\n  items(after: T): [Int]\n}\n\
+              type Box<T> {\n  v: T\n}\ntype Pair<A, B> {\n  a: A\n  b: B\n}\n\
+              type Outer<U> {\n  p: Pair<Page<U>, Box<U>>\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let outer = at(schema, text, "Outer<Int!>", 0);
+  assert_eq!(found(&analysis), [(UNEXPECTED, outer)]);
+  let least = (0..256_u32)
+    .find(|&steps: &u32| {
+      let analysis = analyze_text(text, &Limits::new().with_max_value_steps(steps));
+      codes_at(&analysis, LIMIT).is_empty()
+    })
+    .expect("a budget the program says no limit at");
+  assert!(least > 0);
+  let short = analyze_text(text, &Limits::new().with_max_value_steps(least - 1));
+  assert_eq!(found(&short), [(LIMIT, outer), (UNEXPECTED, outer)]);
+  assert!(
+    the(&short, LIMIT, outer)
+      .to_string()
+      .starts_with("what `Outer` derives under the type arguments it is instantiated with here"),
+    "{:#?}",
+    short.diagnostics()
+  );
+}
+
+/// An argument of a field that implements no interface's field makes nothing relevant: `Page<T>`
+/// implements `Node`, whose one field is `id`, and the `x` its `extra` takes, typed by its bare
+/// nullable parameter, is no argument the implementation check ever judges. With no step to spend,
+/// `Outer<Int>`, which holds `Page<T>`, says nothing. Refuses a definition made relevant by an
+/// unrelated field.
+#[test]
+fn an_argument_of_a_field_that_implements_nothing_makes_nothing_relevant() {
+  let text = "type Query {\n  o: Outer<Int>\n}\ninterface Node {\n  id: ID\n}\n\
+              type Page<T> implements Node {\n  id: ID\n  extra(x: T): Int\n}\n\
+              type Outer<T> {\n  p: Page<T>\n}\n";
+  quiet(&analyze_text(text, &Limits::new().with_max_value_steps(0)));
+  quiet(&analyze_text(text, &Limits::new()));
+}

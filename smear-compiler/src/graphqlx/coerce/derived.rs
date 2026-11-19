@@ -24,15 +24,16 @@
 //!
 //! The expansion reads only toward what can be judged. What an instantiation is judged for is a
 //! value recorded under its definition, here, and in the implementation check an `implements` entry
-//! or a union member that names its type parameters, or, where an object or an interface implements
-//! one, a field argument typed by its own bare nullable type parameter with no default, which may
-//! be required. A definition is relevant when it has something judged, or when one of its positions
-//! holds, at any depth and through any definition, a named type of a relevant definition that does
-//! not grow and that no supplied package writes, open or closed, a type a default fills among them,
-//! or a type whose arguments hold one; and a position is read only when it holds such a type. A
-//! derived instantiation of a definition that grows is neither judged nor expanded, so its own
-//! definition makes it reach nothing: it reaches through what its arguments hold alone. That is a
-//! least fixpoint, and so transitive: a definition is relevant exactly when an expansion of an
+//! or a union member that names its type parameters, or an argument a field of an object or an
+//! interface adds beside the field of its name of an interface one of the definition's own entries
+//! names, typed by its own bare nullable type parameter with no default, which may be required. A
+//! definition is relevant when it has something judged, or when one of its positions holds, at any
+//! depth and through any definition, a named type of a relevant definition that does not grow and
+//! that no supplied package writes, open or closed, a type a default fills among them, or a type
+//! whose arguments hold one; and a position is read only when it holds such a type. A derived
+//! instantiation of a definition that grows is neither judged nor expanded, so its own definition
+//! makes it reach nothing: it reaches through what its arguments hold alone. That is a least
+//! fixpoint, and so transitive: a definition is relevant exactly when an expansion of an
 //! instantiation of it can reach an instantiation of a definition with something judged, since the
 //! walk that finds it reads below each position what an expansion walks below its rebuild, a
 //! written instantiation ending both, and what a rebuild puts in a type parameter's place is
@@ -51,21 +52,29 @@
 //!   the types instantiation built, each distinct type below a position or a root's fill once, with
 //!   its arguments: linear in the model but for sorting, and charged nothing. Each definition keeps
 //!   its useful positions alone, each distinct type once, and each root the fills, past what any
-//!   occurrence of it writes, that can derive something judged;
+//!   occurrence of it writes, that can derive something judged. Whether a field adds an argument
+//!   beside an interface's field is looked up in every interface's fields and arguments, indexed
+//!   once by name: for each interface an object's or an interface's own entries name, the fewer of
+//!   its fields that add such an argument and of the interface's fields is read, and the other side
+//!   looked up, and so for the arguments of each field of one name on both sides, no more than the
+//!   implementation check compares at those entries, and charged nothing either;
 //! - each position an expansion reads is a rebuild, a step for its root and one for each argument
 //!   or element it looks at, as the check at a written instantiation pays for its own; a position
-//!   whose rebuild the check of its instantiation made already is put on the walk's stack, a step;
-//! - a walk's stack holds generic named types and lists alone, each a step as it is put on it. A
-//!   type's distinct such arguments, or its element, are read the first time a walk meets it and
-//!   kept: so a type of no type parameter costs nothing past that one reading, and a type many
-//!   walks meet is read once;
+//!   whose rebuild the check of its instantiation made already is met by the walk, a step;
+//! - a walk meets generic named types and lists alone, each a step as it is met, and each reached
+//!   as soon as it is paid for, before the next is charged, so that a budget that stops the walk
+//!   loses nothing it paid for. A type's distinct such arguments, or its element, are read the
+//!   first time a walk meets it and kept: so a type of no type parameter costs nothing past that
+//!   one reading, and a type many walks meet is read once;
 //! - each derived instantiation's check is a step for each pair of it and a row, made once, as
 //!   soon as it is derived;
 //! - blaming the failing instantiations reads each instantiation and each edge once, each edge
 //!   made by a step its walk paid; each report pass reads each occurrence and application once,
 //!   finding its root by its type's nullable form, found once for each type and kept.
 //!
-//! So the closure does work linear in the model's size and in the steps it pays, but for sorting.
+//! So the closure does work linear in the model's size and in the steps it pays, but for sorting,
+//! and for the lookups of the arguments fields add, which the implementation check's own
+//! comparisons bound.
 //!
 //! A limit that stops an expansion is `resource-limit`, once, at where the root whose expansion was
 //! running is first written, and the closure ends there; but when the written check of that root
@@ -109,7 +118,7 @@ use super::{Checked, Coercion, CountKey, OmittedArgument, Owed, OwedValue, Recor
 use crate::graphqlx::{
   code::schema,
   diagnostic::{Diagnostic, Excerpt, Message},
-  id::{ApplicationId, DefId, MemberId, PoolRange, TyId, TypeExprId, dense},
+  id::{ApplicationId, DefId, MemberId, PoolRange, Sym, TyId, TypeExprId, dense},
   model::{Applied, DefKind, Occurrence, Resolution, Shape, Written, WrittenParam},
   raw::RawTree,
   types::{
@@ -182,6 +191,26 @@ struct Roots {
   /// The most type arguments any occurrence or application of each root writes, by its node: the
   /// arguments past them are filled, by their defaults, wherever it is written.
   spelled: BTreeMap<u32, u32>,
+}
+
+/// Every interface's fields, and their arguments, by name, for the question whether a field adds
+/// an argument beside the field of its name of an interface its definition implements: built the
+/// first time relevance asks it, so that each answer is a few lookups.
+#[derive(Default)]
+struct Declared {
+  /// Whether `fields` and `arguments` hold them.
+  built: bool,
+  /// Each interface's fields, by the interface, then name, then id.
+  fields: Vec<(DefId, Sym, MemberId)>,
+  /// Each interface field's arguments' names, by the field, then name.
+  arguments: Vec<(MemberId, Sym)>,
+  /// The fields of the definition being asked about that add an argument the implementation check
+  /// may judge, by name, each with its run of `names`.
+  adding: Vec<(Sym, MemberId, PoolRange)>,
+  /// The runs `adding` names: the names of the arguments each field adds, sorted.
+  names: Vec<Sym>,
+  /// The interfaces the definition being asked about's own entries name, each once.
+  interfaces: Vec<DefId>,
 }
 
 /// The closure, with what stopped it.
@@ -371,6 +400,7 @@ impl Coercion<'_, '_, '_> {
     // What is judged: a value recorded under a definition, or what the implementation check
     // judges at an instantiation. With nothing judged, nothing is relevant, and nothing is read.
     let mut defs: Vec<DefId> = Vec::new();
+    let mut declared = Declared::default();
     for row in &self.recorded {
       if let Some(slot) = building.relevant.get_mut(row.def.get() as usize)
         && !*slot
@@ -382,7 +412,7 @@ impl Coercion<'_, '_, '_> {
     for index in 0..count {
       let def = DefId::new(index);
       if self.builder.type_param_count(def) > 0
-        && self.judged_when_implemented(def)
+        && self.judged_when_implemented(def, &mut declared)
         && let Some(slot) = building.relevant.get_mut(index as usize)
         && !*slot
       {
@@ -675,9 +705,17 @@ impl Coercion<'_, '_, '_> {
 
   /// Whether the implementation check judges something at an instantiation of `def`, read
   /// generously: an `implements` entry or a union member whose type names a type parameter, or, for
-  /// an object or an interface that writes an `implements` entry, a field argument typed by its own
-  /// bare nullable type parameter with no default.
-  fn judged_when_implemented(&self, def: DefId) -> bool {
+  /// an object or an interface, an argument one of its fields adds beside the field of its name of
+  /// an interface one of its own entries names, typed by its own bare nullable type parameter with
+  /// no default, which may be required. An argument of a field that implements no interface's
+  /// field, or that the interface's field declares, is the check's never.
+  ///
+  /// It reads the definition's fields and entries, and then, for each interface its entries name,
+  /// the fewer of its fields that add such an argument and the interface's fields, looking the
+  /// other side up in `declared`, and for each field of one name on both sides, the fewer of the
+  /// arguments the one adds and the other declares: no more than the implementation check compares
+  /// at the same entries, and nothing for a definition that adds no such argument.
+  fn judged_when_implemented(&self, def: DefId, declared: &mut Declared) -> bool {
     for &item in self
       .builder
       .def_implements(def)
@@ -702,19 +740,118 @@ impl Coercion<'_, '_, '_> {
     {
       return false;
     }
-    self
-      .builder
-      .def_members(def)
-      .into_iter()
-      .any(|field: MemberId| {
-        self
-          .builder
-          .member_arguments(field)
-          .into_iter()
-          .any(|argument: MemberId| {
-            self.bare_param(argument, def) && !self.raw.defaults.contains_key(&argument)
-          })
-      })
+    declared.adding.clear();
+    declared.names.clear();
+    for field in self.builder.def_members(def) {
+      let Some(name) = self.builder.member_name(field) else {
+        continue;
+      };
+      let start = dense(declared.names.len());
+      for argument in self.builder.member_arguments(field) {
+        if self.bare_param(argument, def)
+          && !self.raw.defaults.contains_key(&argument)
+          && let Some(added) = self.builder.member_name(argument)
+        {
+          declared.names.push(added);
+        }
+      }
+      let end = dense(declared.names.len());
+      if end > start {
+        if let Some(run) = declared.names.get_mut(start as usize..end as usize) {
+          run.sort_unstable();
+        }
+        declared
+          .adding
+          .push((name, field, PoolRange { start, end }));
+      }
+    }
+    if declared.adding.is_empty() {
+      return false;
+    }
+    declared.interfaces.clear();
+    for &entry in self.builder.def_implements(def) {
+      if let Some(Occurrence {
+        written: Written::Named(interface),
+        ..
+      }) = self.builder.occurrence(entry)
+        && interface != def
+        && self.builder.def_kind(interface) == Some(DefKind::Interface)
+      {
+        declared.interfaces.push(interface);
+      }
+    }
+    declared.interfaces.sort_unstable();
+    declared.interfaces.dedup();
+    declared
+      .adding
+      .sort_unstable_by_key(|&(name, field, _): &(Sym, MemberId, PoolRange)| (name, field));
+    self.declare(declared);
+    let Declared {
+      fields,
+      arguments,
+      adding,
+      names,
+      interfaces,
+      ..
+    } = &*declared;
+    for &interface in interfaces {
+      let from =
+        fields.partition_point(|&(owner, _, _): &(DefId, Sym, MemberId)| owner < interface);
+      let to = fields.partition_point(|&(owner, _, _): &(DefId, Sym, MemberId)| owner <= interface);
+      let own = fields.get(from..to).unwrap_or(&[]);
+      // The fewer side is read, and the other looked up by name.
+      if adding.len() <= own.len() {
+        for &(name, _, run) in adding {
+          for &(_, _, field) in same_name(own, name, |&(_, written, _): &(DefId, Sym, MemberId)| {
+            written
+          }) {
+            if adds_beside(names, run, arguments, field) {
+              return true;
+            }
+          }
+        }
+      } else {
+        for &(_, name, field) in own {
+          for &(_, _, run) in same_name(
+            adding,
+            name,
+            |&(written, _, _): &(Sym, MemberId, PoolRange)| written,
+          ) {
+            if adds_beside(names, run, arguments, field) {
+              return true;
+            }
+          }
+        }
+      }
+    }
+    false
+  }
+
+  /// Fills `declared` with every interface's fields, and each one's arguments, by name: once.
+  fn declare(&self, declared: &mut Declared) {
+    if declared.built {
+      return;
+    }
+    declared.built = true;
+    for index in 0..self.builder.def_count() {
+      let interface = DefId::new(index);
+      if self.builder.def_kind(interface) != Some(DefKind::Interface) {
+        continue;
+      }
+      for field in self.builder.def_members(interface) {
+        let Some(name) = self.builder.member_name(field) else {
+          continue;
+        };
+        declared.fields.push((interface, name, field));
+        for argument in self.builder.member_arguments(field) {
+          if let Some(name) = self.builder.member_name(argument) {
+            declared.arguments.push((field, name));
+          }
+        }
+      }
+    }
+    declared.fields.sort_unstable();
+    declared.arguments.sort_unstable();
   }
 
   /// Expands the node `at` of the closure: each useful position of its definition, rebuilt under
@@ -777,13 +914,10 @@ impl Coercion<'_, '_, '_> {
 
   /// Walks `ty`, closed, for the instantiations it derives at `place`, with an explicit stack that
   /// holds generic named types and lists alone, each a step of `Limits::max_value_steps` as it is
-  /// put on it: a type's distinct such arguments, or its element, are read the first time a walk
-  /// meets it and kept, so a type of no type parameter is never put on the stack. Each
-  /// instantiation of a relevant generic definition no supplied package writes is a child of the
-  /// node being expanded, once; one new to the closure whose definition does not grow is judged at
-  /// once, so that a limit that stops the closure later leaves it judged, and queued to be
-  /// expanded. A written one is no child, and its arguments are its own. `Err` when the budget
-  /// cannot pay for a type.
+  /// met: a type's distinct such arguments, or its element, are read the first time a walk meets it
+  /// and kept, so a type of no type parameter is never met. Each type is reached as soon as it is
+  /// paid for, before the next is charged, so that a budget that stops the walk loses nothing it
+  /// paid for. `Err` when the budget cannot pay for a type.
   fn collect(&mut self, building: &mut Building, ty: TyId, place: Place) -> Result<(), Stop> {
     building.stack.clear();
     if !self.walked(ty) {
@@ -792,40 +926,10 @@ impl Coercion<'_, '_, '_> {
     if !self.charge(1) {
       return Err(Stop::Steps);
     }
-    building.stack.push(ty);
+    if self.reach(building, ty, place) {
+      building.stack.push(ty);
+    }
     while let Some(held) = building.stack.pop() {
-      if !building.seen.insert(held) {
-        continue;
-      }
-      if let Some(Shape::Named(def)) = self.builder.ty_shape(held) {
-        let nullable = self.nullable(held, def);
-        if let Some(known) = building.closure.find(nullable)
-          && building
-            .closure
-            .node(known)
-            .is_some_and(|node: Node| node.written)
-        {
-          continue;
-        }
-        if building
-          .relevant
-          .get(def.get() as usize)
-          .copied()
-          .unwrap_or(false)
-        {
-          let grows = self.builder.def_grows(def);
-          let (child, new) = building.closure.join(nullable, def, false, grows);
-          if building.derived.insert(child) {
-            building.closure.derive(child, place);
-            if new && !grows {
-              if matches!(self.derived_verdict(def, nullable), Checked::Stopped(_)) {
-                building.stalled.insert(child, building.root);
-              }
-              building.queue.push(child);
-            }
-          }
-        }
-      }
       let run = self.children_of(building, held);
       for index in run.start..run.end {
         let Some(&child) = building.children.get(index as usize) else {
@@ -834,10 +938,55 @@ impl Coercion<'_, '_, '_> {
         if !self.charge(1) {
           return Err(Stop::Steps);
         }
-        building.stack.push(child);
+        if self.reach(building, child, place) {
+          building.stack.push(child);
+        }
       }
     }
     Ok(())
+  }
+
+  /// Reaches `ty`, a type the walk deriving at `place` paid for, and whether the walk reads below
+  /// it: not when the expansion being made has met it already, nor when it is a written
+  /// instantiation, whose arguments are its own. An instantiation of a relevant generic definition
+  /// no supplied package writes is a child of the node being expanded, once, with its edge; one
+  /// new to the closure whose definition does not grow is judged at once, so that a limit that
+  /// stops the closure later leaves it judged, and queued to be expanded.
+  fn reach(&mut self, building: &mut Building, ty: TyId, place: Place) -> bool {
+    if !building.seen.insert(ty) {
+      return false;
+    }
+    let Some(Shape::Named(def)) = self.builder.ty_shape(ty) else {
+      return true;
+    };
+    let nullable = self.nullable(ty, def);
+    if let Some(known) = building.closure.find(nullable)
+      && building
+        .closure
+        .node(known)
+        .is_some_and(|node: Node| node.written)
+    {
+      return false;
+    }
+    if building
+      .relevant
+      .get(def.get() as usize)
+      .copied()
+      .unwrap_or(false)
+    {
+      let grows = self.builder.def_grows(def);
+      let (child, new) = building.closure.join(nullable, def, false, grows);
+      if building.derived.insert(child) {
+        building.closure.derive(child, place);
+        if new && !grows {
+          if matches!(self.derived_verdict(def, nullable), Checked::Stopped(_)) {
+            building.stalled.insert(child, building.root);
+          }
+          building.queue.push(child);
+        }
+      }
+    }
+    true
   }
 
   /// The run of `building.children` that holds the distinct arguments of `ty`, or its element, that
@@ -1234,4 +1383,34 @@ impl Coercion<'_, '_, '_> {
     };
     self.limit(at, message);
   }
+}
+
+/// The run of `sorted`, sorted by the name `name_of` reads, whose name is `name`.
+fn same_name<T>(sorted: &[T], name: Sym, name_of: impl Fn(&T) -> Sym) -> &[T] {
+  let from = sorted.partition_point(|item: &T| name_of(item) < name);
+  let to = sorted.partition_point(|item: &T| name_of(item) <= name);
+  sorted.get(from..to).unwrap_or(&[])
+}
+
+/// Whether one of the names of `run` of `names`, the arguments a field adds, sorted, is not the
+/// name of an argument of `field`, an interface's field, as `arguments` lists them: surely when it
+/// adds more than the field declares, and otherwise looked up, the fewer side read.
+fn adds_beside(
+  names: &[Sym],
+  run: PoolRange,
+  arguments: &[(MemberId, Sym)],
+  field: MemberId,
+) -> bool {
+  let added = names
+    .get(run.start as usize..run.end as usize)
+    .unwrap_or(&[]);
+  let from = arguments.partition_point(|&(owner, _): &(MemberId, Sym)| owner < field);
+  let to = arguments.partition_point(|&(owner, _): &(MemberId, Sym)| owner <= field);
+  let declared = arguments.get(from..to).unwrap_or(&[]);
+  added.len() > declared.len()
+    || added.iter().any(|&name: &Sym| {
+      declared
+        .binary_search_by(|&(_, written): &(MemberId, Sym)| written.cmp(&name))
+        .is_err()
+    })
 }
