@@ -2308,6 +2308,90 @@ fn a_generic_input_fields_null_default_no_instantiation_takes_is_refused_once() 
   }
 }
 
+/// A default its declaration refuses for a `null` no instantiation takes is that declaration's to
+/// report, and no copy of it reports it again: `In<T>`'s `a`, written `T!`, defaults to `null`,
+/// refused where it is written, and `@d<Int>(v: {})` leaves `a` out of a literal whose type a
+/// rebuild made, which no occurrence writes, and adds nothing. Refuses the literal's own report of
+/// the copy beside the declaration's.
+#[test]
+fn a_copy_of_a_default_its_declaration_refuses_reports_nothing_again() {
+  let text = "type Query @d<Int>(v: {}) {\n  x: Int\n}\n\
+              directive @d<X>(v: In<X>) on OBJECT\ninput In<T> {\n  a: T! = null\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(DEFAULT, after(schema, text, "a: T! = ", "null"))]
+  );
+}
+
+/// A generic directive's own default that holds a `null` no instantiation takes is refused where
+/// it is declared, once, whether or not anything applies the directive: `@d`'s `v`, written `X!`,
+/// defaults to `null`. An application that leaves `v` out, under closed type arguments or under a
+/// generic definition's own, adds nothing: the declaration owns the copy. Refuses the default
+/// judged only where an application leaves it out, and its copy reported again at each.
+#[test]
+fn a_generic_directives_null_default_no_instantiation_takes_is_refused_where_declared() {
+  let directive = "directive @d<X>(v: X! = null) on OBJECT\n";
+  for query in [
+    "type Query {\n  x: Int\n}\n",
+    "type Query @d<Int> {\n  x: Int\n}\n",
+    "type Query {\n  g: G<Int>\n}\ntype G<T> @d<T> {\n  f: Int\n}\n",
+  ] {
+    let text = format!("{query}{directive}");
+    let analysis = analyze_text(&text, &Limits::new());
+    let schema = schema_file(&analysis);
+    let null = after(schema, &text, "v: X! = ", "null");
+    assert_eq!(found(&analysis), [(DEFAULT, null)], "{text}");
+    assert_eq!(
+      the(&analysis, DEFAULT, null).to_string(),
+      "`null` is given where a non-null value is expected"
+    );
+  }
+}
+
+/// A field an object literal read at the top leaves out is read for a `null` no instantiation
+/// takes, its default copied under the literal's type: `I<U>`'s `tail` defaults to `null`, and the
+/// literal's type `I<T>` gives `tail` the set's element `T`. Written, `@d<T>(v: {})` is
+/// `invalid-default-value` at the literal, labelled at the default; copied, `@e<T>` leaving out
+/// `v`, whose default is `{}`, is `invalid-default-value` at the application, labelled at `{}`;
+/// and neither is recorded, so `Tags<Int>` adds nothing. Refuses a left-out field's `null` judged
+/// only at each instantiation.
+#[test]
+fn a_field_an_object_literal_leaves_out_is_read_for_a_null_no_instantiation_takes() {
+  let input = "type Query {\n  a: Tags<Int>\n}\ninput I<U> {\n  tail: U = null\n}\n";
+  let written =
+    format!("{input}directive @d<X>(v: I<X>) on SCALAR\nscalar Tags<T> @set @d<T>(v: {{}})\n");
+  let analysis = analyze_text(&written, &Limits::new());
+  let schema = schema_file(&analysis);
+  let literal = after(schema, &written, "@d<T>(v: ", "{}");
+  assert_eq!(found(&analysis), [(DEFAULT, literal)]);
+  let report = the(&analysis, DEFAULT, literal);
+  assert_eq!(
+    report.to_string(),
+    "this literal leaves out `tail`, whose default `null` does not fit the type `tail` takes \
+     under these type arguments"
+  );
+  assert_eq!(
+    labels(report),
+    [(
+      after(schema, &written, "tail: U = ", "null"),
+      "this default"
+    )]
+  );
+
+  let copied =
+    format!("{input}directive @e<X>(v: I<X> = {{}}) on SCALAR\nscalar Tags<T> @set @e<T>\n");
+  let analysis = analyze_text(&copied, &Limits::new());
+  let schema = schema_file(&analysis);
+  let path = named(schema, &copied, "@", "e", 1);
+  assert_eq!(found(&analysis), [(DEFAULT, path)]);
+  assert_eq!(
+    labels(the(&analysis, DEFAULT, path)),
+    [(after(schema, &copied, "v: I<X> = ", "{}"), "this default")]
+  );
+}
+
 /// A field an object literal of a generic definition leaves out, whose type there is its input
 /// object's bare nullable type parameter, is judged by the same rule: the literal is a value its
 /// definition records, and its count at each instantiation reads the field under that

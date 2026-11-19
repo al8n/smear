@@ -214,8 +214,8 @@
 //! its path, with a label at the argument, reported once whatever uses the collection has, and
 //! recorded nowhere. Nor is a value that holds a `null` no instantiation takes recorded: it is
 //! refused at once, as the next section says. A generic directive's own arguments' defaults are
-//! judged where its applications leave them out, and recorded nowhere. When the walk
-//! has ended, each type
+//! judged where its applications leave them out, but for that `null`, and recorded nowhere. When
+//! the walk has ended, each type
 //! occurrence a supplied package writes, in id order, whose type is a closed named type of a
 //! definition with recorded rows, and then each application a supplied package writes, in id
 //! order, whose type is a closed instantiation of its directive, asks that instantiation's
@@ -249,18 +249,28 @@
 //! is read: a list's elements, a lone value against the type under its list, a set literal's
 //! elements, a map literal's keys and values, and the fields an object literal writes, each
 //! field's type read under its object's type arguments as they are written, with no type built.
-//! It does not read into a node whose type is a type parameter, nor into a field a literal leaves
-//! out, whose default each instantiation copies and judges. It is asked of three values:
+//! It does not read into a node whose type is a type parameter. It is asked of three values:
 //!
+//! - a member's default, where it is declared: an input field's or a field argument's of a
+//!   generic type, and a generic directive's argument's. Its `null` is `invalid-default-value`, at
+//!   the `null`, whether or not anything copies it, and the declaration owns every copy of it: a
+//!   copy, where an application or an object literal leaves it out or at an instantiation, is not
+//!   judged again, and is recorded for none;
 //! - an argument an application writes: `null` for a required one is
 //!   `missing-required-directive-argument`, at its name, as above, and any other such `null`, the
 //!   value or one it holds, `invalid-directive-argument-value`, at the `null`;
-//! - a default of an input field or a field argument of a generic type: `invalid-default-value`,
-//!   at the `null`;
 //! - the copy of a directive's default that an application under open type arguments leaves out:
 //!   its count judges it, a step for each node read below its root, and a copy that does not fit
 //!   is `invalid-default-value`, once, at the application's path, labelled at the default, as one
 //!   under closed type arguments is.
+//!
+//! In the last two, the fields an object literal read at the top leaves out are read too: each
+//! default's copy under the literal's type, once for each type and field, a step for each of its
+//! nodes, and its verdict kept. A literal an argument writes that leaves out such a field is
+//! `invalid-default-value`, at the literal, labelled at the default, as a copy that does not fit
+//! is; one in a copy makes the copy not fit. A field left out by a literal inside another
+//! literal's field, or by one in a member's default, is not read, and keeps its check at each
+//! instantiation; nor is a default a declaration owns.
 //!
 //! A value refused whole is one unresolved row; one that holds the `null` stays a `Literal`.
 //!
@@ -527,6 +537,8 @@ pub(crate) fn coerce(
     searched: BTreeMap::new(),
     owner: None,
     recorded: Vec::new(),
+    owned_nulls: BTreeMap::new(),
+    left_nulls: BTreeMap::new(),
     checked: BTreeMap::new(),
     written: BTreeSet::new(),
     paid: 0,
@@ -983,6 +995,20 @@ struct NullEnv {
 /// The environment of the value [`never_null`](Coercion::never_null) starts at: its type is read
 /// as the walk's definition reads it.
 const TOP: u32 = u32::MAX;
+
+/// A `null` no instantiation takes, as [`never_null`](Coercion::never_null) finds it.
+#[derive(Clone, Copy)]
+enum NullFound {
+  /// One the tree read writes, at this node.
+  Written(u32),
+  /// One the copy of the default, whose tree is `tree`, of the field `field` holds, which the
+  /// object literal `literal` the tree read writes leaves out.
+  Left {
+    literal: u32,
+    field: MemberId,
+    tree: u32,
+  },
+}
 
 /// What a literal [`never_null`](Coercion::never_null) reads holds.
 #[derive(Clone, Copy)]
@@ -1520,6 +1546,12 @@ struct Coercion<'c, 'p, 'x> {
   /// the walk's order, and so by its definition: what each closed instantiation of it checks, a
   /// type's written or a directive's applied.
   recorded: Vec<Recorded>,
+  /// Each member's default asked so far, by its tree: the `null` it holds that no instantiation
+  /// takes, which its declaration refuses, and which owns every copy of it.
+  owned_nulls: BTreeMap<u32, Option<u32>>,
+  /// Whether the copy of a field's default, which an object literal read at the top leaves out,
+  /// holds a `null` no instantiation takes, by the literal's type and the field: each read once.
+  left_nulls: BTreeMap<(TyId, MemberId), bool>,
   /// What the rows recorded under each closed instantiation's definition come to under its
   /// arguments, by the instantiation's nullable form.
   checked: BTreeMap<TyId, Checked>,
@@ -1546,18 +1578,9 @@ impl<'p> Coercion<'_, 'p, '_> {
   fn member(&mut self, member: MemberId) {
     if let Some(&tree) = self.raw.defaults.get(&member) {
       let ty = self.member_type(member);
-      // A generic directive's argument's default is judged where an application leaves the
-      // argument out, under that application's type arguments, and is recorded nowhere.
-      let argument = self
-        .owner
-        .is_some_and(|owner: DefId| self.builder.def_kind(owner) == Some(DefKind::Directive));
-      // Any other that holds a `null` no instantiation takes is refused here, and recorded
-      // nowhere.
-      let refused = if argument {
-        None
-      } else {
-        self.written_null(tree, ty)
-      };
+      // A default that holds a `null` no instantiation takes is refused here, once, and recorded
+      // nowhere: this declaration owns every copy of it.
+      let refused = self.owned(member, tree);
       let value = match refused {
         Some(node) => self.refused_null(tree, ty, node, Site::Default),
         None => self.value(tree, ty, Mode::Written(Site::Default)),
@@ -1565,6 +1588,11 @@ impl<'p> Coercion<'_, 'p, '_> {
       if let Some(value) = value {
         self.builder.set_member_default(member, value);
       }
+      // A generic directive's argument's default is judged otherwise where an application leaves
+      // the argument out, under that application's type arguments, and is recorded nowhere.
+      let argument = self
+        .owner
+        .is_some_and(|owner: DefId| self.builder.def_kind(owner) == Some(DefKind::Directive));
       if !argument && refused.is_none() {
         self.record(tree, ty, Site::Default);
       }
@@ -2138,9 +2166,10 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// arguments that does not fit them is reported at the application, the first of its arguments'
   /// copies alone, as `reported` keeps, and so is a default left absent, its copy holding a copy of
   /// itself, whose count reached a node that does not fit them. Under open type arguments, a copy
-  /// that holds a `null` no instantiation takes does not fit them, and is recorded for none.
-  /// Answers `false`, and reports the application once, when the budget cannot pay, or when a type
-  /// the argument takes cannot be built under the arguments.
+  /// that holds a `null` no instantiation takes does not fit them, and is recorded for none. A
+  /// copy of a default its declaration refuses for such a `null` is that declaration's: it is not
+  /// judged, and is recorded for none. Answers `false`, and reports the application once, when the
+  /// budget cannot pay, or when a type the argument takes cannot be built under the arguments.
   fn left_out(&mut self, applying: Applying, left: Listed, reported: &mut bool) -> bool {
     let Applying {
       application,
@@ -2196,14 +2225,17 @@ impl<'p> Coercion<'_, 'p, '_> {
       }
     };
     let ty = expected.ty;
-    let asked = self.ask(tree, ty, library, expected.rebuilt);
+    // A default its declaration refuses, for a `null` no instantiation takes, is that
+    // declaration's: its copy is not judged again, and is recorded for none.
+    let owned = self.owned(left.argument, tree).is_some();
+    let asked = self.ask(tree, ty, library, expected.rebuilt && !owned);
     // Under the application's open type arguments, a copy does not fit only when it holds a `null`
     // no instantiation takes: reported below, once, and recorded for none.
     let fitted = !matches!(
       asked,
       Asked::Copy(CopiedRows { fits: false, .. }) | Asked::Absent(AbsentRows { fits: false })
     );
-    if env.is_some() && fitted {
+    if env.is_some() && fitted && !owned {
       self.record(tree, ty, Site::Default);
     }
     let (rows, fits) = match asked {
@@ -2445,9 +2477,10 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// not pay for. It judges whether the copy fits: whether each of its nodes takes its type as a
   /// written one would, and each judged count it reads fits; a node whose type names type
   /// parameters, which only an instantiation can judge, fits unless it holds a `null` no
-  /// instantiation takes, as [`never_null`](Self::never_null) finds it, a step for each node below
-  /// it read. A count that is not judged fits: its default was judged where it is written. What
-  /// does not fit is kept beside the count.
+  /// instantiation takes, as [`never_null`](Self::never_null) finds it, the copies of the fields
+  /// its literals at the top leave out among them, a step for each node read. A count that is not
+  /// judged fits: its default was judged where it is written, as a default its declaration refuses
+  /// is. What does not fit is kept beside the count.
   fn count(&mut self, tree: u32, ty: Option<TyId>, charged: bool, judged: bool) -> Count {
     if let Some(&kept) = self.counts.get(&CountKey { tree, ty }) {
       return kept;
@@ -2750,10 +2783,13 @@ impl<'p> Coercion<'_, 'p, '_> {
     match self.classify(raw.kind, ty) {
       Class::NoValue => {
         // A type that names type parameters is each instantiation's to judge, but a `null` none of
-        // them takes does not fit here: a step for each node below this one read.
+        // them takes does not fit here, nor one the copy of a field its literal leaves out holds:
+        // a step for each node read below this one.
         if judged
           && let Some(ty) = ty
-          && self.never_null(node, ty, pay)?.is_some()
+          && self
+            .never_null(node, ty, None, pay, Some(charged))?
+            .is_some()
         {
           self.misfit();
         }
@@ -2844,10 +2880,12 @@ impl<'p> Coercion<'_, 'p, '_> {
                 return Err(Count::Past);
               }
               let expected = self.under(field, env, !charged).map_err(unbuilt_count)?;
+              // A default its declaration refuses is that declaration's: not judged again.
+              let judged = expected.rebuilt && self.owned(field, tree).is_none();
               self.counting.push(Counted::Fill(FillCount {
                 tree,
                 ty: expected.ty,
-                judged: expected.rebuilt,
+                judged,
               }));
             }
           }
@@ -3216,8 +3254,9 @@ impl<'p> Coercion<'_, 'p, '_> {
   }
 
   /// The first `null` at or under `node`, in written order, that no instantiation takes, `ty`
-  /// being `node`'s type: its node. `None` when `ty` is closed, which the value's own coercion
-  /// judges, or when there is none. The one test the module's section on such a `null` describes.
+  /// being `node`'s type, read in the environment `start`, or at the top: where it is. `None` when
+  /// `ty` is closed, which the value's own coercion judges, or when there is none. The one test
+  /// the module's section on such a `null` describes.
   ///
   /// A place is non-null in every instantiation when its type is written non-null, at any depth;
   /// when it is a nullable type parameter of the walk's definition that is its collection's key or
@@ -3227,19 +3266,35 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// elements, a lone value against the type under its list, a set literal's elements, a map
   /// literal's keys and values, and the fields an object literal writes, each field's type read
   /// under its object's type arguments as they are written, with no type built. A node whose type
-  /// is a type parameter is not read into, and nor is a field the literal leaves out. `pay`
-  /// charges a step for each node below `node` before it is looked at, and fails with the count's
-  /// verdict when one cannot be paid; without it, nothing is charged.
-  fn never_null(&mut self, node: u32, ty: TyId, pay: bool) -> Result<Option<u32>, Count> {
+  /// is a type parameter is not read into. With `left`, the fields an object literal read at the
+  /// top leaves out are read too, as [`left_null`](Self::left_null) says, charged when it holds
+  /// `true`; those of a literal inside another literal's field are not. `pay` charges a step for
+  /// each node below `node` before it is looked at; a step that cannot be paid fails with the
+  /// count's verdict.
+  fn never_null(
+    &mut self,
+    node: u32,
+    ty: TyId,
+    start: Option<NullEnv>,
+    pay: bool,
+    left: Option<bool>,
+  ) -> Result<Option<NullFound>, Count> {
     if self.builder.ty_closed(ty) {
       return Ok(None);
     }
     let mut envs: Vec<NullEnv> = Vec::new();
+    let env = match start {
+      Some(start) => {
+        envs.push(start);
+        0
+      }
+      None => TOP,
+    };
     let mut stack: Vec<NullAt> = Vec::new();
     stack.push(NullAt {
       node,
       ty,
-      env: TOP,
+      env,
       key: false,
     });
     while let Some(at) = stack.pop() {
@@ -3248,7 +3303,7 @@ impl<'p> Coercion<'_, 'p, '_> {
       };
       if matches!(raw.kind, RawKind::Null) {
         if at.key || self.never_null_at(&envs, at.ty, at.env) {
-          return Ok(Some(at.node));
+          return Ok(Some(NullFound::Written(at.node)));
         }
         continue;
       }
@@ -3275,6 +3330,12 @@ impl<'p> Coercion<'_, 'p, '_> {
           },
           (Some(Base::Map(types)), RawKind::Map) => Holds::Entries(types),
           (Some(Base::Object(def)), RawKind::Object(first)) => {
+            if env == TOP
+              && let Some(charged) = left
+              && let Some(found) = self.left_null(at.node, raw, def, first, ty, charged)?
+            {
+              return Ok(Some(found));
+            }
             let fields = dense(envs.len());
             envs.push(NullEnv {
               ty,
@@ -3407,6 +3468,113 @@ impl<'p> Coercion<'_, 'p, '_> {
       env = object.outer;
     }
     (ty, env)
+  }
+
+  /// The first field, in its input object's order, that the object literal `literal` leaves out
+  /// whose default's copy holds a `null` no instantiation takes: where it is. The literal, whose
+  /// node is `raw` and whose rows of the fields start at `first`, is of the input object `def`, and
+  /// read at the top as `ty`. Each default is read once for each such type and field, as
+  /// [`never_null`](Self::never_null) reads it under `ty`'s arguments, a step for each of its nodes
+  /// when `charged`, and its verdict kept. A default its declaration refuses is that
+  /// declaration's, and is not read.
+  fn left_null(
+    &mut self,
+    literal: u32,
+    raw: RawNode,
+    def: DefId,
+    first: u32,
+    ty: TyId,
+    charged: bool,
+  ) -> Result<Option<NullFound>, Count> {
+    let Some(input) = self.input(def) else {
+      return Ok(None);
+    };
+    // The fields the literal writes, sorted, to tell those it leaves out.
+    let mut set: Vec<MemberId> = Vec::new();
+    let mut child = literal.saturating_add(1);
+    let mut row = first;
+    while child < raw.after {
+      if let Some(field) = self.raw.fields.get(row as usize).copied()
+        && let Some(name) = field.name
+        && let Some(&member) = self.members.get(&(def, name))
+      {
+        set.push(member);
+      }
+      let after = self
+        .raw
+        .nodes
+        .get(child as usize)
+        .map_or(raw.after, |held: &RawNode| held.after);
+      if after <= child {
+        break;
+      }
+      child = after;
+      row = row.saturating_add(1);
+    }
+    set.sort_unstable();
+    let PoolRange { start, end } = input.defaults;
+    for at in start..end {
+      let Some(DefaultedField { field, tree }) = self.defaulted.get(at as usize).copied() else {
+        continue;
+      };
+      if set.binary_search(&field).is_ok() || self.owned(field, tree).is_some() {
+        continue;
+      }
+      let holds = match self.left_nulls.get(&(ty, field)).copied() {
+        Some(holds) => holds,
+        None => {
+          let (Some(root), Some(written)) = (
+            self
+              .raw
+              .trees
+              .get(tree as usize)
+              .map(|tree: &RawTree| tree.root),
+            self.member_occurrence(field).ty,
+          ) else {
+            continue;
+          };
+          if charged && !self.charge(1) {
+            return Err(Count::Past);
+          }
+          let object = NullEnv {
+            ty,
+            def,
+            outer: TOP,
+          };
+          let holds = self
+            .never_null(root, written, Some(object), charged, None)?
+            .is_some();
+          self.left_nulls.insert((ty, field), holds);
+          holds
+        }
+      };
+      if holds {
+        return Ok(Some(NullFound::Left {
+          literal,
+          field,
+          tree,
+        }));
+      }
+    }
+    Ok(None)
+  }
+
+  /// The `null` the default whose tree is `tree`, `member`'s, holds that no instantiation takes,
+  /// read as it is written, against `member`'s type: where it is. Read once for each default, by
+  /// its declaration or by whatever copies it first, and kept. A default that holds one is refused
+  /// at its declaration, which owns every copy of it: a copy is not judged again, and is recorded
+  /// for no instantiation.
+  fn owned(&mut self, member: MemberId, tree: u32) -> Option<u32> {
+    if let Some(&kept) = self.owned_nulls.get(&tree) {
+      return kept;
+    }
+    let ty = self.member_type(member);
+    let found = match self.written_null(tree, ty, None) {
+      Ok(Some(NullFound::Written(node))) => Some(node),
+      _ => None,
+    };
+    self.owned_nulls.insert(tree, found);
+    found
   }
 
   /// Reports `argument`, which `application`, whose path is at `at`, leaves out, as required by
@@ -3631,9 +3799,11 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// instantiation makes non-null, given `null` is reported as left out, at its name, once, and
   /// its value is unresolved and recorded for no instantiation. Any other value that holds a
   /// `null` no instantiation takes, the value itself or one deeper, is refused at that `null`,
-  /// once, and recorded for none, as the module's section on such a `null` says. A value whose
-  /// type cannot be built under the arguments is one unresolved row, typed with the type the
-  /// argument is written with, `resource-limit` at it.
+  /// once, and recorded for none, and so is one whose object literal, read at the top, leaves out
+  /// a field whose default's copy holds one, at that literal, as the module's section on such a
+  /// `null` says; one whose defaults cannot be read within the budget is `resource-limit` at it.
+  /// A value whose type cannot be built under the arguments is one unresolved row, typed with the
+  /// type the argument is written with, `resource-limit` at it.
   fn written_argument(&mut self, applying: Applying, argument: RawArgument) {
     let application = applying.application;
     let expected = match self.under(argument.argument, applying.env, applying.library) {
@@ -3666,16 +3836,44 @@ impl<'p> Coercion<'_, 'p, '_> {
       // instantiation makes non-null: refused here once, and recorded nowhere, so that no
       // instantiation reports it again.
       self.null_for_required(application, argument, ty)
-    } else if let Some(node) = self.written_null(argument.tree, ty) {
-      // Any other `null` no instantiation takes, the value or one it holds, is refused here too,
-      // once, and recorded nowhere: a default stands in for the argument only where it is left
-      // out.
-      self.refused_null(argument.tree, ty, node, Site::Argument)
     } else {
-      if applying.env.is_some() {
-        self.record(argument.tree, ty, Site::Argument);
+      let tree = argument.tree;
+      let mode = Mode::Written(Site::Argument);
+      match self.written_null(tree, ty, Some(!applying.library)) {
+        // Any other `null` no instantiation takes, the value or one it holds, is refused here too,
+        // once, and recorded nowhere: a default stands in for the argument only where it is left
+        // out.
+        Ok(Some(NullFound::Written(node))) => self.refused_null(tree, ty, node, Site::Argument),
+        // So is one the copy of a field an object literal of it leaves out holds: the literal's.
+        Ok(Some(NullFound::Left {
+          literal,
+          field,
+          tree: default,
+        })) => {
+          if let Some(at) = self.node_at(tree, literal) {
+            self.unfit_field(at, field, default);
+          }
+          self.value(tree, ty, mode)
+        }
+        // The defaults its literals leave out could not be read within the budget.
+        Err(_) => {
+          let root = self
+            .raw
+            .trees
+            .get(tree as usize)
+            .map(|raw: &RawTree| raw.root);
+          if let Some(at) = root.and_then(|root: u32| self.node_at(tree, root)) {
+            self.object_starved(at, Stop::Steps);
+          }
+          self.value(tree, ty, mode)
+        }
+        Ok(None) => {
+          if applying.env.is_some() {
+            self.record(tree, ty, Site::Argument);
+          }
+          self.value(tree, ty, mode)
+        }
       }
-      self.value(argument.tree, ty, Mode::Written(Site::Argument))
     };
     if let Some(value) = value {
       self.builder.push_application_argument(
@@ -3747,11 +3945,32 @@ impl<'p> Coercion<'_, 'p, '_> {
   }
 
   /// The first `null` the written tree `tree`, of the type `ty`, holds that no instantiation
-  /// takes, as [`never_null`](Self::never_null) finds it: its node. Read where the tree is
-  /// written, once, and charged nothing.
-  fn written_null(&mut self, tree: u32, ty: Option<TyId>) -> Option<u32> {
-    let root = self.raw.trees.get(tree as usize)?.root;
-    self.never_null(root, ty?, false).ok().flatten()
+  /// takes, as [`never_null`](Self::never_null) finds it with `left`: where it is. Its own nodes
+  /// are read where it is written, once, and charged nothing.
+  fn written_null(
+    &mut self,
+    tree: u32,
+    ty: Option<TyId>,
+    left: Option<bool>,
+  ) -> Result<Option<NullFound>, Count> {
+    let (Some(root), Some(ty)) = (
+      self
+        .raw
+        .trees
+        .get(tree as usize)
+        .map(|tree: &RawTree| tree.root),
+      ty,
+    ) else {
+      return Ok(None);
+    };
+    self.never_null(root, ty, None, false, left)
+  }
+
+  /// Where the node `node` of the tree `tree` is written.
+  fn node_at(&self, tree: u32, node: u32) -> Option<Location> {
+    let source = self.raw.trees.get(tree as usize)?.source;
+    let span = self.raw.nodes.get(node as usize)?.span;
+    Some(Location::new(source, span))
   }
 
   /// The value of the tree `tree`, of the type `ty`, written at `site`, which holds at `node` a
@@ -4211,7 +4430,9 @@ impl<'p> Coercion<'_, 'p, '_> {
       // this default's count, through this same reading of the literal, and it was exact, or no
       // copy would be made. So its rows are among those already paid for.
       if mode.written() {
-        let (fits, made) = match self.ask(default, ty, library, expected.rebuilt) {
+        // A default its declaration refuses is that declaration's: its copy is not judged again.
+        let judged = expected.rebuilt && self.owned(field, default).is_none();
+        let (fits, made) = match self.ask(default, ty, library, judged) {
           Asked::Copy(CopiedRows { fits, .. }) => (fits, true),
           // Absent, its copy holding a copy of itself: what its count reached is judged all the
           // same.

@@ -306,12 +306,15 @@ impl Analysis {
 ///   or as a set's element or a map's key, is never left to the instantiations, however it got
 ///   there: written, the value or deeper, it is refused once, at the `null`, with the site's code,
 ///   or, the whole value of a required argument, `missing-required-directive-argument` at its
-///   name; in a copy of a directive's default that an application leaves out, the application is
-///   `invalid-default-value`, once, labelled at the default; and the value is recorded for no
-///   instantiation. The
+///   name, a member's default's at its declaration, a generic directive's argument's among them,
+///   which owns every copy of it; in a copy of a directive's default that an application leaves
+///   out, the application is `invalid-default-value`, once, labelled at the default; in the copy
+///   of a field an argument's object literal leaves out, the literal is `invalid-default-value`,
+///   labelled at that default; and the value is recorded for no instantiation. The
 ///   values of the applications on a generic directive and on its arguments are checked likewise
 ///   at each closed application of the directive, reported at its path; the directive's own
-///   arguments' defaults are judged only where an application leaves them out. A copy is
+///   arguments' defaults are judged only where an application leaves them out, but for such a
+///   `null`, refused at their declaration. A copy is
 ///   counted before it is made, each default's count kept, and a default whose copy would hold a
 ///   copy of itself is not copied: the argument, or the field, is absent, and under type arguments
 ///   what its count reached is judged as a copy is. The first time a count meets itself, that
