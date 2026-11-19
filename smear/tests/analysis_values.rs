@@ -8,9 +8,9 @@
 use smear::{
   analysis::graphqlx::{
     Analysis, ApplicationArgument, ApplicationId, Cx, DefId, Diagnostic, IntegerProvider, Layout,
-    Limits, MemberId, Model, Namespace, Package, PackageId, Packages, Path, PathRoot, Resolution,
-    SourceFile, SourceId, Sym, Tier, TyId, TyKind, ValueId, ValueKind, Visitor, analyze,
-    test_support, visit,
+    Limits, MemberId, Model, Namespace, Options, Package, PackageId, Packages, Path, PathRoot,
+    Resolution, SourceFile, SourceId, Sym, Tier, TyId, TyKind, ValueId, ValueKind, Visitor,
+    analyze, test_support, visit,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -54,7 +54,7 @@ fn clean(analysis: &Analysis) -> bool {
 fn analyze_text(text: &str, limits: &Limits) -> Analysis {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text)]);
-  analyze(&root, &[], limits)
+  analyze(&root, &[], limits, &Options::new())
 }
 
 /// The same, where the package's integer provider gives every width from 0 to 65536 bits.
@@ -67,7 +67,7 @@ fn analyze_wide_with(text: &str, limits: &Limits) -> Analysis {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text)])
     .with_integers(IntegerProvider::numo());
-  analyze(&root, &[], limits)
+  analyze(&root, &[], limits, &Options::new())
 }
 
 /// The root package's one file, `schema.graphqlx`.
@@ -1300,7 +1300,7 @@ fn a_dependencys_default_fills_the_roots_application() {
       "dep.graphqlx",
       "directive @tag(name: String = \"dep\") on OBJECT\n",
     )]);
-  let analysis = analyze(&root, &[dep], &Limits::new());
+  let analysis = analyze(&root, &[dep], &Limits::new(), &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let copy = arguments_of(model, "T")[0].value();
@@ -1549,7 +1549,7 @@ fn reversing_files_and_dependencies_changes_no_value_and_no_diagnostic() {
     let two: Package<&str> = Package::new("two", Layout::Flat, Tier::Std)
       .with_files([SourceFile::new("two.graphqlx", two)]);
     let dependencies = if reversed { [two, one] } else { [one, two] };
-    let analysis = analyze(&root, &dependencies, &Limits::new());
+    let analysis = analyze(&root, &dependencies, &Limits::new(), &Options::new());
     let model = analysis.model();
     let mut text = String::new();
     let test_support::Counts {

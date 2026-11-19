@@ -18,6 +18,7 @@ use super::{
   limits::Limits,
   lower,
   model::{Model, ModelBuilder, PackageKind},
+  options::Options,
   package::Package,
   parse::{self, Documents},
   resolve,
@@ -30,7 +31,8 @@ use super::{
   visitor::{Packages, Visitor, drive},
 };
 
-/// What one analysis found: the model, the diagnostics, and the source map.
+/// What one analysis found: the model, the diagnostics, and the source map, and the limits and
+/// options it ran under.
 ///
 /// It has no type parameter and no lifetime: it is the same type whatever text type the packages
 /// were supplied in, and it borrows nothing from them. Whatever was refused, the model holds every
@@ -38,26 +40,29 @@ use super::{
 /// what was refused, as far as their ceiling keeps them, and [`is_ok`](Self::is_ok) is the verdict.
 ///
 /// Two analyses are equal when their models, their diagnostics (the list, the error count and
-/// whether the list is truncated), their source maps and the diagnostic ceilings they were made
-/// under are equal. So two analyses of one package set made under two ceilings are unequal, even
-/// when neither list was truncated: a walk over each keeps to its own ceiling. The models are
-/// compared as [`Model`]'s equality says, every row and every id, which is the question to ask of
-/// two analyses of the same packages: [`analyze_with`] says when two parser layers answer equal
-/// ones. It is `PartialEq` and not `Eq` because a float value is compared as an `f64` is; no
-/// literal spells a NaN, so an analysis is equal to itself.
+/// whether the list is truncated), their source maps and the limits and the options they were made
+/// under are equal. So two analyses of one package set made under two configurations are unequal,
+/// even when every answer is the same: a walk over each keeps to its own ceiling, and a backend
+/// reads each one's switches. The models are compared as [`Model`]'s equality says, every row and
+/// every id, which is the question to ask of two analyses of the same packages: [`analyze_with`]
+/// says when two parser layers answer equal ones. It is `PartialEq` and not `Eq` because a float
+/// value is compared as an `f64` is; no literal spells a NaN, so an analysis is equal to itself.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Analysis {
   model: Model,
   diagnostics: Diagnostics,
   sources: SourceMap,
-  /// The diagnostic ceiling it was made with, which a consumer's walk keeps to as well.
-  ceiling: usize,
+  /// The limits it was made within: the diagnostic ceiling among them, which a consumer's walk
+  /// keeps to as well.
+  limits: Limits,
+  /// The options it was made under.
+  options: Options,
 }
 
 impl Analysis {
   /// The analysis `analyze` would conclude from the finished `model`, with `rules` run in place of
   /// smear's own rule set, as the test-support door hands it to its tests: a source map of the
-  /// model's packages' sources, and `limits`' diagnostic ceiling.
+  /// model's packages' sources, `limits`' diagnostic ceiling, and every option off.
   #[cfg(feature = "test-support")]
   pub(crate) fn of_model<V: Visitor + ?Sized>(
     model: Model,
@@ -66,14 +71,27 @@ impl Analysis {
   ) -> Self {
     let sources = SourceMap::of_model(&model);
     let reporter = Reporter::new(limits.max_diagnostics() as usize);
-    conclude(model, sources, reporter, rules)
+    conclude(model, sources, reporter, limits, &Options::new(), rules)
   }
 
   /// The diagnostic ceiling the analysis was made with: how many diagnostics a list it answers,
   /// or a walk over it answers, keeps.
   #[inline]
   pub(crate) fn ceiling(&self) -> usize {
-    self.ceiling
+    self.limits.max_diagnostics() as usize
+  }
+
+  /// The limits the analysis ran within.
+  #[inline]
+  pub const fn limits(&self) -> &Limits {
+    &self.limits
+  }
+
+  /// The options the analysis ran under: what a backend that relies on a switch checks, since a
+  /// program the switch would refuse is accepted without it.
+  #[inline]
+  pub const fn options(&self) -> &Options {
+    &self.options
   }
 
   /// The model of what the packages declare.
@@ -103,7 +121,7 @@ impl Analysis {
   }
 }
 
-/// Analyzes `root` beside `dependencies`, within `limits`.
+/// Analyzes `root` beside `dependencies`, within `limits`, under `options`.
 ///
 /// # What it does
 ///
@@ -604,6 +622,7 @@ pub fn analyze<S: SourceText>(
   root: &Package<S>,
   dependencies: &[Package<S>],
   limits: &Limits,
+  options: &Options,
 ) -> Analysis {
   let mut prepared = prepare(views(root, dependencies), limits);
   let documents = parse::files(
@@ -614,17 +633,19 @@ pub fn analyze<S: SourceText>(
     &mut prepared.reporter,
     None,
   );
-  finish(prepared, &documents, limits)
+  finish(prepared, &documents, limits, options)
 }
 
-/// Analyzes `root` beside `dependencies`, within `limits`, with `parser` reading every supplied
-/// file: [`analyze`], with the parser chosen by the caller, and what the parser kept for each file.
+/// Analyzes `root` beside `dependencies`, within `limits`, under `options`, with `parser` reading
+/// every supplied file: [`analyze`], with the parser chosen by the caller, and what the parser kept
+/// for each file.
 ///
 /// `parser` is a [`Layer`] of GraphQLx. [`Syntactic`] is one: it stops at a file's first syntax
 /// error, keeps nothing, and is what [`analyze`] reads with. The other is `smear-parser`'s lossless
 /// layer, behind its `rowan_0_17` and `std` features: it recovers, so the well-formed rest of a
 /// broken file is analyzed, and it keeps each file's tree. A layer's limits, such as the nesting
-/// depth a parse descends to, are the layer value's, where [`Limits`] bounds the analysis.
+/// depth a parse descends to, are the layer value's, where [`Limits`] bounds the analysis and
+/// [`Options`] relaxes or tightens what it accepts.
 ///
 /// Everything [`analyze`] does around the parse is done here, in the same order. Each supplied file
 /// that is text, or bytes that are UTF-8, is read by `parser`, and every syntax error it lends is a
@@ -642,17 +663,19 @@ pub fn analyze<S: SourceText>(
 /// over the layer that keeps the trees past the packages bounds `P::Tree: 'static`.
 ///
 /// For a package set no layer reports a syntax error for, every layer answers an equal
-/// [`Analysis`], the rules' diagnostics and marks included: the layers hand the same phases the
-/// same documents in the same order. Where a layer reports a syntax error, the package ids and the
-/// source ids are still those every other layer answers, and nothing else is promised. The source
-/// map records which files a layer read whole, [`Source::is_complete`](super::Source::is_complete),
-/// so on a package set a layer reports a syntax error for, the maps can differ only there, as the
-/// analyses do. The trees are beside the analysis, and no part of its equality.
+/// [`Analysis`] under the same limits and options, the rules' diagnostics and marks included: the
+/// layers hand the same phases the same documents in the same order. Where a layer reports a
+/// syntax error, the package ids and the source ids are still those every other layer answers, and
+/// nothing else is promised. The source map records which files a layer read whole,
+/// [`Source::is_complete`](super::Source::is_complete), so on a package set a layer reports a
+/// syntax error for, the maps can differ only there, as the analyses do. The trees are beside the
+/// analysis, and no part of its equality.
 pub fn analyze_with<'a, P, S>(
   parser: &P,
   root: &'a Package<S>,
   dependencies: &'a [Package<S>],
   limits: &Limits,
+  options: &Options,
 ) -> (Analysis, Trees<P::Tree>)
 where
   P: Layer<'a>,
@@ -668,7 +691,10 @@ where
     &mut prepared.reporter,
     Some(&mut trees),
   );
-  (finish(prepared, &documents, limits), Trees { trees })
+  (
+    finish(prepared, &documents, limits, options),
+    Trees { trees },
+  )
 }
 
 /// Every package of one analysis, read through its getters, in id order: the built-ins, then
@@ -715,7 +741,12 @@ fn prepare<'a>(packages: Vec<PackageView<'a>>, limits: &Limits) -> Prepared<'a> 
 
 /// Everything after the parse, compiled once whatever the caller's text type and whatever the
 /// parser: the phases that read the documents, and the rules.
-fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits) -> Analysis {
+fn finish<'a>(
+  prepared: Prepared<'a>,
+  documents: &Documents<'a>,
+  limits: &Limits,
+  options: &Options,
+) -> Analysis {
   let Prepared {
     packages,
     mut reporter,
@@ -779,7 +810,14 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
   );
   tiers::tiers(&declarations, &mut builder);
 
-  conclude(builder.finish(), sources, reporter, &mut Rules::default())
+  conclude(
+    builder.finish(),
+    sources,
+    reporter,
+    limits,
+    options,
+    &mut Rules::default(),
+  )
 }
 
 /// The model of `root` beside `dependencies` as name resolution leaves it, before lowering, and
@@ -970,15 +1008,22 @@ impl<T> ExactSizeIterator for TreesIntoIter<T> {}
 impl<T> FusedIterator for TreesIntoIter<T> {}
 
 /// What every analysis ends with, once its phases have written `model` and reported into
-/// `reporter`: the phases' marks applied, `rules` walked over every supplied package and reporting
-/// into the same list, and the marks of the rules' errors applied once the walk has ended.
+/// `reporter`, made with the diagnostic ceiling of `limits`: the phases' marks applied, `rules`
+/// walked over every supplied package and reporting into the same list, and the marks of the rules'
+/// errors applied once the walk has ended. The analysis records `limits` and `options`.
 fn conclude<V: Visitor + ?Sized>(
   mut model: Model,
   sources: SourceMap,
   mut reporter: Reporter,
+  limits: &Limits,
+  options: &Options,
   rules: &mut V,
 ) -> Analysis {
-  let ceiling = reporter.ceiling();
+  debug_assert_eq!(
+    reporter.ceiling(),
+    limits.max_diagnostics() as usize,
+    "the reporter keeps the ceiling of the limits the analysis records"
+  );
   // The rules read the phases' marks.
   model.mark(&reporter.take_marks());
   // Theirs are kept aside until every rule has walked, so no rule sees another's.
@@ -989,7 +1034,8 @@ fn conclude<V: Visitor + ?Sized>(
     model,
     diagnostics,
     sources,
-    ceiling,
+    limits: *limits,
+    options: *options,
   }
 }
 

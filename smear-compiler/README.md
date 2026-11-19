@@ -102,6 +102,8 @@ and checks a GraphQLx program against smear's own rules and the rules GraphQLx s
   a tier and its files' texts (`&str`, `&[u8]` or a source feature's type). The caller reads the
   files and supplies every package: the analysis does no I/O.
 - **Limits:** `graphqlx::Limits`, the bounds untrusted input runs under.
+- **Options:** `graphqlx::Options`, the switches that relax or tighten what the language accepts,
+  each off by default.
 - **The model:** dense tables read through `Copy` views, of packages, modules, definitions,
   members, type occurrences and interned types, values, directive applications, the schema and the
   built-ins, with canonical names and lookup. It owns every spelling it answers with.

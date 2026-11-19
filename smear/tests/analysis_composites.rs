@@ -9,8 +9,8 @@
 use smear::{
   analysis::graphqlx::{
     Analysis, ApplicationArgument, Cx, DefId, Diagnostic, Layout, Limits, MemberId, Model,
-    Namespace, ObjectEntry, Package, PackageId, Packages, Path, PathRoot, SourceFile, SourceId,
-    Sym, Tier, TyKind, ValueId, ValueKind, Visitor, analyze, test_support, visit,
+    Namespace, ObjectEntry, Options, Package, PackageId, Packages, Path, PathRoot, SourceFile,
+    SourceId, Sym, Tier, TyKind, ValueId, ValueKind, Visitor, analyze, test_support, visit,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -42,7 +42,7 @@ const CYCLE: &str = "smear::schema::input-object-default-value-cycle";
 fn analyze_text(text: &str, limits: &Limits) -> Analysis {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text)]);
-  analyze(&root, &[], limits)
+  analyze(&root, &[], limits, &Options::new())
 }
 
 /// The root package's one file, `schema.graphqlx`.
@@ -671,7 +671,7 @@ fn a_package_makes_its_own_input_object_one_of() {
       "dep.graphqlx",
       "input Q {\n  a: Int\n  b: Int\n}\n",
     )]);
-  let analysis = analyze(&root, &[dep], &Limits::new());
+  let analysis = analyze(&root, &[dep], &Limits::new(), &Options::new());
   assert!(
     found_of(&analysis, &values_codes).is_empty(),
     "{:#?}",
@@ -1914,7 +1914,7 @@ fn reversing_files_and_dependencies_changes_no_composite_value_and_no_diagnostic
     let two: Package<&str> = Package::new("two", Layout::Flat, Tier::Std)
       .with_files([SourceFile::new("two.graphqlx", two)]);
     let dependencies = if reversed { [two, one] } else { [one, two] };
-    let analysis = analyze(&root, &dependencies, &Limits::new());
+    let analysis = analyze(&root, &dependencies, &Limits::new(), &Options::new());
     let model = analysis.model();
     let mut text = String::new();
     let test_support::Counts { values: count, .. } = test_support::counts(model);

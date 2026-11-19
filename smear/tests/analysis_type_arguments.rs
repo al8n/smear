@@ -13,8 +13,8 @@
 use smear::{
   analysis::graphqlx::{
     Analysis, ApplicationId, Cx, DefId, Diagnostic, Layout, Limits, MemberId, Model, Namespace,
-    ObjectEntry, Package, PackageId, Packages, SourceFile, SourceId, Tier, TyId, TyKind, ValueId,
-    ValueKind, Visitor, analyze, test_support, visit,
+    ObjectEntry, Options, Package, PackageId, Packages, SourceFile, SourceId, Tier, TyId, TyKind,
+    ValueId, ValueKind, Visitor, analyze, test_support, visit,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -45,7 +45,7 @@ const PHASE: [&str; 4] = [DEFAULT, ARGUMENT, MISSING, LIMIT];
 fn analyze_text(text: &str, limits: &Limits) -> Analysis {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text)]);
-  analyze(&root, &[], limits)
+  analyze(&root, &[], limits, &Options::new())
 }
 
 /// The root package's one file, `schema.graphqlx`.
@@ -1631,8 +1631,13 @@ fn reversing_files_and_dependencies_changes_nothing_under_type_arguments() {
   let backward = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([second, first])
     .with_dependencies(["other", "dep"]);
-  let one = analyze(&forward, &[dep.clone(), other.clone()], &Limits::new());
-  let two = analyze(&backward, &[other, dep], &Limits::new());
+  let one = analyze(
+    &forward,
+    &[dep.clone(), other.clone()],
+    &Limits::new(),
+    &Options::new(),
+  );
+  let two = analyze(&backward, &[other, dep], &Limits::new(), &Options::new());
   // Not vacuous: `@g<String>`'s copy and `In<String>` are each reported.
   assert_eq!(
     found(&one)

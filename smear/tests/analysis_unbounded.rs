@@ -5,8 +5,8 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Diagnostic, Diagnostics, Layout, Limits, Package, PackageId, Packages, SourceFile,
-    SourceId, Tier, UnboundedInstantiation, Visitor, analyze, visit,
+    Analysis, Diagnostic, Diagnostics, Layout, Limits, Options, Package, PackageId, Packages,
+    SourceFile, SourceId, Tier, UnboundedInstantiation, Visitor, analyze, visit,
   },
   diagnostic::{Diagnose, Label, Location, Severity},
   lexer::tokora::SimpleSpan,
@@ -34,7 +34,7 @@ fn package(
 /// An analysis of the root package `app`, `Flat`, holding the one file `schema.graphqlx`.
 fn analyze_one(text: &'static str) -> Analysis {
   let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
-  analyze(&root, &[], &Limits::new())
+  analyze(&root, &[], &Limits::new(), &Options::new())
 }
 
 /// An analysis of the root package `app`'s one file `text`, which `analyze` accepts: a program it
@@ -279,7 +279,7 @@ fn type_arguments_past_a_directives_parameters_give_no_edge() {
     "directive @e on FIELD_DEFINITION\ntype G<T> { f: Int @e<[T]> }\n",
   ] {
     let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
-    let analysis = analyze(&root, &[], &Limits::new());
+    let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
     silent(&analysis, Packages::All);
   }
 }
@@ -326,7 +326,7 @@ fn each_followed_position_is_followed() {
     ),
   ] {
     let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
-    let analysis = analyze(&root, &[], &Limits::new());
+    let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
     let schema = schema_file(&analysis);
     assert_eq!(
       unbounded(&analysis, Packages::All),
@@ -416,7 +416,7 @@ fn a_bound_and_a_written_default_are_not_followed() {
     ),
   ] {
     let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
-    let analysis = analyze(&root, &[], &Limits::new());
+    let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
     let schema = schema_file(&analysis);
     assert_eq!(
       unbounded(&analysis, Packages::All),
@@ -474,7 +474,7 @@ fn growth_inside_a_filled_default_is_reported_at_the_use() {
     ),
   ] {
     let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
-    let analysis = analyze(&root, &[], &Limits::new());
+    let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
     let schema = schema_file(&analysis);
     assert_eq!(
       unbounded(&analysis, Packages::All),
@@ -701,7 +701,7 @@ fn a_dependencys_growth_is_reported_only_where_the_walk_covers_it() {
   )
   .with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", nest)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let geo_file = file(&analysis, 4, "geo.graphqlx");
   silent(&analysis, Packages::Root);
   let reported = [(
@@ -793,6 +793,7 @@ fn the_rule_composes_and_does_not_depend_on_order() {
       package("map", Layout::Flat, &map),
     ],
     &Limits::new(),
+    &Options::new(),
   );
   let backward = analyze(
     &package("app", Layout::Flat, &[files[1], files[0]]).with_dependencies(["map", "geo"]),
@@ -801,6 +802,7 @@ fn the_rule_composes_and_does_not_depend_on_order() {
       package("geo", Layout::Flat, &geo),
     ],
     &Limits::new(),
+    &Options::new(),
   );
   let reported = visit(&forward, Packages::All, &mut UnboundedInstantiation::new());
   assert_eq!(reported.len(), 3, "{reported:#?}");
@@ -820,7 +822,7 @@ fn a_long_name_is_quoted_as_an_excerpt() {
   );
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let diagnostics = visit(&analysis, Packages::All, &mut UnboundedInstantiation::new());
   let messages: Vec<String> = diagnostics
     .iter()

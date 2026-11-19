@@ -5,8 +5,8 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Diagnostic, DiagnosticKind, Layout, Limits, Package, PackageId, SourceFile, SourceId,
-    Tier, analyze, test_support,
+    Analysis, Diagnostic, DiagnosticKind, Layout, Limits, Options, Package, PackageId, SourceFile,
+    SourceId, Tier, analyze, test_support,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -159,7 +159,7 @@ fn every_form_binds_what_it_names() {
   )
   .with_dependencies(["geo"]);
   let dependencies = [geo];
-  let analysis = analyze(&root, &dependencies, &Limits::new());
+  let analysis = analyze(&root, &dependencies, &Limits::new(), &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   all(
@@ -204,7 +204,7 @@ fn a_use_binds_for_every_file_of_its_module_and_for_its_inline_mod_alone() {
   )
   .with_dependencies(["geo"]);
   let dependencies = [geo];
-  let analysis = analyze(&root, &dependencies, &Limits::new());
+  let analysis = analyze(&root, &dependencies, &Limits::new(), &Options::new());
 
   // `b`, a file of the same module, sees the `use` of `a`; `child`, a module of its own, does not.
   let source = file(&analysis, 3, "lib/child/c.graphqlx");
@@ -255,7 +255,7 @@ fn groups_nest_to_the_limit_and_one_past_it_is_a_resource_limit() {
     ],
   );
   let limits = Limits::new().with_max_use_depth(2);
-  let analysis = analyze(&root, &[], &limits);
+  let analysis = analyze(&root, &[], &limits, &Options::new());
 
   let source = file(&analysis, 3, "top2/y.graphqlx");
   assert_eq!(
@@ -289,7 +289,7 @@ fn a_glob_gives_the_declarations_and_the_child_modules_of_its_module() {
       ("user/c.graphqlx", "use ~::lib::*\n"),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   all(
@@ -318,7 +318,7 @@ fn a_name_two_globs_give_two_items_is_an_error_only_where_it_is_used() {
       ("loud/d.graphqlx", loud),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
 
   let source = file(&analysis, 3, "loud/d.graphqlx");
   assert_eq!(
@@ -369,7 +369,7 @@ fn a_declaration_and_an_explicit_use_each_go_before_a_glob() {
       ("expl/d.graphqlx", "use ~::lib::*\nuse ~::alt::Name\n"),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   all(
@@ -416,7 +416,7 @@ fn a_chain_of_globs_resolves_over_several_rounds() {
   let dependencies = [geo];
   // Four rounds: the package's glob, then `a`'s, then `b`'s, then `Leaf`.
   let limits = Limits::new().with_max_glob_iterations(4);
-  let analysis = analyze(&root, &dependencies, &limits);
+  let analysis = analyze(&root, &dependencies, &limits, &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   all(
@@ -437,7 +437,7 @@ fn a_glob_fixpoint_past_its_limit_is_a_resource_limit() {
   let (root, geo, user) = chained();
   let dependencies = [geo];
   let limits = Limits::new().with_max_glob_iterations(3);
-  let analysis = analyze(&root, &dependencies, &limits);
+  let analysis = analyze(&root, &dependencies, &limits, &Options::new());
 
   // Reported once, at the head the fourth round would resolve; that item is reported no further.
   let source = file(&analysis, 3, "user/u.graphqlx");
@@ -469,7 +469,12 @@ fn a_glob_past_the_glob_limit_is_refused_and_reported_once() {
       ("d/x.graphqlx", "scalar D\n"),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new().with_max_globs(2));
+  let analysis = analyze(
+    &root,
+    &[],
+    &Limits::new().with_max_globs(2),
+    &Options::new(),
+  );
   let lib = file(&analysis, 3, "lib.graphqlx");
   assert_eq!(
     found(&analysis),
@@ -515,10 +520,20 @@ fn the_glob_limit_met_exactly_is_no_error() {
       ("b/x.graphqlx", "scalar B\n"),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new().with_max_globs(2));
+  let analysis = analyze(
+    &root,
+    &[],
+    &Limits::new().with_max_globs(2),
+    &Options::new(),
+  );
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
-  let analysis = analyze(&root, &[], &Limits::new().with_max_globs(0));
+  let analysis = analyze(
+    &root,
+    &[],
+    &Limits::new().with_max_globs(0),
+    &Options::new(),
+  );
   let lib = file(&analysis, 3, "lib.graphqlx");
   assert_eq!(
     found(&analysis),
@@ -558,6 +573,7 @@ fn the_glob_limit_refuses_the_same_glob_whatever_the_order_given() {
     &directory("app", &files).with_dependencies(["geo", "other"]),
     &dependencies,
     &limits,
+    &Options::new(),
   );
   let mut reversed_files = files;
   reversed_files.reverse();
@@ -566,6 +582,7 @@ fn the_glob_limit_refuses_the_same_glob_whatever_the_order_given() {
     &directory("app", &reversed_files).with_dependencies(["other", "geo"]),
     &reversed_dependencies,
     &limits,
+    &Options::new(),
   );
 
   let source = file(&forward, 3, "m/2.graphqlx");
@@ -611,7 +628,7 @@ fn many_globs_of_one_module_are_one_row_and_a_near_miss_search_pays_for_each() {
   text.push_str("type Query {\n  ok: Query\n}\n");
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("lib.graphqlx", text.as_str())]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert_eq!(analysis.diagnostics().error_count(), MISSING);
   let unresolved = code(DiagnosticKind::UnresolvedPath);
   assert!(
@@ -630,10 +647,20 @@ fn a_chain_of_renames_past_the_round_limit_is_a_resource_limit() {
   let text = "scalar Seed\nuse Seed as A1\nuse A1 as A2\nuse A2 as A3\nuse A3 as A4\n";
   let root = directory("app", &[("lib.graphqlx", text)]);
   // Four rounds, one a link.
-  let analysis = analyze(&root, &[], &Limits::new().with_max_glob_iterations(4));
+  let analysis = analyze(
+    &root,
+    &[],
+    &Limits::new().with_max_glob_iterations(4),
+    &Options::new(),
+  );
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
-  let analysis = analyze(&root, &[], &Limits::new().with_max_glob_iterations(3));
+  let analysis = analyze(
+    &root,
+    &[],
+    &Limits::new().with_max_glob_iterations(3),
+    &Options::new(),
+  );
   let source = file(&analysis, 3, "lib.graphqlx");
   assert_eq!(
     found(&analysis),
@@ -709,7 +736,7 @@ fn binding_fives_errors_are_reported_and_one_item_bound_twice_is_not() {
       ("m3/u.graphqlx", twice),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
 
   let m = file(&analysis, 3, "m/u.graphqlx");
   let m2 = file(&analysis, 3, "m2/u.graphqlx");
@@ -788,7 +815,7 @@ fn use_cycles_are_legal() {
       ("b/b.graphqlx", "use ~::a::A\nuse ..::a::*\nscalar B\n"),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   all(&root, &[], "^::app::a", &[("B", Some("^::app::b::B"))]);
   all(&root, &[], "^::app::b", &[("A", Some("^::app::a::A"))]);
@@ -799,7 +826,7 @@ fn a_use_that_never_resolves_is_reported_once() {
   let (_, geo, _) = chained();
   let user = "use geo::*\nuse a::*\nuse ghost::Z\nuse b::*\n";
   let root = directory("app", &[("user/u.graphqlx", user)]).with_dependencies(["geo"]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
 
   let source = file(&analysis, 3, "user/u.graphqlx");
   assert_eq!(
@@ -828,7 +855,7 @@ fn each_root_of_a_use_starts_where_it_says() {
   )
   .with_dependencies(["geo"]);
   let dependencies = [base, geo];
-  let analysis = analyze(&root, &dependencies, &Limits::new());
+  let analysis = analyze(&root, &dependencies, &Limits::new(), &Options::new());
 
   let source = file(&analysis, 3, "x/y/z.graphqlx");
   assert_eq!(
@@ -880,7 +907,7 @@ fn an_unknown_package_says_what_its_name_names() {
     directory("geo", &[("lib.graphqlx", text)]),
     directory("zed", &[("lib.graphqlx", "scalar Z\n")]),
   ];
-  let analysis = analyze(&root, &dependencies, &Limits::new());
+  let analysis = analyze(&root, &dependencies, &Limits::new(), &Options::new());
   let source = file(&analysis, 4, "lib.graphqlx");
   let unknown = code(DiagnosticKind::UnknownPackage);
   assert_eq!(
@@ -932,7 +959,7 @@ fn a_package_name_is_searched_for_among_the_supplied_packages() {
   let dependencies: Vec<Package<&str>> = (0..PACKAGES)
     .map(|index: usize| Package::new(format!("p{index}"), Layout::Flat, Tier::Std))
     .collect();
-  let analysis = analyze(&root, &dependencies, &Limits::new());
+  let analysis = analyze(&root, &dependencies, &Limits::new(), &Options::new());
   assert_eq!(analysis.diagnostics().error_count(), PATHS);
   let first = analysis.diagnostics().iter().next().expect("a diagnostic");
   assert_eq!(first.code().as_str(), code(DiagnosticKind::UnknownPackage));
@@ -957,7 +984,7 @@ fn a_package_name_answers_a_use_of_it_alone_and_last() {
   )
   .with_dependencies(["geo"]);
   let dependencies = [geo];
-  let analysis = analyze(&root, &dependencies, &Limits::new());
+  let analysis = analyze(&root, &dependencies, &Limits::new(), &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   all(
@@ -992,7 +1019,7 @@ fn a_string_source_names_the_module_of_a_directory() {
       ("media/vision/v.graphqlx", vision),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   all(
@@ -1031,7 +1058,7 @@ fn a_string_source_is_refused_where_it_names_no_directory_module() {
       ("bad/g.graphqlx", unnamed),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
 
   let source = |path: &str| -> SourceId { file(&analysis, 3, path) };
   assert_eq!(
@@ -1086,7 +1113,7 @@ fn a_string_source_is_refused_where_it_names_no_directory_module() {
   // In a `Flat` package every string source is refused.
   let flat_text = "use \"./x\" as x\nscalar Q\n";
   let flat = package("flat", Layout::Flat, &[("x/a.graphqlx", flat_text)]);
-  let analysis = analyze(&flat, &[], &Limits::new());
+  let analysis = analyze(&flat, &[], &Limits::new(), &Options::new());
   let source = file(&analysis, 3, "x/a.graphqlx");
   assert_eq!(
     found(&analysis),
@@ -1116,7 +1143,7 @@ fn a_string_source_starts_at_its_files_directory_whatever_mod_it_is_in() {
       ("b/z.graphqlx", "scalar InB\n"),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let lib = file(&analysis, 3, "lib.graphqlx");
   assert_eq!(
     found(&analysis),
@@ -1168,7 +1195,12 @@ fn a_refused_file_hides_no_file_from_a_string_source() {
   let main = "use \"./a.graphqlx\"::*\n";
   let placed: [(&'static str, &'static str); 2] =
     [("a.graphqlx", "scalar A\n"), ("main.graphqlx", main)];
-  let help = file_help(&analyze(&directory("app", &placed), &[], &Limits::new()));
+  let help = file_help(&analyze(
+    &directory("app", &placed),
+    &[],
+    &Limits::new(),
+    &Options::new(),
+  ));
   assert!(
     help
       .as_deref()
@@ -1182,7 +1214,12 @@ fn a_refused_file_hides_no_file_from_a_string_source() {
       .map(|&path: &&'static str| (path, "scalar R\n"))
       .collect();
     files.extend(placed);
-    let analysis = analyze(&directory("app", &files), &[], &Limits::new());
+    let analysis = analyze(
+      &directory("app", &files),
+      &[],
+      &Limits::new(),
+      &Options::new(),
+    );
     let source = file(&analysis, 3, "main.graphqlx");
     let mut expected: Vec<(&'static str, Location)> = refused
       .iter()
@@ -1206,7 +1243,12 @@ fn a_refused_file_hides_no_file_from_a_string_source() {
     assert_eq!(file_help(&analysis), help, "{refused:?}");
 
     files.reverse();
-    let backward = analyze(&directory("app", &files), &[], &Limits::new());
+    let backward = analyze(
+      &directory("app", &files),
+      &[],
+      &Limits::new(),
+      &Options::new(),
+    );
     assert_eq!(
       analysis.diagnostics(),
       backward.diagnostics(),
@@ -1226,7 +1268,12 @@ fn a_string_source_of_a_refused_files_path_names_no_file() {
     ("a.graphqlx", "scalar A\n"),
     ("main.graphqlx", main),
   ];
-  let analysis = analyze(&directory("app", &beside), &[], &Limits::new());
+  let analysis = analyze(
+    &directory("app", &beside),
+    &[],
+    &Limits::new(),
+    &Options::new(),
+  );
   let source = file(&analysis, 3, "main.graphqlx");
   assert_eq!(
     found(&analysis),
@@ -1246,7 +1293,12 @@ fn a_string_source_of_a_refused_files_path_names_no_file() {
 
   let nested = "use \"../z\" as z\n";
   let alone = [("/z", "scalar R\n"), ("sub/main.graphqlx", nested)];
-  let analysis = analyze(&directory("app", &alone), &[], &Limits::new());
+  let analysis = analyze(
+    &directory("app", &alone),
+    &[],
+    &Limits::new(),
+    &Options::new(),
+  );
   let source = file(&analysis, 3, "sub/main.graphqlx");
   assert_eq!(
     found(&analysis),
@@ -1276,7 +1328,12 @@ fn two_files_at_one_path_are_no_file_a_string_source_names() {
     ("dup.graphqlx", "scalar Two\n"),
     ("main.graphqlx", main),
   ];
-  let analysis = analyze(&directory("app", &files), &[], &Limits::new());
+  let analysis = analyze(
+    &directory("app", &files),
+    &[],
+    &Limits::new(),
+    &Options::new(),
+  );
   let source = file(&analysis, 3, "main.graphqlx");
   assert_eq!(
     found(&analysis),
@@ -1296,7 +1353,12 @@ fn two_files_at_one_path_are_no_file_a_string_source_names() {
 
   let mut reversed = files;
   reversed.reverse();
-  let backward = analyze(&directory("app", &reversed), &[], &Limits::new());
+  let backward = analyze(
+    &directory("app", &reversed),
+    &[],
+    &Limits::new(),
+    &Options::new(),
+  );
   assert_eq!(analysis.diagnostics(), backward.diagnostics());
 }
 
@@ -1322,7 +1384,7 @@ fn a_long_file_path_is_not_read_again_for_each_string_source() {
   let text = "use \"./\" as here\n".repeat(SOURCES);
   let root: Package<&str> = Package::new("app", Layout::Directory, Tier::Std)
     .with_files([SourceFile::new(path.as_str(), text.as_str())]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   assert_eq!(
     test_support::resolve(&root, &[], "^::app", &[], "mod here").as_deref(),
@@ -1349,7 +1411,7 @@ fn a_use_binds_in_each_namespace_and_types_and_modules_share_one() {
       ),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
 
   let mixed = "use ~::lib as Mixed\nuse ~::lib::justType as Mixed\n";
   let source = file(&analysis, 3, "mixed/c.graphqlx");
@@ -1397,7 +1459,7 @@ fn a_package_and_its_directive_of_one_name_stand_in_one_scope() {
   )
   .with_dependencies(["ingraph"]);
   let dependencies = [ingraph];
-  let analysis = analyze(&root, &dependencies, &Limits::new());
+  let analysis = analyze(&root, &dependencies, &Limits::new(), &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   all(
@@ -1436,6 +1498,7 @@ fn reversing_files_and_dependencies_changes_no_diagnostic() {
     &directory("app", &files).with_dependencies(["geo", "other"]),
     &dependencies,
     &Limits::new(),
+    &Options::new(),
   );
   let mut reversed_files = files;
   reversed_files.reverse();
@@ -1444,6 +1507,7 @@ fn reversing_files_and_dependencies_changes_no_diagnostic() {
     &directory("app", &reversed_files).with_dependencies(["other", "geo"]),
     &reversed_dependencies,
     &Limits::new(),
+    &Options::new(),
   );
   assert!(!forward.diagnostics().is_empty());
   assert_eq!(forward.diagnostics(), backward.diagnostics());

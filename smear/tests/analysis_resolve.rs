@@ -6,8 +6,8 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Diagnostic, DiagnosticKind, IntegerProvider, Layout, Limits, Package, PackageId,
-    SourceFile, SourceId, Tier, analyze, test_support,
+    Analysis, Diagnostic, DiagnosticKind, IntegerProvider, Layout, Limits, Options, Package,
+    PackageId, SourceFile, SourceId, Tier, analyze, test_support,
   },
   diagnostic::{Diagnose, Location, Severity},
   lexer::tokora::SimpleSpan,
@@ -111,7 +111,12 @@ fn each_root_starts_where_it_says() {
   )
   .with_dependencies(["geo"]);
   let dependencies = [geo];
-  assert!(clean(&analyze(&root, &dependencies, &Limits::new())));
+  assert!(clean(&analyze(
+    &root,
+    &dependencies,
+    &Limits::new(),
+    &Options::new()
+  )));
 
   all(
     &root,
@@ -163,7 +168,12 @@ fn a_package_reaches_its_declared_dependencies_and_the_built_ins_and_nothing_els
   let root =
     package("app", Tier::Std, &[("schema.graphqlx", "scalar Top\n")]).with_dependencies(["geo"]);
   let dependencies = [base, geo, other];
-  assert!(clean(&analyze(&root, &dependencies, &Limits::new())));
+  assert!(clean(&analyze(
+    &root,
+    &dependencies,
+    &Limits::new(),
+    &Options::new()
+  )));
 
   all(
     &root,
@@ -214,7 +224,12 @@ fn a_scope_answers_in_its_order_with_package_names_last() {
   )
   .with_dependencies(["geo", "string"]);
   let dependencies = [geo, string];
-  assert!(clean(&analyze(&root, &dependencies, &Limits::new())));
+  assert!(clean(&analyze(
+    &root,
+    &dependencies,
+    &Limits::new(),
+    &Options::new()
+  )));
 
   // A generic parameter before the module's own declaration of its name, never a directive, and
   // nothing named through one.
@@ -289,7 +304,7 @@ fn a_parameter_shadows_the_module_prefix_of_a_directive_path() {
       ),
     ],
   );
-  assert!(clean(&analyze(&root, &[], &Limits::new())));
+  assert!(clean(&analyze(&root, &[], &Limits::new(), &Options::new())));
 
   for (path, with, without) in [
     ("T", Some("param T"), None),
@@ -324,7 +339,7 @@ fn types_and_modules_share_a_namespace_and_directives_have_their_own() {
       ("media/a.graphqlx", "scalar Image\n"),
     ],
   );
-  assert!(clean(&analyze(&root, &[], &Limits::new())));
+  assert!(clean(&analyze(&root, &[], &Limits::new(), &Options::new())));
 
   all(
     &root,
@@ -388,7 +403,12 @@ fn a_width_resolves_only_in_a_package_that_may_have_it() {
   )
   .with_dependencies(["wide"]);
   let dependencies = [wide];
-  assert!(clean(&analyze(&root, &dependencies, &Limits::new())));
+  assert!(clean(&analyze(
+    &root,
+    &dependencies,
+    &Limits::new(),
+    &Options::new()
+  )));
 
   all(
     &root,
@@ -427,7 +447,7 @@ fn a_type_named_as_a_primitive_shadows_it_in_its_module_with_a_warning() {
       ("plain/b.graphqlx", plain),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
 
   // The warnings: `string`, `i32` and `NonZeroI16`; not `NonZero` or `Boolean`, which are no
   // primitive's names; not the root module's `Int` and `String`, which replace GraphQL's

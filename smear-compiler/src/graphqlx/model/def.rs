@@ -544,14 +544,16 @@ impl<'a> Def<'a> {
   /// it though it needs `alloc`:
   ///
   /// ```
-  /// use smear_compiler::graphqlx::{Layout, Limits, Namespace, Package, SourceFile, Tier, analyze};
+  /// use smear_compiler::graphqlx::{
+  ///   Layout, Limits, Namespace, Options, Package, SourceFile, Tier, analyze,
+  /// };
   ///
   /// let text = "type Query { ok: Int }\n\
   ///             input Binding { lang: string! }\n\
   ///             directive @bind(b: Binding) on OBJECT\n";
   /// let root = Package::new("app", Layout::Flat, Tier::Core)
   ///   .with_files([SourceFile::new("schema.graphqlx", text)]);
-  /// let analysis = analyze(&root, &[], &Limits::new());
+  /// let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   /// assert!(analysis.is_ok());
   /// let model = analysis.model();
   /// let binding = model.lookup(Namespace::Type, "^::app::Binding").expect("defined");

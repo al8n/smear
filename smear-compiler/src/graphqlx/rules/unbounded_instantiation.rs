@@ -119,14 +119,15 @@ const HELD: &str = "this default holds a type argument that wraps a type paramet
 ///
 /// ```
 /// use smear_compiler::graphqlx::{
-///   Layout, Limits, Package, Packages, SourceFile, Tier, UnboundedInstantiation, analyze, visit,
+///   Layout, Limits, Options, Package, Packages, SourceFile, Tier, UnboundedInstantiation, analyze,
+///   visit,
 /// };
 ///
 /// let root = Package::new("app", Layout::Directory, Tier::Std).with_files([SourceFile::new(
 ///   "schema.graphqlx",
 ///   "type Nest<T> { value: T deeper: Nest<[T]> } type Query { nest: Nest<i32> }",
 /// )]);
-/// let analysis = analyze(&root, &[], &Limits::new());
+/// let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
 /// assert!(analysis.is_ok());
 ///
 /// let mut mine = visit(&analysis, Packages::Supplied, &mut UnboundedInstantiation::new());

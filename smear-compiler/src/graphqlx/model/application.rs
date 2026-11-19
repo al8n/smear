@@ -96,14 +96,14 @@ impl Model {
 ///
 /// ```
 /// use smear_compiler::graphqlx::{
-///   Layout, Limits, Package, Resolution, SourceFile, Tier, ValueKind, analyze,
+///   Layout, Limits, Options, Package, Resolution, SourceFile, Tier, ValueKind, analyze,
 /// };
 ///
 /// let text = "schema @repr(for: bytes, lang: \"rust\", type: \"bytes::Bytes\") { query: Query } \
 ///             type Query { x: Int }";
 /// let root = Package::new("app", Layout::Flat, Tier::Std)
 ///   .with_files([SourceFile::new("schema.graphqlx", text)]);
-/// let analysis = analyze(&root, &[], &Limits::new());
+/// let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
 /// assert!(analysis.is_ok());
 ///
 /// let model = analysis.model();

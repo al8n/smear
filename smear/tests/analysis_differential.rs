@@ -76,7 +76,8 @@ use std::{
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Layout, Limits, MemberId, Model, Package, SourceFile, SourceId, Tier, analyze,
+    Analysis, Layout, Limits, MemberId, Model, Options, Package, SourceFile, SourceId, Tier,
+    analyze,
     test_support::{self, RULES},
   },
   diagnostic::{Code, Diagnose, Location, Severity},
@@ -223,7 +224,12 @@ fn parsed(text: &str) -> Option<TypeSystemDocument<&str>> {
 fn analyzed(text: &str) -> Analysis {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text)]);
-  analyze(&root, &[], &Limits::new().with_max_diagnostics(1 << 20))
+  analyze(
+    &root,
+    &[],
+    &Limits::new().with_max_diagnostics(1 << 20),
+    &Options::new(),
+  )
 }
 
 /// Every code a rule of smear's lists.

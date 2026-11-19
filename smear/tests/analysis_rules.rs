@@ -19,9 +19,9 @@
 use smear::{
   analysis::graphqlx::{
     Analysis, ApplicationId, Collection, Contribution, Cx, DefId, Diagnostic, DiagnosticKind,
-    Layout, Limits, MemberId, Model, ModuleId, Namespace, Package, PackageId, Packages, Primitive,
-    Root, RootOperation, SourceFile, SourceId, Tier, TypeExprId, ValueId, Visitor, analyze,
-    test_support::RULES, visit,
+    Layout, Limits, MemberId, Model, ModuleId, Namespace, Options, Package, PackageId, Packages,
+    Primitive, Root, RootOperation, SourceFile, SourceId, Tier, TypeExprId, ValueId, Visitor,
+    analyze, test_support::RULES, visit,
   },
   diagnostic::{Code, Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -227,7 +227,7 @@ fn package(
 /// An analysis of the root package `app`, `Flat`, holding the one file `schema.graphqlx`.
 fn analyze_one(text: &'static str) -> Analysis {
   let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
-  analyze(&root, &[], &Limits::new())
+  analyze(&root, &[], &Limits::new(), &Options::new())
 }
 
 /// The id of the file at `path` in the package `package`.
@@ -387,7 +387,10 @@ fn contributions(model: &Model, def: DefId) -> Vec<(bool, bool)> {
 /// writes.
 fn library_definitions() -> u32 {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
-  analyze(&root, &[], &Limits::new()).model().defs().len()
+  analyze(&root, &[], &Limits::new(), &Options::new())
+    .model()
+    .defs()
+    .len()
 }
 
 #[test]
@@ -442,7 +445,7 @@ fn a_second_schema_definition_is_reported_at_the_later_with_a_label_at_the_first
     [("b.graphqlx", b), ("a.graphqlx", a)],
   ] {
     let root = package("app", Layout::Flat, &files);
-    let analysis = analyze(&root, &[], &Limits::new());
+    let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
     let a_file = file(&analysis, 3, "a.graphqlx");
     let b_file = file(&analysis, 3, "b.graphqlx");
     assert_eq!(
@@ -519,7 +522,7 @@ fn a_dependency_that_defines_the_schema_is_reported_once_and_not_as_a_duplicate(
   let theirs = "schema {\n  query: Point\n}\ntype Point {\n  x: Int\n}\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let geo_file = file(&analysis, 4, "geo.graphqlx");
   // Beside the root package's own definition it is no second definition of the schema: it is
   // reported once, as the dependency's to remove, with no label.
@@ -564,7 +567,7 @@ fn a_dependency_that_defines_the_schema_is_reported_once_and_not_as_a_duplicate(
   .with_dependencies(["astro", "geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
   let astro = package("astro", Layout::Flat, &[("astro.graphqlx", stars)]);
-  let analysis = analyze(&root, &[geo, astro], &Limits::new());
+  let analysis = analyze(&root, &[geo, astro], &Limits::new(), &Options::new());
   let astro_file = file(&analysis, 4, "astro.graphqlx");
   let geo_file = file(&analysis, 5, "geo.graphqlx");
   assert_eq!(
@@ -584,7 +587,7 @@ fn a_dependency_that_extends_the_schema_is_reported() {
   let theirs = "type Point {\n  x: Int\n}\nextend schema {\n  mutation: Point\n}\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let geo_file = file(&analysis, 4, "geo.graphqlx");
   assert_eq!(
     found(&analysis),
@@ -622,7 +625,7 @@ fn the_root_package_defines_and_extends_the_schema_from_any_of_its_modules() {
       ),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(
     analysis.diagnostics().is_empty(),
     "{:#?}",
@@ -986,7 +989,7 @@ fn a_schema_extension_extends_a_schema_that_is_defined() {
   let theirs = "type Point {\n  x: Int\n}\nextend schema {\n  mutation: Point\n}\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let schema = schema_file(&analysis);
   let geo_file = file(&analysis, 4, "geo.graphqlx");
   assert_eq!(
@@ -1065,7 +1068,7 @@ fn long_names_in_these_rules_are_quoted_as_excerpts() {
   for text in &texts {
     let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
       .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
-    let analysis = analyze(&root, &[], &Limits::new());
+    let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
     let messages = messages(&analysis);
     assert_eq!(messages.len(), 1, "{:#?}", analysis.diagnostics());
     assert!(messages[0].len() < 1024, "{}", messages[0]);
@@ -1121,7 +1124,7 @@ fn a_schema_has_a_query_root() {
 
   // A root package with no file has none either.
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert_eq!(
     unwaived(&analysis),
     [(NO_QUERY_ROOT, root_package_source(&analysis), None)],
@@ -1201,7 +1204,7 @@ fn a_root_file_not_read_whole_silences_the_missing_query_root() {
     Layout::Flat,
     &[("a.graphqlx", query), ("b.graphqlx", other)],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   syntax_errors_alone(&analysis, file(&analysis, 3, "a.graphqlx"));
 
   // The same, a file that is not UTF-8 and holds `type Query`.
@@ -1211,7 +1214,7 @@ fn a_root_file_not_read_whole_silences_the_missing_query_root() {
     SourceFile::new("a.graphqlx", bytes),
     SourceFile::new("b.graphqlx", beside),
   ]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   syntax_errors_alone(&analysis, file(&analysis, 3, "a.graphqlx"));
 
   // Over the size limit no file is parsed: the one diagnostic is the limit's, at the root's package
@@ -1222,7 +1225,12 @@ fn a_root_file_not_read_whole_silences_the_missing_query_root() {
   ];
   let total: usize = files.iter().map(|(_, text)| text.len()).sum();
   let over = Limits::new().with_max_source_bytes(u32::try_from(total - 1).expect("small"));
-  let analysis = analyze(&package("app", Layout::Flat, &files), &[], &over);
+  let analysis = analyze(
+    &package("app", Layout::Flat, &files),
+    &[],
+    &over,
+    &Options::new(),
+  );
   assert_eq!(
     unwaived(&analysis),
     [(
@@ -1238,7 +1246,7 @@ fn a_root_file_not_read_whole_silences_the_missing_query_root() {
   // since every file of the root package was read whole.
   let root = package("app", Layout::Flat, &[("a.graphqlx", other)]).with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("g.graphqlx", "type G {\n")]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   missing_root_and_syntax_errors(&analysis, file(&analysis, 4, "g.graphqlx"));
 
   // A blank root file is read whole, and so is every file of a root that holds no query root.
@@ -1249,7 +1257,12 @@ fn a_root_file_not_read_whole_silences_the_missing_query_root() {
       ("b.graphqlx", "type More { z: Int }\n"),
     ],
   ] {
-    let analysis = analyze(&package("app", Layout::Flat, &files), &[], &Limits::new());
+    let analysis = analyze(
+      &package("app", Layout::Flat, &files),
+      &[],
+      &Limits::new(),
+      &Options::new(),
+    );
     assert_eq!(
       unwaived(&analysis),
       [(NO_QUERY_ROOT, root_package_source(&analysis), None)],
@@ -1275,7 +1288,13 @@ fn a_root_file_not_read_whole_silences_the_missing_query_root() {
     let dropped = "typ Query { x: Int }\n";
     assert!(!recovery(dropped).is_complete(), "{}", recovery(dropped));
     let root = package("app", Layout::Flat, &[("schema.graphqlx", dropped)]);
-    let (analysis, _trees) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
+    let (analysis, _trees) = analyze_with(
+      &Lossless::new(),
+      &root,
+      &[],
+      &Limits::new(),
+      &Options::new(),
+    );
     syntax_errors_alone(&analysis, schema_file(&analysis));
 
     // A definition missing its `}` is repaired and loses nothing: the file is read whole, holds no
@@ -1284,9 +1303,15 @@ fn a_root_file_not_read_whole_silences_the_missing_query_root() {
     let repaired = "type Other { y: Int\n";
     assert!(recovery(repaired).is_complete(), "{}", recovery(repaired));
     let root = package("app", Layout::Flat, &[("schema.graphqlx", repaired)]);
-    let (analysis, _trees) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
+    let (analysis, _trees) = analyze_with(
+      &Lossless::new(),
+      &root,
+      &[],
+      &Limits::new(),
+      &Options::new(),
+    );
     missing_root_and_syntax_errors(&analysis, schema_file(&analysis));
-    let analysis = analyze(&root, &[], &Limits::new());
+    let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
     syntax_errors_alone(&analysis, schema_file(&analysis));
   }
 }
@@ -1352,7 +1377,7 @@ fn only_an_object_the_root_module_declares_is_presumed() {
     Layout::Directory,
     &[("m/a.graphqlx", "type Query {\n  ok: Int\n}\n")],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert_eq!(
     unwaived(&analysis),
     [(NO_QUERY_ROOT, root_package_source(&analysis), None)],
@@ -1372,7 +1397,7 @@ fn only_an_object_the_root_module_declares_is_presumed() {
     Layout::Flat,
     &[("dep.graphqlx", "type Query {\n  ok: Int\n}\n")],
   );
-  let analysis = analyze(&root, &[dep], &Limits::new());
+  let analysis = analyze(&root, &[dep], &Limits::new(), &Options::new());
   assert_eq!(
     unwaived(&analysis),
     [(NO_QUERY_ROOT, root_package_source(&analysis), None)],
@@ -1390,7 +1415,7 @@ fn only_an_object_the_root_module_declares_is_presumed() {
       ("b.graphqlx", "type Query {\n  ok: Int\n}\n"),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(
     analysis.diagnostics().is_empty(),
     "{:#?}",
@@ -1562,7 +1587,7 @@ fn a_consumer_waives_the_missing_root_by_its_code() {
   let text = format!("{LIBRARY}schema {{\n  query: Circle\n}}\n");
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
-  let rooted = analyze(&root, &[], &Limits::new());
+  let rooted = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(
     rooted.diagnostics().is_empty(),
     "{:#?}",
@@ -1579,7 +1604,7 @@ fn the_root_extending_a_dependencys_type_is_an_orphan() {
   let theirs = "type Point {\n  x: Int\n}\ndirective @tag on OBJECT\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let schema = schema_file(&analysis);
   let geo_file = file(&analysis, 4, "geo.graphqlx");
   // Each at the extension's target path, with a label at the definition's name.
@@ -1639,7 +1664,7 @@ fn a_dependency_extending_another_packages_type_is_an_orphan() {
   let astro = package("astro", Layout::Flat, &[("astro.graphqlx", stars)]);
   let geo =
     package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]).with_dependencies(["astro", "app"]);
-  let analysis = analyze(&root, &[geo, astro], &Limits::new());
+  let analysis = analyze(&root, &[geo, astro], &Limits::new(), &Options::new());
   let schema = schema_file(&analysis);
   let astro_file = file(&analysis, 4, "astro.graphqlx");
   let geo_file = file(&analysis, 5, "geo.graphqlx");
@@ -1694,7 +1719,7 @@ fn a_package_extends_its_own_types_from_any_module() {
       ("ext/e.graphqlx", "extend type ~::Point {\n  y: Int\n}\n"),
     ],
   );
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   assert_eq!(
@@ -1892,7 +1917,7 @@ fn the_roots_extension_of_a_meta_type_keeps_graphqls_code() {
                 extend enum __TypeKind {\n  EXTRA\n}\n\
                 extend type __Schema implements Face\n";
   let dep = package("dep", Layout::Flat, &[("dep.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[dep], &Limits::new());
+  let analysis = analyze(&root, &[dep], &Limits::new(), &Options::new());
   let dep_file = file(&analysis, 4, "dep.graphqlx");
   let model = analysis.model();
   let named = |name: &str| -> Option<Location> { Some(model.def(def(model, name)).location()) };
@@ -1941,7 +1966,7 @@ fn the_roots_extension_of_a_meta_type_keeps_graphqls_code() {
   let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
   let theirs = "type __Mine {\n  a: Int\n}\n";
   let dep = package("dep", Layout::Flat, &[("dep.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[dep], &Limits::new());
+  let analysis = analyze(&root, &[dep], &Limits::new(), &Options::new());
   let schema = schema_file(&analysis);
   let dep_file = file(&analysis, 4, "dep.graphqlx");
   assert_eq!(
@@ -1972,7 +1997,7 @@ fn a_dependency_extending_a_built_in_is_an_orphan() {
     "directive @once on SCALAR\nextend scalar String @once\nextend enum Tier {\n  X\n}\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let geo_file = file(&analysis, 4, "geo.graphqlx");
   let model = analysis.model();
   let string = model.builtins().string();
@@ -2337,7 +2362,7 @@ fn what_gives_a_built_in_no_meaning_is_no_orphan_and_a_dependencys_extension_is_
   let theirs = "extend scalar NonZero @set\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let geo_file = file(&analysis, 4, "geo.graphqlx");
   let model = analysis.model();
   let non_zero = model.builtins().non_zero();
@@ -2451,7 +2476,7 @@ fn a_dependencys_extern_on_a_built_in_is_one_orphan() {
   let theirs = "extend scalar string @extern(lang: \"rust\", type: \"geo::Str\")\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let geo_file = file(&analysis, 4, "geo.graphqlx");
   let model = analysis.model();
   let string = model.builtins().string();
@@ -2511,7 +2536,7 @@ fn a_flat_package_extending_its_own_definitions_never_meets_the_orphan_rule() {
     [("b.graphqlx", b), ("a.graphqlx", a)],
   ] {
     let root = package("app", Layout::Flat, &files);
-    let analysis = analyze(&root, &[], &Limits::new());
+    let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
     assert!(
       analysis.diagnostics().is_empty(),
       "{:#?}",
@@ -2532,7 +2557,7 @@ fn a_rule_says_nothing_about_a_contribution_a_phase_refused() {
   // as a duplicate.
   let text = "schema {\n  query: Query\n}\ntype Query {\n  ok: Int\n}\nschema {\n  query: u8\n}\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
-  let analysis = analyze(&root, &[], &limits);
+  let analysis = analyze(&root, &[], &limits, &Options::new());
   let schema = schema_file(&analysis);
   assert_eq!(
     found(&analysis),
@@ -2542,7 +2567,7 @@ fn a_rule_says_nothing_about_a_contribution_a_phase_refused() {
   );
   assert_eq!(schema_errors(analysis.model()), [false, true]);
   // With no limit in the way nothing refuses it, and the rule does.
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let schema = schema_file(&analysis);
   assert_eq!(
     found(&analysis),
@@ -2561,7 +2586,7 @@ fn a_rule_says_nothing_about_a_contribution_a_phase_refused() {
   let theirs = "schema {\n  query: u8\n}\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
   let dependencies = [package("geo", Layout::Flat, &[("geo.graphqlx", theirs)])];
-  let analysis = analyze(&root, &dependencies, &limits);
+  let analysis = analyze(&root, &dependencies, &limits, &Options::new());
   let geo_file = file(&analysis, 4, "geo.graphqlx");
   assert_eq!(
     found(&analysis),
@@ -2570,7 +2595,7 @@ fn a_rule_says_nothing_about_a_contribution_a_phase_refused() {
     analysis.diagnostics()
   );
   assert_eq!(schema_errors(analysis.model()), [true]);
-  let analysis = analyze(&root, &dependencies, &Limits::new());
+  let analysis = analyze(&root, &dependencies, &Limits::new(), &Options::new());
   let geo_file = file(&analysis, 4, "geo.graphqlx");
   assert_eq!(
     found(&analysis),
@@ -2585,7 +2610,7 @@ fn a_rule_says_nothing_about_a_contribution_a_phase_refused() {
   let dependencies = [package("geo", Layout::Flat, &[("geo.graphqlx", theirs)])];
   let ours = "extend type ^::geo::Point {\n  extra: Missing\n}\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
-  let analysis = analyze(&root, &dependencies, &Limits::new());
+  let analysis = analyze(&root, &dependencies, &Limits::new(), &Options::new());
   let schema = schema_file(&analysis);
   assert_eq!(
     found(&analysis),
@@ -2605,7 +2630,7 @@ fn a_rule_says_nothing_about_a_contribution_a_phase_refused() {
   // With a type that is one, nothing refuses the extension, and the rule does.
   let ours = "extend type ^::geo::Point {\n  extra: Int\n}\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
-  let analysis = analyze(&root, &dependencies, &Limits::new());
+  let analysis = analyze(&root, &dependencies, &Limits::new(), &Options::new());
   let schema = schema_file(&analysis);
   let geo_file = file(&analysis, 4, "geo.graphqlx");
   assert_eq!(
@@ -2630,7 +2655,7 @@ fn a_rules_error_marks_its_contribution_and_its_definition_and_fails_the_verdict
                 extend schema {\n  mutation: Point\n}\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   assert!(!analysis.is_ok());
   assert_eq!(analysis.diagnostics().error_count(), 3);
   let model = analysis.model();
@@ -2652,7 +2677,7 @@ fn a_rules_error_marks_its_contribution_and_its_definition_and_fails_the_verdict
   let theirs = "type Point {\n  x: Int\n}\ntype Line {\n  head: Point\n}\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   assert!(!analysis.is_ok());
   assert_eq!(analysis.diagnostics().error_count(), 1);
   let model = analysis.model();
@@ -2689,7 +2714,7 @@ fn long_names_are_quoted_as_excerpts() {
       "s.graphqlx",
       "schema {\n  query: Query\n}\n",
     )]);
-  let analysis = analyze(&root, &[dependency], &Limits::new());
+  let analysis = analyze(&root, &[dependency], &Limits::new(), &Options::new());
   assert_eq!(
     messages(&analysis),
     [format!(
@@ -2711,7 +2736,7 @@ fn long_names_are_quoted_as_excerpts() {
     .with_dependencies([geo_name.as_str()]);
   let geo: Package<&str> = Package::new(geo_name.as_str(), Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("geo.graphqlx", theirs.as_str())]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   assert_eq!(
     messages(&analysis),
     [format!(
@@ -2885,7 +2910,7 @@ fn a_dependencys_schema_definition() -> Analysis {
       "schema {\n  query: Point\n}\ntype Point {\n  x: Int\n}\n",
     )],
   );
-  analyze(&root, &[geo], &Limits::new())
+  analyze(&root, &[geo], &Limits::new(), &Options::new())
 }
 
 /// A root package that extends a dependency's type.
@@ -2904,7 +2929,7 @@ fn an_extension_of_a_dependencys_type() -> Analysis {
     Layout::Flat,
     &[("geo.graphqlx", "type Point {\n  x: Int\n}\n")],
   );
-  analyze(&root, &[geo], &Limits::new())
+  analyze(&root, &[geo], &Limits::new(), &Options::new())
 }
 
 /// A root package that adds a field to `__Type`: the schema builder's fixture for the kind.
@@ -3142,7 +3167,7 @@ fn a_string_in_a_core_package() -> Analysis {
     "schema.graphqlx",
     "type Query {\n  x: String\n}\n",
   )]);
-  analyze(&root, &[], &Limits::new())
+  analyze(&root, &[], &Limits::new(), &Options::new())
 }
 
 /// Two input objects that require each other through non-null fields: the census row.
@@ -3406,7 +3431,7 @@ fn the_walk_of_an_analyzed_program_is_the_written_sequence_of_hooks() {
   let root =
     package("app", Layout::Flat, &[("schema.graphqlx", ORDER_APP)]).with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", ORDER_GEO)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   assert!(
     analysis.diagnostics().is_empty(),
     "{:#?}",

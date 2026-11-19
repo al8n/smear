@@ -306,7 +306,9 @@ as the default has.
 
 ```rust
 # #[cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))] {
-use smear::analysis::graphqlx::{Layout, Limits, Namespace, Package, SourceFile, Tier, analyze};
+use smear::analysis::graphqlx::{
+  Layout, Limits, Namespace, Options, Package, SourceFile, Tier, analyze,
+};
 
 // A library, and the root package that depends on it. smear reads no file: the caller supplies
 // every package's texts.
@@ -318,7 +320,7 @@ let app = Package::new("app", Layout::Flat, Tier::Std)
     "schema.graphqlx",
     "type Page<T> { items: [T!]! } type Query { points: Page<^::geo::Point> }",
   )]);
-let analysis = analyze(&app, &[geo], &Limits::new());
+let analysis = analyze(&app, &[geo], &Limits::new(), &Options::new());
 assert!(analysis.is_ok());
 
 // Every written type is resolved and interned: `Page<^::geo::Point>` is one instantiation.

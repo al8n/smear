@@ -32,7 +32,9 @@
 use std::path::PathBuf;
 
 use smear::{
-  analysis::graphqlx::{Analysis, Diagnostic, Layout, Limits, Package, SourceFile, Tier, analyze},
+  analysis::graphqlx::{
+    Analysis, Diagnostic, Layout, Limits, Options, Package, SourceFile, Tier, analyze,
+  },
   diagnostic::Diagnose,
   lexer::tokora::{Parse as _, Parser},
   parser::graphql::{
@@ -130,7 +132,7 @@ fn files(directories: &[&str]) -> Vec<(PathBuf, Vec<u8>)> {
 fn analyzed(text: &[u8], limits: &Limits) -> Analysis {
   let root: Package<&[u8]> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text)]);
-  analyze(&root, &[], limits)
+  analyze(&root, &[], limits, &Options::new())
 }
 
 /// `sdl` read by GraphQL's type-system parser: `None` when it refuses it.

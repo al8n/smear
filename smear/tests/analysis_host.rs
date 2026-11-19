@@ -5,8 +5,8 @@
 use smear::{
   analysis::graphqlx::{
     Analysis, ApplicationArgument, ApplicationId, Collection, DefId, Diagnostic, Extern, Layout,
-    Limits, Model, Namespace, Package, PackageId, Resolution, SourceFile, SourceId, Tier, ValueId,
-    ValueKind, analyze,
+    Limits, Model, Namespace, Options, Package, PackageId, Resolution, SourceFile, SourceId, Tier,
+    ValueId, ValueKind, analyze,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -43,6 +43,7 @@ fn analyze_text(text: &str) -> Analysis {
     &package("app", Tier::Std, &[("schema.graphqlx", text)]),
     &[],
     &Limits::new(),
+    &Options::new(),
   )
 }
 
@@ -162,7 +163,12 @@ fn a_scalars_externs_are_its_own_packages_applications() {
     [("a.graphqlx", a), ("b.graphqlx", b)],
     [("b.graphqlx", b), ("a.graphqlx", a)],
   ] {
-    let analysis = analyze(&package("app", Tier::Std, &files), &[], &Limits::new());
+    let analysis = analyze(
+      &package("app", Tier::Std, &files),
+      &[],
+      &Limits::new(),
+      &Options::new(),
+    );
     assert!(
       analysis.diagnostics().is_empty(),
       "{:#?}",
@@ -212,7 +218,7 @@ fn an_externs_tier_is_its_own_or_its_packages() {
   )
   .with_dependencies(["geo"]);
   let geo = package("geo", Tier::Alloc, &[("geo.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let model = analysis.model();
   assert_eq!(externs(model, "^::geo::A"), [("rust", "a", Tier::Alloc)]);
   assert_eq!(externs(model, "^::geo::B"), [("rust", "b", Tier::Core)]);
@@ -231,7 +237,7 @@ fn what_another_package_writes_binds_nothing() {
               extend scalar ^::geo::Point @extern(lang: \"typescript\", type: \"P\")\n";
   let root = package("app", Tier::Std, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
   let geo = package("geo", Tier::Std, &[("geo.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   assert_eq!(
     externs(analysis.model(), "^::geo::Point"),
     [("rust", "geo::Point", Tier::Std)]
@@ -264,7 +270,7 @@ fn what_another_package_writes_binds_nothing() {
       "extend scalar string @extern(lang: \"rust\", type: \"geo::Str\")\n",
     )],
   );
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   assert!(externs(analysis.model(), "^::alloc::string").is_empty());
 
   // A directive of the package's own named `extern` is not `core`'s.
@@ -379,6 +385,7 @@ fn a_lang_bound_twice_is_refused_at_the_later() {
     &package("app", Tier::Std, &[("a.graphqlx", a), ("b.graphqlx", b)]),
     &[],
     &Limits::new(),
+    &Options::new(),
   );
   let (a_file, b_file) = (
     file(&analysis, 3, "a.graphqlx"),
@@ -519,6 +526,7 @@ fn a_package_binding_its_own_scalar_says_nothing() {
     &package("app", Tier::Std, &[("a.graphqlx", a), ("b.graphqlx", b)]),
     &[],
     &Limits::new(),
+    &Options::new(),
   );
   assert!(
     analysis.diagnostics().is_empty(),

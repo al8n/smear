@@ -333,11 +333,12 @@ All notable changes to Smear are documented in this file.
   behind the `graphqlx` feature and a tier.
   - **The entrance.** `graphqlx::analyze` takes a root `Package` and its dependencies, each a
     name, a `Layout`, a `Tier`, its `SourceFile`s and optionally an `IntegerProvider`, each file's
-    text any `SourceText` (`&str`, `&[u8]` or a source feature's type), within `Limits`, and
-    answers an `Analysis`, which has no type parameter: a `Model`, its `Diagnostics` and a
-    `SourceMap`. It is Sans-I/O: the caller supplies every package. `graphqlx::analyze_with` is
-    the same analysis read by a parser layer the caller passes, such as the lossless one, which
-    recovers, and answers beside it the `Trees` that layer kept, one for each file it read.
+    text any `SourceText` (`&str`, `&[u8]` or a source feature's type), within `Limits` and under
+    `Options`, and answers an `Analysis`, which has no type parameter: a `Model`, its
+    `Diagnostics` and a `SourceMap`, and the limits and options it ran under. It is Sans-I/O: the
+    caller supplies every package. `graphqlx::analyze_with` is the same analysis read by a parser
+    layer the caller passes, such as the lossless one, which recovers, and answers beside it the
+    `Trees` that layer kept, one for each file it read.
   - **The model.** Dense tables read through `Copy` views, each numbered by a dense `u32` id in a
     fixed order that permuting the dependencies or a package's files does not change: packages,
     modules, definitions and their contributions, members, type occurrences and interned types,

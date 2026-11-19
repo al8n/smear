@@ -117,8 +117,8 @@ pub enum Site {
 ///
 /// ```
 /// use smear_compiler::graphqlx::{
-///   Cx, DefId, Diagnostic, Layout, Limits, Package, Packages, SourceFile, Tier, Visitor, analyze,
-///   visit,
+///   Cx, DefId, Diagnostic, Layout, Limits, Options, Package, Packages, SourceFile, Tier, Visitor,
+///   analyze, visit,
 /// };
 /// use tokora::diagnostic::Code;
 ///
@@ -139,7 +139,7 @@ pub enum Site {
 ///
 /// let root = Package::new("app", Layout::Directory, Tier::Std)
 ///   .with_files([SourceFile::new("schema.graphqlx", "type Query { ok: Int }")]);
-/// let analysis = analyze(&root, &[], &Limits::new());
+/// let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
 /// let diagnostics = visit(&analysis, Packages::Root, &mut NoLegacy);
 /// assert!(diagnostics.is_empty());
 ///

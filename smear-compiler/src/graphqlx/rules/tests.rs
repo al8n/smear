@@ -8,7 +8,8 @@ use tokora::diagnostic::{Code, Diagnose, Location};
 
 use super::Rules;
 use crate::graphqlx::{
-  Cx, Diagnostic, Layout, Limits, ModuleId, Package, Packages, Tier, Visitor, analyze, visit,
+  Cx, Diagnostic, Layout, Limits, ModuleId, Options, Package, Packages, Tier, Visitor, analyze,
+  visit,
 };
 
 /// The first rule's code.
@@ -283,7 +284,7 @@ fn a_set_calls_each_rule_in_field_order_and_keeps_what_each_reports() {
     },
   };
   let root: Package<&str> = Package::new("app", Layout::Directory, Tier::Std);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
 
   // Over the supplied packages, the walk enters the root package's root module and nothing else.
   let diagnostics = visit(&analysis, Packages::Supplied, &mut pair);

@@ -254,14 +254,14 @@ impl Model {
   ///
   /// ```
   /// use smear_compiler::graphqlx::{
-  ///   Layout, Limits, Namespace, Package, SourceFile, Tier, TyKind, analyze,
+  ///   Layout, Limits, Namespace, Options, Package, SourceFile, Tier, TyKind, analyze,
   /// };
   ///
   /// let root = Package::new("app", Layout::Flat, Tier::Std).with_files([SourceFile::new(
   ///   "schema.graphqlx",
   ///   "type Page<T> { items: [T!]! } type Query { a: Page<String> b: Page<Int> c: Page<String> }",
   /// )]);
-  /// let analysis = analyze(&root, &[], &Limits::new());
+  /// let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   /// assert!(analysis.is_ok());
   ///
   /// let model = analysis.model();

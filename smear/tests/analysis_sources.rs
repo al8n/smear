@@ -5,8 +5,8 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Diagnostic, Diagnostics, Layout, Limits, Package, PackageId, SourceFile, SourceId,
-    SourceText, Tier, analyze,
+    Analysis, Diagnostic, Diagnostics, Layout, Limits, Options, Package, PackageId, SourceFile,
+    SourceId, SourceText, Tier, analyze,
   },
   diagnostic::{Code, Diagnose, Location},
   lexer::tokora::{Parse as _, Parser, SimpleSpan},
@@ -51,7 +51,7 @@ fn bind_answers_each_text_a_renderer_can_read() {
     SourceFile::new("a.graphqlx", good),
     SourceFile::new("b.graphqlx", not_utf8),
   ]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let a = file(&analysis, 3, "a.graphqlx");
   let b = file(&analysis, 3, "b.graphqlx");
 
@@ -105,7 +105,7 @@ fn bind_answers_none_for_a_file_that_is_missing_or_changed() {
       ("c.graphqlx", "scalar C\n"),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let (a, b, c) = (
     file(&analysis, 3, "a.graphqlx"),
     file(&analysis, 3, "b.graphqlx"),
@@ -147,7 +147,7 @@ fn files_that_share_a_path_are_answered_no_text() {
       ("c.graphqlx", "scalar C"),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   // Files are numbered by path, then by text.
   let shared = files_at(&analysis, 3, "a.graphqlx");
   assert_eq!(shared.len(), 2);
@@ -189,7 +189,7 @@ fn files_that_share_a_path_are_answered_no_text() {
 #[test]
 fn a_file_is_answered_no_text_once_another_shares_its_path() {
   let root = package("app", &[("a.graphqlx", "scalar A")]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let a = file(&analysis, 3, "a.graphqlx");
   assert_eq!(
     analysis.sources().bind(&root, &[]).text(a),
@@ -211,7 +211,12 @@ fn a_file_is_answered_no_text_once_another_shares_its_path() {
 fn the_root_given_under_another_name_is_answered_no_text() {
   let root = package("app", &[("a.graphqlx", OK)]).with_dependencies(["geo"]);
   let geo = package("geo", &[("p.graphqlx", "scalar P\n")]);
-  let analysis = analyze(&root, core::slice::from_ref(&geo), &Limits::new());
+  let analysis = analyze(
+    &root,
+    core::slice::from_ref(&geo),
+    &Limits::new(),
+    &Options::new(),
+  );
   assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
 
   let other = package("other", &[("a.graphqlx", OK)]).with_dependencies(["geo"]);
@@ -247,7 +252,7 @@ fn dependencies_that_share_a_name_are_answered_no_text() {
   let zeta = package("zeta", &[("z.graphqlx", "scalar Z\n")]);
   let named_as_root = package("app", &[("r.graphqlx", "scalar R\n")]);
   let unchanged = [first, second.clone(), zeta.clone(), named_as_root.clone()];
-  let analysis = analyze(&root, &unchanged, &Limits::new());
+  let analysis = analyze(&root, &unchanged, &Limits::new(), &Options::new());
 
   // Dependencies are numbered by name, then by what they hold: the `app` is 4, the `geo` holding
   // `scalar A` is 5 and the one holding `scalar B` is 6, and `zeta` is 7.
@@ -280,7 +285,12 @@ fn bind_finds_each_dependency_by_name_whatever_order_it_is_given_in() {
   let root = package("app", &[("a.graphqlx", OK)]).with_dependencies(["geo", "zeta"]);
   let geo = package("geo", &[("p.graphqlx", "type Point { x: Int }\n")]);
   let zeta = package("zeta", &[("z.graphqlx", "scalar Z\n")]);
-  let analysis = analyze(&root, &[geo.clone(), zeta.clone()], &Limits::new());
+  let analysis = analyze(
+    &root,
+    &[geo.clone(), zeta.clone()],
+    &Limits::new(),
+    &Options::new(),
+  );
   assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
 
   let given_order = [geo.clone(), zeta.clone()];
@@ -354,7 +364,7 @@ fn a_syntax_error_is_reported_at_its_file_and_the_other_files_are_still_parsed()
       ("d.graphqlx", "scalar D\n"),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(!analysis.is_ok());
   let b = file(&analysis, 3, "b.graphqlx");
   let c = file(&analysis, 3, "c.graphqlx");
@@ -399,7 +409,7 @@ fn summary<S: SourceText>(
   Diagnostics,
   Vec<(PackageId, String, usize, bool, Option<String>, bool)>,
 ) {
-  let analysis = analyze(package, &[], &Limits::new());
+  let analysis = analyze(package, &[], &Limits::new(), &Options::new());
   let texts = analysis.sources().bind(package, &[]);
   let sources = analysis.sources();
   let described = sources
@@ -546,7 +556,7 @@ fn a_source_says_whether_it_was_read_whole() {
       ("b.graphqlx", broken),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let sources = analysis.sources();
   let model = analysis.model();
   assert!(whole(&analysis, 3, "a.graphqlx"));
@@ -576,7 +586,7 @@ fn a_source_says_whether_it_was_read_whole() {
     SourceFile::new("a.graphqlx", good),
     SourceFile::new("b.graphqlx", not_utf8),
   ]);
-  let analysis = analyze(&bytes, &[], &Limits::new());
+  let analysis = analyze(&bytes, &[], &Limits::new(), &Options::new());
   assert!(whole(&analysis, 3, "a.graphqlx"));
   assert!(!whole(&analysis, 3, "b.graphqlx"));
 
@@ -584,7 +594,7 @@ fn a_source_says_whether_it_was_read_whole() {
   let files = [("a.graphqlx", OK), ("b.graphqlx", "type B {\n")];
   let total = OK.len() + "type B {\n".len();
   let over = Limits::new().with_max_source_bytes(u32::try_from(total - 1).expect("small"));
-  let analysis = analyze(&package("app", &files), &[], &over);
+  let analysis = analyze(&package("app", &files), &[], &over, &Options::new());
   assert!(!whole(&analysis, 3, "a.graphqlx"));
   assert!(!whole(&analysis, 3, "b.graphqlx"));
   let built_in = analysis.model().package(PackageId::new(0)).sources();
@@ -592,7 +602,7 @@ fn a_source_says_whether_it_was_read_whole() {
   assert!(analysis.sources().source(library).is_complete());
   // At the limit the same files are parsed: the whole one is read whole.
   let at = Limits::new().with_max_source_bytes(u32::try_from(total).expect("small"));
-  let analysis = analyze(&package("app", &files), &[], &at);
+  let analysis = analyze(&package("app", &files), &[], &at, &Options::new());
   assert!(whole(&analysis, 3, "a.graphqlx"));
   assert!(!whole(&analysis, 3, "b.graphqlx"));
 
@@ -622,13 +632,19 @@ fn a_source_says_whether_it_was_read_whole() {
         ("stray.graphqlx", stray),
       ],
     );
-    let (analysis, _trees) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
+    let (analysis, _trees) = analyze_with(
+      &Lossless::new(),
+      &root,
+      &[],
+      &Limits::new(),
+      &Options::new(),
+    );
     assert!(whole(&analysis, 3, "a.graphqlx"));
     assert!(whole(&analysis, 3, "blank.graphqlx"));
     assert!(whole(&analysis, 3, "repaired.graphqlx"));
     assert!(!whole(&analysis, 3, "stray.graphqlx"));
     // Both files hold a syntax error, which the syntactic layer answers no document for.
-    let alone = analyze(&root, &[], &Limits::new());
+    let alone = analyze(&root, &[], &Limits::new(), &Options::new());
     assert!(!whole(&alone, 3, "repaired.graphqlx"));
     assert!(!whole(&alone, 3, "stray.graphqlx"));
   }
@@ -639,7 +655,7 @@ fn a_source_says_whether_it_was_read_whole() {
 #[test]
 fn a_consumer_reports_at_its_own_sources_past_the_analysis() {
   let root = package("app", &[("a.graphqlx", "type A {\n")]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let own = analysis.sources().len();
 
   let mine = Diagnostic::builder(

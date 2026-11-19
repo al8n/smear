@@ -6,8 +6,8 @@
 use smear::{
   analysis::graphqlx::{
     Analysis, DefId, Diagnostic, IntegerProvider, Layout, Limits, MemberId, Model, Namespace,
-    Origin, Package, PackageId, PackageKind, SourceFile, SourceId, Tier, TypeExprId, analyze,
-    test_support,
+    Options, Origin, Package, PackageId, PackageKind, SourceFile, SourceId, Tier, TypeExprId,
+    analyze, test_support,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -32,6 +32,7 @@ fn analyze_text(text: &str) -> Analysis {
     &package("app", Tier::Std, &[("schema.graphqlx", text)]),
     &[],
     &Limits::new(),
+    &Options::new(),
   )
 }
 
@@ -42,6 +43,7 @@ fn analyze_at(text: &str, tier: Tier) -> Analysis {
     &package("app", tier, &[("schema.graphqlx", text)]),
     &[],
     &Limits::new(),
+    &Options::new(),
   )
 }
 
@@ -168,7 +170,7 @@ fn a_types_tier_counts_its_definition_and_its_arguments() {
               e: NonZeroU32\n  f: i256\n  g: Box<string>\n  h: string!\n}\nscalar Box<T>\n";
   let root =
     package("app", Tier::Std, &[("schema.graphqlx", text)]).with_integers(IntegerProvider::numo());
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   quiet(&analysis);
   let model = analysis.model();
   let tiers: Vec<Tier> = ["a", "b", "c", "d", "e", "f", "g", "h"]
@@ -278,7 +280,7 @@ fn an_extern_scalar_takes_its_externs_greatest_tier() {
   let theirs = "scalar D @extern(lang: \"rust\", type: \"d\")\n";
   let root = package("app", Tier::Std, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
   let geo = package("geo", Tier::Core, &[("geo.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   quiet(&analysis);
   let model = analysis.model();
   assert_eq!(tier_of(model, "^::app::A"), Tier::Std);
@@ -373,8 +375,13 @@ fn reversing_files_and_dependencies_changes_no_tier() {
     .with_dependencies(["geo", "far"]);
   let backward = package("app", Tier::Std, &[("b.graphqlx", b), ("a.graphqlx", a)])
     .with_dependencies(["far", "geo"]);
-  let one = analyze(&forward, &[geo.clone(), far.clone()], &Limits::new());
-  let two = analyze(&backward, &[far, geo], &Limits::new());
+  let one = analyze(
+    &forward,
+    &[geo.clone(), far.clone()],
+    &Limits::new(),
+    &Options::new(),
+  );
+  let two = analyze(&backward, &[far, geo], &Limits::new(), &Options::new());
   quiet(&one);
   // Not vacuous: `Pair` and `Other` hold one another, and `Point` holds a `HashSet`.
   let model = one.model();
@@ -500,7 +507,7 @@ fn another_packages_definition_is_judged_at_each_use() {
   let ours = "type Query {\n  x: Int\n  a: ^::dep::X\n  b: ^::dep::X\n}\n";
   let root = package("app", Tier::Core, &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
   let dep = package("dep", Tier::Alloc, &[("dep.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[dep], &Limits::new());
+  let analysis = analyze(&root, &[dep], &Limits::new(), &Options::new());
   let schema = file(&analysis, 3, "schema.graphqlx");
   assert_eq!(
     found(&analysis, TIER),
@@ -523,7 +530,7 @@ fn a_dependencys_own_mistake_is_reported_once() {
   let ours = "type Query {\n  x: Int\n  a: ^::dep::X\n  b: ^::dep::X\n}\n";
   let root = package("app", Tier::Core, &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
   let dep = package("dep", Tier::Core, &[("dep.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[dep], &Limits::new());
+  let analysis = analyze(&root, &[dep], &Limits::new(), &Options::new());
   let dep_file = file(&analysis, 4, "dep.graphqlx");
   assert_eq!(
     found(&analysis, TIER),
@@ -545,7 +552,7 @@ fn a_use_names_the_need_capped_at_the_definitions_package() {
   let ours = "type Query {\n  x: Int\n  a: ^::dep::X\n}\n";
   let root = package("app", Tier::Core, &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
   let dep = package("dep", Tier::Alloc, &[("dep.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[dep], &Limits::new());
+  let analysis = analyze(&root, &[dep], &Limits::new(), &Options::new());
   let schema = file(&analysis, 3, "schema.graphqlx");
   let dep_file = file(&analysis, 4, "dep.graphqlx");
   assert_eq!(
@@ -594,7 +601,7 @@ fn a_slot_filled_from_a_default_is_counted_at_the_use() {
   let ours = "type Query {\n  x: Int\n  p: ^::dep::P\n  q: ^::dep::P<Int>\n}\n";
   let root = package("app", Tier::Core, &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
   let dep = package("dep", Tier::Std, &[("dep.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[dep], &Limits::new());
+  let analysis = analyze(&root, &[dep], &Limits::new(), &Options::new());
   let schema = file(&analysis, 3, "schema.graphqlx");
   let dep_file = file(&analysis, 4, "dep.graphqlx");
   assert_eq!(
@@ -624,7 +631,7 @@ fn an_applications_type_arguments_are_not_judged_written_or_filled() {
   for tier in [Tier::Core, Tier::Alloc] {
     for text in [omitted, written] {
       let root = package("app", tier, &[("schema.graphqlx", text)]).with_dependencies(["dep"]);
-      quiet(&analyze(&root, &[dep()], &Limits::new()));
+      quiet(&analyze(&root, &[dep()], &Limits::new(), &Options::new()));
     }
   }
 }
@@ -640,7 +647,7 @@ fn a_default_that_names_a_parameter_adds_nothing_of_its_own() {
               r: ^::dep::P3\n}\n";
   let root = package("app", Tier::Core, &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
   let dep = package("dep", Tier::Std, &[("dep.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[dep], &Limits::new());
+  let analysis = analyze(&root, &[dep], &Limits::new(), &Options::new());
   let schema = file(&analysis, 3, "schema.graphqlx");
   let dep_file = file(&analysis, 4, "dep.graphqlx");
   assert_eq!(
@@ -692,7 +699,7 @@ fn an_extern_tier_above_its_package_is_refused_at_its_tier() {
     "type Query {\n  x: Int\n}\nscalar R @extern(lang: \"rust\", type: \"r\", tier: CORE)\n";
   let root = package("app", Tier::Std, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
   let geo = package("geo", Tier::Core, &[("geo.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let geo_file = file(&analysis, 4, "geo.graphqlx");
   assert_eq!(
     found(&analysis, TIER),
@@ -723,7 +730,7 @@ fn what_counts_nowhere_is_not_judged() {
               directive @b<T> on OBJECT where T: ^::dep::Named\n";
   let root = package("app", Tier::Core, &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
   let dep = package("dep", Tier::Alloc, &[("dep.graphqlx", theirs)]);
-  quiet(&analyze(&root, &[dep], &Limits::new()));
+  quiet(&analyze(&root, &[dep], &Limits::new(), &Options::new()));
 }
 
 /// What a generic type writes is judged, as what a generic directive writes is not: at `core`, a
@@ -737,7 +744,7 @@ fn a_generic_types_defaults_and_bounds_are_judged() {
               type B<T> where T: ^::dep::Named {\n  v: T\n}\n";
   let root = package("app", Tier::Core, &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
   let dep = package("dep", Tier::Alloc, &[("dep.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[dep], &Limits::new());
+  let analysis = analyze(&root, &[dep], &Limits::new(), &Options::new());
   let schema = file(&analysis, 3, "schema.graphqlx");
   assert_eq!(
     found(&analysis, TIER),
@@ -808,7 +815,7 @@ fn long_names_are_quoted_as_excerpts() {
   let root =
     package("app", Tier::Core, &[("schema.graphqlx", ours.as_str())]).with_dependencies(["geo"]);
   let geo = package("geo", Tier::Alloc, &[("geo.graphqlx", theirs.as_str())]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let written = messages(&analysis, TIER);
   assert_eq!(written.len(), 1, "{written:#?}");
   for message in written {
@@ -1007,7 +1014,7 @@ fn a_definition_reached_both_ways_is_judged() {
               directive @bind(b: Binding) on SCALAR\n";
   let root = package("app", Tier::Core, &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
   let dep = package("dep", Tier::Std, &[("dep.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[dep], &Limits::new());
+  let analysis = analyze(&root, &[dep], &Limits::new(), &Options::new());
   let schema = file(&analysis, 3, "schema.graphqlx");
   let dep_file = file(&analysis, 4, "dep.graphqlx");
   assert_eq!(
@@ -1134,12 +1141,12 @@ fn metadata_reaches_over_every_package() {
   let refused = "`string` needs `alloc`, and package `geo` is declared at tier `core`";
 
   let root = package("app", Tier::Alloc, &[("schema.graphqlx", POINT)]).with_dependencies(["geo"]);
-  let analysis = analyze(&root, &[geo()], &Limits::new());
+  let analysis = analyze(&root, &[geo()], &Limits::new(), &Options::new());
   quiet(&analysis);
   assert!(metadata(analysis.model(), "^::geo::Binding"));
 
   let root = package("app", Tier::Alloc, &[("schema.graphqlx", USES)]).with_dependencies(["geo"]);
-  let analysis = analyze(&root, &[geo()], &Limits::new());
+  let analysis = analyze(&root, &[geo()], &Limits::new(), &Options::new());
   let schema = file(&analysis, 3, "schema.graphqlx");
   let geo_file = file(&analysis, 4, "geo.graphqlx");
   let entered = at(schema, USES, "^::geo::Binding", 0);
@@ -1157,14 +1164,14 @@ fn metadata_reaches_over_every_package() {
   );
   assert!(!metadata(analysis.model(), "^::geo::Binding"));
 
-  let analysis = analyze(&geo(), &[], &Limits::new());
+  let analysis = analyze(&geo(), &[], &Limits::new(), &Options::new());
   quiet(&analysis);
   assert!(metadata(analysis.model(), "^::geo::Binding"));
 
   let sibling = package("sib", Tier::Alloc, &[("sib.graphqlx", SIB)]).with_dependencies(["geo"]);
   let root =
     package("app", Tier::Alloc, &[("schema.graphqlx", POINT)]).with_dependencies(["geo", "sib"]);
-  let analysis = analyze(&root, &[geo(), sibling], &Limits::new());
+  let analysis = analyze(&root, &[geo(), sibling], &Limits::new(), &Options::new());
   let geo_file = file(&analysis, 4, "geo.graphqlx");
   let sib_file = file(&analysis, 5, "sib.graphqlx");
   assert_eq!(
@@ -1443,6 +1450,7 @@ fn the_metadata_flags_do_not_depend_on_order() {
         .with_dependencies(["geo", "sib"]),
         &[geo(), sib()],
         &Limits::new(),
+        &Options::new(),
       ),
       analyze(
         &package(
@@ -1453,6 +1461,7 @@ fn the_metadata_flags_do_not_depend_on_order() {
         .with_dependencies(["sib", "geo"]),
         &[sib(), geo()],
         &Limits::new(),
+        &Options::new(),
       ),
       1,
     ),
@@ -1474,6 +1483,7 @@ fn the_metadata_flags_do_not_depend_on_order() {
         .with_dependencies(["far", "geo"]),
         &[far(), geo()],
         &Limits::new(),
+        &Options::new(),
       ),
       analyze(
         &package(
@@ -1487,6 +1497,7 @@ fn the_metadata_flags_do_not_depend_on_order() {
         .with_dependencies(["geo", "far"]),
         &[geo(), far()],
         &Limits::new(),
+        &Options::new(),
       ),
       0,
     ),
@@ -1522,6 +1533,7 @@ fn the_metadata_flags_do_not_depend_on_order() {
     .with_dependencies(["far", "geo"]),
     &[far(), geo()],
     &Limits::new(),
+    &Options::new(),
   );
   let backward = analyze(
     &package(
@@ -1532,6 +1544,7 @@ fn the_metadata_flags_do_not_depend_on_order() {
     .with_dependencies(["geo", "far"]),
     &[geo(), far()],
     &Limits::new(),
+    &Options::new(),
   );
   let entered = within(file(&forward, 3, "a.graphqlx"), ONE_RUN, "(v: T)", "T");
   assert!(
@@ -1557,7 +1570,12 @@ fn the_metadata_flags_do_not_depend_on_order() {
 
 /// An analysis of the root package `app`, `Flat`, at `core`, holding `files`, `(path, text)`.
 fn analyze_files(files: &[(&str, &str)]) -> Analysis {
-  analyze(&package("app", Tier::Core, files), &[], &Limits::new())
+  analyze(
+    &package("app", Tier::Core, files),
+    &[],
+    &Limits::new(),
+    &Options::new(),
+  )
 }
 
 /// Two thousand input objects, each holding the next and the last a `string`, reached from one
@@ -1820,7 +1838,7 @@ fn an_executable_directives_parameter_reaches_every_package_and_keeps_earlier_en
   const RUN: &str = "type Query {\n  ok: Int\n}\ndirective @run<T>(v: T) on FIELD\n";
   let root = package("app", Tier::Std, &[("schema.graphqlx", RUN)]).with_dependencies(["geo"]);
   let geo = package("geo", Tier::Core, &[("geo.graphqlx", GEO)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let schema = file(&analysis, 3, "schema.graphqlx");
   let geo_file = file(&analysis, 4, "geo.graphqlx");
   let entered = within(schema, RUN, "(v: T)", "T");
@@ -1991,7 +2009,7 @@ fn an_extension_is_its_definitions() {
 fn a_dependant_can_exempt_a_dependencys_definition() {
   const GEO: &str = "type Query {\n  ok: Int\n}\ninput Cfg {\n  s: string\n}\n";
   let geo = || package("geo", Tier::Core, &[("geo.graphqlx", GEO)]);
-  let analysis = analyze(&geo(), &[], &Limits::new());
+  let analysis = analyze(&geo(), &[], &Limits::new(), &Options::new());
   let geo_file = file(&analysis, 3, "geo.graphqlx");
   assert_eq!(
     found(&analysis, TIER),
@@ -2007,7 +2025,7 @@ fn a_dependant_can_exempt_a_dependencys_definition() {
 
   let ours = "type Query {\n  x: Int\n}\ndirective @rd(c: ^::geo::Cfg) on OBJECT\n";
   let root = package("app", Tier::Std, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
-  let analysis = analyze(&root, &[geo()], &Limits::new());
+  let analysis = analyze(&root, &[geo()], &Limits::new(), &Options::new());
   quiet(&analysis);
   assert!(metadata(analysis.model(), "^::geo::Cfg"));
 }

@@ -8,8 +8,8 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, DefId, DefKind, Diagnostic, Layout, Limits, Package, PackageId, SourceFile, SourceId,
-    Tier, TyKind, TypeExprId, analyze,
+    Analysis, DefId, DefKind, Diagnostic, Layout, Limits, Options, Package, PackageId, SourceFile,
+    SourceId, Tier, TyKind, TypeExprId, analyze,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -76,7 +76,12 @@ fn package<'a>(name: &'a str, files: &[(&'a str, &'a str)]) -> Package<&'a str> 
 
 /// An analysis of the root package `app`, `Flat`, holding the one file `schema.graphqlx`.
 fn analyze_text(text: &str, limits: &Limits) -> Analysis {
-  analyze(&package("app", &[("schema.graphqlx", text)]), &[], limits)
+  analyze(
+    &package("app", &[("schema.graphqlx", text)]),
+    &[],
+    limits,
+    &Options::new(),
+  )
 }
 
 /// The id of the file at `path` in the package `package`.
@@ -227,7 +232,7 @@ fn every_later_entry_of_one_type_is_a_duplicate() {
     "type Query {\n  x: Int\n}\ninterface I {\n  a: Int\n}\ntype T implements I {\n  a: Int\n}\n";
   let b = "extend type T implements I\n";
   let root = package("app", &[("a.graphqlx", a), ("b.graphqlx", b)]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let (a_file, b_file) = (
     file(&analysis, 3, "a.graphqlx"),
     file(&analysis, 3, "b.graphqlx"),
@@ -311,7 +316,7 @@ fn what_another_package_writes_is_not_read() {
   let ours = "type Query {\n  x: Int\n}\nextend type ^::dep::P implements ^::dep::I\n";
   let root = package("app", &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
   let dep = package("dep", &[("dep.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[dep], &Limits::new());
+  let analysis = analyze(&root, &[dep], &Limits::new(), &Options::new());
   assert_eq!(codes(&analysis), [ORPHAN]);
 }
 
@@ -1015,7 +1020,7 @@ fn deprecation_is_told_by_the_directive() {
               type T implements I {\n  a: Int @^::dep::deprecated\n}\n";
   let root = package("app", &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
   let dep = package("dep", &[("dep.graphqlx", theirs)]);
-  quiet(&analyze(&root, &[dep], &Limits::new()));
+  quiet(&analyze(&root, &[dep], &Limits::new(), &Options::new()));
 }
 
 /// A definition and a field, each named with four kilobytes, are quoted as excerpts: the message
@@ -1444,6 +1449,7 @@ fn reversing_files_and_dependencies_changes_nothing_the_phase_says() {
       package("other", &[("other.graphqlx", other)]),
     ],
     &Limits::new(),
+    &Options::new(),
   );
   let backward = analyze(
     &package("app", &[("b.graphqlx", b), ("a.graphqlx", a)]).with_dependencies(["other", "geo"]),
@@ -1452,6 +1458,7 @@ fn reversing_files_and_dependencies_changes_nothing_the_phase_says() {
       package("geo", &[("geo.graphqlx", geo)]),
     ],
     &Limits::new(),
+    &Options::new(),
   );
   let mut kinds: Vec<&str> = codes(&forward);
   kinds.sort_unstable();

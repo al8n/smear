@@ -300,11 +300,11 @@ pub fn graphqlx_parser(
 ///
 /// Returns the verdict, how many diagnostics were kept, and the file's text as bound.
 pub fn graphqlx_analysis(src: &str) -> (bool, usize, Option<String>) {
-  use smear::analysis::graphqlx::{Layout, Limits, Package, SourceFile, Tier, analyze};
+  use smear::analysis::graphqlx::{Layout, Limits, Options, Package, SourceFile, Tier, analyze};
 
   let root = Package::new("app", Layout::Directory, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", src)]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let model = analysis.model();
   let file = model
     .package(model.root_package())

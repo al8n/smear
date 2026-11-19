@@ -8,7 +8,8 @@
 //! A [`Package`] is a name, a [`Layout`], a [`Tier`], its [`SourceFile`]s, the names of the
 //! packages it depends on, and optionally an [`IntegerProvider`]. A file's text is any
 //! [`SourceText`]: `&str`, `&[u8]`, or one of the texts behind the source features. [`Limits`]
-//! bounds what an analysis may spend.
+//! bounds what an analysis may spend and the shapes it admits, and [`Options`] relaxes or tightens
+//! what it accepts.
 //!
 //! The analysis is Sans-I/O: the caller walks its directories, applies its include rules, reads
 //! its files and reads its manifest, and supplies every package up front.
@@ -32,11 +33,11 @@
 //! it waives any code (see "Waiving a rule" below).
 //!
 //! ```
-//! use smear_compiler::graphqlx::{Layout, Limits, Package, SourceFile, Tier, analyze};
+//! use smear_compiler::graphqlx::{Layout, Limits, Options, Package, SourceFile, Tier, analyze};
 //!
 //! let root = Package::new("app", Layout::Directory, Tier::Std)
 //!   .with_files([SourceFile::new("schema.graphqlx", "type Query { ok: Int }")]);
-//! let analysis = analyze(&root, &[], &Limits::new());
+//! let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
 //! assert!(analysis.is_ok());
 //!
 //! // The texts stay with the caller, and are paired with the analysis again to render.
@@ -240,14 +241,14 @@
 //!
 //! ```
 //! use smear_compiler::graphqlx::{
-//!   Diagnostic, Layout, Limits, Package, SourceFile, Tier, analyze, schema,
+//!   Diagnostic, Layout, Limits, Options, Package, SourceFile, Tier, analyze, schema,
 //! };
 //! use tokora::diagnostic::Diagnose;
 //!
 //! // A library has no query root, so analyzed as the root package it is not ok.
 //! let library = Package::new("geo", Layout::Flat, Tier::Std)
 //!   .with_files([SourceFile::new("geo.graphqlx", "type Point { x: Float! y: Float! }")]);
-//! let analysis = analyze(&library, &[], &Limits::new());
+//! let analysis = analyze(&library, &[], &Limits::new(), &Options::new());
 //! assert!(!analysis.is_ok());
 //!
 //! // Waived by its code, on a list the ceiling did not cut, nothing else remains.
@@ -306,6 +307,15 @@
 //!
 //! The parser's own ceilings are not among these: they belong to the parser value, as [`Limits`]
 //! says.
+//!
+//! # Options
+//!
+//! [`Options`] holds the switches that relax or tighten what the language accepts, each off by
+//! default, so [`Options::new`] is the language as this documentation describes it. A switch
+//! changes which programs are accepted, and never what a program accepted both ways means: one
+//! that relaxes accepts more, to the same model, and one that tightens refuses more. The switches
+//! are the analysis's, not a package's: one setting holds for every package analyzed together, and
+//! [`Analysis::options`] answers what an analysis ran under.
 //!
 //! # Rules
 //!
@@ -377,13 +387,15 @@
 //! them.
 //!
 //! ```
-//! use smear_compiler::graphqlx::{Layout, Limits, Package, SourceFile, SourceId, Tier, analyze};
+//! use smear_compiler::graphqlx::{
+//!   Layout, Limits, Options, Package, SourceFile, SourceId, Tier, analyze,
+//! };
 //! use tokora::diagnostic::Diagnose;
 //!
 //! let text = "type Query { a: Missing }";
 //! let root = Package::new("app", Layout::Flat, Tier::Std)
 //!   .with_files([SourceFile::new("schema.graphqlx", text)]);
-//! let analysis = analyze(&root, &[], &Limits::new());
+//! let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
 //!
 //! // A renderer is handed each diagnostic's source by its path and its text.
 //! let texts = analysis.sources().bind(&root, &[]);
@@ -454,6 +466,7 @@ mod instantiate;
 mod limits;
 mod lower;
 mod model;
+mod options;
 mod package;
 mod parse;
 mod positions;
@@ -492,6 +505,7 @@ pub use model::{
   Path, PathRoot, Primitive, Resolution, Root, RootOperation, Schema, Ty, TyKind, TypeBound,
   TypeExpr, TypeExprKind, TypeParam, TypeParamRef, TypeParams, Value, ValueKind,
 };
+pub use options::Options;
 pub use package::{IntegerProvider, Layout, Package, SourceFile, Tier};
 pub use rules::UnboundedInstantiation;
 pub use source::{Bound, Source, SourceMap};

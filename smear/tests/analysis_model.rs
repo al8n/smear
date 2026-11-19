@@ -13,9 +13,9 @@ use smear::{
     Contribution, Contributions, Def, DefId, DefKind, Description, DirectiveLocation, EnumValueRef,
     Extern, Externs, FloatValue, IntPrimitive, IntValue, IntegerProvider, Layout, Limits, Literal,
     LiteralKind, Member, MemberId, MemberKind, Model, Module, ModuleId, ModuleKind, NamedTy,
-    NamedTypeExpr, Namespace, ObjectEntry, Origin, Package, PackageId, PackageInfo, PackageKind,
-    Path, PathRoot, Primitive, Resolution, Root, RootOperation, Schema, SourceId, Sym, Tier, Ty,
-    TyId, TyKind, TypeBound, TypeExpr, TypeExprId, TypeExprKind, TypeParam, TypeParamRef,
+    NamedTypeExpr, Namespace, ObjectEntry, Options, Origin, Package, PackageId, PackageInfo,
+    PackageKind, Path, PathRoot, Primitive, Resolution, Root, RootOperation, Schema, SourceId, Sym,
+    Tier, Ty, TyId, TyKind, TypeBound, TypeExpr, TypeExprId, TypeExprKind, TypeParam, TypeParamRef,
     TypeParams, Value, ValueId, ValueKind, analyze, test_support::ModelBuilder,
   },
   diagnostic::Location,
@@ -1209,7 +1209,7 @@ fn packages_answer_their_kind_name_tier_layout_sources_dependencies_provider_and
 #[test]
 fn analyze_gives_every_package_its_root_module() {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let model = analysis.model();
   assert_eq!(model.packages().len(), 4);
   assert_eq!(model.modules().len(), 4);
