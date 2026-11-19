@@ -16,6 +16,11 @@
 //! Which generic definitions grow is one fact, found once, after instantiation, by [`grow`], which
 //! marks each on the model: the `growth` graph, the one `UnboundedInstantiation` builds. Every
 //! phase after instantiation reads the mark, and `Def::grows` answers it.
+//!
+//! What each written instantiation derives through the definitions that do not grow is the
+//! `closure`, which coercion builds once its walk has ended, paying for its rebuilds from
+//! `Limits::max_value_steps`, and keeps here for the implementation check, which judges the same
+//! derived instantiations and reports them at the same written occurrences.
 
 use std::{collections::BTreeMap, vec::Vec};
 
@@ -25,6 +30,7 @@ use crate::graphqlx::{
   model::{ModelBuilder, Shape, TypeParamRef},
 };
 
+pub(crate) mod closure;
 pub(crate) mod growth;
 
 /// Marks each definition of `builder` that grows, once instantiation has typed every occurrence
@@ -130,6 +136,8 @@ pub(crate) struct Types {
   pub(crate) bound_steps: Counter,
   /// The routines that derive a type, and what they keep.
   pub(crate) derived: Derived,
+  /// What each written instantiation derives: built by coercion, read by the implementation check.
+  pub(crate) closure: closure::Closure,
 }
 
 impl Types {
@@ -139,6 +147,7 @@ impl Types {
       limits,
       substitutions: Counter::new(limits.max_substitutions()),
       bound_steps: Counter::new(limits.max_bound_steps()),
+      closure: closure::Closure::default(),
       derived: Derived {
         max_depth: limits.max_generic_depth(),
         max_instantiations: limits.max_instantiations(),

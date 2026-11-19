@@ -2381,8 +2381,9 @@ fn a_collections_key_a_deprecated_member_takes_is_refused_once() {
   // each application's own mistake, reported once, at its path, labelled at `v`, and no use
   // repeats it, `S<Int>`, `S<Int!>` and `M<Int, Int>` among them. `N`'s value is no key: `@d<V>`
   // makes `v` required under `N<Int, Int!>` alone, reported at that use, labelled at the
-  // application that leaves `v` out and at `v`. A use only a derivation reaches, the `S<Int!>` of
-  // `Box<Int!>`, is not checked. The phase's error marks `S` and `M`, and `Query` at
+  // application that leaves `v` out and at `v`. The `S<Int!>` that `Box<Int!>` derives is one `t`
+  // writes, and `S` records nothing for it: its omission is its own. The phase's error marks `S`
+  // and `M`, and `Query` at
   // `N<Int, Int!>`, where this rule then says nothing: the definitions' mistakes are the phase's,
   // and no deprecated-member report is left for an application that leaves `v` out.
   let text = FORCED;
@@ -2495,8 +2496,10 @@ fn a_collections_key_a_deprecated_member_takes_is_refused_once() {
   // Where a default fills the slot, `v`'s type there, `Y`, takes the element, and the application
   // leaves `v` out: the application's own mistake, the phase's, once, at its path, labelled at
   // `v`, and `S<Int>` adds nothing. Where an `implements` entry passes the element on, this rule
-  // reports at the entry, once; the one on `Mk` is reached at `S<Int>` only through a derivation,
-  // which the phase does not check.
+  // reports at the entry, once; the application on `Mk` is reached at `S<Int>` only through a
+  // derivation, `Mk<Int!>`, which the phase checks (D11): it makes `v` required there, so the
+  // phase's `missing-required-directive-argument` is at `S<Int>`, labelled at the entry that
+  // derives `Mk<Int!>`. That error marks `Query`, and this rule's report in `S` stands.
   let deprecated_message = "`T`, the element of the set `S`, is non-null in every instantiation, \
                             and here it makes the deprecated argument `v` of the directive `@d` \
                             required";
@@ -2524,15 +2527,31 @@ fn a_collections_key_a_deprecated_member_takes_is_refused_once() {
   let schema = schema_file(&analysis);
   assert_eq!(
     found(&analysis),
-    [(
-      DEPRECATED_ARGUMENT,
-      at(schema, text, "Mk<T>", 0),
-      Some(at(schema, text, "deprecated", 0))
-    )],
+    [
+      (
+        MISSING_ARGUMENT,
+        at(schema, text, "S<Int>", 0),
+        Some(at(schema, text, "Mk<T>", 0))
+      ),
+      (
+        DEPRECATED_ARGUMENT,
+        at(schema, text, "Mk<T>", 0),
+        Some(at(schema, text, "deprecated", 0))
+      ),
+    ],
     "{:#?}",
     analysis.diagnostics()
   );
-  assert_eq!(messages(&analysis), [deprecated_message]);
+  assert_eq!(
+    messages(&analysis),
+    [
+      String::from(
+        "`S` is instantiated here with type arguments that derive an instantiation of `Mk` under \
+         which `@d` requires its argument `v`, and an application it holds leaves it out"
+      ),
+      String::from(deprecated_message),
+    ]
+  );
 }
 
 #[test]

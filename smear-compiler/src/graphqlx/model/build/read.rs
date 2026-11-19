@@ -352,6 +352,16 @@ impl ModelBuilder {
       .max()
   }
 
+  /// Whether `def` grows, once the type services marked the definitions that do, after
+  /// instantiation: `false` before that, and for an id the builder did not issue.
+  pub(crate) fn def_grows(&self, def: DefId) -> bool {
+    self
+      .model
+      .defs
+      .get(def.get() as usize)
+      .is_some_and(|row: &DefRow| row.grows)
+  }
+
   /// The model as the phases have written it so far, for a routine that reads it through the
   /// finished model's views: the growth graph, once instantiation has typed every occurrence and
   /// completed every application. Such a routine reads only rows written by then: names, the marks

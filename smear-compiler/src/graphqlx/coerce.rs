@@ -231,9 +231,18 @@
 //! `Literal`, and the check makes no row. A count that meets itself is judged by what it reached,
 //! as an exact one is: the cycle is reported where the count meets itself, below, and a value
 //! that does not fit is
-//! reported all the same. An instantiation only a derivation reaches is not checked, nor an
-//! application only an instantiation reaches: a value written under such a type is judged where
-//! it is written.
+//! reported all the same.
+//!
+//! Then the instantiations those written ones derive, through the definitions that do not grow,
+//! are checked the same way, as the `derived` module says: what a copy of a written instantiation
+//! needs, its definition's members' types, `implements` entries, union members and the complete
+//! types of its applications, each read under its arguments, and each instantiation of a generic
+//! definition they hold that no supplied package writes, in turn, an application only an
+//! instantiation reaches among them. Each occurrence, or application, of a written instantiation
+//! whose own verdict holds reports the first that fails, with the code the same failure has at a
+//! written instantiation, labelled at the type or the application that derives it. A derived
+//! instantiation of a definition that grows is not checked, nor what only it derives: a value
+//! written under such a type is judged where it is written.
 //!
 //! # The count of a copy
 //!
@@ -288,11 +297,11 @@
 //! So a program that holds a cycle among closed types gets at least one report, and not one for
 //! each cycle: once a count meets one, every count on its stack ends poisoned, and a second cycle
 //! that only reads one of them is never met. No cycle is met through a OneOf's defaulted field,
-//! which is never filled and which `one-of-field-has-default` refuses; in the defaults of an
-//! instantiation only a fill or a substitution derives, which is not checked; or in a generic
-//! definition no closed instantiation reaches. A cycle met only past the budget is
-//! `resource-limit`, and nothing more. The report reads the frames above the one met, once for
-//! each count, each opened by a read the count paid for, and it charges nothing.
+//! which is never filled and which `one-of-field-has-default` refuses; in the defaults of a
+//! derived instantiation of a definition that grows, which is not checked; or in a generic
+//! definition no closed instantiation reaches, written or derived. A cycle met only past the
+//! budget is `resource-limit`, and nothing more. The report reads the frames above the one met,
+//! once for each count, each opened by a read the count paid for, and it charges nothing.
 //!
 //! # What bounds it
 //!
@@ -307,8 +316,11 @@
 //! for one held twice, a step for each 64 bytes of it or part, once for each literal and the type
 //! its identities are read against; each node a rebuild of a member's type under type
 //! arguments looks at, its root included, once for each type and instantiation; each argument or
-//! field that may be required left out where the type arguments are complete; and each pair of a
-//! closed instantiation checked, written or applied, and a row recorded under its definition. So
+//! field that may be required left out where the type arguments are complete; each pair of a
+//! closed instantiation checked, written, applied or derived, and a row recorded under its
+//! definition; and, building the closure of derived instantiations, each node a rebuild of a
+//! position under an instantiation's arguments looks at, once for each type and instantiation, and
+//! each instantiation an expansion derives, once for each instantiation that derives it. So
 //! is the one reading that is more than linear: a decimal integer of more than 38
 //! significant digits, the most `u128` arithmetic reads whatever they spell, is converted nine
 //! digits at a time over a vector of limbs, and that is charged first, an upper bound of its limb
@@ -367,6 +379,7 @@ use super::{
   types::{Counter, Limit, Stop, Types},
 };
 
+mod derived;
 mod number;
 mod spelling;
 
@@ -536,6 +549,7 @@ pub(crate) fn coerce(
     }
   }
   coercion.instantiations();
+  coercion.derived();
   debug_assert_eq!(
     coercion.paid, coercion.copied,
     "the copies make exactly the rows they were counted to"

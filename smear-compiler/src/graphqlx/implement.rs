@@ -84,9 +84,9 @@
 //! each for an occurrence. `Either<User, User>` of `union Either<A, B> = A | B` is one. An open
 //! occurrence is judged too: `Pair<X, X>` inside a definition of `X` has two entries of one type
 //! whatever `X` stands for. A written duplicate was reported where it is written, and is not
-//! again; an instantiation only a fill derives is not judged. Each type is judged once, its two
-//! nullnesses sharing one verdict, and a verdict a limit stopped is `resource-limit` at each
-//! occurrence of it, but at an entry a definition's check stopped at, which said so.
+//! again. Each type is judged once, its two nullnesses sharing one verdict, and a verdict a limit
+//! stopped is `resource-limit` at each occurrence of it, but at an entry a definition's check
+//! stopped at, which said so.
 //!
 //! # What an instantiation makes required
 //!
@@ -97,9 +97,17 @@
 //! `Page<Int!>` of `type Page<T> implements Paged { items(after: T): [Int] }` is one, and so is
 //! `Page` of `type Page<T = Int!>`, whose default makes it so. Each type is judged once, a step
 //! for each such argument it looks at, and one a limit stopped is `resource-limit` at each
-//! occurrence of it. An instantiation that only a fill or a substitution derives is not judged:
-//! `Outer<Int!>` of `type Outer<U> { p: Page<U> }` makes a `Page<Int!>` that no occurrence writes,
-//! as no derived instantiation is judged here.
+//! occurrence of it.
+//!
+//! # Derived instantiations
+//!
+//! Last, each instantiation the closure coercion built derives from a written one, through the
+//! definitions that do not grow, is judged for both, by the same verdicts, as the `derived` module
+//! says: `Outer<Int!>` of `type Outer<U> { p: Page<U> }` derives a `Page<Int!>` that no occurrence
+//! writes, which makes `after` required, and `unexpected-required-argument` is at `Outer<Int!>`,
+//! labelled at `Page<U>`, the type that derives it. Each occurrence of a written instantiation, and
+//! each application, whose own verdict holds reports the first derived instantiation that fails. A
+//! derived instantiation of a definition that grows is not judged, nor what only it derives.
 //!
 //! # What it costs, and what bounds it
 //!
@@ -111,9 +119,10 @@
 //! interface looked at, and each argument of it or of the field that implements it; each pair of
 //! types the relation looks at, one answered before included,
 //! and each entry, bound and member it looks at to answer one; each distinct written entry and
-//! member a verdict reads; each argument a field adds that a written instantiation's type is read
-//! for, once for each type; and each node of a type rebuilt under an entry's arguments, a rebuild
-//! remembered by the type and the arguments' named type costing nothing more. A listed
+//! member a verdict reads; each argument a field adds that a written or a derived instantiation's
+//! type is read for, once for each type; and each node of a type rebuilt under an entry's
+//! arguments, a rebuild remembered by the type and the arguments' named type costing nothing
+//! more. A listed
 //! definition's own entries and members are read once, when an occurrence first asks about it,
 //! and a verdict looked up costs nothing. On a program the check accepts, each root costs its interface's entries
 //! and its fields, and no more. The definition's own fields are indexed by name once, at its first
@@ -154,14 +163,16 @@ use super::{
 
 use subtype::{Alternative, Answer, Frame, TyPair};
 
+mod derived;
 mod subtype;
 
 /// Checks what each definition `builder` holds says it is, whose declarations are `declarations`
 /// and whose sources `sources` numbers, with the type services of `types`, reporting into
 /// `reporter`: that no two of its `implements` entries, nor of a union's members, are one type, as
-/// written or under the type arguments of an instantiation the program writes; that it implements
-/// what the interfaces it implements implement; and that an object or an interface declares their
-/// fields, with their arguments.
+/// written or under the type arguments of an instantiation the program writes or derives; that it
+/// implements what the interfaces it implements implement; and that an object or an interface
+/// declares their fields, with their arguments. The closure of derived instantiations is read from
+/// `types`, where coercion left it, and dropped.
 pub(crate) fn implement(
   declarations: &Declarations<'_, '_>,
   sources: &SourceMap,
@@ -213,6 +224,7 @@ pub(crate) fn implement(
   };
   implementing.definitions();
   implementing.occurrences();
+  implementing.derived();
 }
 
 /// One of a definition's lists of types.

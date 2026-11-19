@@ -1,12 +1,31 @@
 //! Derived instantiations, design Z's D11: which generic definitions grow, one fact that the
-//! analysis and the opt-in rule `UnboundedInstantiation` read off one graph.
+//! analysis and the opt-in rule `UnboundedInstantiation` read off one graph; and what a written
+//! instantiation derives through the definitions that do not grow, judged for its definition's
+//! values, the arguments it makes required and its entries and members, and reported at the
+//! written occurrence that derives it.
 #![cfg(all(feature = "std", feature = "analysis"))]
 
 use std::path::PathBuf;
 
-use smear::analysis::graphqlx::{
-  Analysis, DefId, Layout, Limits, Model, Package, SourceFile, Tier, analyze, test_support,
+use smear::{
+  analysis::graphqlx::{
+    Analysis, DefId, Diagnostic, Layout, Limits, Model, Namespace, Package, PackageId, SourceFile,
+    SourceId, Tier, analyze, test_support,
+  },
+  diagnostic::{Diagnose, Location},
+  lexer::tokora::SimpleSpan,
 };
+
+/// A bound of the limits passed.
+const LIMIT: &str = "smear::graphqlx::resource-limit";
+/// GraphQL's code for a default that does not fit.
+const DEFAULT: &str = "smear::schema::invalid-default-value";
+/// GraphQL's code for two members of a union of one type.
+const MEMBER: &str = "smear::schema::duplicate-union-member";
+/// GraphQL's code for an argument a field requires that its interface's field does not declare.
+const UNEXPECTED: &str = "smear::schema::unexpected-required-argument";
+/// The label at the type that derives the instantiation a report names.
+const DERIVES: &str = "this derives that instantiation";
 
 /// An analysis of the root package `app`, `Flat`, at tier `Std`, holding the one file
 /// `schema.graphqlx`, within `limits`.
@@ -14,6 +33,101 @@ fn analyze_text(text: &str, limits: &Limits) -> Analysis {
   let root = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text)]);
   analyze(&root, &[], limits)
+}
+
+/// The root package's one file, `schema.graphqlx`.
+fn schema_file(analysis: &Analysis) -> SourceId {
+  let sources = analysis.sources();
+  analysis
+    .model()
+    .package(PackageId::new(3))
+    .sources()
+    .into_iter()
+    .find(|id: &SourceId| sources.source(*id).path() == "schema.graphqlx")
+    .expect("the root package's file")
+}
+
+/// Where the `nth` occurrence, counting from 0, of `needle` is in `text`, the file `source`.
+fn at(source: SourceId, text: &str, needle: &str, nth: usize) -> Location {
+  let start = text
+    .match_indices(needle)
+    .nth(nth)
+    .map(|(start, _): (usize, &str)| start)
+    .unwrap_or_else(|| panic!("`{needle}` does not occur {} times", nth + 1));
+  Location::new(source.get(), SimpleSpan::new(start, start + needle.len()))
+}
+
+/// Where `literal` is written right after `before`, the first time, in `text`, the file `source`.
+fn after(source: SourceId, text: &str, before: &str, literal: &str) -> Location {
+  let written = format!("{before}{literal}");
+  let start = text
+    .find(written.as_str())
+    .unwrap_or_else(|| panic!("`{written}` is not written"))
+    + before.len();
+  Location::new(source.get(), SimpleSpan::new(start, start + literal.len()))
+}
+
+/// Where the `nth` occurrence, counting from 0, of the name `name` written right after `before` is
+/// in `text`, the file `source`: a name that a longer name begins with is not one.
+fn named(source: SourceId, text: &str, before: &str, name: &str, nth: usize) -> Location {
+  let written = format!("{before}{name}");
+  let start = text
+    .match_indices(written.as_str())
+    .map(|(start, _): (usize, &str)| start + before.len())
+    .filter(|start: &usize| {
+      text[start + name.len()..]
+        .chars()
+        .next()
+        .is_none_or(|next: char| !(next.is_ascii_alphanumeric() || next == '_'))
+    })
+    .nth(nth)
+    .unwrap_or_else(|| panic!("`{written}` does not occur {} times", nth + 1));
+  Location::new(source.get(), SimpleSpan::new(start, start + name.len()))
+}
+
+/// Each diagnostic's code and primary location, in the list's order.
+fn found(analysis: &Analysis) -> Vec<(&'static str, Location)> {
+  analysis
+    .diagnostics()
+    .iter()
+    .map(|diagnostic: &Diagnostic| (diagnostic.code().as_str(), diagnostic.primary()))
+    .collect()
+}
+
+/// Asserts that `analysis` says nothing.
+fn quiet(analysis: &Analysis) {
+  assert!(
+    analysis.diagnostics().is_empty(),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
+/// The diagnostic with the code `code` at `at`.
+fn the<'a>(analysis: &'a Analysis, code: &str, at: Location) -> &'a Diagnostic {
+  analysis
+    .diagnostics()
+    .iter()
+    .find(|diagnostic: &&Diagnostic| {
+      diagnostic.code().as_str() == code && diagnostic.primary() == at
+    })
+    .unwrap_or_else(|| panic!("no `{code}` at {at:?}: {:#?}", analysis.diagnostics()))
+}
+
+/// Each label of `diagnostic`, where it is and what it says, in order.
+fn labels(diagnostic: &Diagnostic) -> Vec<(Location, &str)> {
+  (0..diagnostic.labels())
+    .filter_map(|index: usize| diagnostic.label(index))
+    .map(|label| (label.location(), label.text()))
+    .collect()
+}
+
+/// The definition the root package's `name` names in the type namespace.
+fn type_def(model: &Model, name: &str) -> DefId {
+  let canonical = format!("^::app::{name}");
+  model
+    .lookup(Namespace::Type, &canonical)
+    .unwrap_or_else(|| panic!("no type `{canonical}`"))
 }
 
 /// Every file of the GraphQLx corpus and of the GraphQL schema fixtures, by path, each with its
@@ -165,4 +279,255 @@ fn def_grows_agrees_with_the_opt_in_rule_on_every_definition_of_the_corpus() {
     growing += ours.len();
   }
   assert!(growing > 0, "no program grows");
+}
+
+/// A value that only a substitution derives an instantiation for, and that does not fit there, is
+/// reported at each written occurrence that derives it, once, both nullnesses sharing the verdict:
+/// `Outer<String>` derives `Box<String>` through `b`, under which `Box`'s `1` does not fit, with
+/// the code the same failure has where `Box<String>` is written, labelled at the type that derives
+/// it and at the value. `Outer<Int>` derives a `Box<Int>` that fits. Nothing derived is kept:
+/// `Box` has no instantiation the program writes. Refuses the gap D11 closes, which said nothing.
+#[test]
+fn a_failure_only_a_substitution_derives_is_reported_at_the_written_occurrence() {
+  let text = "type Query {\n  f(o: Outer<String>): Int\n  g(o: Outer<String>!): Int\n}\n\
+              input Box<T> {\n  v: T = 1\n}\ninput Outer<U> {\n  b: Box<U>\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let nullable = at(schema, text, "Outer<String>", 0);
+  let non_null = at(schema, text, "Outer<String>!", 0);
+  assert_eq!(found(&analysis), [(DEFAULT, nullable), (DEFAULT, non_null)]);
+  for occurrence in [nullable, non_null] {
+    let report = the(&analysis, DEFAULT, occurrence);
+    assert_eq!(
+      report.to_string(),
+      "`Outer` is instantiated here with type arguments that derive an instantiation of `Box` \
+       under which `1`, a value it holds, does not fit the type it takes"
+    );
+    assert_eq!(report.primary_label(), Some("invalid default value"));
+    assert_eq!(
+      labels(report),
+      [
+        (after(schema, text, "b: ", "Box<U>"), DERIVES),
+        (after(schema, text, "v: T = ", "1"), "this value"),
+      ]
+    );
+  }
+  let model = analysis.model();
+  assert!(model.instantiations(type_def(model, "Box")).is_empty());
+
+  let fits = "type Query {\n  f(o: Outer<Int>): Int\n}\ninput Box<T> {\n  v: T = 1\n}\n\
+              input Outer<U> {\n  b: Box<U>\n}\n";
+  quiet(&analyze_text(fits, &Limits::new()));
+}
+
+/// What a type parameter's default fills is derived by that default: `Conn<String>` leaves `E` to
+/// `Edge<N>`, which gives it `Edge<String>`, whose `1` does not fit, though no member of `Conn`
+/// names `E`. Reported at `Conn<String>`, labelled at the default. Refuses a root whose filled
+/// arguments are not read.
+#[test]
+fn a_failure_only_a_fill_derives_is_reported_at_the_written_occurrence() {
+  let text = "type Query {\n  f(c: Conn<String>): Int\n}\ninput Edge<N> {\n  v: N = 1\n}\n\
+              input Conn<N, E = Edge<N>> {\n  n: N\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, text, "Conn<String>", 0);
+  assert_eq!(found(&analysis), [(DEFAULT, occurrence)]);
+  assert_eq!(
+    labels(the(&analysis, DEFAULT, occurrence)),
+    [
+      (after(schema, text, "E = ", "Edge<N>"), DERIVES),
+      (after(schema, text, "v: N = ", "1"), "this value"),
+    ]
+  );
+}
+
+/// A derived instantiation of a definition that grows is not judged. `Nest<Int>` derives
+/// `Nest<[Int]!>`, under which `v`'s `null` would not fit, and says nothing: `Nest` grows. The
+/// `Box<Int>` that the written `Nest<Int>` derives is judged all the same, `Box` not growing, and
+/// its `"s"` reported at `Nest<Int>`; the `Box<[Int]>` that only `Nest<[Int]>` would derive is
+/// never derived. Refuses a closure that expands a growing definition's derived instantiation, and
+/// one that judges nothing a growing definition's written instantiation derives.
+#[test]
+fn a_growing_definitions_derived_instantiation_is_not_judged() {
+  let text = "type Query {\n  f(n: Nest<Int>): Int\n}\n\
+              input Nest<T> {\n  v: T = null\n  deeper: Nest<[T]!>\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  quiet(&analysis);
+  let model = analysis.model();
+  assert!(model.def(type_def(model, "Nest")).grows());
+
+  let text = "type Query {\n  f(n: Nest<Int>): Int\n}\ninput Box<T> {\n  v: T = \"s\"\n}\n\
+              input Nest<T> {\n  b: Box<T>\n  deeper: Nest<[T]>\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, text, "Nest<Int>", 0);
+  assert_eq!(found(&analysis), [(DEFAULT, occurrence)]);
+  assert_eq!(
+    labels(the(&analysis, DEFAULT, occurrence)),
+    [
+      (after(schema, text, "b: ", "Box<T>"), DERIVES),
+      (after(schema, text, "v: T = ", "\"s\""), "this value"),
+    ]
+  );
+  let model = analysis.model();
+  assert!(model.def(type_def(model, "Nest")).grows());
+  assert!(!model.def(type_def(model, "Box")).grows());
+}
+
+/// The closure counts each instantiation it derives toward `Limits::max_instantiations`, and stops
+/// past it with one `resource-limit`, at where the written instantiation whose expansion was
+/// running is first written, however many occurrences it has. `A1<Int>` derives `A2<[Int]>`,
+/// `A3<[[Int]]>` and `A4<[[[Int]]]>`, each new: under the least bound the program is ok at, less
+/// one, the last cannot be built. Refuses a closure uncounted, and a report at each occurrence.
+#[test]
+fn the_closure_stops_at_max_instantiations_with_one_resource_limit() {
+  let text = "type Query {\n  f(a: A1<Int>): Int\n  g(a: A1<Int>): Int\n}\n\
+              input A1<T> {\n  n: A2<[T]>\n}\ninput A2<T> {\n  n: A3<[T]>\n}\n\
+              input A3<T> {\n  n: A4<[T]>\n}\ninput A4<T> {\n  v: T = 1\n}\n";
+  quiet(&analyze_text(text, &Limits::new()));
+  let least = (0..64_u32)
+    .find(|&bound: &u32| analyze_text(text, &Limits::new().with_max_instantiations(bound)).is_ok())
+    .expect("a bound the program is ok under");
+  assert!(least > 0);
+  let short = analyze_text(text, &Limits::new().with_max_instantiations(least - 1));
+  let schema = schema_file(&short);
+  let occurrence = at(schema, text, "A1<Int>", 0);
+  assert_eq!(found(&short), [(LIMIT, occurrence)]);
+  assert_eq!(short.diagnostics().error_count(), 1);
+  assert_eq!(
+    the(&short, LIMIT, occurrence).to_string(),
+    format!(
+      "what `A1` derives under the type arguments it is instantiated with here could not be \
+       read: it derives more instantiations of generic definitions than \
+       `Limits::max_instantiations`, {}, admits",
+      least - 1
+    )
+  );
+}
+
+/// Two members of a union that a derived instantiation makes one type are refused at the written
+/// occurrence that derives it: `Outer<User>` derives `Either<User, User>` through `e`, labelled at
+/// `e`'s type and at the two members; `Outer<Post>` derives `Either<Post, User>`, whose members
+/// stay distinct. Refuses the implementation check's gap at derived instantiations.
+#[test]
+fn derived_members_that_meet_are_refused_at_the_written_occurrence() {
+  let text = "type Query {\n  o: Outer<User>\n  p: Outer<Post>\n}\ntype User {\n  id: ID\n}\n\
+              type Post {\n  id: ID\n}\nunion Either<A, B> = A | B\n\
+              type Outer<T> {\n  e: Either<T, User>\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, text, "Outer<User>", 0);
+  assert_eq!(found(&analysis), [(MEMBER, occurrence)]);
+  let report = the(&analysis, MEMBER, occurrence);
+  assert_eq!(
+    report.to_string(),
+    "`Outer` is instantiated here with type arguments that derive an instantiation of `Either` \
+     under which two of its members are one type"
+  );
+  assert_eq!(
+    labels(report),
+    [
+      (after(schema, text, "e: ", "Either<T, User>"), DERIVES),
+      (named(schema, text, "= ", "A", 0), "this member"),
+      (named(schema, text, "| ", "B", 0), "the same type here"),
+    ]
+  );
+}
+
+/// An argument a field adds beside its interface's field's, typed by its own bare nullable type
+/// parameter, is required in a derived instantiation that gives the parameter a non-null type:
+/// `Outer<Int!>` derives `Page<Int!>`, which no occurrence writes, and is refused, labelled at
+/// `p`'s type, at the argument and at the interface's field; `Outer<Int>` derives a `Page<Int>`
+/// that requires nothing. Refuses the gap the module recorded for `Outer<Int!>`.
+#[test]
+fn an_argument_a_derived_instantiation_makes_required_is_refused_at_the_written_occurrence() {
+  let text = "type Query {\n  o: Outer<Int!>\n  q: Outer<Int>\n}\n\
+              interface Paged {\n  items: [Int]\n}\n\
+              type Page<T> implements Paged {\n  items(after: T): [Int]\n}\n\
+              type Outer<U> {\n  p: Page<U>\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, text, "Outer<Int!>", 0);
+  assert_eq!(found(&analysis), [(UNEXPECTED, occurrence)]);
+  let report = the(&analysis, UNEXPECTED, occurrence);
+  assert_eq!(
+    report.to_string(),
+    "`Outer` is instantiated here with type arguments that derive an instantiation of `Page` \
+     under which its field `items` requires the argument `after`, which `Paged`'s field `items` \
+     does not declare"
+  );
+  assert_eq!(
+    labels(report),
+    [
+      (after(schema, text, "p: ", "Page<U>"), DERIVES),
+      (
+        named(schema, text, "items(", "after", 0),
+        "required under these type arguments"
+      ),
+      (
+        named(schema, text, "  ", "items", 0),
+        "the interface's field"
+      ),
+    ]
+  );
+}
+
+/// An application whose directive's instantiation derives one that fails is reported at its path:
+/// `@w<String>` derives `Box<String>` through `w`'s argument `a`, labelled there and at the value.
+/// Refuses a closure that starts from type occurrences alone.
+#[test]
+fn an_application_reports_what_its_directives_instantiation_derives() {
+  let text = "type Query @w<String> {\n  x: Int\n}\ninput Box<T> {\n  v: T = 1\n}\n\
+              directive @w<T>(a: Box<T>) on OBJECT\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let path = named(schema, text, "@", "w", 0);
+  assert_eq!(found(&analysis), [(DEFAULT, path)]);
+  let report = the(&analysis, DEFAULT, path);
+  assert_eq!(
+    report.to_string(),
+    "`@w` is applied here with type arguments that derive an instantiation of `Box` under which \
+     `1`, a value it holds, does not fit the type it takes"
+  );
+  assert_eq!(
+    labels(report),
+    [
+      (after(schema, text, "a: ", "Box<T>"), DERIVES),
+      (after(schema, text, "v: T = ", "1"), "this value"),
+    ]
+  );
+}
+
+/// An instantiation a supplied package writes is judged where it is written, and what derives it
+/// says nothing of it: `Box<String>` is written beside `Outer<String>`, which derives it, and is
+/// reported at its own occurrence alone. Refuses a second report of one mistake.
+#[test]
+fn a_derived_instantiation_a_supplied_package_writes_is_judged_where_it_is_written() {
+  let text = "type Query {\n  f(o: Outer<String>, b: Box<String>): Int\n}\n\
+              input Box<T> {\n  v: T = 1\n}\ninput Outer<U> {\n  b: Box<U>\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, text, "Box<String>", 0);
+  assert_eq!(found(&analysis), [(DEFAULT, occurrence)]);
+  assert_eq!(
+    labels(the(&analysis, DEFAULT, occurrence)),
+    [(after(schema, text, "v: T = ", "1"), "this value")]
+  );
+}
+
+/// A written instantiation whose own values do not fit reports them, and nothing it derives: the
+/// first failing instantiation of `Outer<String>`'s expansion is itself, its `2`, and the
+/// `Box<String>` it derives is not reported too. Refuses a report for each failing instantiation.
+#[test]
+fn a_written_instantiation_whose_own_values_fail_reports_them_alone() {
+  let text = "type Query {\n  f(o: Outer<String>): Int\n}\ninput Box<T> {\n  v: T = 1\n}\n\
+              input Outer<U> {\n  u: U = 2\n  b: Box<U>\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let occurrence = at(schema, text, "Outer<String>", 0);
+  assert_eq!(found(&analysis), [(DEFAULT, occurrence)]);
+  assert_eq!(
+    labels(the(&analysis, DEFAULT, occurrence)),
+    [(after(schema, text, "u: U = ", "2"), "this value")]
+  );
 }

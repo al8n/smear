@@ -593,6 +593,15 @@ impl<'a> Def<'a> {
   /// `B<[T]>`. Passing a type parameter on as it is, `Swap<U, T>` inside `type Swap<T, U>`, is no
   /// growth, and a definition with no type parameter never grows.
   ///
+  /// It is what a derived instantiation of the definition is not judged for. The analysis judges a
+  /// generic definition's values, the arguments it makes required, and its entries and members, at
+  /// each closed instantiation a supplied package writes, and at each one such an instantiation
+  /// derives, through a fill or a substitution, whose definition does not grow, reporting what
+  /// fails at the written occurrence that derives it. A derived instantiation of a definition that
+  /// grows, and what only it derives, is not judged: `Nest<[i32]>` of
+  /// `type Nest<T> { v: Box<T>, deeper: Nest<[T]> }` is one, and the `Box<i32>` that a written
+  /// `Nest<i32>` derives is judged.
+  ///
   /// It is computed once instantiation has typed every occurrence, whatever the verdict. In an
   /// analysis that is not ok, an occurrence or an application a phase could not type gives the
   /// graph nothing, so a definition whose growth only such an occurrence writes answers `false`.

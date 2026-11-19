@@ -1161,9 +1161,9 @@ fn an_extra_argument_is_required_by_its_written_bang() {
 
 /// An extra argument typed by a bare type parameter, written nullable with no default, is required
 /// in an instantiation that gives the parameter a non-null type: `Page<Int!>` is refused at the
-/// occurrence, and so is `Filled`, whose default gives it one, while `Page<Int>` is not. What only
-/// a substitution derives is not judged: `Outer<Int!>` makes a `Page<Int!>` no occurrence writes,
-/// the gap recorded for derived instantiations. Refuses the written `!` read alone.
+/// occurrence, and so is `Filled`, whose default gives it one, while `Page<Int>` is not.
+/// `Outer<Int!>` derives that `Page<Int!>`, which `a` writes: it is judged where it is written, and
+/// not again at `Outer<Int!>`. Refuses the written `!` read alone.
 #[test]
 fn an_instantiation_that_makes_an_extra_argument_required_is_refused() {
   let text = "type Query {\n  ok: Int\n  a: Page<Int!>\n  b: Page<Int>\n  c: Filled\n  \

@@ -310,7 +310,18 @@ impl Analysis {
 ///   it is reported there once, and recorded for no instantiation. The
 ///   values of the applications on a generic directive and on its arguments are checked likewise
 ///   at each closed application of the directive, reported at its path; the directive's own
-///   arguments' defaults are judged only where an application leaves them out. A copy is
+///   arguments' defaults are judged only where an application leaves them out. So are the
+///   instantiations a written one derives, through the definitions that do not grow, its own
+///   argument types and an application's among them: what a copy of it needs, its definition's
+///   members' types, `implements` entries, union members and applications' complete types, each
+///   read under its arguments, and each instantiation they hold that no supplied package writes,
+///   in turn, each reading a step of [`Limits::max_value_steps`], each a type depth-checked and
+///   counted as every type is. Each occurrence of a written instantiation, or application, whose
+///   own verdict holds reports the first that fails, with its code, labelled at the type or the
+///   application that derives it; a limit that stops the reading is `resource-limit` once, at the
+///   written instantiation whose reading it stopped, and what was not read is not judged. A derived
+///   instantiation of a definition that grows, [`Def::grows`](super::Def::grows), is not judged,
+///   nor what only it derives. A copy is
 ///   counted before it is made, each default's count kept, and a default whose copy would hold a
 ///   copy of itself is not copied: the argument, or the field, is absent, and under type arguments
 ///   what its count reached is judged as a copy is. The first time a count meets itself, that
@@ -381,13 +392,16 @@ impl Analysis {
 ///   `duplicate-implements-interface` or `duplicate-union-member` at the occurrence, labelled at
 ///   the two. Each type is judged once, both nullnesses sharing the verdict, and one a limit stops
 ///   is `resource-limit` at each occurrence of it, but at an entry whose definition's check
-///   stopped there; an instantiation only a fill derives is not judged. With them, every type
+///   stopped there. With them, every type
 ///   occurrence of a definition one of whose fields adds an argument its interface's field does
 ///   not declare, typed by the definition's type parameter bare and written nullable, with no
 ///   default: one whose type gives that parameter a non-null type makes the argument required, and
 ///   is `unexpected-required-argument` at the occurrence, labelled at the argument and at the
-///   interface's field, each type judged once, a step for each such argument; an instantiation
-///   only a fill or a substitution derives is not judged.
+///   interface's field, each type judged once, a step for each such argument. Last, both are
+///   judged at each instantiation coercion found a written one to derive, through the definitions
+///   that do not grow, by the same verdicts and on the same budget: each occurrence of a written
+///   instantiation, or application, whose own verdict holds reports the first that fails, labelled
+///   at the type or the application that derives it as well.
 /// - Gives every definition and every type the tier it requires, last, once every type is
 ///   interned: a built-in keeps its package's tag; a scalar a supplied package defines requires
 ///   its externs' greatest tier, `core` with none; an enum and a directive `core`; an object or an
