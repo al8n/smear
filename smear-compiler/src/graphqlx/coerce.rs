@@ -269,7 +269,8 @@
 //! another literal's field, or in a member's default. A default a declaration owns is not judged
 //! again anywhere.
 //!
-//! A value refused whole is one unresolved row; one that holds the `null` stays a `Literal`.
+//! A value refused whole is one unresolved row, typed with its type, as `null` for a non-null type
+//! is, whether the value is written or copied; one that holds the `null` stays a `Literal`.
 //!
 //! # The count of a copy
 //!
@@ -1011,7 +1012,8 @@ enum Class {
   NoValue,
   /// `null` against a nullable type: one `Null` row.
   Null,
-  /// `null` against a non-null type: one unresolved row.
+  /// `null` against a non-null type, or against a type that names type parameters where every
+  /// instantiation makes it non-null: one unresolved row.
   NotNull,
   /// A list against a list of this element: a `List` row, then each element against it.
   List(TyId),
@@ -4638,7 +4640,16 @@ impl<'p> Coercion<'_, 'p, '_> {
     };
     let builder: &ModelBuilder = &*self.builder;
     if !builder.ty_closed(ty) {
-      return Class::NoValue;
+      // Only an instantiation can judge a value of a type that names type parameters, but `null`
+      // fits none where every one of them makes the type non-null: written so, or a collection's
+      // key or element. A copy refused so is one unresolved row, as the written one is.
+      let never = matches!(kind, RawKind::Null)
+        && (builder.ty_non_null(ty) || self.forced(Some(ty)).is_some());
+      return if never {
+        Class::NotNull
+      } else {
+        Class::NoValue
+      };
     }
     let class = match builder.ty_shape(ty) {
       Some(Shape::Named(def)) => match (self.base(def, ty), kind) {

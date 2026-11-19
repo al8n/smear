@@ -2308,6 +2308,45 @@ fn a_generic_input_fields_null_default_no_instantiation_takes_is_refused_once() 
   }
 }
 
+/// A copy refused whole, its root a `null` no instantiation takes, is one unresolved row, typed and
+/// not written, as the written one is one unresolved row: on the set `Tags`, `@d<K>` leaves out
+/// `v`, whose default `null` fills `K`, the set's element, and `@e<K>(v: null)` writes it, `v`
+/// having a default. Each is reported once, and each value is `ValueKind::Unresolved`, typed with
+/// `Tags`'s `K`, the copy not written and the other written. Refuses a refused copy kept in the
+/// model as the literal `null`, a value deferred to the instantiations.
+#[test]
+fn a_copied_null_no_instantiation_takes_is_one_unresolved_row() {
+  let text = "type Query {\n  x: Int\n}\n\
+              directive @d<X>(v: X = null) on SCALAR\ndirective @e<X>(v: X = 1) on SCALAR\n\
+              scalar Tags<K> @set @d<K> @e<K>(v: null)\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (DEFAULT, named(schema, text, "@", "d", 1)),
+      (ARGUMENT, after(schema, text, "@e<K>(v: ", "null")),
+    ]
+  );
+  let model = analysis.model();
+  let values: Vec<ValueId> = model
+    .def(type_def(model, "Tags"))
+    .applications()
+    .iter()
+    .filter_map(|application: &ApplicationId| argument(model, *application, "v"))
+    .collect();
+  assert_eq!(values.len(), 2);
+  for (value, written) in values.into_iter().zip([false, true]) {
+    assert!(
+      matches!(model.value(value).kind(), ValueKind::Unresolved),
+      "{}",
+      valued(model, value)
+    );
+    assert_eq!(shown(model, model.value(value).ty()), "Tags#0");
+    assert_eq!(model.value(value).written(), written);
+  }
+}
+
 /// A default its declaration refuses for a `null` no instantiation takes is that declaration's to
 /// report, and no copy of it reports it again: `In<T>`'s `a`, written `T!`, defaults to `null`,
 /// refused where it is written, and `@d<Int>(v: {})` leaves `a` out of a literal whose type a
