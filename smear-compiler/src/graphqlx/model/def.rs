@@ -617,14 +617,16 @@ impl<'a> Def<'a> {
   /// # Examples
   ///
   /// ```
-  /// use smear_compiler::graphqlx::{Layout, Limits, Namespace, Package, SourceFile, Tier, analyze};
+  /// use smear_compiler::graphqlx::{
+  ///   Layout, Limits, Namespace, Options, Package, SourceFile, Tier, analyze,
+  /// };
   ///
   /// let text = "type Query { nest: Nest<i32> }\n\
   ///             type Nest<T> { v: Box<T> deeper: Nest<[T]> }\n\
   ///             type Box<T> { v: T }\n";
   /// let root = Package::new("app", Layout::Flat, Tier::Std)
   ///   .with_files([SourceFile::new("schema.graphqlx", text)]);
-  /// let analysis = analyze(&root, &[], &Limits::new());
+  /// let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   /// assert!(analysis.is_ok());
   /// let model = analysis.model();
   /// let nest = model.lookup(Namespace::Type, "^::app::Nest").expect("defined");

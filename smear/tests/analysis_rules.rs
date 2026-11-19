@@ -2560,7 +2560,7 @@ fn the_orphan_rules_predicate_agrees_with_its_reports() {
     let root =
       package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
     let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
-    analyze(&root, &[geo], &Limits::new())
+    analyze(&root, &[geo], &Limits::new(), &Options::new())
   };
   let programs: Vec<Analysis> = vec![
     // A package's own extensions, from any of its modules.
@@ -2587,6 +2587,7 @@ fn the_orphan_rules_predicate_agrees_with_its_reports() {
         ],
       )],
       &Limits::new(),
+      &Options::new(),
     ),
     // The root package extending a dependency's type, and its directive.
     beside(
@@ -2619,6 +2620,7 @@ fn the_orphan_rules_predicate_agrees_with_its_reports() {
         ),
       ],
       &Limits::new(),
+      &Options::new(),
     ),
     // A dependency extending built-ins: with a directive alone, with an enum value, with `@set`,
     // and with `@extern`.
