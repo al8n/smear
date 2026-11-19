@@ -1331,49 +1331,49 @@ fn a_starved_copy_is_checked_at_no_instantiation() {
 }
 
 /// `Limits::max_values` is a kind of `resource-limit` of its own, said once at a place, beside
-/// another kind said there: under two values, `@d<String>` reads its defaults' two literals, cannot
-/// pay for the copy of `a`'s `1`, and is `resource-limit` at its path; under a step budget that then
-/// leaves the check of `d<String>` too little to read `b`'s `"s"`, that check is `resource-limit`
-/// at the same path. Two reports there, one naming each limit. Refuses a value bound said as the
-/// step budget's kind, which would hide the check's stop.
+/// another kind said there. Under two values `a`'s `1` and `Box`'s `"s"` are read, and
+/// `@d<String>` cannot pay for its copy of `a`'s default: `resource-limit` at its path. `d` records
+/// nothing, its own defaults being judged where an application leaves them out, but `Box` records
+/// `"s"`, so the closure reads what `d<String>` derives through `x`, `Box<String>`, a step at a
+/// time; under a step budget too small for that reading it stops, `resource-limit` at the same
+/// path. Two reports there, one naming each limit. Refuses a value bound said as the step budget's
+/// kind, which would hide the reading's stop.
 #[test]
-fn a_full_application_and_its_stopped_check_are_two_limits_at_its_path() {
-  let text = "directive @d<T>(a: Int = 1, b: T = \"s\") on OBJECT\n\
+fn a_full_application_and_its_stopped_reading_are_two_limits_at_its_path() {
+  let text = "directive @d<T>(a: Int = 1, x: Box<T>) on OBJECT\n\
+              input Box<V> {\n  v: V = \"s\"\n}\n\
               type Query @d<String> {\n  f: Int\n}\n";
   let limits =
     |steps: u32| -> Limits { Limits::new().with_max_values(2).with_max_value_steps(steps) };
+  let path = after(
+    schema_file(&analyze_text(text, &limits(0), &Options::new())),
+    text,
+    "type Query @",
+    "d",
+  );
   let steps = (0..64_u32)
     .find(|&steps: &u32| {
       let analysis = analyze_text(text, &limits(steps), &Options::new());
-      found(&analysis, LIMIT).len() == 2
+      found(&analysis, LIMIT) == [(path, None), (path, None)]
     })
-    .expect("a step budget at which both limits are said");
+    .expect("a step budget at which both limits are said at the path");
   let analysis = analyze_text(text, &limits(steps), &Options::new());
-  let schema = schema_file(&analysis);
-  let path = after(schema, text, "type Query @", "d");
-  assert_eq!(
-    found(&analysis, LIMIT),
-    [(path, None), (path, None)],
-    "{:#?}",
-    analysis.diagnostics()
-  );
   assert_eq!(
     analysis.diagnostics().len(),
     2,
     "{:#?}",
     analysis.diagnostics()
   );
+  // At one place the two are ordered by their messages.
   let reports = messages(&analysis, LIMIT);
   assert!(
-    reports
-      .iter()
-      .any(|report: &String| report.contains(&format!("{VALUES}, 2"))),
+    reports[0].contains("the arguments this application leaves out"),
     "{reports:#?}"
   );
+  assert!(reports[0].contains(&format!("{VALUES}, 2")), "{reports:#?}");
+  assert!(reports[1].contains("what `@d` derives"), "{reports:#?}");
   assert!(
-    reports
-      .iter()
-      .any(|report: &String| report.contains(&format!("`Limits::max_value_steps`, {steps}"))),
+    reports[1].contains(&format!("`Limits::max_value_steps`, {steps}")),
     "{reports:#?}"
   );
 }
