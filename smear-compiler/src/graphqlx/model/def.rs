@@ -528,9 +528,11 @@ impl<'a> Def<'a> {
   /// definition out on this answer. A type that names a metadata definition is written only in
   /// metadata, though [`Model::instantiations`] lists it under its definition, which need not be
   /// metadata: `Pair<Note>` under `Pair`. A backend that leaves metadata out leaves such an
-  /// instantiation out too. In an analysis that is not ok, an occurrence a phase refused names
-  /// nothing, so a definition compile-time metadata reaches can answer `true` when its only use
-  /// outside metadata is such an occurrence.
+  /// instantiation out too. In an analysis that is not ok, an occurrence a phase left with no
+  /// complete type, or with the unresolved type, names nothing, so a definition compile-time
+  /// metadata reaches can answer `true` when its only use outside metadata is such an occurrence.
+  /// An occurrence a phase refused but kept the complete type of, as one whose bound fails, still
+  /// reaches what that type names.
   ///
   /// The tier rule judges nothing a metadata definition holds, so in an analysis that is ok its
   /// [`tier`](Self::tier) may be above its package's. A backend that emits only what runs leaves it

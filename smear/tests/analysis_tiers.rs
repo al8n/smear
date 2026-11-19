@@ -1375,15 +1375,36 @@ fn the_library_is_never_metadata() {
   }
 }
 
-/// An occurrence a phase refused names nothing: `Binding<Int>`, a count `Binding` does not take, is
-/// the phase's `generic-arity` alone, the rule silent in `Query`, and `Binding` stays metadata.
-/// Refuses an untyped occurrence that panics the pass, or that reaches.
+/// An occurrence reaches by the type it keeps. `Binding<Int>`, a count `Binding` does not take,
+/// keeps the unresolved type and names nothing: the phase's `generic-arity` alone, the rule silent
+/// in `Query`, and `Binding` stays metadata. `HashSet<Note>`, whose `MapKey` bound `Note` fails,
+/// keeps its complete type, which reaches `Note`: no metadata, and its `string` refused, labelled
+/// at that occurrence. Refuses an untyped occurrence that panics the pass, or that reaches, and a
+/// refused occurrence whose type is kept read as reaching nothing.
 #[test]
-fn an_occurrence_a_phase_refused_reaches_nothing() {
+fn an_occurrence_reaches_by_the_type_it_keeps() {
   let text = BINDING.replacen("  x: Int\n", "  x: Int\n  f(b: Binding<Int>): Int\n", 1);
   let analysis = analyze_at(&text, Tier::Core);
   assert_eq!(codes(&analysis), ["smear::graphqlx::generic-arity"]);
   assert!(metadata(analysis.model(), "^::app::Binding"));
+
+  let text = "type Query {\n  x: Int\n  f(n: HashSet<Note>): Int\n}\ninput Note {\n  s: string\n}\n\
+              directive @meta(n: Note) on OBJECT\n";
+  let analysis = analyze_at(text, Tier::Core);
+  let schema = file(&analysis, 3, "schema.graphqlx");
+  assert!(
+    codes(&analysis).contains(&"smear::graphqlx::unsatisfied-bound"),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    found(&analysis, TIER),
+    [(
+      at(schema, text, "string", 0),
+      Some(at(schema, text, "HashSet<Note>", 0))
+    )]
+  );
+  assert!(!metadata(analysis.model(), "^::app::Note"));
 }
 
 /// Which definitions are metadata, and what the rule says, labels included, is the same whichever
