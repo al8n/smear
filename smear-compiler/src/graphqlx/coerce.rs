@@ -386,19 +386,20 @@
 //! `Limits::max_values` bounds the rows themselves, one budget over the whole analysis. Lowering
 //! charged each literal a supplied package writes to it before any of its value was read, and a
 //! value it could not pay for is one row here, unresolved whatever its type, none of its literals
-//! read and nothing spent on it or said of it: it fits every type, so no instantiation checks it,
-//! and no type is rebuilt for it, under an application's type arguments or an object literal's.
-//! Where an application or an object literal leaves out the argument or field whose default it is,
-//! it is read under no type arguments: a count, a check's among them, counts it as one row that
-//! fits, with no read and no step, and a copy of it is one row of the type that argument or field
-//! is written with, charged as any copy is. Two kinds of row no literal writes are charged to the
-//! budget here, besides their steps: each list a written lone value stands for, one value each, and
-//! each row of a copy, its whole count at once. Each is charged to both budgets, all of it or none,
-//! the steps asked first, and a report names the budget that could not pay; the work stops as it
-//! stops past the steps, a lone value's level its one unresolved row, an application filled no
-//! further and an object literal given no more of its defaults. Nothing else this phase spends a
-//! step on makes a row, so the rows it makes are at most the built-in library's own, those
-//! `Limits::max_values` paid for, and one for each value lowering refused.
+//! read and nothing said of it. It costs no value, no rebuild and no read: it fits every type, so
+//! no instantiation checks it, and no type is rebuilt for it, under an application's type arguments
+//! or an object literal's. Where an application or an object literal leaves out the argument or
+//! field whose default it is, it is read under no type arguments: a count, a check's among them,
+//! counts it as one row that fits, with no read, its visit paying the one step a visit to any
+//! default left out pays, and a copy of it is one row of the type that argument or field is written
+//! with, charged as any copy is. Two kinds of row no literal writes are charged to the budget here,
+//! besides their steps: each list a written lone value stands for, one value each, and each row of
+//! a copy, its whole count at once. Each is charged to both budgets, all of it or none, the steps
+//! asked first, and a report names the budget that could not pay; the work stops as it stops past
+//! the steps, a lone value's level its one unresolved row, an application filled no further and an
+//! object literal given no more of its defaults. Nothing else this phase spends a step on makes a
+//! row, so the rows it makes are at most the built-in library's own, those `Limits::max_values`
+//! paid for, and one for each value lowering refused.
 //!
 //! # The arenas
 //!
@@ -2628,15 +2629,15 @@ impl<'p> Coercion<'_, 'p, '_> {
   }
 
   /// The count of the default whose tree is `tree`, against `ty`: kept once made, by the two, and
-  /// answered as kept when asked again, its asker having paid for that read
-  /// ([`ask`](Self::ask)); and made with two stacks of its own, a frame for each default being
-  /// counted. A frame counts its tree's written nodes through [`classify`](Self::classify), as a
-  /// copy makes them: one row each, a list's elements, a lone value's levels of list from its type
-  /// and then the value against the type under them, and the fields an object literal sets; and
-  /// for each default an object literal leaves out, a read of that default's count, a step charged
-  /// before it is pushed when `charged`, but for a default lowering refused: one row, which fits,
-  /// with no read, no type rebuilt for it and no step. A read of a kept count adds its rows; of
-  /// one not counted yet, opens its frame.
+  /// answered as kept when asked again, its asker having paid for that read ([`ask`](Self::ask));
+  /// and made with two stacks of its own, a frame for each default being counted. A frame counts
+  /// its tree's written nodes through [`classify`](Self::classify), as a copy makes them: one row
+  /// each, a list's elements, a lone value's levels of list from its type and then the value
+  /// against the type under them, and the fields an object literal sets; and for each default an
+  /// object literal leaves out, a step charged when `charged` before anything is pushed for it,
+  /// then a read of that default's count, or, for a default lowering refused, one row, which fits,
+  /// with no read and no type rebuilt for it. A read of a kept count adds its rows; of one not
+  /// counted yet, opens its frame.
   ///
   /// A frame with nothing left is exact, kept, and its rows added to the frame that read it. A
   /// verdict is every open frame's, each reading the one above it: a read of one past the budget,
@@ -3111,16 +3112,18 @@ impl<'p> Coercion<'_, 'p, '_> {
               }));
             }
             Next::Default(DefaultedField { field, tree }) => {
+              // Each default left out is a step, paid before anything is pushed or added for it:
+              // no charge covers work done before it, and a count's walk is bounded by its steps
+              // however many defaults it passes.
+              if charged && !self.charge(1) {
+                return Err(Count::Past);
+              }
               if self.refused_tree(tree) {
                 // A default lowering refused is one row of the copy, which fits whatever the type:
-                // counted here, with no read, no type rebuilt for it and no step, as the copy
-                // makes it under no type arguments.
+                // counted here, with no read and no type rebuilt for it, as the copy makes it
+                // under no type arguments.
                 self.add_rows(1, charged)?;
               } else {
-                // A read is paid before it is pushed: no charge covers work pushed before it.
-                if charged && !self.charge(1) {
-                  return Err(Count::Past);
-                }
                 let expected = self.under(field, env, !charged).map_err(unbuilt_count)?;
                 self.counting.push(Counted::Fill(FillCount {
                   tree,

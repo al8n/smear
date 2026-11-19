@@ -1266,6 +1266,68 @@ fn a_refused_default_left_out_is_one_row_in_a_check() {
   said(&analysis, &derived);
 }
 
+/// A count pays a step for each default it passes, one lowering refused included, so the checks
+/// that count one value against many instantiations are bounded by `Limits::max_value_steps`
+/// however many refused defaults the value leaves out. Under one value `Holder`'s `{}` is read and
+/// each of `In`'s forty defaults is refused, so `{}` cannot pay for its copies, `resource-limit` at
+/// the literal. Each of five written instantiations of `Holder` counts `{}` against its own `In`:
+/// a step for the row, two for the rebuild, one for the literal and one for each of the forty
+/// defaults it passes. Under 64 steps the first check takes 44, the second runs out passing them,
+/// `resource-limit` at its occurrence, and so does each after it. Refuses refused defaults passed
+/// for nothing, which would let every instantiation walk them all.
+#[test]
+fn a_count_pays_a_step_for_each_refused_default_it_passes() {
+  const FIELDS: usize = 40;
+  const STEPS: &str = "`Limits::max_value_steps`, 64";
+  let fields: String = (0..FIELDS)
+    .map(|k: usize| format!("  f{k}: [T] = [0, 0]\n"))
+    .collect();
+  let text = format!(
+    "type Query {{\n  a(x: Holder<Int>): Int\n  b(x: Holder<Float>): Int\n  \
+     c(x: Holder<String>): Int\n  d(x: Holder<Boolean>): Int\n  e(x: Holder<ID>): Int\n}}\n\
+     input Holder<T> {{\n  h: In<T> = {{}}\n}}\ninput In<T> {{\n{fields}}}\n"
+  );
+  let analysis = analyze_text(
+    &text,
+    &Limits::new().with_max_values(1).with_max_value_steps(64),
+    &Options::new(),
+  );
+  let schema = schema_file(&analysis);
+  let stopped: Vec<Location> = analysis
+    .diagnostics()
+    .iter()
+    .filter(|diagnostic| {
+      diagnostic.code().as_str() == LIMIT && diagnostic.to_string().contains(STEPS)
+    })
+    .map(|diagnostic| diagnostic.primary())
+    .collect();
+  assert_eq!(
+    stopped,
+    [
+      "Holder<Float>",
+      "Holder<String>",
+      "Holder<Boolean>",
+      "Holder<ID>"
+    ]
+    .map(|written: &str| at(schema, &text, written, 0)),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  // Besides them, lowering's report at each refused default, and the literal's at `{}`.
+  assert_eq!(
+    found(&analysis, LIMIT).len(),
+    4 + FIELDS + 1,
+    "{:#?}",
+    analysis.diagnostics()
+  );
+  assert_eq!(
+    analysis.diagnostics().len(),
+    4 + FIELDS + 1,
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
 /// A copy `Limits::max_values` kept from being made is checked at no instantiation, so the check
 /// spends no step on it that a written value needs: under two values and five steps, `@d<T>` on
 /// `Box` spends two steps rebuilding `U` and counting the copy of `true`, cannot pay for its value,

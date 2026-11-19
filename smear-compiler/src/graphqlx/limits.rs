@@ -477,17 +477,17 @@ impl Limits {
   /// A step is one of: a value of a copy of a default, which fills an argument an application
   /// leaves out or a field an object literal leaves out, each value nested in the default counting
   /// one, the copies of the defaults its own object literals leave out among them; a read, while a
-  /// count is made, of the count of each default one of its object literals leaves out, and a read
-  /// of a count made already, when a later copy of its default is asked for, each spent whether or
-  /// not a copy is made, but none for a default lowering refused past
-  /// [`max_values`](Self::max_values), which is one row, read for nothing and rebuilt under no type
-  /// arguments; a default left out whose copy would hold a copy of itself, which is not made; a
-  /// list that a written value stands for where a list is expected, one for each level of list
-  /// between the value and its type, as `tags: [[Int]] = 1` stands for a list of a list of `1`; a
-  /// required argument an application leaves out, and a required field an object literal leaves
-  /// out, each found left out, reported where it is written and not in a count; a node a rebuild of
-  /// a member's type under type arguments looks at, its root included, once for each written type
-  /// and instantiation; a node of a count made under a type its value is not written against, each
+  /// count is made, of the count of each default one of its object literals leaves out, or, for one
+  /// lowering refused past [`max_values`](Self::max_values), which is one row, read and rebuilt for
+  /// nothing, its visit; and a read of a count made already, when a later copy of a default
+  /// lowering did not refuse is asked for; each spent whether or not a copy is made; a default left
+  /// out whose copy would hold a copy of itself, which is not made; a list that a written value
+  /// stands for where a list is expected, one for each level of list between the value and its
+  /// type, as `tags: [[Int]] = 1` stands for a list of a list of `1`; a required argument an
+  /// application leaves out, and a required field an object literal leaves out, each found left
+  /// out, reported where it is written and not in a count; a node a rebuild of a member's type
+  /// under type arguments looks at, its root included, once for each written type and
+  /// instantiation; a node of a count made under a type its value is not written against, each
   /// field that is or may be required that an object literal such a count reads leaves out, up to
   /// the first found missing, and an identity of a set's element or of a map's key that such a
   /// count renders to search them for one held twice, a step for each 64 bytes of it or part, once
