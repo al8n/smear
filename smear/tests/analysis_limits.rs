@@ -1231,6 +1231,84 @@ fn a_starved_copy_is_checked_at_no_instantiation() {
   );
 }
 
+/// A copy's count reads its default under the asker's type arguments, and what that reading reports
+/// stands whatever either budget then answers, once: at `core`, under the switch that judges
+/// compile-time metadata, `@d<E>` counts `Missing::A` under `E`, and the resolver refuses `Missing`.
+/// Under one value the copy cannot be paid for, and the application is `resource-limit`; under two
+/// it is made, and reads the prefix the count resolved. Either way `Missing` is `unresolved-path`
+/// once, and that error marks `@d`'s contribution, so `label: string` is not judged there. Where
+/// the prefix resolves, `E::A`, nothing marks `@d`, and `string` is `tier`. Refuses a verdict that
+/// changes as the budget is raised.
+#[test]
+fn what_a_count_reports_stands_whether_or_not_its_copy_is_made() {
+  const UNRESOLVED: &str = "smear::graphqlx::unresolved-path";
+  const TIER: &str = "smear::graphqlx::tier";
+  let program = |default: &str| -> String {
+    format!(
+      "enum E {{\n  A\n}}\ndirective @d<T>(v: T = {default}, label: string) on OBJECT\n\
+       type Query @d<E> {{\n  ok: Boolean\n}}\n"
+    )
+  };
+  let analyze_core = |text: &str, limits: &Limits| -> Analysis {
+    let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Core)
+      .with_files([SourceFile::new("schema.graphqlx", text)]);
+    analyze(
+      &root,
+      &[],
+      limits,
+      &Options::new().with_judged_metadata(true),
+    )
+  };
+
+  let text = program("Missing::A");
+  for max in [1, 2] {
+    let analysis = analyze_core(&text, &Limits::new().with_max_values(max));
+    let schema = schema_file(&analysis);
+    assert_eq!(
+      found(&analysis, UNRESOLVED),
+      [(at(schema, &text, "Missing", 0), None)],
+      "at {max}: {:#?}",
+      analysis.diagnostics()
+    );
+    let string = at(schema, &text, "string", 0);
+    assert!(
+      found(&analysis, TIER)
+        .iter()
+        .all(|(primary, _): &(Location, Option<Location>)| *primary != string),
+      "at {max}: {:#?}",
+      analysis.diagnostics()
+    );
+    if max == 1 {
+      assert_eq!(
+        found(&analysis, LIMIT),
+        [(after(schema, &text, "type Query @", "d"), None)],
+        "{:#?}",
+        analysis.diagnostics()
+      );
+      let message = only(messages(&analysis, LIMIT));
+      assert!(message.contains(&format!("{VALUES}, 1")), "{message}");
+    } else {
+      assert!(
+        found(&analysis, LIMIT).is_empty(),
+        "{:#?}",
+        analysis.diagnostics()
+      );
+    }
+  }
+
+  let resolved = program("E::A");
+  let analysis = analyze_core(&resolved, &Limits::new());
+  let schema = schema_file(&analysis);
+  let string = at(schema, &resolved, "string", 0);
+  assert!(
+    found(&analysis, TIER)
+      .iter()
+      .any(|(primary, _): &(Location, Option<Location>)| *primary == string),
+    "{:#?}",
+    analysis.diagnostics()
+  );
+}
+
 /// The model holds at most the bound's values beyond the built-in library's own and one for each
 /// written value refused: measured for the programs above at each bound they run at, the values a
 /// program's model holds beyond an empty root package's, against the bound and the reports that

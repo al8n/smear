@@ -301,7 +301,10 @@
 //! step is charged, and nothing is made: the argument, or the field, is absent, and the cycle was
 //! reported where its count met itself, while what its count reached is judged as a copy is. A read
 //! the budget cannot pay for starves the asker too. A copy is whole or absent, and the rows a copy
-//! makes are its count's, which the phase asserts when it ends.
+//! makes are its count's, which the phase asserts when it ends. A copy's count reads its default
+//! under the asker's type arguments, and what that reading reports, a path the resolver refuses or
+//! a cycle of defaults, is reported as it is read, once, whatever either budget then answers: so a
+//! copy a budget keeps from being made can still report its default's error.
 //!
 //! # A cycle of defaults
 //!
