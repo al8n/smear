@@ -66,6 +66,26 @@ fn dot_begins_a_fraction(bytes: &[u8]) -> bool {
   hex && holds_a_digit(exponent, u8::is_ascii_digit).0
 }
 
+/// A source the number sub-lexer can be handed cut short: `str` or `[u8]`, as its alphabet is.
+pub(crate) trait SourcePrefix {
+  /// The source up to `end`, or the whole of it when `end` is past it or splits a character.
+  fn prefix(&self, end: usize) -> &Self;
+}
+
+impl SourcePrefix for str {
+  #[inline(always)]
+  fn prefix(&self, end: usize) -> &Self {
+    self.get(..end).unwrap_or(self)
+  }
+}
+
+impl SourcePrefix for [u8] {
+  #[inline(always)]
+  fn prefix(&self, end: usize) -> &Self {
+    self.get(..end).unwrap_or(self)
+  }
+}
+
 // The four whitespace bytes without the comma, which inside a `const { … }` block with no `<`
 // open is the token `Separator`. GraphQL's lexer never calls it.
 memspan::skip_class! {
@@ -878,6 +898,7 @@ where
   NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>:
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
   <S::Slice<'inp> as Slice<'inp>>::Char: CharLen + CharBody + ByteStrBody,
+  LogosSourceOf<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>: SourcePrefix,
 {
   type State = SyntacticState;
 
@@ -998,9 +1019,9 @@ where
 // outside a block itself, and the instance inside one through `lex_in_block`, kept out of line so
 // that `lex`'s own code does not double. Both are this one text, so they cannot drift apart.
 //
-// `DelegateStringError`, `NumberLexerToken`, `CharBody` and `ByteStrBody` are crate-internal; they
-// appear here only as bounds on private methods, never as nameable API, so silence
-// `private_bounds` rather than widen their visibility.
+// `DelegateStringError`, `NumberLexerToken`, `CharBody`, `ByteStrBody` and `SourcePrefix` are
+// crate-internal; they appear here only as bounds on private methods, never as nameable API, so
+// silence `private_bounds` rather than widen their visibility.
 #[allow(private_bounds)]
 impl<'inp, S> SyntacticLexer<'inp, S>
 where
@@ -1022,6 +1043,7 @@ where
   NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>:
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
   <S::Slice<'inp> as Slice<'inp>>::Char: CharLen + CharBody + ByteStrBody,
+  LogosSourceOf<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>: SourcePrefix,
 {
   /// The loop's instance inside a `const { … }` block.
   #[allow(clippy::type_complexity)]
@@ -1195,7 +1217,10 @@ where
               SyntacticToken::LitFloat(LitFloat::Decimal(slice))
             ));
           }
-          None => return self.delegate_number_to_logos(token_start),
+          None => {
+            let scan = self.number_source::<IN_BLOCK>(bytes, token_start);
+            return self.delegate_number_to_logos(token_start, scan);
+          }
         },
         b'*' => return Some(emit_punct!(self: token_start, SyntacticToken::Asterisk)),
         b'&' => return Some(emit_punct!(self: token_start, SyntacticToken::Ampersand)),
@@ -1290,7 +1315,8 @@ where
           // `.ap1` as numbers too: the dispatch follows it there.
           if matches!(bytes.get(1), Some(b'0'..=b'9')) || (IN_BLOCK && dot_begins_a_fraction(bytes))
           {
-            return self.delegate_number_to_logos(token_start);
+            let scan = self.number_source::<IN_BLOCK>(bytes, token_start);
+            return self.delegate_number_to_logos(token_start, scan);
           }
           // A lone `.` (or `.` before any non-digit) is an unterminated spread
           // operator — the same error the full grammar's `#[token(".")]` arm
@@ -1532,6 +1558,25 @@ where
     }
   }
 
+  /// The source the number sub-lexer reads the number at `token_start` from, `bytes` being the
+  /// source from there: the whole source; or, inside a block, the source cut before the brace or
+  /// the angle bracket that the number's refusal would otherwise read past its number and take.
+  /// The sub-lexer is lent the limits alone, and a source that ends at the brace is how it learns
+  /// where to stop: a refusal there ends as it would at the end of input.
+  #[inline(always)]
+  fn number_source<const IN_BLOCK: bool>(
+    &self,
+    bytes: &[u8],
+    token_start: usize,
+  ) -> &'inp LogosSourceOf<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>> {
+    let scan: &'inp LogosSourceOf<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>> =
+      self.src.as_ref();
+    if IN_BLOCK && let Some(at) = super::handlers::brace_stop(bytes) {
+      return scan.prefix(token_start + at);
+    }
+    scan
+  }
+
   /// Where the string literal whose opening quote is at `quote` ends, a block string when `block`,
   /// read as the dispatch reads a string: by the scanners, and a refused literal by the string
   /// sub-lexer, whose refusal this answers.
@@ -1650,7 +1695,8 @@ where
   /// anomaly (leading `0x`/`0o`/`0b` with no digits, an illegal suffix, an empty
   /// fraction/exponent, a `.`-led float missing its integer part, ...) returns
   /// the exact error. `NumberLexerToken`'s `Error` is this lexer's error type,
-  /// so the [`Delegated::Error`] arm needs no conversion.
+  /// so the [`Delegated::Error`] arm needs no conversion. It reads `scan`, the source
+  /// `number_source` answers for this token.
   // The return type mirrors `Lexer::lex`'s own `Option<Result<Token, Error>>`
   // shape; clippy can't see through the associated-type projections, so silence
   // its type-complexity lint here.
@@ -1659,6 +1705,7 @@ where
   fn delegate_number_to_logos(
     &mut self,
     token_start: usize,
+    scan: &'inp LogosSourceOf<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>,
   ) -> Option<
     Result<
       SyntacticToken<S::Slice<'inp>>,
@@ -1666,7 +1713,7 @@ where
     >,
   > {
     match crate::simd::delegate_to_logos::<NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>(
-      self.src.as_ref(),
+      scan,
       self.cursor,
       *self.state.limits(),
     )? {

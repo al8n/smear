@@ -13,6 +13,63 @@ use crate::{
 
 use super::error;
 
+/// Whether a number's refusal must end before a brace or an angle bracket, as it must inside a
+/// `const { … }` block, where a brace clears the count of open `<` and an angle bracket moves it: a
+/// refusal that took one would leave the count wrong for every token after it. The lossless state
+/// knows its mode and answers it. The limits the syntactic lexer lends its number sub-lexer answer
+/// no: that lexer cuts the source it lends before the brace instead.
+pub(crate) trait BraceStop {
+  /// Whether the refusal ends before a brace or an angle bracket.
+  fn stops_before_a_brace(&self) -> bool;
+}
+
+impl BraceStop for LosslessState {
+  #[inline(always)]
+  fn stops_before_a_brace(&self) -> bool {
+    self.in_const_block()
+  }
+}
+
+impl BraceStop for crate::limits::SyntacticLimits {
+  #[inline(always)]
+  fn stops_before_a_brace(&self) -> bool {
+    false
+  }
+}
+
+/// Where a number's refusal must end inside a block: at the first byte of `bytes` past the run of
+/// digits, letters, `.`, `_`, `+` and `-` that a number and its suffix are spelled with, when that
+/// byte is `{`, `}`, `<` or `>`; otherwise `None`. A refusal takes bytes of that run, or the one
+/// character after its number, so a brace or an angle bracket it could take is always where the
+/// run ends. `bytes` begins at the number, as the syntactic lexer passes it, or right after the lexeme
+/// a rule matched, as a handler passes it: the run ends at the same byte.
+pub(crate) fn brace_stop(bytes: &[u8]) -> Option<usize> {
+  let at = bytes.iter().position(|byte: &u8| {
+    !matches!(byte, b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'.' | b'_' | b'+' | b'-')
+  })?;
+  matches!(bytes.get(at), Some(b'{' | b'}' | b'<' | b'>')).then_some(at)
+}
+
+/// `rest`, what follows a number, cut where [`brace_stop`] finds a brace or an angle bracket when
+/// `stop`; otherwise whole.
+#[inline(always)]
+pub(super) fn before_a_brace(stop: bool, rest: &[u8]) -> &[u8] {
+  if stop && let Some(at) = brace_stop(rest) {
+    return rest.get(..at).unwrap_or(rest);
+  }
+  rest
+}
+
+/// [`before_a_brace`] over a text source. The cut is before an ASCII byte, so it never splits a
+/// character.
+#[inline(always)]
+pub(super) fn before_a_brace_str(stop: bool, rest: &str) -> &str {
+  if stop && let Some(at) = brace_stop(rest.as_bytes()) {
+    return rest.get(..at).unwrap_or(rest);
+  }
+  rest
+}
+
 pub(super) mod slice;
 pub(super) mod str;
 

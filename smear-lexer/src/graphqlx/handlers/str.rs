@@ -1,4 +1,4 @@
-use super::error;
+use super::{BraceStop, error};
 use tokora::{
   SimpleSpan,
   error::UnexpectedEnd,
@@ -79,12 +79,14 @@ pub(crate) fn handle_fractional_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>
 where
-  T: Logos<'a, Source = S>,
+  T: Logos<'a, Source = S, Extras: BraceStop>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<str>,
 {
   let remainder = lexer.remainder();
-  let remainder_str = remainder.as_ref();
+  // Inside a block the refusal ends before a brace or an angle bracket, as at the end of input.
+  let remainder_str =
+    super::before_a_brace_str(lexer.extras.stops_before_a_brace(), remainder.as_ref());
   let remainder_len = remainder_str.len();
   let iter = remainder_str.chars();
   Err(LexerError::float(
@@ -98,12 +100,14 @@ pub(crate) fn handle_hex_fractional_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>
 where
-  T: Logos<'a, Source = S>,
+  T: Logos<'a, Source = S, Extras: BraceStop>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<str>,
 {
   let remainder = lexer.remainder();
-  let remainder_str = remainder.as_ref();
+  // Inside a block the refusal ends before a brace or an angle bracket, as at the end of input.
+  let remainder_str =
+    super::before_a_brace_str(lexer.extras.stops_before_a_brace(), remainder.as_ref());
   let remainder_len = remainder_str.len();
   let iter = remainder_str.chars();
   Err(LexerError::hex_float(
@@ -115,12 +119,14 @@ where
 #[inline]
 fn exponent_error<'a, S, T, Extras>(lexer: &mut Lexer<'a, T>) -> LexerError<Extras>
 where
-  T: Logos<'a, Source = S>,
+  T: Logos<'a, Source = S, Extras: BraceStop>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<str>,
 {
   let remainder = lexer.remainder();
-  let remainder_str = remainder.as_ref();
+  // Inside a block the refusal ends before a brace or an angle bracket, as at the end of input.
+  let remainder_str =
+    super::before_a_brace_str(lexer.extras.stops_before_a_brace(), remainder.as_ref());
   let remainder_len = remainder_str.len();
   let iter = remainder_str.chars();
 
@@ -148,7 +154,7 @@ pub(crate) fn handle_exponent_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>
 where
-  T: Logos<'a, Source = S>,
+  T: Logos<'a, Source = S, Extras: BraceStop>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<str>,
 {
@@ -158,12 +164,14 @@ where
 #[inline]
 fn hex_exponent_error<'a, S, T, Extras>(lexer: &mut Lexer<'a, T>) -> LexerError<Extras>
 where
-  T: Logos<'a, Source = S>,
+  T: Logos<'a, Source = S, Extras: BraceStop>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<str>,
 {
   let remainder = lexer.remainder();
-  let remainder_str = remainder.as_ref();
+  // Inside a block the refusal ends before a brace or an angle bracket, as at the end of input.
+  let remainder_str =
+    super::before_a_brace_str(lexer.extras.stops_before_a_brace(), remainder.as_ref());
   let remainder_len = remainder_str.len();
   let iter = remainder_str.chars();
 
@@ -192,7 +200,7 @@ pub(crate) fn handle_hex_exponent_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>
 where
-  T: Logos<'a, Source = S>,
+  T: Logos<'a, Source = S, Extras: BraceStop>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<str>,
 {

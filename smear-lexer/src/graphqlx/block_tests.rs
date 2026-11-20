@@ -451,3 +451,86 @@ fn a_fraction_after_a_blocks_minus_is_one_number_in_both_lexers() {
     ]
   );
 }
+
+/// Each item `lexer` answers, as `items!` has it, with the count of open `<` after it.
+macro_rules! steps {
+  ($lexer:expr) => {{
+    let mut lexer = $lexer;
+    let mut steps: Vec<(String, SimpleSpan, usize)> = Vec::new();
+    while let Some(item) = lexer.lex() {
+      let what = match item {
+        Ok(token) => std::format!("{:?}", token.kind()),
+        Err(errors) => std::format!("{errors:?}"),
+      };
+      steps.push((what, lexer.span(), lexer.state().open_angles()));
+    }
+    steps
+  }};
+}
+
+/// Inside a block a number's refusal ends before a brace or an angle bracket, which is then lexed
+/// as itself, alike in both lexers: in `{<1.}>>` the `}` is `RBrace` and clears the count, so the
+/// `>>` after it is `Shr`. An incomplete fraction or exponent, decimal or hexadecimal, ends there,
+/// and a refused suffix already did. Outside a block the refusal still takes the brace.
+#[test]
+fn a_refused_number_ends_before_a_blocks_brace() {
+  for src in [
+    "{<1.}>>",
+    "{<1e}>>",
+    "{<1e+}>>",
+    "{<0x1.}>>",
+    "{<0x1p}>>",
+    "{<1u08}>>",
+    "{<1.>>",
+    "{<1.{}>>",
+  ] {
+    let syntactic = steps!(SyntacticLexer::<str>::with_state(src, entered()));
+    let lossless = steps!(LosslessLexer::<&str>::with_state(src, lossless_entered()));
+    assert_eq!(syntactic, lossless, "{src:?}");
+  }
+
+  for (src, refused) in [("{<1.}>>", 4), ("{<1e}>>", 4), ("{<1u08}>>", 6)] {
+    for (lexer, steps) in [
+      (
+        "syntactic",
+        steps!(SyntacticLexer::<str>::with_state(src, entered())),
+      ),
+      (
+        "lossless",
+        steps!(LosslessLexer::<&str>::with_state(src, lossless_entered())),
+      ),
+    ] {
+      let shape: Vec<(&str, SimpleSpan, usize)> = steps
+        .iter()
+        .map(|(what, span, open): &(String, SimpleSpan, usize)| {
+          let what = if what.starts_with("LexerErrors") {
+            "refused"
+          } else {
+            what.as_str()
+          };
+          (what, *span, *open)
+        })
+        .collect();
+      assert_eq!(
+        shape,
+        [
+          ("LBrace", SimpleSpan::new(0, 1), 0),
+          ("LAngle", SimpleSpan::new(1, 2), 1),
+          ("refused", SimpleSpan::new(2, refused), 1),
+          ("RBrace", SimpleSpan::new(refused, refused + 1), 0),
+          ("Shr", SimpleSpan::new(refused + 1, refused + 3), 0),
+        ],
+        "{src:?}, {lexer}: the refusal ends before the brace"
+      );
+    }
+  }
+
+  let outside = steps!(SyntacticLexer::<str>::new("{<1.}>>"));
+  assert_eq!(
+    outside
+      .get(2)
+      .map(|(_, span, _): &(String, SimpleSpan, usize)| *span),
+    Some(SimpleSpan::new(2, 5)),
+    "outside a block the refusal takes the brace, as it did"
+  );
+}
