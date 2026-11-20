@@ -1,7 +1,8 @@
-//! A number with a suffix and a `char` literal, before the analyzer gives each its meaning:
-//! lowering reports each as an item of a kind it does not know, once for a file and at the form,
-//! and lowers it as one refused node, of which coercion says nothing. A custom scalar keeps a list
-//! with one inside it whole, and the list's refused node is never read.
+//! A number with a suffix, a `char` literal and a typed form, before the analyzer gives each its
+//! meaning: lowering reports each as an item of a kind it does not know, once for a file and at the
+//! form, and lowers it as one refused node, of which coercion says nothing. A typed form is one
+//! node whatever it holds. A custom scalar keeps a list with one inside it whole, and the list's
+//! refused node is never read.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
@@ -194,8 +195,70 @@ fn a_char_and_a_suffixed_number_are_one_report() {
   );
 }
 
-/// The two parser layers lower a suffixed number and a `char` literal alike: the same codes at the
-/// same places.
+/// A typed object is one `unknown-item` at the whole form, and nothing else: neither its type, a
+/// declared input object, nor its fields are read, so no `invalid-default-value` follows it.
+#[test]
+fn a_typed_object_is_an_unknown_item_and_nothing_more() {
+  let text = "input P { x: u8 }\ninput I { p: P = P { x: 1 } }\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(UNKNOWN_ITEM, after(schema, text, "p: P = ", "P { x: 1 }"))]
+  );
+  assert!(!analysis.is_ok(), "a reported form is an error");
+}
+
+/// A typed value is one `unknown-item` at the whole form, and nothing else.
+#[test]
+fn a_typed_value_is_an_unknown_item_and_nothing_more() {
+  let text = "input I { u: u8 = u8(1) }\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(UNKNOWN_ITEM, after(schema, text, "u: u8 = ", "u8(1)"))]
+  );
+  assert!(!analysis.is_ok(), "a reported form is an error");
+}
+
+/// A typed form in a list is one node, whatever it holds, so the count lowering charged holds and
+/// nothing panics. A custom scalar keeps the list whole, and its refused node is never read.
+#[test]
+fn a_typed_form_in_a_list_keeps_the_count() {
+  for text in [
+    "input L { xs: [u8] = [1, u8(2), 3] }\n",
+    "scalar Json\ninput J { s: Json = [1, u8([2, 3]), 4] }\n",
+  ] {
+    let analysis = analyze_text(text);
+    let schema = schema_file(&analysis);
+    let form = if text.contains("u8([2, 3])") {
+      "u8([2, 3])"
+    } else {
+      "u8(2)"
+    };
+    assert_eq!(
+      found(&analysis),
+      [(UNKNOWN_ITEM, after(schema, text, "1, ", form))],
+      "{text:?}"
+    );
+  }
+}
+
+/// A typed form and a `char` literal in one file are one report, at the first.
+#[test]
+fn a_typed_form_and_a_char_are_one_report() {
+  let text = "input I {\n  a: u8 = u8(1)\n  b: u8 = 'a'\n}\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(UNKNOWN_ITEM, after(schema, text, "a: u8 = ", "u8(1)"))]
+  );
+}
+
+/// The two parser layers lower a suffixed number, a `char` literal and a typed form alike: the same
+/// codes at the same places.
 #[cfg(all(feature = "rowan_0_17", feature = "std"))]
 #[test]
 fn both_layers_agree() {
@@ -209,6 +272,10 @@ fn both_layers_agree() {
     "input I { c: u8 = 'a' }\n",
     "input L { cs: [u8] = ['a', 'b'] }\n",
     "input I {\n  a: u8 = 'a'\n  b: u8 = 1u8\n}\n",
+    "input P { x: u8 }\ninput I { p: P = P { x: 1 } }\n",
+    "input I { u: u8 = u8(1) }\n",
+    "input L { xs: [u8] = [1, u8(2), 3] }\n",
+    "input I {\n  a: u8 = u8(1)\n  b: u8 = 'a'\n}\n",
   ] {
     let syntactic = analyze_text(text);
     let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)

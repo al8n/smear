@@ -432,6 +432,93 @@ fn a_schema_position_answers_as_a_constant_one_does() {
   assert!(!parse_schema_value("[1, 'c', {a: ^::b::C}]").has_errors());
 }
 
+#[test]
+fn a_schema_position_reads_the_typed_forms_and_a_constant_one_does_not() {
+  // A typed object holds its fields directly, after a type path that is always there.
+  assert_eq!(
+    kinds!(parse_schema_value, "P { x: 1 }"),
+    vec![
+      K::Root,
+      K::TypedObjectValue,
+      K::TypePath,
+      K::Path,
+      K::ObjectField,
+      K::IntValue
+    ]
+  );
+  assert_eq!(
+    kinds!(parse_schema_value, "Box<i32> {}"),
+    vec![
+      K::Root,
+      K::TypedObjectValue,
+      K::TypePath,
+      K::Path,
+      K::TypeGenerics,
+      K::DefinitionTypePath,
+      K::Path
+    ]
+  );
+  assert_eq!(
+    kinds!(parse_schema_value, "Url(\"x\")"),
+    vec![K::Root, K::TypedValue, K::TypePath, K::Path, K::StringValue]
+  );
+  // The next significant token decides, whatever trivia stands before it.
+  assert_eq!(
+    kinds!(parse_schema_value, "P # c\n { x: 1 }"),
+    kinds!(parse_schema_value, "P { x: 1 }")
+  );
+  // The corner: one element here, two in an executable document's constant position.
+  assert_eq!(
+    kinds!(parse_schema_value, "[RED {a: 1}]"),
+    vec![
+      K::Root,
+      K::ListValue,
+      K::TypedObjectValue,
+      K::TypePath,
+      K::Path,
+      K::ObjectField,
+      K::IntValue
+    ]
+  );
+  assert_eq!(
+    kinds!(parse_const_value, "[RED {a: 1}]"),
+    vec![
+      K::Root,
+      K::ListValue,
+      K::EnumValue,
+      K::Path,
+      K::ObjectValue,
+      K::ObjectField,
+      K::IntValue
+    ]
+  );
+  for src in [
+    "P { x: 1 }",
+    "Box<i32> {}",
+    "Url(\"x\")",
+    "[RED {a: 1}]",
+    "^::a::P { x: 1 }",
+  ] {
+    assert!(!parse_schema_value(src).has_errors(), "{src}");
+    assert_eq!(text!(parse_schema_value, src), src);
+  }
+  // Type arguments that open neither bracket: one report, and a typed object with no body.
+  let bodiless = parse_schema_value("Box<i32>");
+  assert_eq!(bodiless.diagnostics().len(), 1);
+  assert_eq!(
+    kinds!(parse_schema_value, "Box<i32>"),
+    vec![
+      K::Root,
+      K::TypedObjectValue,
+      K::TypePath,
+      K::Path,
+      K::TypeGenerics,
+      K::DefinitionTypePath,
+      K::Path
+    ]
+  );
+}
+
 // ---------------------------------------------------------------------------------------------
 // Divergences 2, 3, 4 — paths, generics and type references.
 // ---------------------------------------------------------------------------------------------

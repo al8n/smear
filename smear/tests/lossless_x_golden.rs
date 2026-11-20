@@ -106,7 +106,7 @@
 //! what that costs — an `expect` that skips trivia on its accepting branch as well as before it
 //! moves trailing placement across the whole corpus while round-trip, the gap census, the parity
 //! gate, the injection gate and the projection differential all stay green. So the sentence is now
-//! [`CLOSES_ON_TRAILING_TRIVIA`], forty-nine pairings re-derived on every run by
+//! [`CLOSES_ON_TRAILING_TRIVIA`], fifty pairings re-derived on every run by
 //! [`only_the_recorded_nodes_close_on_their_trailing_trivia`]. It is nearly twice its GraphQL
 //! twin's length for a reason the constant states: two GraphQLx productions end on a probe for an
 //! optional continuation that is usually not there — `::` for a path, `<` for a definition's name
@@ -306,6 +306,7 @@ const CLOSES_ON_TRAILING_TRIVIA: &[&str] = &[
   "Argument > ListValue",
   "Arguments > Argument",
   "ArgumentsDefinition > InputValueDefinition",
+  "DefaultValue > TypedObjectValue",
   "DefinitionTypeGenerics > DefinitionTypeParam",
   "DefinitionTypePath > Path",
   "DirectiveDefinition > DefinitionName",
@@ -1211,7 +1212,7 @@ fn only_the_recorded_nodes_open_on_their_leading_trivia() {
 /// appeared where a production began holding its node open across a peek, and list pairings
 /// vanished, because trivia eaten by the `expect` that ends an element never reaches the loop peek
 /// that used to leave it inside the preceding sibling. So the failure is reported as the two
-/// differences rather than as two forty-nine-element vectors: which half moved is what tells a
+/// differences rather than as two fifty-element vectors: which half moved is what tells a
 /// reader whether a production gained a probe or lost one.
 #[test]
 fn only_the_recorded_nodes_close_on_their_trailing_trivia() {

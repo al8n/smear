@@ -1,13 +1,15 @@
-//! Typed wrappers over the fifteen value node kinds.
+//! Typed wrappers over the seventeen value node kinds.
 //!
-//! # Why a value position carries twelve getters instead of one
+//! # Why a value position carries fourteen getters instead of one
 //!
 //! `apollo-parser` gives a value position a single `value() -> Option<Value>`, where `Value` is a
 //! generated **union enum** casting on any of the value kinds. This layer has no such union: the
 //! inventory is one wrapper per node kind and a union is not a node kind, so [`ObjectField`],
 //! [`DefaultValue`] and [`Argument`](super::directive::Argument) each expose one `opt` getter per
-//! value kind and at most one of the twelve answers `Some`. Twelve and not GraphQL's nine, because
-//! [`SetValue`], [`MapValue`] and [`CharValue`] are values here too.
+//! value kind and at most one of the fourteen answers `Some`. Fourteen and not GraphQL's nine,
+//! because [`SetValue`], [`MapValue`] and [`CharValue`] are values here too, and so are a schema
+//! position's [`TypedObjectValue`] and [`TypedValue`]. A position that reads no typed form never
+//! holds one, so its two getters answer `None` there.
 //!
 //! That is complete and it is checkable — every getter is a kind test with a decline to assert —
 //! but it does lose one thing a union would keep: **document order across kinds**. [`ListValue`]
@@ -20,7 +22,7 @@
 //!
 //! - **[`MapEntry`] holds two values.** `Value => Value`, both halves full values and a map key
 //!   not restricted to a name, so an `opt` getter would answer the key whenever the two are the
-//!   same kind and the value would be unreachable. Its twelve getters are therefore `many`, and a
+//!   same kind and the value would be unreachable. Its fourteen getters are therefore `many`, and a
 //!   consumer that needs the halves apart walks the entry's children: the key is the first, the
 //!   value the one after the `=>`.
 //! - **[`SetValue`] holds a run of them.** `set!{ … }` is a collection like [`ListValue`], not a
@@ -36,7 +38,10 @@
 
 use crate::{
   ast_node,
-  graphqlx::{kinds::SyntaxKind as K, lossless::ast::ty::Path},
+  graphqlx::{
+    kinds::SyntaxKind as K,
+    lossless::ast::ty::{Path, TypePath},
+  },
 };
 
 ast_node!(
@@ -149,6 +154,10 @@ ast_node!(
     object_values: many ObjectValue,
     /// Every `char` literal in the list.
     char_values: many CharValue,
+    /// Every typed object in the list.
+    typed_object_values: many TypedObjectValue,
+    /// Every typed value in the list.
+    typed_values: many TypedValue,
   }
 );
 
@@ -185,6 +194,10 @@ ast_node!(
     object_values: many ObjectValue,
     /// Every `char` literal in the set.
     char_values: many CharValue,
+    /// Every typed object in the set.
+    typed_object_values: many TypedObjectValue,
+    /// Every typed value in the set.
+    typed_values: many TypedValue,
   }
 );
 
@@ -227,6 +240,10 @@ ast_node!(
     object_values: many ObjectValue,
     /// Every half of the entry that is a `char` literal.
     char_values: many CharValue,
+    /// Every half of the entry that is a typed object.
+    typed_object_values: many TypedObjectValue,
+    /// Every half of the entry that is a typed value.
+    typed_values: many TypedValue,
   }
 );
 
@@ -273,6 +290,10 @@ ast_node!(
     object_value: opt ObjectValue,
     /// The field's value, when it is a `char` literal.
     char_value: opt CharValue,
+    /// The field's value, when it is a typed object.
+    typed_object_value: opt TypedObjectValue,
+    /// The field's value, when it is a typed value.
+    typed_value: opt TypedValue,
   }
 );
 
@@ -312,6 +333,10 @@ ast_node!(
     object_value: opt ObjectValue,
     /// The default, when it is a `char` literal.
     char_value: opt CharValue,
+    /// The default, when it is a typed object.
+    typed_object_value: opt TypedObjectValue,
+    /// The default, when it is a typed value.
+    typed_value: opt TypedValue,
   }
 );
 
@@ -321,5 +346,59 @@ ast_node!(
   CharValue => K::CharValue {
     /// The literal token, both quotes included.
     char_token: tok K::Char,
+  }
+);
+
+ast_node!(
+  lang = crate::graphqlx::kinds::GraphQLxLang;
+  /// A typed object, `Point { x: 1 }` — GraphQLx only, in a schema position.
+  ///
+  /// It holds its fields directly, as an [`ObjectValue`] does, and no `ObjectValue` of its own: the
+  /// type path and the braces are one node's.
+  TypedObjectValue => K::TypedObjectValue {
+    /// The type the object is of, with its type arguments.
+    type_path: opt TypePath,
+    /// Every field of the object, in order.
+    object_fields: many ObjectField,
+  }
+);
+
+ast_node!(
+  lang = crate::graphqlx::kinds::GraphQLxLang;
+  /// A typed value, `Url("x")` — GraphQLx only, in a schema position.
+  ///
+  /// One value between its parentheses, so one getter per kind it may be, as a [`DefaultValue`]
+  /// has: at most one answers `Some`.
+  TypedValue => K::TypedValue {
+    /// The type the value is of, with its type arguments.
+    type_path: opt TypePath,
+    /// The value, when it is a variable.
+    variable_value: opt VariableValue,
+    /// The value, when it is an integer literal.
+    int_value: opt IntValue,
+    /// The value, when it is a float literal.
+    float_value: opt FloatValue,
+    /// The value, when it is a string literal.
+    string_value: opt StringValue,
+    /// The value, when it is `true` or `false`.
+    boolean_value: opt BooleanValue,
+    /// The value, when it is `null`.
+    null_value: opt NullValue,
+    /// The value, when it is an enum value.
+    enum_value: opt EnumValue,
+    /// The value, when it is a list.
+    list_value: opt ListValue,
+    /// The value, when it is a set.
+    set_value: opt SetValue,
+    /// The value, when it is a map.
+    map_value: opt MapValue,
+    /// The value, when it is an object.
+    object_value: opt ObjectValue,
+    /// The value, when it is a `char` literal.
+    char_value: opt CharValue,
+    /// The value, when it is a typed object.
+    typed_object_value: opt TypedObjectValue,
+    /// The value, when it is a typed value.
+    typed_value: opt TypedValue,
   }
 );

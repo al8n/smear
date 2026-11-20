@@ -158,21 +158,27 @@ pub const MAX_GREEN_DEPTH: usize = 1024;
 ///
 /// | shape | brackets | levels | per bracket |
 /// |---|---|---|---|
-/// | object value `{ a: { a: … } }` | 254 | **516** | 2.020 |
+/// | typed object `P { k: P { k: … } }` | 255 | **517** | 2.016 |
+/// | object value `{ a: { a: … } }` | 254 | 516 | 2.020 |
 /// | selection set `{ a { a … } }` | 255 | 515 | 2.008 |
+/// | typed value `U(U(…))` | 255 | 263 | 1.020 |
 /// | list value `[[…]]` | 254 | 262 | 1.020 |
 /// | list type `[[…]]` | 255 | 261 | 1.012 |
 ///
 /// GraphQLx measures identically on every row it shares and is never worse, which is worth
-/// stating because `HARD_MAX`'s own table found GraphQLx the worse of the two by 0.3%.
+/// stating because `HARD_MAX`'s own table found GraphQLx the worse of the two by 0.3%. The two
+/// typed forms are GraphQLx's alone, each in a schema position under the one brace of the
+/// definition it defaults a member of: a typed object costs what an object does for a bracket,
+/// since it holds its fields directly, and its chain reaches one level more for having that one
+/// bracket of context where the object's has two.
 ///
 /// **The number is recorded rather than computed.** The assertions use `GREEN_LEVELS_PER_BRACKET`,
 /// an integer above every row of this table, rather than a formula fitted to one row.
-const WORST_DOOR_GREEN_TREE: usize = 516;
+const WORST_DOOR_GREEN_TREE: usize = 517;
 
 /// Green levels one open bracket can add to the tree.
 ///
-/// Three, where the worst row of `WORST_DOOR_GREEN_TREE`'s table measures 2.020. It is the
+/// Three, where the worst row of `WORST_DOOR_GREEN_TREE`'s table per bracket measures 2.020. It is the
 /// coefficient the crate root's assertion uses through `MAX_DOOR_BRACKETS`.
 const GREEN_LEVELS_PER_BRACKET: usize = 3;
 

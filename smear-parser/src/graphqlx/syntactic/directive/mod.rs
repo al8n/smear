@@ -20,7 +20,7 @@ use smear_lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
 
 use super::{
   GraphqlxError, GraphqlxInput, GraphqlxLexer, GraphqlxSlice, GraphqlxToken,
-  argument::{arguments, const_arguments},
+  argument::{arguments, const_arguments, schema_arguments},
   path_after_first, path_root, try_name,
   ty::try_type_generics,
   unexpected_here,
@@ -144,7 +144,9 @@ where
     .parse_input(inp)
 }
 
-fn const_directive_after_at<'inp, Src, Ctx>(
+/// A constant directive after its `@`, its arguments read by an executable document's constant
+/// grammar, or by a schema position's when `SCHEMA` holds.
+fn const_directive_after_at<'inp, Src, Ctx, const SCHEMA: bool>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
   start: usize,
 ) -> Result<ConstDirective<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
@@ -158,7 +160,13 @@ where
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   take_directive_type_path
-    .then(const_arguments)
+    .then(|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| {
+      if SCHEMA {
+        schema_arguments(inp)
+      } else {
+        const_arguments(inp)
+      }
+    })
     .spanned_trimmed()
     .map(
       |Spanned {
@@ -202,7 +210,9 @@ where
   Ok(Directives::new(SimpleSpan::new(start, end), parsed))
 }
 
-fn const_directives_after_at<'inp, Src, Ctx>(
+/// A constant directive run after its first `@`, each directive read as
+/// `const_directive_after_at` reads it under the same `SCHEMA`.
+fn const_directives_after_at<'inp, Src, Ctx, const SCHEMA: bool>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
   first_at: At<SimpleSpan, (), GraphQLx>,
 ) -> Result<ConstDirectives<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
@@ -216,9 +226,12 @@ where
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let start = first_at.span().start();
-  let mut parsed = Vec::from([const_directive_after_at(inp, start)?]);
+  let mut parsed = Vec::from([const_directive_after_at::<Src, Ctx, SCHEMA>(inp, start)?]);
   while let ParseAttempt::Accept(at) = try_at(inp)? {
-    parsed.push(const_directive_after_at(inp, at.span().start())?);
+    parsed.push(const_directive_after_at::<Src, Ctx, SCHEMA>(
+      inp,
+      at.span().start(),
+    )?);
   }
   let end = parsed
     .last()
@@ -257,7 +270,7 @@ directive_parser!(
   ConstDirective<GraphqlxSlice<'inp, Src>>;
   {
     let at = take_at(inp)?;
-    const_directive_after_at(inp, at.span().start())
+    const_directive_after_at::<Src, Ctx, false>(inp, at.span().start())
   }
 );
 
@@ -301,7 +314,7 @@ directive_parser!(
     // the token that follows it. See tokora's `InputRef::span_since_trimmed`.
     let start = inp.span().end();
     match try_at(inp)? {
-      ParseAttempt::Accept(at) => const_directives_after_at(inp, at),
+      ParseAttempt::Accept(at) => const_directives_after_at::<Src, Ctx, false>(inp, at),
       ParseAttempt::Decline => Ok(ConstDirectives::new(
         SimpleSpan::new(start, start),
         Vec::new(),
@@ -313,8 +326,8 @@ directive_parser!(
 /// Parses one committed GraphQLx `Directive` production in a schema position: a directive that a
 /// type-system definition or extension applies.
 ///
-/// Every directive [`const_directive`] reads is one here.
-#[inline(always)]
+/// Every directive [`const_directive`] reads is one here, and its arguments are
+/// [`schema_arguments`].
 pub fn schema_directive<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<ConstDirective<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
@@ -327,15 +340,16 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  const_directive(inp)
+  let at = take_at(inp)?;
+  const_directive_after_at::<Src, Ctx, true>(inp, at.span().start())
 }
 
 /// Parses a GraphQLx `Directives` collection in a schema position: the directives a type-system
 /// definition or extension applies.
 ///
 /// If `@` is absent, this returns an empty zero-width collection without consuming input. Every
-/// collection [`const_directives`] reads is one here.
-#[inline(always)]
+/// collection [`const_directives`] reads is one here, and each directive is a
+/// [`schema_directive`].
 pub fn schema_directives<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<ConstDirectives<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
@@ -348,7 +362,15 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  const_directives(inp)
+  // The committed end, as `const_directives` takes it.
+  let start = inp.span().end();
+  match try_at(inp)? {
+    ParseAttempt::Accept(at) => const_directives_after_at::<Src, Ctx, true>(inp, at),
+    ParseAttempt::Decline => Ok(ConstDirectives::new(
+      SimpleSpan::new(start, start),
+      Vec::new(),
+    )),
+  }
 }
 
 macro_rules! impl_directive_api {

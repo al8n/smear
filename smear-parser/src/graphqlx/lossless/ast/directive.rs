@@ -39,7 +39,7 @@ use crate::{
       ty::TypePath,
       value::{
         BooleanValue, CharValue, EnumValue, FloatValue, IntValue, ListValue, MapValue, NullValue,
-        ObjectValue, SetValue, StringValue, VariableValue,
+        ObjectValue, SetValue, StringValue, TypedObjectValue, TypedValue, VariableValue,
       },
     },
   },
@@ -79,6 +79,10 @@ ast_node!(
     object_value: opt ObjectValue,
     /// The argument's value, when it is a `char` literal.
     char_value: opt CharValue,
+    /// The argument's value, when it is a typed object.
+    typed_object_value: opt TypedObjectValue,
+    /// The argument's value, when it is a typed value.
+    typed_value: opt TypedValue,
   }
 );
 

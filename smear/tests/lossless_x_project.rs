@@ -4172,6 +4172,33 @@ const SITES: &[Site] = &[
     "Ok",
     Absent::Token(K::SetValue, "}"),
   ),
+  // A schema position's typed forms: type arguments that open neither bracket, and a typed value
+  // whose `)` is missing at the end of input and in front of the `}` of the definition around it.
+  // A typed object's body is an object's, so its unclosed `}` is the object's site, in `SHARED`.
+  (
+    "value.rs",
+    "report",
+    "input I { a: T = Box<i32> }",
+    Root::Mixed,
+    "MissingChild TypedObjectValue",
+    Absent::Imaged,
+  ),
+  (
+    "value.rs",
+    "unclosed",
+    "input I { a: T = U(1",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::TypedValue, ")"),
+  ),
+  (
+    "value.rs",
+    "report",
+    "input I { a: T = U(1 }",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::TypedValue, ")"),
+  ),
   (
     "directive.rs",
     "unclosed",
@@ -4230,9 +4257,10 @@ const SITES: &[Site] = &[
   ),
 ];
 
-/// The second node kind two shared sites build: `angle_name_list` serves both bare-name generic
-/// lists, and `collection_body` both keyword containers. One probe per kind, so the derivation
-/// below sees every `(node, token)` a site can leave.
+/// The second node kind three shared sites build: `angle_name_list` serves both bare-name generic
+/// lists, `collection_body` both keyword containers, and `object_fields` an object's body and a
+/// typed object's. One probe per kind, so the derivation below sees every `(node, token)` a site
+/// can leave.
 const SHARED: &[(&str, &str, Absent)] = &[
   (
     "generic.rs",
@@ -4243,6 +4271,11 @@ const SHARED: &[(&str, &str, Absent)] = &[
     "value.rs",
     "{ f(a: map!{1 => 2",
     Absent::Token(K::MapValue, "}"),
+  ),
+  (
+    "value.rs",
+    "input I { a: T = P { x: 1",
+    Absent::Token(K::TypedObjectValue, "}"),
   ),
 ];
 
@@ -4413,7 +4446,7 @@ fn every_report_and_build_site_has_a_measured_answer() {
   };
   assert_eq!(
     (total("report"), total("unclosed")),
-    (66, 17),
+    (68, 18),
     "the two families' populations"
   );
 
@@ -4485,7 +4518,7 @@ fn every_report_and_build_site_has_a_measured_answer() {
 }
 
 /// How many of [`SITES`]' probes project.
-const PROJECTING_SITES: usize = 21;
+const PROJECTING_SITES: usize = 23;
 
 /// Image-less tokens a site can leave out whose probe is **not** a witness.
 ///
@@ -4963,7 +4996,7 @@ fn every_walk_is_a_transcription() {
     1,
     "the cursor's trivia skip, and nothing else"
   );
-  assert_eq!(count("Cursor::new("), 74, "the walks, one cursor each");
+  assert_eq!(count("Cursor::new("), 76, "the walks, one cursor each");
 }
 
 #[test]

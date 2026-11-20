@@ -9,7 +9,7 @@
 //! `Value[Const]` is **threaded** through a private `Constness` argument rather than duplicated
 //! into a second set of productions.
 //!
-//! # The five places GraphQLx's value grammar is not GraphQL's
+//! # The six places GraphQLx's value grammar is not GraphQL's
 //!
 //! **1. An enum value is a whole path.** `graphqlx/syntactic/value.rs`'s `enum_after_first` builds
 //! `EnumValue::new(span, path)`, so `^::ns::Colour` and `Colour` are both enum values and the node
@@ -24,9 +24,10 @@
 //! refused.
 //!
 //! **3. `set` and `map` are contextual, and the test is the *immediately following* token.**
-//! `set!{ 1, 2 }` is a [`SetValue`](crate::graphqlx::kinds::SyntaxKind::SetValue); `set` alone,
-//! `set::Thing`, and the `set` of `set { a: 1 }`, are ordinary enum values (the `set` and `map`
-//! arms of `value` and `const_value` in `graphqlx/syntactic/value.rs`). See this module's private
+//! `set!{ 1, 2 }` is a [`SetValue`](crate::graphqlx::kinds::SyntaxKind::SetValue); `set` alone and
+//! `set::Thing` are ordinary enum values (the `set` and `map` arms of `value` and `const_value` in
+//! `graphqlx/syntactic/value.rs`), and so is the `set` of `set { a: 1 }` everywhere but a schema
+//! position, where point 6 makes it a typed object's type. See this module's private
 //! `collection_or_enum` for why the test needs a retro-wrap rather than a two-token peek.
 //!
 //! **4. `MapEntry` is `Value => Value`,** with both halves full values — a map key is not
@@ -35,6 +36,13 @@
 //! **5. A `char` literal is a value.** `'a'` is one token, and its node is
 //! [`CharValue`](crate::graphqlx::kinds::SyntaxKind::CharValue) wherever GraphQL takes a scalar:
 //! an executable value, a constant one, and a member of every collection.
+//!
+//! **6. A schema position reads the typed forms.** A path followed by `{` is a
+//! [`TypedObjectValue`](crate::graphqlx::kinds::SyntaxKind::TypedObjectValue), `Point { x: 1 }`, and
+//! a path followed by `(` a [`TypedValue`](crate::graphqlx::kinds::SyntaxKind::TypedValue),
+//! `Url("x")`, each with type arguments between when `<` follows the path. The next significant
+//! token decides, whatever trivia stands before it, so `[RED {a: 1}]` is one typed object there.
+//! An executable document reads neither, and there the same texts are a path and an object.
 //!
 //! What did **not** widen: an `ObjectField`'s key is still a plain `Name` (`object_field` in
 //! `graphqlx/syntactic/value.rs`, `name then_ignore(colon) then(value)`). Only the value side
@@ -57,13 +65,13 @@ use crate::graphqlx::kinds::SyntaxKind as K;
 use super::coverage::{node, node_at};
 
 use super::{
-  GraphqlxLosslessInput, Keyword, recover,
+  GraphqlxLosslessError, GraphqlxLosslessInput, Keyword, recover,
   recover::{
-    CONST_VALUE_HEADS, LIST_CLOSER_HEADS, OBJECT_FIELD_HEADS, VALUE_HEADS, closes_enclosing_block,
-    is_closer, opener_span, starts_value,
+    CONST_VALUE_HEADS, LIST_CLOSER_HEADS, OBJECT_FIELD_HEADS, PARENS_CLOSER_HEADS,
+    TYPED_FORM_HEADS, VALUE_HEADS, closes_enclosing_block, is_closer, opener_span, starts_value,
   },
   trivia::{eat_if, expect, peek_as, peek_kind},
-  ty::{path, path_tail},
+  ty::{path, path_root, path_tail, type_generics},
 };
 
 /// The spec's `[Const]` grammar parameter, as an argument, and the schema position beside it.
@@ -295,25 +303,31 @@ lossless_production! {
     let inp = &mut *frame;
     node(
       K::ObjectValue.raw(),
-      |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
-        expect::<Src, Ctx>(inp, Kind::LBrace)?;
-        let open = opener_span(inp.span().end());
-        loop {
-          if eat_if::<Src, Ctx>(inp, Kind::RBrace)? {
-            return Ok(());
-          }
-          match peek_kind::<Src, Ctx>(inp)? {
-            None => return recover::unclosed_object::<Src, Ctx>(inp, open),
-            Some(Kind::Identifier) => object_field::<Src, Ctx>(inp, konst)?,
-            // The head is checked here rather than left to `object_field`'s own `expect`, because
-            // that `expect` would return `Err` and abort the whole value — the list's recovery
-            // would then have no counterpart inside an object.
-            Some(_) => recover::unexpected::<Src, Ctx>(inp, OBJECT_FIELD_HEADS)?,
-          }
-        }
-      },
+      |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| object_fields::<Src, Ctx>(inp, konst),
     )
     .parse_input(inp)
+  }
+
+  /// `{ ObjectField* }` inside whichever node its caller opened: an object value's, and a typed
+  /// object's after its type path. Opens no node, and is always inlined, so an object costs the
+  /// frames it did when its loop was written in its node's closure.
+  #[inline(always)]
+  fn object_fields<'inp, Src, Ctx>(inp, konst: Constness) {
+    expect::<Src, Ctx>(inp, Kind::LBrace)?;
+    let open = opener_span(inp.span().end());
+    loop {
+      if eat_if::<Src, Ctx>(inp, Kind::RBrace)? {
+        return Ok(());
+      }
+      match peek_kind::<Src, Ctx>(inp)? {
+        None => return recover::unclosed_object::<Src, Ctx>(inp, open),
+        Some(Kind::Identifier) => object_field::<Src, Ctx>(inp, konst)?,
+        // The head is checked here rather than left to `object_field`'s own `expect`, because
+        // that `expect` would return `Err` and abort the whole value — the list's recovery
+        // would then have no counterpart inside an object.
+        Some(_) => recover::unexpected::<Src, Ctx>(inp, OBJECT_FIELD_HEADS)?,
+      }
+    }
   }
 
   /// `Name : Value`
@@ -398,7 +412,11 @@ lossless_production! {
     .parse_input(inp)
   }
 
-  /// `set`/`map` as a collection constructor, or as an ordinary path segment.
+  /// `set`/`map` as a collection constructor or as an ordinary path segment, and in a schema
+  /// position every path at a value's head, which may be the type of a typed form.
+  ///
+  /// `collection` names the keyword at the head, when the head is `set` or `map`; with none, the
+  /// head is a name or a root's sigil, which the path production reads.
   ///
   /// # Why this needs a retro-wrap and not a two-token peek
   ///
@@ -407,38 +425,167 @@ lossless_production! {
   /// may be any number of trivia tokens away. `set /* c */ ! { 1 }` is a set. A fixed
   /// `peek::<U2>()` sees the raw stream and would answer `Space`, so the only way to ask the
   /// question is to consume the keyword and then peek — after which, if the answer is "no", the
-  /// keyword has already been committed outside any node.
+  /// keyword has already been committed outside any node. A typed form is the same question asked
+  /// after a whole path: `Point /* c */ { x: 1 }` is one typed object.
   ///
-  /// Two marks are minted before that commit, so either answer can still open its node over the
-  /// keyword: the outer becomes [`SetValue`](K::SetValue)/[`MapValue`](K::MapValue) or
-  /// [`EnumValue`](K::EnumValue), the inner becomes the [`Path`](K::Path). `cst_mark` pushes a
-  /// tombstone, so two consecutive calls name two distinct slots and the wraps nest in slot order
-  /// rather than in the order they were spent. **An unspent mark materializes into nothing**, so
-  /// the branch not taken leaves no trace in the tree.
-  fn collection_or_enum<'inp, Src, Ctx>(inp, konst: Constness, collection: Collection) {
-    // Before the keyword: the enclosing node is still the innermost one open, so the leading
-    // trivia the peek in `value` already crossed sits outside whatever this opens.
+  /// Three marks are minted before anything is committed, so every answer can still open its node
+  /// over what came before it: the outer becomes [`SetValue`](K::SetValue)/[`MapValue`](K::MapValue),
+  /// [`EnumValue`](K::EnumValue), [`TypedObjectValue`](K::TypedObjectValue) or
+  /// [`TypedValue`](K::TypedValue); the middle becomes a typed form's [`TypePath`](K::TypePath); and
+  /// the inner becomes the [`Path`](K::Path). `cst_mark` pushes a tombstone, so consecutive calls
+  /// name distinct slots and the wraps nest in slot order rather than in the order they were spent.
+  /// **An unspent mark materializes into nothing**, so the branch not taken leaves no trace in the
+  /// tree.
+  ///
+  /// # What is read after the path, and what it moves
+  ///
+  /// The path's own probe for `::` crossed the trivia after the path while the `Path` was open, so
+  /// that trivia is the path's, as it is wherever a path ends. The read that decides a typed form
+  /// is a second look at the same staged token and crosses nothing: an enum value is the tree it
+  /// was before the typed forms existed, and so is every value outside a schema position, which
+  /// never asks.
+  fn collection_or_enum<'inp, Src, Ctx>(
+    inp,
+    konst: Constness,
+    collection: Option<Collection>,
+  ) {
+    // Before the head: the enclosing node is still the innermost one open, so the leading trivia
+    // the peek in `value` already crossed sits outside whatever this opens.
     let outer = inp.cst_mark();
+    let typed = inp.cst_mark();
     let inner = inp.cst_mark();
-    expect::<Src, Ctx>(inp, Kind::Identifier)?;
 
-    if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Bang) {
-      return collection_body::<Src, Ctx>(inp, outer, konst, collection);
-    }
-
-    // An ordinary enum value whose first segment happens to spell `set` or `map`. The path may
-    // continue — `set::Thing` is one path of two segments — and `path_tail` is `path`'s loop with
-    // the first name already consumed.
-    node_at(
-      outer,
-      K::EnumValue.raw(),
-      |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
+    match collection {
+      Some(collection) => {
+        expect::<Src, Ctx>(inp, Kind::Identifier)?;
+        if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Bang) {
+          return collection_body::<Src, Ctx>(inp, outer, konst, collection);
+        }
+        // A path whose first segment happens to spell `set` or `map`. It may continue —
+        // `set::Thing` is one path of two segments — and `path_tail` is `path`'s loop with the
+        // first name already consumed.
         node_at(
           inner,
           K::Path.raw(),
           |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| path_tail::<Src, Ctx>(inp),
         )
+        .parse_input(inp)?;
+      }
+      None => {
+        // `path`'s body, under the mark rather than a node of its own.
+        node_at(
+          inner,
+          K::Path.raw(),
+          |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
+            path_root::<Src, Ctx>(inp)?;
+            expect::<Src, Ctx>(inp, Kind::Identifier)?;
+            path_tail::<Src, Ctx>(inp)
+          },
+        )
+        .parse_input(inp)?;
+      }
+    }
+
+    let opens_a_typed_form = match konst {
+      Constness::Schema => matches!(
+        peek_kind::<Src, Ctx>(inp)?,
+        Some(Kind::LAngle | Kind::LBrace | Kind::LParen)
+      ),
+      Constness::Const | Constness::NonConst => false,
+    };
+    if opens_a_typed_form {
+      return typed_form::<Src, Ctx>(inp, outer, typed, konst);
+    }
+    node_at(
+      outer,
+      K::EnumValue.raw(),
+      |_: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| -> Result<(), GraphqlxLosslessError<'inp, Src, Ctx>> { Ok(()) },
+    )
+    .parse_input(inp)
+  }
+
+  /// A typed form after the path that names its type: `Point { x: 1 }`, `Box<i32> {}` or
+  /// `Url("x")`, wrapped from the marks [`collection_or_enum`] minted before the path.
+  ///
+  /// The [`TypePath`](K::TypePath) is always there, with type arguments or without, since the
+  /// form's type is one. `<` and then neither bracket is reported where the bracket should be, and
+  /// the form is built as a typed object with no body: the type was written, and what is missing is
+  /// the rest.
+  fn typed_form<'inp, Src, Ctx>(
+    inp,
+    value: tokora::cst::EventMark,
+    ty: tokora::cst::EventMark,
+    konst: Constness,
+  ) {
+    let has_arguments = peek_kind::<Src, Ctx>(inp)? == Some(Kind::LAngle);
+    node_at(
+      ty,
+      K::TypePath.raw(),
+      |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
+        if has_arguments {
+          type_generics::<Src, Ctx>(inp)
+        } else {
+          Ok(())
+        }
+      },
+    )
+    .parse_input(inp)?;
+    match peek_kind::<Src, Ctx>(inp)? {
+      Some(Kind::LBrace) => typed_object_body::<Src, Ctx>(inp, value, konst),
+      Some(Kind::LParen) => typed_value_body::<Src, Ctx>(inp, value, konst),
+      _ => {
+        recover::report_unexpected::<Src, Ctx>(inp, TYPED_FORM_HEADS)?;
+        node_at(
+          value,
+          K::TypedObjectValue.raw(),
+          |_: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| -> Result<(), GraphqlxLosslessError<'inp, Src, Ctx>> { Ok(()) },
+        )
         .parse_input(inp)
+      }
+    }
+  }
+
+  /// `{ ObjectField* }` after a typed object's type path, its loop [`object_value`]'s.
+  fn typed_object_body<'inp, Src, Ctx>(inp, mark: tokora::cst::EventMark, konst: Constness) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
+    node_at(
+      mark,
+      K::TypedObjectValue.raw(),
+      |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| object_fields::<Src, Ctx>(inp, konst),
+    )
+    .parse_input(inp)
+  }
+
+  /// `( Value )` after a typed value's type path: one value, and its closer tested as a list's is.
+  ///
+  /// A `}` of a block around the form ends it unclosed, by [`closes_enclosing_block`], and anything
+  /// else before the `)` is reported once and skipped, so a second value is one diagnostic and the
+  /// form still closes on its own `)`.
+  fn typed_value_body<'inp, Src, Ctx>(inp, mark: tokora::cst::EventMark, konst: Constness) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
+    node_at(
+      mark,
+      K::TypedValue.raw(),
+      |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
+        expect::<Src, Ctx>(inp, Kind::LParen)?;
+        let open = opener_span(inp.span().end());
+        let open_at: usize = inp.state().brace_depth();
+        required_value::<Src, Ctx>(inp, konst)?;
+        loop {
+          if eat_if::<Src, Ctx>(inp, Kind::RParen)? {
+            return Ok(());
+          }
+          match peek_kind::<Src, Ctx>(inp)? {
+            None => return recover::unclosed_parens::<Src, Ctx>(inp, open),
+            Some(Kind::RBrace) if closes_enclosing_block(open_at, inp.state().brace_depth()) => {
+              return recover::report_unexpected::<Src, Ctx>(inp, PARENS_CLOSER_HEADS);
+            }
+            // `unexpected` reports and consumes, so every turn returns or consumes.
+            Some(_) => recover::unexpected::<Src, Ctx>(inp, PARENS_CLOSER_HEADS)?,
+          }
+        }
       },
     )
     .parse_input(inp)
@@ -482,7 +629,8 @@ lossless_production! {
   /// sigil opens a rooted enum value, and the `set`/`map` spellings inside the `Identifier` arm
   /// route to [`collection_or_enum`] rather than straight to [`enum_value`] — everything else
   /// about the identifier arm is GraphQL's, since `true`, `false` and `null` are reserved in both
-  /// dialects and reserved only in a path's first segment.
+  /// dialects and reserved only in a path's first segment. In a schema position every path goes
+  /// to [`collection_or_enum`], which decides whether it names a typed form's type.
   fn value<'inp, Src, Ctx>(inp, konst: Constness) {
     match peek_kind::<Src, Ctx>(inp)? {
       Some(Kind::Dollar) => {
@@ -497,21 +645,28 @@ lossless_production! {
       Some(Kind::Char) => char_value::<Src, Ctx>(inp),
       Some(Kind::LBracket) => list_value::<Src, Ctx>(inp, konst),
       Some(Kind::LBrace) => object_value::<Src, Ctx>(inp, konst),
-      // GraphQLx only: a root's sigil opens a rooted enum value. A `::` opens nothing and falls to
-      // the recovery below.
-      Some(Kind::Tilde | Kind::DotDot | Kind::Caret) => enum_value::<Src, Ctx>(inp),
+      // GraphQLx only: a root's sigil opens a rooted enum value, or in a schema position a typed
+      // form's type as well. A `::` opens nothing and falls to the recovery below.
+      Some(Kind::Tilde | Kind::DotDot | Kind::Caret) => match konst {
+        Constness::Schema => collection_or_enum::<Src, Ctx>(inp, konst, None),
+        Constness::Const | Constness::NonConst => enum_value::<Src, Ctx>(inp),
+      },
       Some(Kind::Identifier) => match peek_as::<Src, Ctx, Keyword>(inp)? {
         Some(Keyword::True | Keyword::False) => boolean_value::<Src, Ctx>(inp),
         Some(Keyword::Null) => null_value::<Src, Ctx>(inp),
         Some(Keyword::Set) => {
-          collection_or_enum::<Src, Ctx>(inp, konst, Collection::Set)
+          collection_or_enum::<Src, Ctx>(inp, konst, Some(Collection::Set))
         }
         Some(Keyword::Map) => {
-          collection_or_enum::<Src, Ctx>(inp, konst, Collection::Map)
+          collection_or_enum::<Src, Ctx>(inp, konst, Some(Collection::Map))
         }
         // Every other spelling — including the SDL keywords and the directive-location spellings
-        // `ContextualKeyword` also carries — is a perfectly good first path segment.
-        _ => enum_value::<Src, Ctx>(inp),
+        // `ContextualKeyword` also carries — is a perfectly good first path segment, and in a
+        // schema position the type a typed form may name.
+        _ => match konst {
+          Constness::Schema => collection_or_enum::<Src, Ctx>(inp, konst, None),
+          Constness::Const | Constness::NonConst => enum_value::<Src, Ctx>(inp),
+        },
       },
       _ => recover::unexpected::<Src, Ctx>(inp, konst.value_heads()),
     }

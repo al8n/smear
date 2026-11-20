@@ -1,0 +1,9 @@
+input Shapes {
+  point: Point = Point { x: 1 }
+  boxed: Wrap = Box<i32> {}
+  holder: Holder = { p: Point { x: 1 } }
+}
+
+type Query {
+  shape: Int @look(at: Point { x: 1 })
+}

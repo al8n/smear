@@ -1,0 +1,110 @@
+Root@0..123
+  Document@0..123
+    InputObjectTypeDefinition@0..74
+      Name@0..5 "input"
+      Space@5..6 " "
+      DefinitionName@6..12
+        Name@6..11 "Links"
+        Space@11..12 " "
+      InputFieldsDefinition@12..74
+        LBrace@12..13 "{"
+        Newline@13..14 "\n"
+        Space@14..15 " "
+        Space@15..16 " "
+        InputValueDefinition@16..40
+          Name@16..20 "home"
+          Colon@20..21 ":"
+          Space@21..22 " "
+          DefinitionTypePath@22..27
+            Path@22..27
+              Name@22..26 "Link"
+              Space@26..27 " "
+          DefaultValue@27..37
+            Equal@27..28 "="
+            Space@28..29 " "
+            TypedValue@29..37
+              TypePath@29..32
+                Path@29..32
+                  Name@29..32 "Url"
+              LParen@32..33 "("
+              StringValue@33..36
+                InlineString@33..36 "\"x\""
+              RParen@36..37 ")"
+          Newline@37..38 "\n"
+          Space@38..39 " "
+          Space@39..40 " "
+        InputValueDefinition@40..73
+          Name@40..46 "holder"
+          Colon@46..47 ":"
+          Space@47..48 " "
+          DefinitionTypePath@48..55
+            Path@48..55
+              Name@48..54 "Holder"
+              Space@54..55 " "
+          DefaultValue@55..72
+            Equal@55..56 "="
+            Space@56..57 " "
+            ObjectValue@57..72
+              LBrace@57..58 "{"
+              Space@58..59 " "
+              ObjectField@59..70
+                Name@59..60 "u"
+                Colon@60..61 ":"
+                Space@61..62 " "
+                TypedValue@62..70
+                  TypePath@62..65
+                    Path@62..65
+                      Name@62..65 "Url"
+                  LParen@65..66 "("
+                  StringValue@66..69
+                    InlineString@66..69 "\"x\""
+                  RParen@69..70 ")"
+              Space@70..71 " "
+              RBrace@71..72 "}"
+          Newline@72..73 "\n"
+        RBrace@73..74 "}"
+    Newline@74..75 "\n"
+    Newline@75..76 "\n"
+    ObjectTypeDefinition@76..122
+      Name@76..80 "type"
+      Space@80..81 " "
+      DefinitionName@81..87
+        Name@81..86 "Query"
+        Space@86..87 " "
+      FieldsDefinition@87..122
+        LBrace@87..88 "{"
+        Newline@88..89 "\n"
+        Space@89..90 " "
+        Space@90..91 " "
+        FieldDefinition@91..121
+          Name@91..95 "page"
+          Colon@95..96 ":"
+          Space@96..97 " "
+          DefinitionTypePath@97..101
+            Path@97..101
+              Name@97..100 "Int"
+              Space@100..101 " "
+          Directives@101..121
+            Directive@101..120
+              At@101..102 "@"
+              TypePath@102..106
+                Path@102..106
+                  Name@102..106 "link"
+              Arguments@106..120
+                LParen@106..107 "("
+                Argument@107..119
+                  Name@107..109 "to"
+                  Colon@109..110 ":"
+                  Space@110..111 " "
+                  TypedValue@111..119
+                    TypePath@111..114
+                      Path@111..114
+                        Name@111..114 "Url"
+                    LParen@114..115 "("
+                    StringValue@115..118
+                      InlineString@115..118 "\"x\""
+                    RParen@118..119 ")"
+                RParen@119..120 ")"
+            Newline@120..121 "\n"
+        RBrace@121..122 "}"
+    Newline@122..123 "\n"

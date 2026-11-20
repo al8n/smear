@@ -64,7 +64,10 @@
 //!   `one-of-field-has-default` alone, beside which the schema builder reports the cycle too;
 //! - a rule silent beside a cycle of defaults, which is a phase's error: `input In { a: In! = {} }`
 //!   is `input-object-default-value-cycle` alone, beside which the schema builder reports
-//!   `circular-non-null-input-field` too.
+//!   `circular-non-null-input-field` too;
+//! - a name before an object, in a list of a schema position: `[RED {a: 1}]` is two elements in
+//!   GraphQL and one typed object in GraphQLx, which the analyzer reports as an item of a kind it
+//!   does not know yet.
 //!
 //! An integer too long to be a finite `Float` (`[Z12]`) is no divergence: both dialects refuse it.
 #![cfg(all(feature = "std", feature = "analysis", feature = "validator"))]

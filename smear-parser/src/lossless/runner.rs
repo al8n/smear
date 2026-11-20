@@ -526,16 +526,17 @@ where
 ///
 /// - Every lossless door installs `min(requested, HARD_MAX)` as the parse's recursion budget, so
 ///   no parse this crate performs holds more than the lexer's `HARD_MAX` brackets open.
-/// - The deepest tree a shipped production materialises at that maximum is **516** green levels:
-///   an object-value chain, `WORST_DOOR_GREEN_TREE` in `crate::lossless::project`, whose table
+/// - The deepest tree a shipped production materialises at that maximum is **517** green levels:
+///   a typed-object chain, `WORST_DOOR_GREEN_TREE` in `crate::lossless::project`, whose table
 ///   records every shape measured on this crate's own `parse_document_with_limits` at a
-///   `HARD_MAX` ceiling. A selection chain reaches 515; the object-value chain costs slightly more
-///   per bracket and is the worst case.
-/// - tokora's tree ceiling, `MAX_TREE_DEPTH`, is 1024 in 0.11.0 — above 516.
+///   `HARD_MAX` ceiling. An object-value chain reaches 516 and a selection chain 515; the
+///   typed-object chain costs what an object does per bracket, and its context opens one bracket
+///   fewer, so it is the worst case.
+/// - tokora's tree ceiling, `MAX_TREE_DEPTH`, is 1024 in 0.11.0 — above 517.
 ///
-/// So the claim is that 516 clears the substrate's ceiling, not that a refusal "cannot happen".
+/// So the claim is that 517 clears the substrate's ceiling, not that a refusal "cannot happen".
 /// tokora refuses an open when its frame stack already holds the ceiling's worth of frames, so
-/// should a substrate ceiling ever drop below 516, or a door stop clamping to `HARD_MAX`, a
+/// should a substrate ceiling ever drop below 517, or a door stop clamping to `HARD_MAX`, a
 /// shipped production's stream could be refused, and it would panic at
 /// [`finish_parsed_root_with`], where productions materialise, with the substrate's `TooDeep`
 /// message — which names the ceiling — in the panic.

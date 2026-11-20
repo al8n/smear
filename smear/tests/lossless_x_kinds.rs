@@ -146,7 +146,7 @@ const SOURCES_WITH_NO_KIND: &[(&str, &str)] = &[
   ),
   (
     "Value",
-    "the `value` production; a choice over the eleven InputValue alternatives",
+    "the `value` production; a choice over the twelve InputValue alternatives",
   ),
   (
     "InputValue",
@@ -363,6 +363,14 @@ const SOURCES_WITH_NO_KIND: &[(&str, &str)] = &[
   (
     "CharValueComponents",
     "`CharValue`'s decomposition, the struct its `into_components` returns; not a production",
+  ),
+  (
+    "TypedObjectValueComponents",
+    "`TypedObjectValue`'s decomposition, the struct its `into_components` returns; not a production",
+  ),
+  (
+    "TypedValueComponents",
+    "`TypedValue`'s decomposition, the struct its `into_components` returns; not a production",
   ),
 ];
 

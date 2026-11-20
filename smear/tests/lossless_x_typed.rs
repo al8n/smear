@@ -3,7 +3,7 @@
 //! Two halves. The **shaped** half, first, is one test per grammar area, each walking a real tree
 //! through the wrappers rather than through
 //! [`SyntaxNode`](smear::parser::graphqlx::lossless::SyntaxNode). The **totality** half, from
-//! [`the_probe_table_is_exactly_the_shipped_inventory`] on, sweeps all 77 wrappers and all 326
+//! [`the_probe_table_is_exactly_the_shipped_inventory`] on, sweeps all 79 wrappers and all 355
 //! getters over the shared corpus and answers five questions the shaped half cannot: whether the
 //! probe table still matches what the crate ships, whether every getter ever *projected* anything,
 //! whether every getter's name states the kind it projects, whether each node kind casts to exactly
@@ -58,9 +58,9 @@ use smear::parser::graphqlx::{
       ObjectField, ObjectTypeDefinition, ObjectTypeExtension, ObjectValue, OperationDefinition,
       Path, RootOperationTypeDefinition, RootOperationTypesDefinition, ScalarTypeDefinition,
       ScalarTypeExtension, SchemaDefinition, SchemaExtension, SelectionSet, SetValue, StringValue,
-      TypeCondition, TypeGenerics, TypePath, TypeSystemDocument, UnionMemberTypes,
-      UnionTypeDefinition, UnionTypeExtension, UseDefinition, UseTree, VariableDefinition,
-      VariableValue, VariablesDefinition, WhereClause, WherePredicate,
+      TypeCondition, TypeGenerics, TypePath, TypeSystemDocument, TypedObjectValue, TypedValue,
+      UnionMemberTypes, UnionTypeDefinition, UnionTypeExtension, UseDefinition, UseTree,
+      VariableDefinition, VariableValue, VariablesDefinition, WhereClause, WherePredicate,
     },
     generic::test_support::{
       parse_definition_type_generics, parse_executable_definition_type_generics,
@@ -69,7 +69,7 @@ use smear::parser::graphqlx::{
     parse_document, parse_executable_document, parse_type_system_document,
     selection::test_support::parse_selection_set,
     ty::test_support::parse_type_ref,
-    value::test_support::parse_value,
+    value::test_support::{parse_schema_value, parse_value},
   },
 };
 
@@ -204,6 +204,51 @@ fn a_char_value_is_its_own_kind_beside_a_string() {
   assert_eq!(
     texts!(entry.char_values()),
     vec!["'k'".to_string(), "'v'".to_string()]
+  );
+}
+
+#[test]
+fn a_typed_form_is_its_own_kind_beside_an_object() {
+  // `P { x: 1 }` and `{ x: 2 }` are both brace-delimited field lists, and `U("s")` holds one value
+  // as a default does, so a getter that projected the neighbouring kind would answer the other one
+  // in every position below. A schema position, the one that reads typed forms.
+  let parse = parse_schema_value("[P { x: 1 }, { x: 2 }, U(\"s\"), map!{ U(1) => Q<i32> {} }]");
+  assert!(
+    !parse.has_errors(),
+    "the typed-form fixture must parse clean"
+  );
+  let root = parse.syntax();
+
+  let typed_object: TypedObjectValue = first(&root);
+  assert!(ObjectValue::cast_node(typed_object.syntax().clone()).is_none());
+  assert_eq!(node_text!(typed_object.type_path()), Some("P ".to_string()));
+  assert_eq!(
+    texts!(typed_object.object_fields()),
+    vec!["x: 1".to_string()]
+  );
+
+  let typed_value: TypedValue = first(&root);
+  assert_eq!(node_text!(typed_value.type_path()), Some("U".to_string()));
+  assert_eq!(
+    node_text!(typed_value.string_value()),
+    Some("\"s\"".to_string())
+  );
+  assert!(typed_value.enum_value().is_none());
+
+  let list: ListValue = first(&root);
+  assert_eq!(
+    texts!(list.typed_object_values()),
+    vec!["P { x: 1 }".to_string()]
+  );
+  assert_eq!(texts!(list.object_values()), vec!["{ x: 2 }".to_string()]);
+  assert_eq!(texts!(list.typed_values()), vec!["U(\"s\")".to_string()]);
+
+  // Both halves of an entry are values, so each typed form comes back through its plural getter.
+  let entry: MapEntry = first(&root);
+  assert_eq!(texts!(entry.typed_values()), vec!["U(1)".to_string()]);
+  assert_eq!(
+    texts!(entry.typed_object_values()),
+    vec!["Q<i32> {}".to_string()]
   );
 }
 
@@ -813,7 +858,7 @@ impl Projection {
   }
 }
 
-/// Something a getter can project — one of the 77 wrappers, or a token.
+/// Something a getter can project — one of the 79 wrappers, or a token.
 ///
 /// The trait exists for its two associated functions: an element type knows whether its getters
 /// look at a node's *children* or at its *tokens*, and therefore what the kind-blind rival on that
@@ -855,12 +900,12 @@ impl Element for SyntaxToken {
   }
 }
 
-/// The node-side rival for [`Element::rival_one`], shared by all 77 wrappers.
+/// The node-side rival for [`Element::rival_one`], shared by all 79 wrappers.
 fn first_child_node(parent: &SyntaxNode) -> Projection {
   Projection::One(parent.children().next().map(|n| span_of(n.text_range())))
 }
 
-/// The node-side rival for [`Element::rival_many`], shared by all 77 wrappers.
+/// The node-side rival for [`Element::rival_many`], shared by all 79 wrappers.
 fn all_child_nodes(parent: &SyntaxNode) -> Projection {
   let spans: Vec<Span> = parent.children().map(|n| span_of(n.text_range())).collect();
   Projection::Many(spans.len(), spans.first().copied())
@@ -978,31 +1023,40 @@ wrapper_table! {
   ListValue {
     many variable_values, many int_values, many float_values, many string_values,
     many boolean_values, many null_values, many enum_values, many list_values, many set_values,
-    many map_values, many object_values, many char_values,
+    many map_values, many object_values, many char_values, many typed_object_values,
+    many typed_values,
   }
   SetValue {
     many variable_values, many int_values, many float_values, many string_values,
     many boolean_values, many null_values, many enum_values, many list_values, many set_values,
-    many map_values, many object_values, many char_values,
+    many map_values, many object_values, many char_values, many typed_object_values,
+    many typed_values,
   }
   MapValue { many map_entries }
   MapEntry {
     many variable_values, many int_values, many float_values, many string_values,
     many boolean_values, many null_values, many enum_values, many list_values, many set_values,
-    many map_values, many object_values, many char_values,
+    many map_values, many object_values, many char_values, many typed_object_values,
+    many typed_values,
   }
   ObjectValue { many object_fields }
   ObjectField {
     tok name, opt variable_value, opt int_value, opt float_value, opt string_value,
     opt boolean_value, opt null_value, opt enum_value, opt list_value, opt set_value,
-    opt map_value, opt object_value, opt char_value,
+    opt map_value, opt object_value, opt char_value, opt typed_object_value, opt typed_value,
   }
   DefaultValue {
     opt variable_value, opt int_value, opt float_value, opt string_value, opt boolean_value,
     opt null_value, opt enum_value, opt list_value, opt set_value, opt map_value,
-    opt object_value, opt char_value,
+    opt object_value, opt char_value, opt typed_object_value, opt typed_value,
   }
   CharValue { tok char_token }
+  TypedObjectValue { opt type_path, many object_fields }
+  TypedValue {
+    opt type_path, opt variable_value, opt int_value, opt float_value, opt string_value,
+    opt boolean_value, opt null_value, opt enum_value, opt list_value, opt set_value,
+    opt map_value, opt object_value, opt char_value, opt typed_object_value, opt typed_value,
+  }
   Path { toks names, toks separators, tok tilde_token, tok caret_token, toks dot_dot_tokens }
   TypeGenerics { many definition_type_paths, many list_types }
   DefinitionTypePath { opt path, opt type_generics, tok bang_token }
@@ -1011,7 +1065,7 @@ wrapper_table! {
   Argument {
     tok name, opt variable_value, opt int_value, opt float_value, opt string_value,
     opt boolean_value, opt null_value, opt enum_value, opt list_value, opt set_value,
-    opt map_value, opt object_value, opt char_value,
+    opt map_value, opt object_value, opt char_value, opt typed_object_value, opt typed_value,
   }
   Arguments { many arguments }
   Directive { opt type_path, opt arguments }
@@ -1217,7 +1271,7 @@ impl Registry {
 
   /// Parse one source through all three roots and probe every tree.
   ///
-  /// All three, because `parse_document` reaches 75 of the 77 wrappers structurally:
+  /// All three, because `parse_document` reaches 77 of the 79 wrappers structurally:
   /// [`ExecutableDocument`] and [`TypeSystemDocument`] are *roots*, and a parse has one. Driving
   /// the other two over the same bytes is what gate 3 does for the same reason.
   fn sweep_source(&mut self, src: &str) {
@@ -1295,11 +1349,11 @@ fn corpus() -> Vec<(String, String)> {
 
 /// Sources this gate adds on top of the corpus, and what each one is for.
 ///
-/// The corpus reaches **every one of the 77 wrappers** on its own and calls all 326 getters, but 61
+/// The corpus reaches **every one of the 79 wrappers** on its own and calls all 355 getters, but 77
 /// of those getters had nothing to project from it: a getter is only exercised by a document that
 /// writes the shape it reaches for, and no corpus entry writes a float inside a set, a map on both
 /// halves of a map entry, a description on a scalar, a `where` on an extension, a directive
-/// definition's own directives, or most kinds of item inside a module. These six are that
+/// definition's own directives, or most kinds of item inside a module. These seven are that
 /// complement and nothing else — they were written against the measured list in
 /// [`CORPUS_CANNOT_PROJECT`], which is what keeps them honest, and
 /// [`every_added_source_earns_its_place`] leaves each of them out in turn to check it is still the
@@ -1311,7 +1365,7 @@ fn corpus() -> Vec<(String, String)> {
 const FIXTURES: &[(&str, &str)] = &[
   // Every value kind in every value position the grammar has: a variable's default, a list's
   // members, a set's members, both halves of a map entry, and an object's fields. The corpus writes
-  // integers, strings and objects freely and almost nothing else, so 33 of the 61 gaps below are
+  // integers, strings and objects freely and almost nothing else, so 32 of the 77 gaps below are
   // here.
   (
     "every_value_kind_in_every_value_position",
@@ -1361,6 +1415,17 @@ const FIXTURES: &[(&str, &str)] = &[
   (
     "a_directive_definition_with_its_own_directives",
     "directive @dd(x: Int) @d(y: 1) repeatable on FIELD | DIRECTIVE_DEFINITION",
+  ),
+  // Every value kind a typed value can hold, and both typed forms in a set and in a map entry: the
+  // corpus's typed values hold strings, and its sets and maps hold no typed form.
+  (
+    "every_value_kind_in_a_typed_value_and_a_typed_form_in_every_collection",
+    "input I { \
+     a: T = W(1) b: T = W(1.5) c: T = W(true) d: T = W(null) e: T = W(EV) f: T = W([1]) \
+     g: T = W(set!{ 1 }) h: T = W(map!{ 1 => 2 }) i: T = W({k: 1}) j: T = W('c') \
+     k: T = W(P { x: 1 }) l: T = W(U(1)) \
+     m: T = set!{ P { x: 1 } U(1) } n: T = map!{ P { x: 1 } => U(1) } \
+     }",
   ),
   // Every item kind a module's body holds and the corpus never puts in one — four type
   // definitions, a directive definition, a schema, and seven of the eight extensions — beside a
@@ -1430,7 +1495,7 @@ struct SourceGetter {
   target: String,
 }
 
-/// The ten files the 77 `ast_node!` invocations live in.
+/// The ten files the 79 `ast_node!` invocations live in.
 ///
 /// Ten and not the GraphQL twin's seven: this dialect puts the eight type-system extensions in
 /// `extension.rs` and the generic machinery in `generic.rs`, and adds `use_tree.rs` for a
@@ -1660,7 +1725,7 @@ fn listed<T: core::fmt::Debug>(items: impl IntoIterator<Item = T>) -> String {
 
 /// Getters whose name is not the plain snake of the kind they project, with that projection pinned.
 ///
-/// Twenty-one of 326, in two classes.
+/// Twenty-one of 355, in two classes.
 ///
 /// **Role-named, twenty.** Each names a position the grammar has and the kind space does not.
 /// Fifteen are `description`: divergence 12 removed GraphQL's `Description` node, so a description
@@ -1732,13 +1797,13 @@ fn the_probe_table_is_exactly_the_shipped_inventory() {
   // every comparison below vacuous, so the counts are pinned before they are used.
   assert_eq!(
     shipped.len(),
-    326,
-    "the wrapper sources should declare 326 getters"
+    355,
+    "the wrapper sources should declare 355 getters"
   );
   let shipped_wrappers: BTreeSet<&str> = shipped.iter().map(|g| g.wrapper.as_str()).collect();
-  assert_eq!(shipped_wrappers.len(), 77, "…over 77 wrappers");
-  assert_eq!(DECLARED.len(), 326, "the table declares 326 getters");
-  assert_eq!(TABLE_WRAPPERS.len(), 77, "…over 77 wrappers");
+  assert_eq!(shipped_wrappers.len(), 79, "…over 79 wrappers");
+  assert_eq!(DECLARED.len(), 355, "the table declares 355 getters");
+  assert_eq!(TABLE_WRAPPERS.len(), 79, "…over 79 wrappers");
 
   let table: BTreeSet<(&str, &str, &str)> = DECLARED.iter().copied().collect();
   assert_eq!(table.len(), DECLARED.len(), "the table repeats an entry");
@@ -1770,7 +1835,7 @@ fn every_getter_is_named_for_what_it_projects() {
   // The defect this catches is the one no other gate can see: a getter aimed at a **plausible
   // neighbour** — `interface_type_definitions: many ObjectTypeDefinition` — which compiles,
   // navigates, answers `Some`, round-trips and keeps every byte. Only the name disagrees with the
-  // kind, so the name is what has to be checked, for all 326 rather than for the handful a fixture
+  // kind, so the name is what has to be checked, for all 355 rather than for the handful a fixture
   // happens to count.
   let mut pinned: BTreeSet<(String, String, String, String)> = NAME_EXCEPTIONS
     .iter()
@@ -1937,7 +2002,7 @@ fn every_wrapper_casts_from_a_real_parse() {
      their kind being misspelled:{}",
     listed(reg.uncast())
   );
-  assert_eq!(reg.casts.len(), 77);
+  assert_eq!(reg.casts.len(), 79);
 }
 
 #[test]
@@ -1954,13 +2019,13 @@ fn every_getter_is_called_and_projects_something() {
      from a getter pointed at a kind that cannot occur:{}",
     listed(reg.unanswered())
   );
-  assert_eq!(reg.getters.len(), 326);
+  assert_eq!(reg.getters.len(), 355);
 }
 
 #[test]
 fn each_node_kind_casts_to_exactly_the_wrapper_that_names_it() {
   // The near-neighbour decline, made total. The shaped half above asserts it for the sharpest pairs
-  // by hand; this asserts it for every kind against all 77 wrappers at once, and it is the check a
+  // by hand; this asserts it for every kind against all 79 wrappers at once, and it is the check a
   // wrapper pointed at a *neighbouring* kind fails — that wrapper then accepts a node another
   // wrapper already answers for, and the row carries two names instead of one.
   let reg = sweep_everything();
@@ -2003,8 +2068,8 @@ fn each_node_kind_casts_to_exactly_the_wrapper_that_names_it() {
     "no Gap token occurred in the whole sweep, so the assertion above is about nothing"
   );
 
-  // 77 wrappers plus `Root` and `Error`; `Gap` is excluded by the assertion above.
-  assert_eq!(checked, 79);
+  // 79 wrappers plus `Root` and `Error`; `Gap` is excluded by the assertion above.
+  assert_eq!(checked, 81);
 }
 
 /// Every getter the shared corpus alone calls but never gives anything to project.
@@ -2014,14 +2079,15 @@ fn each_node_kind_casts_to_exactly_the_wrapper_that_names_it() {
 /// write a set of floats would make one fixture redundant, and nothing would say so —
 /// [`every_added_source_earns_its_place`] is the other half of that guard.
 ///
-/// Note what is *not* here. The corpus reaches all 77 wrappers and calls all 326 getters on its
+/// Note what is *not* here. The corpus reaches all 79 wrappers and calls all 355 getters on its
 /// own; every entry below is a getter with a node to run on and nothing in it to find, which is a
 /// statement about what GraphQLx the corpus writes rather than about what the typed layer can
 /// reach.
 ///
-/// 33 of the 61 are a value kind in a value position (the corpus writes integers, strings and
+/// 49 of the 77 are a value kind in a value position (the corpus writes integers, strings and
 /// objects and little else, so `set`, `map`, floats, booleans, `null`, enums and variables are
-/// missing from most positions), and 2 are a list type where the corpus only ever writes a path
+/// missing from most positions, and a typed value holds only a string there, and a set and a map
+/// entry no typed form), and 2 are a list type where the corpus only ever writes a path
 /// type — a generic parameter's default and an argument's type. 7 are a description on a
 /// definition the corpus never describes. 6 are clauses no corpus entry writes on the definition
 /// that carries them: a directive definition's own directives, an interface's and an operation's
@@ -2033,7 +2099,6 @@ const CORPUS_CANNOT_PROJECT: &[(&str, &str)] = &[
   ("DefaultValue", "float_value"),
   ("DefaultValue", "map_value"),
   ("DefaultValue", "null_value"),
-  ("DefaultValue", "object_value"),
   ("DefaultValue", "set_value"),
   ("DefaultValue", "string_value"),
   ("DefinitionTypeParam", "list_type"),
@@ -2057,6 +2122,8 @@ const CORPUS_CANNOT_PROJECT: &[(&str, &str)] = &[
   ("MapEntry", "float_values"),
   ("MapEntry", "map_values"),
   ("MapEntry", "null_values"),
+  ("MapEntry", "typed_object_values"),
+  ("MapEntry", "typed_values"),
   ("ModDefinition", "directive_definitions"),
   ("ModDefinition", "directive_extensions"),
   ("ModDefinition", "enum_type_definitions"),
@@ -2089,6 +2156,21 @@ const CORPUS_CANNOT_PROJECT: &[(&str, &str)] = &[
   ("SetValue", "object_values"),
   ("SetValue", "set_values"),
   ("SetValue", "string_values"),
+  ("SetValue", "typed_object_values"),
+  ("SetValue", "typed_values"),
+  ("TypedValue", "boolean_value"),
+  ("TypedValue", "char_value"),
+  ("TypedValue", "enum_value"),
+  ("TypedValue", "float_value"),
+  ("TypedValue", "int_value"),
+  ("TypedValue", "list_value"),
+  ("TypedValue", "map_value"),
+  ("TypedValue", "null_value"),
+  ("TypedValue", "object_value"),
+  ("TypedValue", "set_value"),
+  ("TypedValue", "typed_object_value"),
+  ("TypedValue", "typed_value"),
+  ("TypedValue", "variable_value"),
   ("UnionTypeDefinition", "description"),
 ];
 
@@ -2140,7 +2222,9 @@ fn every_fixture_is_a_document_the_suite_accepts() {
 /// A list wrapper's children are all of one kind by construction — a `FieldsDefinition` holds
 /// `FieldDefinition`s and nothing else — so on every valid document `field_definitions()` and "hand
 /// back every child node" are the same function. Recovery is the only thing that ever puts a
-/// foreign child in such a list, and these eight are where it does.
+/// foreign child in such a list, and these eight are where it does. A ninth is malformed for
+/// another property: a variable in a typed value, which a schema position reports and still
+/// builds, so the typed value's `variable_value` has something to answer.
 ///
 /// **They are eight and not twenty-three because that is what was measured**, and
 /// [`every_added_source_earns_its_place`] re-measures it every run. Twenty-three malformed shapes
@@ -2194,6 +2278,9 @@ const RECOVERY_FIXTURES: &[(&str, &str)] = &[
     "a_variables_definition_with_a_hole",
     "query Q($a: Int * $b: Int) { f }",
   ),
+  // Not a hole: a variable in a typed value, which a schema position reports and still builds, so
+  // the one getter no valid document can answer has a tree to answer from.
+  ("a_variable_in_a_typed_value", "input I { a: T = W($v) }"),
 ];
 
 #[test]
@@ -2230,7 +2317,7 @@ fn every_added_source_earns_its_place() {
      already have — either the corpus grew into their shape or they were never needed:{}",
     listed(freeloaders)
   );
-  assert_eq!(sources.len(), 14);
+  assert_eq!(sources.len(), 16);
 }
 
 #[test]
@@ -2290,17 +2377,17 @@ fn every_recovery_fixture_really_is_malformed() {
 
 /// The getters no tree this gate sweeps ever separates from a kind-blind rival, and why.
 ///
-/// 47 of 326. Every other getter is **measured** to answer differently, at least once, from a
+/// 49 of 355. Every other getter is **measured** to answer differently, at least once, from a
 /// getter of the same arity that ignored kinds entirely — the property that makes this sweep's
 /// fixtures worth anything: over `"{ a }"` a `cast::child` is indistinguishable from "take the
 /// first child", and a suite built out of fixtures like that reports full coverage of a layer it
 /// never tested.
 ///
-/// The 47 fall into four shapes, and none of them is a weak fixture:
+/// The 49 fall into four shapes, and none of them is a weak fixture:
 ///
-/// - **The wanted child is always the node's first, 28.** Every `definition_name`, every
-///   `extension_name`, every `type_path` and every `path` opens its parent, and a `use` item's tree
-///   is the only node it holds. See the finding below.
+/// - **The wanted child is always the node's first, 30.** Every `definition_name`, every
+///   `extension_name`, every `type_path` and every `path` opens its parent — a typed form's type
+///   path among them — and a `use` item's tree is the only node it holds. See the finding below.
 /// - **The wanted token is always the node's first, 8.** An `Alias` is `name :`, an `Argument` is
 ///   `name : value`, a `DefinitionName` is `Name <A>`, a `UseDefinition` is `use UseTree`. "The
 ///   first token" and "the `Name` token" are the same token in every tree the grammar builds.
@@ -2314,7 +2401,7 @@ fn every_recovery_fixture_really_is_malformed() {
 /// # The finding: this census is **larger** than the GraphQL twin's, and the design predicted the
 /// opposite
 ///
-/// GraphQL pins 24 of 210, 11.4%. This pins 47 of 326, 14.4% — more, absolutely and
+/// GraphQL pins 24 of 210, 11.4%. This pins 49 of 355, 13.8% — more, absolutely and
 /// proportionally. The design expected fewer, on the reasoning that divergences 1, 2, 10 and 11
 /// replace single-token positions with paths and generics lists, so nodes that held exactly one
 /// child over there hold structure here. **That reasoning has the direction backwards**, and the
@@ -2376,6 +2463,8 @@ const UNDISCRIMINATED: &[(&str, &str)] = &[
   ("StringValue", "string_token"),
   ("TypeCondition", "type_path"),
   ("TypePath", "path"),
+  ("TypedObjectValue", "type_path"),
+  ("TypedValue", "type_path"),
   ("UnionMemberTypes", "type_paths"),
   ("UnionTypeDefinition", "definition_name"),
   ("UnionTypeExtension", "extension_name"),
@@ -2407,7 +2496,7 @@ fn every_getter_but_these_answers_differently_from_a_kind_blind_rival() {
   );
   assert_eq!(
     DECLARED.len() - undiscriminated.len(),
-    279,
-    "279 of the 326 getters are proved to beat a kind-blind rival"
+    306,
+    "306 of the 355 getters are proved to beat a kind-blind rival"
   );
 }

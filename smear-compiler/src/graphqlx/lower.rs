@@ -1857,6 +1857,13 @@ impl Lowering<'_, '_, '_> {
           self.unknown(source, span);
           RawKind::Refused
         }
+        // A typed form is a value lowering does not read yet either: reported once for the source,
+        // at the form, and lowered as one refused node whatever it holds. What it holds is not in
+        // the model, so `held` answers none for it and nothing of it is entered.
+        ConstInputValue::TypedObject(_) | ConstInputValue::Typed(_) => {
+          self.unknown(source, span);
+          RawKind::Refused
+        }
         ConstInputValue::List(_) => RawKind::List,
         ConstInputValue::Set(_) => RawKind::Set,
         ConstInputValue::Map(_) => RawKind::Map,
@@ -1907,7 +1914,9 @@ impl Lowering<'_, '_, '_> {
         | ConstInputValue::Int(_)
         | ConstInputValue::Enum(_)
         | ConstInputValue::Null(_)
-        | ConstInputValue::Char(_) => {}
+        | ConstInputValue::Char(_)
+        | ConstInputValue::TypedObject(_)
+        | ConstInputValue::Typed(_) => {}
       }
     }
     if let Some(count) = charged {
@@ -2780,7 +2789,9 @@ fn held<S>(value: &ConstInputValue<S>, index: usize) -> Option<&ConstInputValue<
     | ConstInputValue::Int(_)
     | ConstInputValue::Enum(_)
     | ConstInputValue::Null(_)
-    | ConstInputValue::Char(_) => None,
+    | ConstInputValue::Char(_)
+    | ConstInputValue::TypedObject(_)
+    | ConstInputValue::Typed(_) => None,
   }
 }
 

@@ -284,6 +284,11 @@ pub(crate) const LIST_CLOSER_HEADS: &[Kind] = &[Kind::RBracket];
 /// The `>` a generic list closes with, reported as [`PARENS_CLOSER_HEADS`] is.
 pub(crate) const ANGLE_CLOSER_HEADS: &[Kind] = &[Kind::RAngle];
 
+/// The two brackets a typed form opens with after its type path: `{` for a typed object and `(`
+/// for a typed value. What a schema value reports as expected where type arguments are followed by
+/// neither.
+pub(crate) const TYPED_FORM_HEADS: &[Kind] = &[Kind::LBrace, Kind::LParen];
+
 /// Whether `kind` can begin a value.
 ///
 /// [`VALUE_HEADS`] as a predicate. The two are kept in step by

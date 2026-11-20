@@ -1,0 +1,5 @@
+input Lists {
+  shapes: Shapes = [Circle { r: 1 }, Square { s: 2 }]
+  links: Links = [Url("a") Url("b")]
+  one: One = [RED {a: 1}]
+}

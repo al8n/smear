@@ -13,7 +13,8 @@
 //!
 //! - the **value** cycle absorbs two more containers — `set!{ … }` and `map!{ k => v }` — and a
 //!   map entry is the one place a single child slot yields *two* subtrees, so it nests through its
-//!   key as well as through its value;
+//!   key as well as through its value; and in a schema position it absorbs the two typed forms,
+//!   `P { a: … }` and `U( … )`, each a frame of its own;
 //! - the **type** cycle absorbs what GraphQL splits off as a `NonNullType` wrapper (the `!` is a
 //!   token here) and gains one shape of its own: a path's **generic arguments**, which nest without
 //!   passing through a bracket at all;
@@ -311,6 +312,26 @@ fn a_map_values_key_half_projects_flat() {
   assert_projection_is_flat("const_value / map key", false, |depth| {
     constant(&nested_value(depth, |inner| {
       std::format!("map!{{ {inner} => 2 }}")
+    }))
+  });
+}
+
+/// `U(U( … ))` — a typed value in a typed value, a schema position's own, whose frame holds the
+/// type path while the one value is built below.
+#[test]
+fn a_typed_value_projects_flat() {
+  assert_projection_is_flat("const_value / typed value", false, |depth| {
+    constant(&nested_value(depth, |inner| std::format!("U({inner})")))
+  });
+}
+
+/// `P {a: P {a: … }}` — a typed object as a typed object's field, a schema position's own, whose
+/// frame holds the type path and the fields finished so far.
+#[test]
+fn a_typed_object_projects_flat() {
+  assert_projection_is_flat("const_value / typed object", false, |depth| {
+    constant(&nested_value(depth, |inner| {
+      std::format!("P {{a: {inner}}}")
     }))
   });
 }

@@ -451,6 +451,62 @@ fn a_schema_position_reads_what_a_constant_one_reads() {
 }
 
 #[test]
+fn a_schema_position_reads_the_typed_forms_and_a_constant_one_does_not() {
+  let object = drive_str(ast::ConstInputValue::graphqlx_schema, "P { x: 1 }").expect("an object");
+  let ast::ConstInputValue::TypedObject(object) = &object else {
+    panic!("a path before `{{` is a typed object: {object:?}")
+  };
+  assert_eq!(object.fields().len(), 1);
+  assert!(object.ty().type_generics().is_none());
+  assert_eq!(*object.span(), SimpleSpan::new(0, 10));
+  assert_eq!(*object.ty().span(), SimpleSpan::new(0, 1));
+
+  let generic = drive_str(ast::ConstInputValue::graphqlx_schema, "Box<i32> {}").expect("an object");
+  let ast::ConstInputValue::TypedObject(generic) = &generic else {
+    panic!("type arguments and then `{{` are a typed object: {generic:?}")
+  };
+  assert!(generic.fields().is_empty());
+  assert_eq!(*generic.ty().span(), SimpleSpan::new(0, 8));
+  assert_eq!(*generic.span(), SimpleSpan::new(0, 11));
+
+  let value = drive_str(ast::ConstInputValue::graphqlx_schema, "Url(\"x\")").expect("a value");
+  let ast::ConstInputValue::Typed(value) = &value else {
+    panic!("a path before `(` is a typed value: {value:?}")
+  };
+  assert!(matches!(value.value(), ast::ConstInputValue::String(_)));
+  assert_eq!(*value.span(), SimpleSpan::new(0, 8));
+
+  // The corner: a name and then an object are one typed object in a schema position's list, and
+  // two elements in an executable document's.
+  let schema = drive_str(ast::ConstInputValue::graphqlx_schema, "[RED {a: 1}]").expect("a list");
+  let ast::ConstInputValue::List(schema) = &schema else {
+    panic!("a list: {schema:?}")
+  };
+  assert_eq!(schema.values().len(), 1);
+  assert!(matches!(
+    schema.values()[0],
+    ast::ConstInputValue::TypedObject(_)
+  ));
+  let constant = drive_str(ast::ConstInputValue::graphqlx, "[RED {a: 1}]").expect("a list");
+  let ast::ConstInputValue::List(constant) = &constant else {
+    panic!("a list: {constant:?}")
+  };
+  assert_eq!(constant.values().len(), 2);
+  assert!(matches!(
+    constant.values()[0],
+    ast::ConstInputValue::Enum(_)
+  ));
+
+  // `set` with no `!` is a path, so it names a typed object's type here.
+  assert!(matches!(
+    drive_str(ast::ConstInputValue::graphqlx_schema, "set { a: 1 }").expect("an object"),
+    ast::ConstInputValue::TypedObject(_)
+  ));
+  // Type arguments that open neither bracket are refused.
+  assert!(drive_str(ast::ConstInputValue::graphqlx_schema, "Box<i32> 1").is_err());
+}
+
+#[test]
 fn public_value_composition_parsers_and_direct_apis_are_source_generic() {
   fn check_set<S: AsRef<[u8]>>(value: ast::Set<S>) {
     assert_eq!(value.values().len(), 1);

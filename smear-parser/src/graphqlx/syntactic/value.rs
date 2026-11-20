@@ -9,14 +9,24 @@
 //! and adding `set` and `map` collection values and a `char` literal, `'a'`,
 //! which every value grammar reads where GraphQL reads a scalar.
 //!
+//! A schema position, a constant position of a type-system definition or extension, reads two
+//! forms more. A path followed by `{` is a typed object, `Point { x: 1 }`, and a path followed by
+//! `(` is a typed value, `Url("x")`, each with type arguments between when `<` follows the path.
+//! So in a schema position `set { a: 1 }` is a typed object whose type is named `set`, and
+//! `[RED {a: 1}]` is a list of one element. An executable document reads neither form, and there
+//! the same texts are a path and then an object.
+//!
 //! See the [GraphQL Input Values specification](https://spec.graphql.org/draft/#sec-Input-Values).
+
+use std::boxed::Box;
 
 use tokora::{
   Accumulator, Action, EmitterView, Lexer, ParseAttempt, ParseInput, ParseTokenChoice, SimpleSpan,
   Slice, Source, Token, TryParseInput,
   cache::{Peeked, PeekedTokenExt},
+  combinator::parens,
   span::Spanned,
-  utils::{DowncastRef, typenum::U1},
+  utils::{DowncastRef, IntoComponents, typenum::U1},
 };
 
 use smear_lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
@@ -32,8 +42,8 @@ use crate::{
     ast::{
       BooleanValue, CharValue, ConstInputValue, ConstList, ConstMap, ConstMapEntry, ConstObject,
       ConstObjectField, ConstSet, DefaultInputValue, EnumValue, FloatValue, InlineStringValue,
-      InputValue, IntValue, List, Map, MapEntry, NullValue, Object, ObjectField, Set, StringValue,
-      VariableValue,
+      InputValue, IntValue, List, Map, MapEntry, Nest, NullValue, Object, ObjectField, Set,
+      StringValue, TypePath, TypedObjectValue, TypedValue, VariableValue,
     },
     error::{Expectation, GraphqlxError as DialectGraphqlxError},
   },
@@ -83,6 +93,29 @@ macro_rules! value_parser {
       ],
       $body
     );
+  };
+  // A body written once for an executable document's constant positions and a schema position's,
+  // generic over the constant that says which: `false` for the first, `true` for the second.
+  (@schema_generic $(#[$meta:meta])* $name:ident, $input:ident, $output:ty, $body:block) => {
+    $(#[$meta])*
+    fn $name<'inp, Src, Ctx, const SCHEMA: bool>(
+      $input: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+    ) -> Result<$output, GraphqlxError<'inp, Src, Ctx>>
+    where
+      Src: Source<usize> + ?Sized,
+      GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+      GraphqlxToken<'inp, Src>:
+        Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
+      GraphqlxLexer<'inp, Src>: Lexer<
+        'inp,
+        Source = Src,
+        Token = GraphqlxToken<'inp, Src>,
+        Span = SimpleSpan,
+        Offset = usize,
+      >,
+      Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+      GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+    $body
   };
   (
     @impl $(#[$meta:meta])* $visibility:vis $name:ident,
@@ -536,8 +569,18 @@ value_parser!(
   inp,
   ConstList<GraphqlxSlice<'inp, Src>>,
   [complex],
+  { const_list_body::<Src, Ctx, false>(inp) }
+);
+
+value_parser!(
+  @schema_generic
+  /// The list both constant grammars read, its elements read by the grammar `SCHEMA` names.
+  #[inline(always)]
+  const_list_body,
+  inp,
+  ConstList<GraphqlxSlice<'inp, Src>>,
   {
-  (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| const_value(inp))
+  (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| const_member::<Src, Ctx, SCHEMA>(inp))
     .repeated_while::<_, U1>(decide_const_value_head::<_, Ctx>)
     .delimited_by_brackets()
     .collect_with(Default::default())
@@ -545,6 +588,15 @@ value_parser!(
     .parse_input(inp)
     .map(|Spanned { span, data }| ConstList::new(span, data))
   }
+);
+
+value_parser!(
+  /// A list in a schema position, whose elements are schema values.
+  schema_list_value,
+  inp,
+  ConstList<GraphqlxSlice<'inp, Src>>,
+  [complex],
+  { const_list_body::<Src, Ctx, true>(inp) }
 );
 
 value_parser!(
@@ -579,14 +631,33 @@ value_parser!(
   inp,
   ConstObjectField<GraphqlxSlice<'inp, Src>>,
   [complex],
+  { const_object_field_body::<Src, Ctx, false>(inp) }
+);
+
+value_parser!(
+  @schema_generic
+  /// The object field both constant grammars read, its value read by the grammar `SCHEMA` names.
+  #[inline(always)]
+  const_object_field_body,
+  inp,
+  ConstObjectField<GraphqlxSlice<'inp, Src>>,
   {
   super::name
     .then_ignore(colon)
-    .then(const_value)
+    .then(const_member::<Src, Ctx, SCHEMA>)
     .spanned_trimmed()
     .map(|Spanned { span, data: (name, value) }| ConstObjectField::new(span, name, value))
     .parse_input(inp)
   }
+);
+
+value_parser!(
+  /// An object field in a schema position, whose value is a schema value.
+  schema_object_field,
+  inp,
+  ConstObjectField<GraphqlxSlice<'inp, Src>>,
+  [complex],
+  { const_object_field_body::<Src, Ctx, true>(inp) }
 );
 
 value_parser!(
@@ -622,8 +693,18 @@ value_parser!(
   inp,
   ConstObject<GraphqlxSlice<'inp, Src>>,
   [complex],
+  { const_object_body::<Src, Ctx, false>(inp) }
+);
+
+value_parser!(
+  @schema_generic
+  /// The object both constant grammars read, its fields read by the grammar `SCHEMA` names.
+  #[inline(always)]
+  const_object_body,
+  inp,
+  ConstObject<GraphqlxSlice<'inp, Src>>,
   {
-  (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| const_object_field(inp))
+  (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| const_field_member::<Src, Ctx, SCHEMA>(inp))
     .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
     .delimited_by_braces()
     .collect_with(Default::default())
@@ -631,6 +712,15 @@ value_parser!(
     .parse_input(inp)
     .map(|Spanned { span, data }| ConstObject::new(span, data))
   }
+);
+
+value_parser!(
+  /// An object in a schema position, whose fields hold schema values.
+  schema_object_value,
+  inp,
+  ConstObject<GraphqlxSlice<'inp, Src>>,
+  [complex],
+  { const_object_body::<Src, Ctx, true>(inp) }
 );
 
 value_parser!(
@@ -666,10 +756,20 @@ value_parser!(
   inp,
   ConstMapEntry<GraphqlxSlice<'inp, Src>>,
   [complex],
+  { const_map_entry_body::<Src, Ctx, false>(inp) }
+);
+
+value_parser!(
+  @schema_generic
+  /// The map entry both constant grammars read, its halves read by the grammar `SCHEMA` names.
+  #[inline(always)]
+  const_map_entry_body,
+  inp,
+  ConstMapEntry<GraphqlxSlice<'inp, Src>>,
   {
-    const_value
+    const_member::<Src, Ctx, SCHEMA>
       .then_ignore(fat_arrow)
-      .then(const_value)
+      .then(const_member::<Src, Ctx, SCHEMA>)
       .spanned_trimmed()
       .map(
         |Spanned {
@@ -678,6 +778,55 @@ value_parser!(
          }| ConstMapEntry::new(span, key, value),
       )
       .parse_input(inp)
+  }
+);
+
+value_parser!(
+  /// A map entry in a schema position, whose halves are schema values.
+  schema_map_entry,
+  inp,
+  ConstMapEntry<GraphqlxSlice<'inp, Src>>,
+  [complex],
+  { const_map_entry_body::<Src, Ctx, true>(inp) }
+);
+
+value_parser!(
+  @schema_generic
+  /// A member of a constant aggregate: a value of the executable constant grammar, or of a schema
+  /// position's when `SCHEMA` holds. Always inlined, so a member costs the frames it did when the
+  /// aggregates read the executable constant grammar alone.
+  #[inline(always)]
+  const_member,
+  inp,
+  ConstInputValue<GraphqlxSlice<'inp, Src>>,
+  {
+    if SCHEMA { schema_value(inp) } else { const_value(inp) }
+  }
+);
+
+value_parser!(
+  @schema_generic
+  /// A field of a constant object, in the grammar `SCHEMA` names, under the terms of
+  /// [`const_member`].
+  #[inline(always)]
+  const_field_member,
+  inp,
+  ConstObjectField<GraphqlxSlice<'inp, Src>>,
+  {
+    if SCHEMA { schema_object_field(inp) } else { const_object_field(inp) }
+  }
+);
+
+value_parser!(
+  @schema_generic
+  /// An entry of a constant map, in the grammar `SCHEMA` names, under the terms of
+  /// [`const_member`].
+  #[inline(always)]
+  const_entry_member,
+  inp,
+  ConstMapEntry<GraphqlxSlice<'inp, Src>>,
+  {
+    if SCHEMA { schema_map_entry(inp) } else { const_map_entry(inp) }
   }
 );
 
@@ -731,7 +880,8 @@ where
     .map(|Spanned { span, data }| Set::new(SimpleSpan::new(start, span.end()), data))
 }
 
-fn const_set_after_keyword<'inp, Src, Ctx>(
+/// The `! { … }` of a constant set, its elements read by the grammar `SCHEMA` names.
+fn const_set_after_keyword<'inp, Src, Ctx, const SCHEMA: bool>(
   start: usize,
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<ConstSet<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
@@ -745,7 +895,7 @@ where
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   collection_bang(inp)?;
-  (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| const_value(inp))
+  (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| const_member::<Src, Ctx, SCHEMA>(inp))
     .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
     .delimited_by_braces()
     .collect_with(Default::default())
@@ -777,7 +927,8 @@ where
     .map(|Spanned { span, data }| Map::new(SimpleSpan::new(start, span.end()), data))
 }
 
-fn const_map_after_keyword<'inp, Src, Ctx>(
+/// The `! { … }` of a constant map, its entries read by the grammar `SCHEMA` names.
+fn const_map_after_keyword<'inp, Src, Ctx, const SCHEMA: bool>(
   start: usize,
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<ConstMap<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
@@ -791,7 +942,7 @@ where
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   collection_bang(inp)?;
-  (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| const_map_entry(inp))
+  (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| const_entry_member::<Src, Ctx, SCHEMA>(inp))
     .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
     .delimited_by_braces()
     .collect_with(Default::default())
@@ -924,6 +1075,22 @@ value_parser!(
   inp,
   ConstInputValue<GraphqlxSlice<'inp, Src>>,
   [complex],
+  { const_value_body::<Src, Ctx, false>(inp) }
+);
+
+value_parser!(
+  @schema_generic
+  /// The dispatch both constant grammars read, written once: [`const_value`] is its instance with
+  /// `SCHEMA` false, and [`schema_value`] its instance with `SCHEMA` true.
+  ///
+  /// The schema instance has three outcomes more, each decided after a path by the one token that
+  /// follows it: a typed object, a typed value, and the refusal of type arguments that open
+  /// neither. Always inlined, so each instance is one function and a level of nesting costs the
+  /// frames it did when there was one instance.
+  #[inline(always)]
+  const_value_body,
+  inp,
+  ConstInputValue<GraphqlxSlice<'inp, Src>>,
   {
   let int_head =
     |Spanned { span, data: token }: Spanned<GraphqlxToken<'inp, Src>, SimpleSpan>,
@@ -965,7 +1132,7 @@ value_parser!(
         }
         (GraphqlxToken::<'inp, Src>::Identifier(source), Some(ContextualKeyword::Set)) => {
           if matches!(super::peek_kind(inp)?, Some(SyntacticTokenKind::Bang)) {
-            const_set_after_keyword(span.start(), inp).map(ConstInputValue::Set)
+            const_set_after_keyword::<Src, Ctx, SCHEMA>(span.start(), inp).map(ConstInputValue::Set)
           } else {
             enum_after_first(span.start(), super::ast::Name::new(span, source), inp)
               .map(ConstInputValue::Enum)
@@ -973,7 +1140,7 @@ value_parser!(
         }
         (GraphqlxToken::<'inp, Src>::Identifier(source), Some(ContextualKeyword::Map)) => {
           if matches!(super::peek_kind(inp)?, Some(SyntacticTokenKind::Bang)) {
-            const_map_after_keyword(span.start(), inp).map(ConstInputValue::Map)
+            const_map_after_keyword::<Src, Ctx, SCHEMA>(span.start(), inp).map(ConstInputValue::Map)
           } else {
             enum_after_first(span.start(), super::ast::Name::new(span, source), inp)
               .map(ConstInputValue::Enum)
@@ -997,14 +1164,30 @@ value_parser!(
     ])
     .try_parse_input(inp)?
   {
+    // A path a name began is decided in a schema position by the token after it. Every other value
+    // the dispatch built is the value.
+    ParseAttempt::Accept(ConstInputValue::Enum(value)) if SCHEMA => schema_path_value(value, inp),
     ParseAttempt::Accept(value) => Ok(value),
     ParseAttempt::Decline => match super::peek_kind(inp)? {
-      Some(SyntacticTokenKind::LBracket) => const_list_value(inp).map(ConstInputValue::List),
-      Some(SyntacticTokenKind::LBrace) => const_object_value(inp).map(ConstInputValue::Object),
+      Some(SyntacticTokenKind::LBracket) => {
+        (if SCHEMA { schema_list_value(inp) } else { const_list_value(inp) }).map(ConstInputValue::List)
+      }
+      Some(SyntacticTokenKind::LBrace) => {
+        (if SCHEMA { schema_object_value(inp) } else { const_object_value(inp) })
+          .map(ConstInputValue::Object)
+      }
       Some(SyntacticTokenKind::Char) => char_value(inp).map(ConstInputValue::Char),
       Some(
         SyntacticTokenKind::Tilde | SyntacticTokenKind::DotDot | SyntacticTokenKind::Caret,
-      ) => path(inp).map(|path| ConstInputValue::Enum(EnumValue::new(*path.span(), path))),
+      ) => {
+        let path = path(inp)?;
+        let value = EnumValue::new(*path.span(), path);
+        if SCHEMA {
+          schema_path_value(value, inp)
+        } else {
+          Ok(ConstInputValue::Enum(value))
+        }
+      }
       Some(SyntacticTokenKind::PathSeparator) => leading_path_separator(inp),
       _ => unexpected_here(inp, Expectation::ConstInputValue),
     },
@@ -1012,13 +1195,110 @@ value_parser!(
   }
 );
 
+/// A path at the head of a schema value, decided by the one token after it: `<`, `{` and `(` open a
+/// typed form, and anything else leaves the path the value.
+///
+/// The path's own loop ended on a declined `::`, which left that token staged, so this reads the
+/// staged token and lexes nothing. Inlined into the schema dispatch, and the typed forms are out of
+/// line, so a schema value that is no typed form carries none of their frame.
+#[inline(always)]
+fn schema_path_value<'inp, Src, Ctx>(
+  value: EnumValue<GraphqlxSlice<'inp, Src>>,
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<ConstInputValue<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  match super::peek_kind(inp)? {
+    Some(SyntacticTokenKind::LAngle | SyntacticTokenKind::LBrace | SyntacticTokenKind::LParen) => {
+      typed_form(value.into_components().source, inp)
+    }
+    _ => Ok(ConstInputValue::Enum(value)),
+  }
+}
+
+/// A typed form, from the path that names its type: `Point { x: 1 }`, `Box<i32> {}` or `Url("x")`.
+///
+/// Type arguments come first when `<` follows the path, and then `{` or `(` must: anything else is
+/// refused at the token found. A typed object's fields and a typed value's value are a schema
+/// position's.
+///
+/// Never inlined, and not cold: a schema value that is no typed form carries none of this frame,
+/// and a list of lists costs the native stack what it costs without the typed forms.
+#[inline(never)]
+fn typed_form<'inp, Src, Ctx>(
+  path: super::ast::Path<GraphqlxSlice<'inp, Src>>,
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<ConstInputValue<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  let start = path.span().start();
+  let path_end = path.span().end();
+  let generics = super::ty::try_type_generics(inp)?;
+  let end = generics
+    .as_ref()
+    .map_or(path_end, |generics| generics.span().end());
+  let ty = TypePath::new(SimpleSpan::new(start, end), path, generics);
+  match super::peek_kind(inp)? {
+    Some(SyntacticTokenKind::LBrace) => {
+      (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| schema_object_field(inp))
+        .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
+        .delimited_by_braces()
+        .collect_with(Default::default())
+        .spanned_trimmed()
+        .parse_input(inp)
+        .map(|Spanned { span, data }| {
+          ConstInputValue::TypedObject(Box::new(TypedObjectValue::new(
+            SimpleSpan::new(start, span.end()),
+            ty,
+            data,
+          )))
+        })
+    }
+    Some(SyntacticTokenKind::LParen) => {
+      // Not the `Delimited`'s own span, as `committed_arguments` explains: the trimmed cursor is
+      // the `(`'s own start, and the span since it ends at the `)`.
+      let node_start = inp.cursor_trimmed()?;
+      let parsed = parens::<_, _, _, _, ConstInputValue<GraphqlxSlice<'inp, Src>>, _>(
+        |inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| schema_value(inp),
+      )(inp)?;
+      let (_, _, _, value) = parsed.into_components();
+      let end = inp.span_since_trimmed(&node_start).end();
+      Ok(ConstInputValue::Typed(Nest::new(TypedValue::new(
+        SimpleSpan::new(start, end),
+        ty,
+        value,
+      ))))
+    }
+    _ => unexpected_here(
+      inp,
+      Expectation::Production("`{` or `(` after the type arguments"),
+    ),
+  }
+}
+
 /// Parses a committed GraphQLx value in a schema position: a constant position of a type-system
 /// definition or extension, which is a member's default and an argument of each directive such a
 /// definition applies.
 ///
-/// Every form [`const_value`] reads is a value here, and an executable document's constant
-/// positions read [`const_value`] alone.
-#[inline(always)]
+/// Every form [`const_value`] reads is a value here, and two more. A path followed by `{` is a typed
+/// object, `Point { x: 1 }`, and a path followed by `(` is a typed value, `Url("x")`, each with type
+/// arguments between when `<` follows the path, as in `Box<i32> {}`. So `[RED {a: 1}]` is one
+/// typed object here, where an executable document reads an enum value and an object. An
+/// executable document's constant positions read [`const_value`] alone.
 pub fn schema_value<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<ConstInputValue<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
@@ -1031,7 +1311,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  const_value(inp)
+  const_value_body::<Src, Ctx, true>(inp)
 }
 
 /// Attempts an optional GraphQLx default assignment without consuming when
@@ -1054,18 +1334,31 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  let node_start = inp.cursor_trimmed()?;
-  match try_equal(inp)? {
-    ParseAttempt::Accept(_) => {
-      let value = const_value(inp)?;
-      Ok(ParseAttempt::Accept(DefaultInputValue::new(
-        inp.span_since_trimmed(&node_start),
-        value,
-      )))
-    }
-    ParseAttempt::Decline => Ok(ParseAttempt::Decline),
-  }
+  try_default_body::<Src, Ctx, false>(inp)
 }
+
+value_parser!(
+  @schema_generic
+  /// The default assignment both constant grammars read, its value read by the grammar `SCHEMA`
+  /// names.
+  #[inline(always)]
+  try_default_body,
+  inp,
+  ParseAttempt<DefaultInputValue<GraphqlxSlice<'inp, Src>>>,
+  {
+    let node_start = inp.cursor_trimmed()?;
+    match try_equal(inp)? {
+      ParseAttempt::Accept(_) => {
+        let value = const_member::<Src, Ctx, SCHEMA>(inp)?;
+        Ok(ParseAttempt::Accept(DefaultInputValue::new(
+          inp.span_since_trimmed(&node_start),
+          value,
+        )))
+      }
+      ParseAttempt::Decline => Ok(ParseAttempt::Decline),
+    }
+  }
+);
 
 /// Parses an optional GraphQLx default assignment.
 ///
@@ -1093,7 +1386,6 @@ where
 /// by [`schema_value`].
 ///
 /// See [`try_default_value`] and the [GraphQL Input Value Definitions specification](https://spec.graphql.org/draft/#sec-Input-Value-Definitions).
-#[inline(always)]
 pub fn try_schema_default_value<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<ParseAttempt<DefaultInputValue<GraphqlxSlice<'inp, Src>>>, GraphqlxError<'inp, Src, Ctx>>
@@ -1106,13 +1398,12 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  try_default_value(inp)
+  try_default_body::<Src, Ctx, true>(inp)
 }
 
 /// Parses an optional GraphQLx default assignment in a schema position, a member's default.
 ///
 /// See [`try_schema_default_value`] and the [GraphQL Input Value Definitions specification](https://spec.graphql.org/draft/#sec-Input-Value-Definitions).
-#[inline(always)]
 pub fn schema_default_value<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<Option<DefaultInputValue<GraphqlxSlice<'inp, Src>>>, GraphqlxError<'inp, Src, Ctx>>
@@ -1526,7 +1817,7 @@ value_parser!(
         if super::peek_kind(inp)?.is_none() {
           return unexpected_here(inp, Expectation::Bang);
         }
-        const_set_after_keyword(span.start(), inp)
+        const_set_after_keyword::<Src, Ctx, false>(span.start(), inp)
       }
       Some(Spanned { span, data: token }) => {
         unexpected_after_consumed::<Src, Ctx, _>(token, span, Expectation::Keyword("set"))
@@ -1576,7 +1867,7 @@ value_parser!(
         if super::peek_kind(inp)?.is_none() {
           return unexpected_here(inp, Expectation::Bang);
         }
-        const_map_after_keyword(span.start(), inp)
+        const_map_after_keyword::<Src, Ctx, false>(span.start(), inp)
       }
       Some(Spanned { span, data: token }) => {
         unexpected_after_consumed::<Src, Ctx, _>(token, span, Expectation::Keyword("map"))

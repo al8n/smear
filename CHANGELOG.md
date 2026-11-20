@@ -4,6 +4,32 @@ All notable changes to Smear are documented in this file.
 
 ## [Unreleased]
 
+- `smear-parser`!: a GraphQLx schema position reads the typed forms: a path followed by `{` is a
+  typed object, `Point { x: 1 }`, and a path followed by `(` is a typed value, `Url("x")`, each
+  with type arguments between when `<` follows the path, as in `Box<i32> {}`. The next significant
+  token decides, whatever trivia stands before it. An executable document reads neither.
+  - **The AST.** `graphqlx::ast::TypedObjectValue`, its span, its `TypePath` and its fields, and
+    `TypedValue`, its span, its `TypePath` and the one value it ascribes, with their
+    `…Components`; and the variants `ConstInputValue::TypedObject`, behind a `Box`, and
+    `ConstInputValue::Typed`, behind a `Nest`, which holds the value in place in its node so a
+    typed value costs one allocation. The enum stays 96 bytes on a 64-bit target.
+  - **The ranks.** A typed form drops its type path in place, so `ConstInputValue`'s
+    `Nestable::RANK` is 2, above the type tree's, and `TypeSystemItem`'s is 3.
+  - **The productions.** `schema_value`, the schema family's arguments, directives and defaults,
+    and the lists, sets, maps and objects a schema value holds, read the typed forms.
+    `const_value` and its family are unchanged. Type arguments that open neither bracket are
+    refused at the token found.
+  - **The tree.** `SyntaxKind` gains the nodes `TypedObjectValue` and `TypedValue` after
+    `CharValue`, which moves the raw value of every later kind by two, and the lossless layer's
+    typed wrappers of the same names. Each wrapper that holds a value gains a getter for each:
+    `typed_object_values` and `typed_values` on `ListValue`, `SetValue` and `MapEntry`, and
+    `typed_object_value` and `typed_value` on `ObjectField`, `DefaultValue` and `Argument`. A
+    typed object holds its fields directly, and no `ObjectValue`.
+  - **The one reading of GraphQL that changes.** In a list of a schema position, a name followed
+    by an object is one typed object: `[RED {a: 1}]` is one element, where GraphQL reads two.
+- `smear-compiler`: a GraphQLx typed object and typed value are each reported as
+  `smear::graphqlx::unknown-item`, once for a file, at the form, and lowered as one refused node
+  whatever they hold, until the analyzer gives them their meaning.
 - `smear-parser`: a GraphQLx schema position, a constant position of a type-system definition or
   extension, reads its values through productions of its own: `schema_value`,
   `schema_default_value` and `try_schema_default_value`, `schema_argument`, `schema_arguments`,

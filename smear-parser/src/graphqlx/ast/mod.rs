@@ -361,7 +361,22 @@ impl<S, Span> Nestable for InputValue<S, Span> {
 
 /// A GraphQLx constant input value, which cannot contain a variable.
 ///
-/// Like [`InputValue`], it declares no `Drop`; the release is [`Nested`]'s.
+/// Like [`InputValue`], it declares no `Drop`; the release is [`Nested`]'s and [`Nest`]'s.
+///
+/// # Which forms a position may hold
+///
+/// One enum serves an executable document's constant positions and a schema position, and the
+/// productions decide which variants each may produce: no [`TypedObject`](Self::TypedObject) or
+/// [`Typed`](Self::Typed) is produced in an executable document, where a variable's default and its
+/// directives read the constant grammar alone.
+///
+/// # The typed forms stand behind a pointer
+///
+/// A typed form holds a [`TypePath`] and a value, more than every other variant, so held in place
+/// it would grow every constant value of every document by the difference. Behind a pointer each
+/// variant is one word, and the enum keeps its size. A typed value's pointer is a [`Nest`], since
+/// the value it ascribes is held in place in its node and that pointer is what releases it in a
+/// loop. A typed object's fields are a [`Nested`] already, so its pointer is a plain `Box`.
 #[derive(
   Debug, Clone, PartialEq, Eq, derive_more::IsVariant, derive_more::TryUnwrap, derive_more::Unwrap,
 )]
@@ -390,6 +405,10 @@ pub enum ConstInputValue<S, Span = SimpleSpan> {
   Object(ConstObject<S, Span>),
   /// A `char` literal.
   Char(CharValue<S, Span>),
+  /// A typed object, `Point { x: 1 }` — a schema position's form alone.
+  TypedObject(Box<TypedObjectValue<S, Span>>),
+  /// A typed value, `Url("x")` — a schema position's form alone.
+  Typed(Nest<Box<TypedValue<S, Span>>>),
 }
 
 impl<S, Span> AsSpan<Span> for ConstInputValue<S, Span> {
@@ -407,6 +426,8 @@ impl<S, Span> AsSpan<Span> for ConstInputValue<S, Span> {
       Self::Map(value) => value.as_span(),
       Self::Object(value) => value.as_span(),
       Self::Char(value) => value.as_span(),
+      Self::TypedObject(value) => value.as_span(),
+      Self::Typed(value) => value.as_span(),
     }
   }
 }
@@ -426,6 +447,10 @@ impl<S, Span> IntoSpan<Span> for ConstInputValue<S, Span> {
       Self::Map(value) => value.into_span(),
       Self::Object(value) => value.into_span(),
       Self::Char(value) => value.into_span(),
+      Self::TypedObject(value) => (*value).into_span(),
+      // `into_sole` rather than a deref, as `Type`'s pointer arm reads its span: the span is owned
+      // and carries no `Copy` bound, so the pointee has to come back out.
+      Self::Typed(value) => value.into_sole().into_span(),
     }
   }
 }
@@ -437,9 +462,22 @@ impl<S, Span> NestNode for ConstInputValue<S, Span> {
   type Entry = ConstMapEntry<S, Span>;
 }
 
+// ── THE RANK EDGE, ASSERTED ─────────────────────────────────────────────────────────────────────
+//
+// A typed form names its type, and a constant value drops that type **in place**: a `TypePath`
+// holds `Type` nodes, a node of a lower-ranked tree with an iterative release of its own, so
+// dropping one here costs this release O(1) native frames however deep it is — the invariant on
+// `Nestable::into_children`. One concrete instantiation is enough: `RANK` does not depend on the
+// payload parameters.
+const _: () = assert!(
+  <Type<&'static str> as Nestable>::RANK < <ConstInputValue<&'static str> as Nestable>::RANK,
+  "a typed form drops its type in place, so the type tree must rank below the constant value tree",
+);
+
 impl<S, Span> Nestable for ConstInputValue<S, Span> {
-  /// The value tree: rank 1. It holds no type node and no selection.
-  const RANK: u8 = 1;
+  /// The constant value tree: rank 2. A typed form holds a type, which it drops in place — see the
+  /// assertion above — and no value holds a selection.
+  const RANK: u8 = 2;
 
   type Node = Self;
 
@@ -463,7 +501,35 @@ impl<S, Span> Nestable for ConstInputValue<S, Span> {
       // place in either dialect where a single child slot yields two subtrees.
       Self::Map(map) => worklist.adopt_entries(map.into_entries().into_vec()),
       Self::Object(object) => worklist.adopt_fields(object.into_fields().into_vec()),
+      // The type path is dropped in place, by the rank edge asserted above; the fields are handed
+      // over as an object's are.
+      Self::TypedObject(object) => worklist.adopt_fields((*object).into_fields().into_vec()),
+      // Nothing is handed over only when the pointer is shared and another owner remains, which a
+      // `Box` never is. The pointee hands its value over itself, so a chain of typed values runs
+      // through the worklist's register and allocates nothing at any depth.
+      Self::Typed(nest) => {
+        if let Some(typed) = nest.into_inner() {
+          typed.into_children(worklist);
+        }
+      }
     }
+  }
+}
+
+impl<S, Span> Sealed for TypedValue<S, Span> {}
+
+/// The pointee side of the walk: a typed value is `(span, type, value)`, and the value is the one
+/// child it hands over. Its type path is dropped in place, by the rank edge asserted beside
+/// [`ConstInputValue`]'s own impl.
+impl<S, Span> Nestable for TypedValue<S, Span> {
+  /// A carrier of the constant value tree: it takes the rank of the value it wraps.
+  const RANK: u8 = <ConstInputValue<S, Span> as Nestable>::RANK;
+
+  type Node = ConstInputValue<S, Span>;
+
+  #[inline]
+  fn into_children(self, worklist: &mut Worklist<ConstInputValue<S, Span>>) {
+    worklist.push(self.into_value());
   }
 }
 
