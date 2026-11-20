@@ -1168,19 +1168,19 @@ lossless_production! {
   ///
   /// `after_value` says whether that token directly follows a value. The run takes an expression's
   /// tokens, an operator's, a `>`, and a `^` after a value, into one `Error` with no report of its
-  /// own, and a value that follows them, read as the value it is. A value that follows a value ends
-  /// the run, so in a list it is the next element. A `(` that begins the run is skipped balanced
-  /// into the `Error` its report builds, and counts as a value; a `(` later in the run ends it.
+  /// own, and a value that follows them, read as the value it is. A `(` where the run would read a
+  /// value, and the `(` that begins the run, is skipped balanced to its own `)` into an `Error` of
+  /// its own, and counts as a value (R3′). A value that follows a value ends the run, a `(` among
+  /// them, so in a list it is the next element, and a map entry's `=>` is left to the entry.
   fn expression_run<'inp, Src, Ctx>(inp, after_value: bool) {
     let mut after_value = after_value;
+    recover::report_unexpected::<Src, Ctx>(inp, CONST_BLOCK_HEADS)?;
     if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
-      recover::unexpected::<Src, Ctx>(inp, CONST_BLOCK_HEADS)?;
+      expression_group::<Src, Ctx>(inp)?;
       after_value = true;
-    } else {
-      recover::report_unexpected::<Src, Ctx>(inp, CONST_BLOCK_HEADS)?;
     }
-    // Every turn consumes or returns: the tokens' arm takes at least the one it peeked, and the
-    // value's arm reads a value whose head it peeked.
+    // Every turn consumes or returns: the tokens' arm takes at least the one it peeked, the group's
+    // the `(` it peeked, and the value's arm reads a value whose head it peeked.
     loop {
       match peek_kind::<Src, Ctx>(inp)? {
         Some(head)
@@ -1188,6 +1188,10 @@ lossless_production! {
         {
           expression_tokens::<Src, Ctx>(inp)?;
           after_value = false;
+        }
+        Some(Kind::LParen) if !after_value => {
+          expression_group::<Src, Ctx>(inp)?;
+          after_value = true;
         }
         Some(head) if !after_value && starts_value(head) => {
           value::<Src, Ctx>(inp, Constness::Schema)?;
@@ -1208,6 +1212,42 @@ lossless_production! {
       match peek_kind::<Src, Ctx>(inp)? {
         Some(head) if is_operator(head) || head == Kind::RAngle => {}
         _ => break,
+      }
+    }
+    inp.cst_start_at(mark, K::Error.raw());
+    inp.cst_finish(K::Error.raw());
+    Ok(())
+  }
+
+  /// A `(` the run meets where a value may stand, and what it opens, to the `)` that balances it,
+  /// into one `Error` node, built as a skipped token's is and reported by no one.
+  ///
+  /// The `)` is the last token it takes, so the trivia after it is its caller's, and a map entry's
+  /// `=>` after it is the entry's. A `]` or a `}` it did not open closes something around the
+  /// group, so it stops before one, and at the end of input, with the group unclosed: the run that
+  /// reads it has reported once, and what the group leaves open is no report of its own.
+  fn expression_group<'inp, Src, Ctx>(inp) {
+    let mark = inp.cst_mark();
+    // The `(` the caller peeked.
+    inp.try_expect_or_stop(|_| true)?;
+    let (mut parens, mut brackets, mut braces) = (1_usize, 0_usize, 0_usize);
+    while parens > 0 {
+      match peek_kind::<Src, Ctx>(inp)? {
+        None => break,
+        Some(Kind::RBracket) if brackets == 0 => break,
+        Some(Kind::RBrace) if braces == 0 => break,
+        Some(head) => {
+          inp.try_expect_or_stop(|_| true)?;
+          match head {
+            Kind::LParen => parens += 1,
+            Kind::RParen => parens -= 1,
+            Kind::LBracket => brackets += 1,
+            Kind::RBracket => brackets -= 1,
+            Kind::LBrace => braces += 1,
+            Kind::RBrace => braces -= 1,
+            _ => {}
+          }
+        }
       }
     }
     inp.cst_start_at(mark, K::Error.raw());

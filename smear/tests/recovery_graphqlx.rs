@@ -1466,6 +1466,35 @@ mod lossless {
     }
   }
 
+  // ── An expression outside a block ──────────────────────────────────────────────────────────
+
+  /// A `(` where the run reads an operand is one value, to its own `)`: the map entry keeps its
+  /// `=>`, and the field after the map stays a field.
+  #[test]
+  fn a_parenthesis_a_run_reads_as_an_operand_leaves_the_arrow_to_its_entry() {
+    let answer = read("input I { a: T = map!{ 1 + (2) => 3 } b: Int }");
+    assert_eq!(answer.reports, 1, "one report, at the `+`");
+    let entry = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::MapEntry)
+      .expect("the map's entry");
+    assert!(
+      entry
+        .children_with_tokens()
+        .any(|element| element.kind() == K::FatArrow),
+      "the entry keeps its `=>`"
+    );
+    let members: Vec<String> = answer
+      .tree
+      .descendants()
+      .filter(|node: &SyntaxNode| node.kind() == K::InputValueDefinition)
+      .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
+      .collect();
+    assert_eq!(members.len(), 2, "{members:?}");
+    assert_eq!(members[1], "b: Int", "`b` stays a field of `I`");
+  }
+
   // ── Through the analyzer ───────────────────────────────────────────────────────────────────
 
   #[cfg(feature = "analysis")]
