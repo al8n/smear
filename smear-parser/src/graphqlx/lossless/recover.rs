@@ -686,10 +686,65 @@ lossless_production! {
     crate::lossless::recover::report_unexpected(inp, expected)
   }
 
+  /// [`unexpected`] inside a `const { … }` block: report once, then skip with a scan that never
+  /// reads past a `}` it did not open, whatever else it left open.
+  ///
+  /// The shared skip balances one depth over every pair, so behind an unmatched `(` or `[` it reads
+  /// on past the block's `}`, in the block's mode, before its look-ahead for a `}` it did not open
+  /// takes that back, and what it read is paid for again under the produce-event budget. This one
+  /// reads forward once: it takes the head, then stops at the end of input, in front of a `}` none
+  /// of its own braces is open for, which it leaves staged for the block or the aggregate that owns
+  /// it, or in front of a restart point where its depth over every pair is zero. A restart point at
+  /// the head is taken alone, as the shared skip's fallback takes it. The caller has asked about a
+  /// `}` at the head before it calls, as every caller of the shared skip does.
+  fn unexpected_in_block<'inp, Src, Ctx>(inp, expected: &'static [Kind]) {
+    crate::lossless::recover::report_unexpected(inp, expected)?;
+    let Some(head) = super::trivia::peek_kind::<Src, Ctx>(inp)? else {
+      return Ok(());
+    };
+    let mark = inp.cst_mark();
+    let (mut depth, mut braces) = (0_usize, 0_usize);
+    let mut next = Some(head);
+    let mut first = true;
+    while let Some(kind) = next {
+      if !first && ((kind == Kind::RBrace && braces == 0) || (depth == 0 && is_sync_point(kind))) {
+        break;
+      }
+      inp.try_expect_or_stop(|_| true)?;
+      match delimiters(&kind) {
+        Balance::Open(pair) => {
+          depth += 1;
+          if pair == b'{' {
+            braces += 1;
+          }
+        }
+        Balance::Close(pair) => {
+          depth = depth.saturating_sub(1);
+          if pair == b'{' {
+            braces = braces.saturating_sub(1);
+          }
+        }
+        Balance::Neutral => {}
+      }
+      if first && is_sync_point(kind) {
+        break;
+      }
+      first = false;
+      next = super::trivia::peek_kind::<Src, Ctx>(inp)?;
+    }
+    inp.cst_start_at(mark, K::Error.raw());
+    inp.cst_finish(K::Error.raw());
+    Ok(())
+  }
+
   /// Nothing that could start one of `expected` is here, and there is still input.
   /// [`crate::lossless::recover::unexpected`] with this dialect's four pairs and its restart
-  /// predicate.
+  /// predicate, and inside a `const { … }` block, where the lexer's state says it is,
+  /// [`unexpected_in_block`], which reads nothing past the block's `}`.
   fn unexpected<'inp, Src, Ctx>(inp, expected: &'static [Kind]) {
+    if inp.state().in_const_block() {
+      return unexpected_in_block::<Src, Ctx>(inp, expected);
+    }
     // #168's scan allowance. Read here rather than inside the substrate helper because the
     // committed side is `smear-lexer`'s token tally and `crate::lossless::recover` may not name
     // that crate — `lossless_isolation.rs` enforces it. **Both numbers are produce-events**, and

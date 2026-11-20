@@ -1495,6 +1495,29 @@ mod lossless {
     assert_eq!(members[1], "b: Int", "`b` stays a field of `I`");
   }
 
+  /// A skip inside a block stops at the block's `}`, with its `(` still open, so nothing after the
+  /// `}` is lexed in the block's mode and then again outside it: under a produce-event budget of
+  /// one event for each lexeme, and one more, the text reads to its end.
+  #[test]
+  fn a_skip_inside_a_block_reads_nothing_past_the_blocks_brace() {
+    let text = "input I { a: T = [const { 1 (2 } -2] }";
+    let limits = LosslessLimits::default().with_max_produce_events(lexemes(text) + 1);
+    let answer = read_with(&Lossless::with_limits(limits), text);
+    assert_eq!(answer.reports, 1, "one report, at the `(`");
+    let list = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::ListValue)
+      .expect("the list");
+    assert_eq!(kinds(&list), [K::ConstBlock, K::IntValue]);
+    let last = list.children().last().expect("the list's second element");
+    assert_eq!(
+      last.text().to_string(),
+      "-2",
+      "lexed once, outside the block"
+    );
+  }
+
   // ── Through the analyzer ───────────────────────────────────────────────────────────────────
 
   #[cfg(feature = "analysis")]
