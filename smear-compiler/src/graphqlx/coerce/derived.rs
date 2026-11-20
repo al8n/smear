@@ -135,7 +135,7 @@ use tokora::diagnostic::Location;
 use super::{Checked, Coercion, CountKey, OmittedArgument, Owed, OwedValue, Recorded};
 use crate::graphqlx::{
   code::schema,
-  diagnostic::{Diagnostic, Excerpt, Message},
+  diagnostic::{DefName, Diagnostic, Excerpt, Message},
   id::{ApplicationId, DefId, MemberId, PoolRange, Sym, TyId, TypeExprId, dense},
   model::{Applied, DefKind, Occurrence, Resolution, Shape, Written, WrittenParam},
   raw::RawTree,
@@ -379,17 +379,29 @@ impl Coercion<'_, '_, '_> {
         defs.push(row.def);
       }
     }
+    // A definition a recorded value made relevant already is not asked about: its answer could add
+    // nothing, and the lookups it would spend are the other definitions'.
     for index in 0..count {
       let def = DefId::new(index);
       if self.builder.type_param_count(def) > 0
-        && self.judged_when_implemented(def, &mut declared)
         && let Some(slot) = building.relevant.get_mut(index as usize)
         && !*slot
+        && self.judged_when_implemented(def, &mut declared)
       {
         *slot = true;
         defs.push(def);
       }
     }
+    debug_assert!(
+      self.recorded.iter().all(|row: &Recorded| {
+        building
+          .relevant
+          .get(row.def.get() as usize)
+          .copied()
+          .unwrap_or(false)
+      }),
+      "the seed holds every definition whose recorded rows a derived instantiation's check reads"
+    );
     if defs.is_empty() {
       return;
     }
@@ -1150,7 +1162,7 @@ impl Coercion<'_, '_, '_> {
       return false;
     };
     match self.rebuilt(written, ty, def, false) {
-      Ok(Some(under)) => self.owned.contains(&CountKey {
+      Ok(Some(under)) => self.owned_counts.contains(&CountKey {
         tree,
         ty: Some(under),
       }),
@@ -1257,7 +1269,7 @@ impl Coercion<'_, '_, '_> {
         let message = format!(
           "{used} with type arguments that derive an instantiation of `{}` under which `{}`, a \
            value it holds, does not fit the type it takes",
-          Excerpt(self.builder.def_name(def)),
+          DefName::of(self.builder, def),
           Excerpt(self.raw.text(source, node.span))
         );
         let (code, label) = site.refusal();
@@ -1296,7 +1308,7 @@ impl Coercion<'_, '_, '_> {
         let message = format!(
           "{used} with type arguments that derive an instantiation of `{}` under which `@{}` \
            requires its argument `{}`, and an application it holds leaves it out",
-          Excerpt(self.builder.def_name(def)),
+          DefName::of(self.builder, def),
           Excerpt(directive),
           Excerpt(name)
         );
@@ -1320,15 +1332,10 @@ impl Coercion<'_, '_, '_> {
   /// Reports, at `at`, a use of an instantiation of `user` whose expansion derives an instantiation
   /// of `def`, that `stop` kept what `def` holds from being checked under its arguments.
   fn report_derived_unchecked(&mut self, at: Location, user: DefId, def: DefId, stop: Stop) {
-    let sigil = if self.builder.def_kind(user) == Some(DefKind::Directive) {
-      "@"
-    } else {
-      ""
-    };
     let what = format!(
-      "an instantiation of `{}` that `{sigil}{}` derives here",
-      Excerpt(self.builder.def_name(def)),
-      Excerpt(self.builder.def_name(user))
+      "an instantiation of `{}` that `{}` derives here",
+      DefName::of(self.builder, def),
+      DefName::of(self.builder, user)
     );
     let message = match stop {
       Stop::Steps => Message {
@@ -1349,14 +1356,14 @@ impl Coercion<'_, '_, '_> {
   /// Reports, at `at`, where the root `user` whose expansion was running is first written, that
   /// `stop` kept what it derives from being read: once, and the closure ends.
   fn report_unexpanded(&mut self, at: Location, user: DefId, stop: Stop) {
-    let (sigil, verb) = if self.builder.def_kind(user) == Some(DefKind::Directive) {
-      ("@", "applied")
+    let named = DefName::of(self.builder, user);
+    let verb = if named.is_directive() {
+      "applied"
     } else {
-      ("", "instantiated")
+      "instantiated"
     };
     let what = format!(
-      "what `{sigil}{}` derives under the type arguments it is {verb} with here could not be read",
-      Excerpt(self.builder.def_name(user))
+      "what `{named}` derives under the type arguments it is {verb} with here could not be read"
     );
     let limits = self.types.limits();
     let message = match stop {
