@@ -571,6 +571,43 @@ mod tests {
     *lexer.state()
   }
 
+  /// Each item `lexer` answers: its kind, or `None` for a refusal, and its span.
+  fn kinds_and_spans<'a, L, S>(
+    mut lexer: L,
+  ) -> std::vec::Vec<(Option<LosslessTokenKind>, usize, usize)>
+  where
+    L: Lexer<'a, Token = LosslessToken<S>, Span = tokora::SimpleSpan>,
+  {
+    let mut items: std::vec::Vec<(Option<LosslessTokenKind>, usize, usize)> = std::vec::Vec::new();
+    while let Some(item) = lexer.lex() {
+      let span = lexer.span();
+      let kind: Option<LosslessTokenKind> = item.ok().map(|token: LosslessToken<S>| token.kind());
+      items.push((kind, span.start(), span.end()));
+    }
+    items
+  }
+
+  /// Each arm of the grammar's macro lexes every place a `-` stands alike: as the operator, as a
+  /// sign, and before a refusal. Each arm spells the `-` rule and its callback itself, and the
+  /// oracle lexes a `&str` alone.
+  #[test]
+  fn each_arm_lexes_a_sign_alike() {
+    const SIGNS: &str = "HOUR-1\nHOUR -1\n- 1\n1e-5\n-.5\n-0x\n-5\n-2.5\n-0xFF\n--5\n-x\n-";
+    let text = kinds_and_spans(LosslessLexer::<&str>::new(SIGNS));
+    assert_eq!(text.len(), 30, "the items of the `&str` stream");
+    assert_eq!(
+      kinds_and_spans(LosslessLexer::<&[u8]>::new(SIGNS.as_bytes())),
+      text,
+      "&[u8]"
+    );
+    #[cfg(feature = "bytes_1")]
+    assert_eq!(
+      kinds_and_spans(LosslessLexer::<bytes_1::Bytes>::new(SIGNS.as_bytes())),
+      text,
+      "bytes::Bytes"
+    );
+  }
+
   #[test]
   fn the_brace_count_follows_the_braces_of_a_balanced_text() {
     assert_brace_counts_over_each_arm(

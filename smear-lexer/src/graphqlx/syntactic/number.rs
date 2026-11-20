@@ -1,6 +1,7 @@
-//! Focused GraphQLx number sub-lexer.
+//! Focused GraphQLx number grammars: the syntactic lexer's number sub-lexer, and the sign's
+//! grammar the lossless lexer reads a `-` with.
 //!
-//! [`NumberToken`] is the classification returned by this number sub-lexer. Its
+//! [`NumberToken`] is the classification returned by the number sub-lexer. Its
 //! two primitive Logos grammars recognize ONLY decimal / hexadecimal / binary /
 //! octal integers, decimal and hexadecimal floats, and the bare `-` (`Minus`)
 //! operator — the exact slow paths the SIMD lexer refuses to hand-roll. They
@@ -14,7 +15,7 @@
 //! `Decimal("-5")`, `-.5` -> a missing-integer-part float), while a `-` before
 //! any other byte is the valid `Minus` operator. Logos resolves that ambiguity
 //! by longest match, so the `#[token("-")] Minus` arm and the `-?`-prefixed
-//! number regexes coexist here exactly as they do in the full grammar.
+//! number regexes coexist here.
 //!
 //! The SIMD lexer routes a malformed/ambiguous number opener here via
 //! `SyntacticLexer::delegate_number_to_logos` (instantiating
@@ -28,6 +29,14 @@
 //! the frozen handlers but discard matched slices; `NumberLexerToken<Char>`
 //! only adapts the classification to tokora's trait types, avoiding any
 //! source-wrapper conversion.
+//!
+//! `number_token_impl!` writes these rules once and renders them a second way:
+//! the `sign` grammars, over the same two alphabets, where each rule answers its
+//! own tag and runs no handler, no hook and no state. The lossless grammar
+//! matches a `-` alone and reads the lexeme from it with one of them, and its
+//! callback then runs the matched rule's hook and handler on the lossless lexer.
+//! So the lossless grammar's longest match at a `-`, its charge and its errors
+//! are the ones these rules make.
 
 use crate::graphqlx::{
   LitFloat, LitInt,
@@ -106,10 +115,107 @@ impl<Char> NumberLexerToken<Char> {
   }
 }
 
-/// Internal implementation macro for one primitive Logos number grammar.
+/// The number grammars' one macro: the subpatterns and the nineteen rules a number or a `-` can
+/// be, written once, and three ways to render them.
+///
+/// - `number_token_impl!(name(Char, handlers, utf8))` is one syntactic instance: a primitive `str`
+///   or `[u8]` grammar whose rules run the frozen handlers, for `SyntacticLexer`'s delegation.
+/// - `number_token_impl!(sign name(utf8))` is one instance of the sign's grammar: the same rules
+///   over the same alphabets, each answering its tag and running nothing, for the lossless
+///   grammar's `-` rule.
+/// - `number_token_impl!(rules)` is `sign::Rule`, one tag for each rule.
 macro_rules! number_token_impl {
-  // One primitive `str` or `[u8]` Logos grammar.
   ($mod:ident ($char:ty, $handlers:ident, $utf8:tt)) => {
+    number_token_impl! { @rules [syntactic $mod ($char, $handlers, $utf8)] }
+  };
+  (sign $mod:ident ($utf8:tt)) => {
+    number_token_impl! { @rules [sign $mod ($utf8)] }
+  };
+  (rules) => {
+    number_token_impl! { @rules [rules] }
+  };
+  // Each rule: the variant of the syntactic grammar it belongs to, its kind and pattern, its tag
+  // and, for every rule but the bare `-`, the frozen handler a syntactic instance runs, with the
+  // arguments that follow the lexer.
+  (@rules [$($instance:tt)*]) => {
+    number_token_impl! {
+      @emit $($instance)*
+      [
+        digit = "[0-9]",
+        hex_digit = "[0-9a-fA-F]",
+        octal_digit = "[0-7]",
+        binary_digit = "[01]",
+        digits_with_sep = "[0-9_]*[0-9][0-9_]*",
+        hex_digits_with_sep = "[0-9a-fA-F_]*[0-9a-fA-F][0-9a-fA-F_]*",
+        decimal = "-?(?&digit)[0-9_]*",
+        hex_start = "-?0x_*",
+        hex = "(?&hex_start)(?&hex_digit)[0-9a-fA-F_]*",
+        octal_start = "-?0o_*",
+        octal = "(?&octal_start)(?&octal_digit)[0-7_]*",
+        binary_start = "-?0b_*",
+        binary = "(?&binary_start)(?&binary_digit)[01_]*",
+        frac = "\\.(?&digits_with_sep)",
+        esign = "[eE][+-]?",
+        exp = "(?&esign)(?&digits_with_sep)",
+        psign = "[pP][+-]?",
+        hex_exp = "(?&psign)(?&hex_digits_with_sep)",
+        hex_frac = "\\.(?&hex_digits_with_sep)",
+      ]
+      {
+        Minus {
+          token "-" => Minus,
+        },
+        Float {
+          regex "(?&decimal)((?&frac)(?&exp)|(?&frac)|(?&exp))"
+            => Float(handle_decimal_suffix[FloatError::UnexpectedSuffix]),
+          regex "-?(?&frac)(?&exp)?"
+            => FloatMissingInteger(handle_float_missing_integer_part_error_then_check_suffix[]),
+          regex "(?&decimal)(?&frac)(?&esign)"
+            => FloatFractionEmptyExponent(handle_exponent_error[]),
+          regex "(?&decimal)\\._*" => FloatEmptyFraction(handle_fractional_error[]),
+          regex "(?&decimal)(?&esign)" => FloatEmptyExponent(handle_exponent_error[]),
+        },
+        HexFloat {
+          regex "(?&hex)(?&hex_frac)?(?&hex_exp)"
+            => HexFloat(handle_valid_hex_suffix[HexFloatError::UnexpectedSuffix]),
+          regex "(?&hex)(?&hex_frac)"
+            => HexFloatMissingExponent(handle_hex_float_missing_exponent_then_check_suffix[]),
+          regex "-?(?&hex_frac)(?&hex_exp)"
+            => HexFloatMissingInteger(
+              handle_hex_float_missing_integer_part_error_then_check_suffix[]
+            ),
+          regex "(?&hex)(?&hex_frac)(?&psign)"
+            => HexFloatFractionEmptyExponent(handle_hex_exponent_error[]),
+          regex "(?&hex)\\._*" => HexFloatEmptyFraction(handle_hex_fractional_error[]),
+          regex "(?&hex)(?&psign)" => HexFloatEmptyExponent(handle_hex_exponent_error[]),
+        },
+        Decimal {
+          regex "(?&decimal)" => Decimal(handle_decimal_suffix[DecimalError::UnexpectedSuffix]),
+        },
+        Binary {
+          regex "(?&binary)" => Binary(handle_valid_binary_suffix[BinaryError::UnexpectedSuffix]),
+          regex "(?&binary_start)" => BinaryMissingDigits(handle_invalid_binary_suffix[]),
+        },
+        Octal {
+          regex "(?&octal)" => Octal(handle_valid_octal_suffix[OctalError::UnexpectedSuffix]),
+          regex "(?&octal_start)" => OctalMissingDigits(handle_invalid_octal_suffix[]),
+        },
+        Hex {
+          regex "(?&hex)" => Hex(handle_valid_hex_suffix[HexError::UnexpectedSuffix]),
+          regex "(?&hex_start)" => HexMissingDigits(handle_invalid_hex_suffix[]),
+        },
+      }
+    }
+  };
+  // One syntactic instance.
+  (@emit syntactic $mod:ident ($char:ty, $handlers:ident, $utf8:tt)
+    [$($sub:ident = $sub_pattern:literal),* $(,)?]
+    {$(
+      $variant:ident {$(
+        $kind:ident $pattern:literal => $tag:ident $(($handler:ident [$($arg:tt)*]))?
+      ),* $(,)?}
+    ),* $(,)?}
+  ) => {
     mod $mod {
       use tokora::{
         logos::Logos,
@@ -136,64 +242,14 @@ macro_rules! number_token_impl {
         utf8 = $utf8,
         error(TokenErrors, handlers::$handlers::default_error)
       )]
-      #[logos(subpattern digit = "[0-9]")]
-      #[logos(subpattern hex_digit = "[0-9a-fA-F]")]
-      #[logos(subpattern octal_digit = "[0-7]")]
-      #[logos(subpattern binary_digit = "[01]")]
-      #[logos(subpattern digits_with_sep = "[0-9_]*[0-9][0-9_]*")]
-      #[logos(subpattern hex_digits_with_sep = "[0-9a-fA-F_]*[0-9a-fA-F][0-9a-fA-F_]*")]
-      #[logos(subpattern decimal = "-?(?&digit)[0-9_]*")]
-      #[logos(subpattern hex_start = "-?0x_*")]
-      #[logos(subpattern hex = "(?&hex_start)(?&hex_digit)[0-9a-fA-F_]*")]
-      #[logos(subpattern octal_start = "-?0o_*")]
-      #[logos(subpattern octal = "(?&octal_start)(?&octal_digit)[0-7_]*")]
-      #[logos(subpattern binary_start = "-?0b_*")]
-      #[logos(subpattern binary = "(?&binary_start)(?&binary_digit)[01_]*")]
-      #[logos(subpattern frac = "\\.(?&digits_with_sep)")]
-      #[logos(subpattern esign = "[eE][+-]?")]
-      #[logos(subpattern exp = "(?&esign)(?&digits_with_sep)")]
-      #[logos(subpattern psign = "[pP][+-]?")]
-      #[logos(subpattern hex_exp = "(?&psign)(?&hex_digits_with_sep)")]
-      #[logos(subpattern hex_frac = "\\.(?&hex_digits_with_sep)")]
+      $(#[logos(subpattern $sub = $sub_pattern)])*
       pub enum Token {
-        #[token("-")]
-        Minus,
-
-        #[regex("(?&decimal)((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| handlers::$handlers::handle_decimal_suffix(lexer, FloatError::UnexpectedSuffix).map(|_| ()))]
-        #[regex(
-          "-?(?&frac)(?&exp)?",
-          |lexer| handlers::$handlers::handle_float_missing_integer_part_error_then_check_suffix(lexer).map(|_| ())
-        )]
-        #[regex("(?&decimal)(?&frac)(?&esign)", |lexer| handlers::$handlers::handle_exponent_error(lexer).map(|_| ()))]
-        #[regex("(?&decimal)\\._*", |lexer| handlers::$handlers::handle_fractional_error(lexer).map(|_| ()))]
-        #[regex("(?&decimal)(?&esign)", |lexer| handlers::$handlers::handle_exponent_error(lexer).map(|_| ()))]
-        Float,
-
-        #[regex("(?&hex)(?&hex_frac)?(?&hex_exp)", |lexer| handlers::$handlers::handle_valid_hex_suffix(lexer, HexFloatError::UnexpectedSuffix).map(|_| ()))]
-        #[regex("(?&hex)(?&hex_frac)", |lexer| handlers::$handlers::handle_hex_float_missing_exponent_then_check_suffix(lexer).map(|_| ()))]
-        #[regex(
-          "-?(?&hex_frac)(?&hex_exp)",
-          |lexer| handlers::$handlers::handle_hex_float_missing_integer_part_error_then_check_suffix(lexer).map(|_| ())
-        )]
-        #[regex("(?&hex)(?&hex_frac)(?&psign)", |lexer| handlers::$handlers::handle_hex_exponent_error(lexer).map(|_| ()))]
-        #[regex("(?&hex)\\._*", |lexer| handlers::$handlers::handle_hex_fractional_error(lexer).map(|_| ()))]
-        #[regex("(?&hex)(?&psign)", |lexer| handlers::$handlers::handle_hex_exponent_error(lexer).map(|_| ()))]
-        HexFloat,
-
-        #[regex("(?&decimal)", |lexer| handlers::$handlers::handle_decimal_suffix(lexer, DecimalError::UnexpectedSuffix).map(|_| ()))]
-        Decimal,
-
-        #[regex("(?&binary)", |lexer| handlers::$handlers::handle_valid_binary_suffix(lexer, BinaryError::UnexpectedSuffix).map(|_| ()))]
-        #[regex("(?&binary_start)", |lexer| handlers::$handlers::handle_invalid_binary_suffix(lexer).map(|_| ()))]
-        Binary,
-
-        #[regex("(?&octal)", |lexer| handlers::$handlers::handle_valid_octal_suffix(lexer, OctalError::UnexpectedSuffix).map(|_| ()))]
-        #[regex("(?&octal_start)", |lexer| handlers::$handlers::handle_invalid_octal_suffix(lexer).map(|_| ()))]
-        Octal,
-
-        #[regex("(?&hex)", |lexer| handlers::$handlers::handle_valid_hex_suffix(lexer, HexError::UnexpectedSuffix).map(|_| ()))]
-        #[regex("(?&hex_start)", |lexer| handlers::$handlers::handle_invalid_hex_suffix(lexer).map(|_| ()))]
-        Hex,
+        $(
+          $(
+            #[$kind($pattern $(, |lexer| handlers::$handlers::$handler(lexer, $($arg)*).map(|_| ()))?)]
+          )*
+          $variant,
+        )*
       }
 
       impl From<Token> for NumberLexerToken<$char> {
@@ -254,7 +310,80 @@ macro_rules! number_token_impl {
       }
     }
   };
+  // One instance of the sign's grammar.
+  (@emit sign $mod:ident ($utf8:tt)
+    [$($sub:ident = $sub_pattern:literal),* $(,)?]
+    {$(
+      $variant:ident {$(
+        $kind:ident $pattern:literal => $tag:ident $(($handler:ident [$($arg:tt)*]))?
+      ),* $(,)?}
+    ),* $(,)?}
+  ) => {
+    /// The sign's grammar over one alphabet.
+    pub(crate) mod $mod {
+      use tokora::logos::Logos;
+
+      use super::Rule;
+
+      /// A lexeme a `-` begins, by the rule that matched it. No rule has a handler, a hook or
+      /// a state, so a scan charges nothing and refuses nothing.
+      #[derive(Logos, Clone, Copy, Debug, Eq, PartialEq)]
+      #[logos(crate = tokora::logos, utf8 = $utf8)]
+      $(#[logos(subpattern $sub = $sub_pattern)])*
+      pub(crate) enum Token {
+        $(
+          $(#[$kind($pattern, |_lexer| Rule::$tag)])*
+          $variant(Rule),
+        )*
+      }
+
+      impl Token {
+        /// The rule that matched.
+        #[inline(always)]
+        pub(crate) const fn rule(self) -> Rule {
+          match self {
+            $(Self::$variant(rule))|* => rule,
+          }
+        }
+      }
+    }
+  };
+  // The tags.
+  (@emit rules
+    [$($sub:ident = $sub_pattern:literal),* $(,)?]
+    {$(
+      $variant:ident {$(
+        $kind:ident $pattern:literal => $tag:ident $(($handler:ident [$($arg:tt)*]))?
+      ),* $(,)?}
+    ),* $(,)?}
+  ) => {
+    /// The rule of the sign's grammar that matched at a `-`, one for each of the nineteen.
+    ///
+    /// The lossless grammar's `-` callback maps each to the hook and the handler of the rule's
+    /// unsigned twin. A class is not enough: `-1.` and `-1.5` are both a float, and their rules
+    /// run different handlers.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub(crate) enum Rule {
+      $($(
+        #[doc = concat!("The rule `", $pattern, "`.")]
+        $tag,
+      )*)*
+    }
+  };
 }
 
 number_token_impl!(str_number(char, str, true));
 number_token_impl!(slice_number(u8, slice, false));
+
+/// The sign's grammar: the lossless grammar reads a `-` with it.
+///
+/// The lossless grammar matches a `-` alone, and its callback lexes from the `-` with this grammar,
+/// which holds every rule a `-` can begin: the bare `-` and the eighteen signed number rules, the
+/// syntactic instances' own. So its longest match at a `-` is the one the full grammar would make.
+/// It answers the rule's tag and its extent, and the callback then runs that rule's hook and
+/// handler on the lossless lexer itself.
+pub(crate) mod sign {
+  number_token_impl!(rules);
+  number_token_impl!(sign str(true));
+  number_token_impl!(sign slice(false));
+}

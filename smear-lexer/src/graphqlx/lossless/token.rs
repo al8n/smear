@@ -49,6 +49,7 @@ macro_rules! token_impl {
       use crate::{
         error::StringErrors,
         graphqlx::lossless::LosslessState,
+        graphqlx::lossless::token::Signed,
         graphqlx::{
           error::{LexerErrors, LexerError, DecimalError, HexError, FloatError, HexFloatError, BinaryError, OctalError},
           handlers::{
@@ -69,6 +70,115 @@ macro_rules! token_impl {
       type TokenError = LexerError<$char, LimitExceeded>;
       type TokenErrors = LexerErrors<$char, LimitExceeded>;
       type TokenErrorOnlyResult = Result<(), TokenError>;
+
+      /// The `-` rule's callback: the operator, or the sign of the number the `-` begins.
+      ///
+      /// This grammar's number patterns take no sign, so it matches a `-` alone. The sign's
+      /// grammar holds every rule a `-` can begin and reads the lexeme from the `-`. This lexer
+      /// bumps to that lexeme's end, and then runs exactly what the matched rule's unsigned twin
+      /// in this grammar runs. So the ceiling's check, the one charge, the handler's reading of
+      /// what follows and any refusal are all this lexer's, at the lexeme's extent.
+      #[allow(clippy::result_large_err)]
+      fn minus<$logos_lt>(
+        lexer: &mut tokora::logos::Lexer<$logos_lt, Token<$logos_lt>>,
+      ) -> Result<Signed<$logos_slice>, TokenErrors> {
+        use crate::graphqlx::syntactic::number::sign::{$handlers::Token as Sign, Rule};
+
+        let mut sign = <Sign as Logos>::lexer(lexer.source());
+        sign.bump(lexer.span().start);
+        // `-` alone is a rule of the sign's grammar, so the scan matches at least the `-`.
+        let (rule, end) = match sign.next() {
+          Some(Ok(token)) => (token.rule(), sign.span().end),
+          Some(Err(())) | None => (Rule::Minus, lexer.span().end),
+        };
+        lexer.bump(end.saturating_sub(lexer.span().end));
+
+        match rule {
+          Rule::Minus => one(tt_hook(lexer)).map(|()| Signed::Operator),
+          Rule::Float => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_decimal_suffix(lexer, FloatError::UnexpectedSuffix)
+          }))
+          .map(Signed::Float),
+          Rule::FloatMissingInteger => tt_hook_and_then_into_errors(
+            lexer,
+            handlers::$handlers::handle_float_missing_integer_part_error_then_check_suffix,
+          )
+          .map(Signed::Float),
+          Rule::FloatFractionEmptyExponent => {
+            one(tt_hook_and_then(lexer, handlers::$handlers::handle_exponent_error))
+              .map(Signed::Float)
+          }
+          Rule::FloatEmptyFraction => {
+            one(tt_hook_and_then(lexer, handlers::$handlers::handle_fractional_error))
+              .map(Signed::Float)
+          }
+          Rule::FloatEmptyExponent => {
+            one(tt_hook_and_then(lexer, handlers::$handlers::handle_exponent_error))
+              .map(Signed::Float)
+          }
+          Rule::HexFloat => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_valid_hex_suffix(lexer, HexFloatError::UnexpectedSuffix)
+          }))
+          .map(Signed::HexFloat),
+          Rule::HexFloatMissingExponent => tt_hook_and_then_into_errors(
+            lexer,
+            handlers::$handlers::handle_hex_float_missing_exponent_then_check_suffix,
+          )
+          .map(Signed::HexFloat),
+          Rule::HexFloatMissingInteger => tt_hook_and_then_into_errors(
+            lexer,
+            handlers::$handlers::handle_hex_float_missing_integer_part_error_then_check_suffix,
+          )
+          .map(Signed::HexFloat),
+          Rule::HexFloatFractionEmptyExponent => {
+            one(tt_hook_and_then(lexer, handlers::$handlers::handle_hex_exponent_error))
+              .map(Signed::HexFloat)
+          }
+          Rule::HexFloatEmptyFraction => {
+            one(tt_hook_and_then(lexer, handlers::$handlers::handle_hex_fractional_error))
+              .map(Signed::HexFloat)
+          }
+          Rule::HexFloatEmptyExponent => {
+            one(tt_hook_and_then(lexer, handlers::$handlers::handle_hex_exponent_error))
+              .map(Signed::HexFloat)
+          }
+          Rule::Decimal => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_decimal_suffix(lexer, DecimalError::UnexpectedSuffix)
+          }))
+          .map(Signed::Decimal),
+          Rule::Binary => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_valid_binary_suffix(lexer, BinaryError::UnexpectedSuffix)
+          }))
+          .map(Signed::Binary),
+          Rule::BinaryMissingDigits => {
+            tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_invalid_binary_suffix)
+              .map(Signed::Binary)
+          }
+          Rule::Octal => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_valid_octal_suffix(lexer, OctalError::UnexpectedSuffix)
+          }))
+          .map(Signed::Octal),
+          Rule::OctalMissingDigits => {
+            tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_invalid_octal_suffix)
+              .map(Signed::Octal)
+          }
+          Rule::Hex => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_valid_hex_suffix(lexer, HexError::UnexpectedSuffix)
+          }))
+          .map(Signed::Hex),
+          Rule::HexMissingDigits => {
+            tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_invalid_hex_suffix)
+              .map(Signed::Hex)
+          }
+        }
+      }
+
+      /// One lexeme's answer, with its error in the grammar's error type.
+      #[allow(clippy::result_large_err)]
+      #[inline(always)]
+      fn one<O>(answer: Result<O, TokenError>) -> Result<O, TokenErrors> {
+        answer.map_err(TokenErrors::from)
+      }
 
       impl<'b: $slice_lt, $slice_lt: 'b> tokora::Token<'b> for LosslessToken<$slice> {
         type Kind = LosslessTokenKind;
@@ -91,10 +201,12 @@ macro_rules! token_impl {
         /// the cut`, in both dialects and at both doors.
         ///
         /// The exact frontier is not reachable either: a `logos` callback runs only at the leaf
-        /// the DFA accepted, and that leaf is `-`, whose rule carries none — so `State::take_probe`
-        /// has nothing to record. The price of `Unbounded` is paid by a `Partial` consumer alone,
-        /// which buffers until the stream is sealed; every door this workspace ships is
-        /// `Complete`, where there is no holdback at all.
+        /// the DFA accepted, and that leaf is `-`. Its callback reads the rest of the lexeme with
+        /// the sign's grammar and records no probe, so `State::take_probe` has nothing to take:
+        /// over `-.`, a cut of `-.5`, the sign's grammar answers a bare `-` the complete parse does
+        /// not have. The price of `Unbounded` is paid by a `Partial` consumer alone, which buffers
+        /// until the stream is sealed; every door this workspace ships is `Complete`, where there is
+        /// no holdback at all.
         const SCAN_LOOKAHEAD: tokora::ScanLookahead = tokora::ScanLookahead::Unbounded;
 
         #[inline(always)]
@@ -124,12 +236,12 @@ macro_rules! token_impl {
       #[logos(subpattern binary_digit = "[01]")]
       #[logos(subpattern digits_with_sep = "[0-9_]*[0-9][0-9_]*")]
       #[logos(subpattern hex_digits_with_sep = "[0-9a-fA-F_]*[0-9a-fA-F][0-9a-fA-F_]*")]
-      #[logos(subpattern decimal = "-?(?&digit)[0-9_]*")]
-      #[logos(subpattern hex_start = "-?0x_*")]
+      #[logos(subpattern decimal = "(?&digit)[0-9_]*")]
+      #[logos(subpattern hex_start = "0x_*")]
       #[logos(subpattern hex = "(?&hex_start)(?&hex_digit)[0-9a-fA-F_]*")]
-      #[logos(subpattern octal_start = "-?0o_*")]
+      #[logos(subpattern octal_start = "0o_*")]
       #[logos(subpattern octal = "(?&octal_start)(?&octal_digit)[0-7_]*")]
-      #[logos(subpattern binary_start = "-?0b_*")]
+      #[logos(subpattern binary_start = "0b_*")]
       #[logos(subpattern binary = "(?&binary_start)(?&binary_digit)[01_]*")]
       #[logos(subpattern frac = "\\.(?&digits_with_sep)")]
       #[logos(subpattern esign = "[eE][+-]?")]
@@ -189,8 +301,8 @@ macro_rules! token_impl {
         #[token("+", tt_hook)]
         Plus,
 
-        #[token("-", tt_hook)]
-        Minus,
+        #[token("-", minus)]
+        Minus(Signed<$logos_slice>),
 
         #[token("...", tt_hook)]
         #[token(".", |lexer| tt_hook_and_then(lexer, |lexer| TokenErrorOnlyResult::Err(unterminated_spread_operator_error(lexer))))]
@@ -240,7 +352,7 @@ macro_rules! token_impl {
 
         #[regex("(?&decimal)((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_decimal_suffix(lexer, FloatError::UnexpectedSuffix)))]
         #[regex(
-          "-?(?&frac)(?&exp)?",
+          "(?&frac)(?&exp)?",
           |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_float_missing_integer_part_error_then_check_suffix)
         )]
         #[regex("(?&decimal)(?&frac)(?&esign)", |lexer| tt_hook_and_then(lexer, handlers::$handlers::handle_exponent_error))]
@@ -251,7 +363,7 @@ macro_rules! token_impl {
         #[regex("(?&hex)(?&hex_frac)?(?&hex_exp)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_valid_hex_suffix(lexer, HexFloatError::UnexpectedSuffix)))]
         #[regex("(?&hex)(?&hex_frac)", |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_hex_float_missing_exponent_then_check_suffix))]
         #[regex(
-          "-?(?&hex_frac)(?&hex_exp)",
+          "(?&hex_frac)(?&hex_exp)",
           |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_hex_float_missing_integer_part_error_then_check_suffix)
         )]
         #[regex("(?&hex)(?&hex_frac)(?&psign)", |lexer| tt_hook_and_then(lexer, handlers::$handlers::handle_hex_exponent_error))]
@@ -321,7 +433,15 @@ macro_rules! token_impl {
             Token::LitInlineStr($val) => Self::LitInlineStr($convert),
             Token::LitBlockStr($val) => Self::LitBlockStr($convert),
             Token::Plus => Self::Plus,
-            Token::Minus => Self::Minus,
+            Token::Minus(signed) => match signed {
+              Signed::Operator => Self::Minus,
+              Signed::Float($val) => Self::LitFloat(LitFloat::Decimal($convert)),
+              Signed::HexFloat($val) => Self::LitFloat(LitFloat::Hex($convert)),
+              Signed::Decimal($val) => Self::LitInt(LitInt::Decimal($convert)),
+              Signed::Binary($val) => Self::LitInt(LitInt::Binary($convert)),
+              Signed::Octal($val) => Self::LitInt(LitInt::Octal($convert)),
+              Signed::Hex($val) => Self::LitInt(LitInt::Hex($convert)),
+            },
             Token::PathSeparator => Self::PathSeparator,
             Token::Tilde => Self::Tilde,
             Token::DotDot => Self::DotDot,
@@ -363,6 +483,7 @@ macro_rules! token_impl {
       use crate::{
         error::StringErrors,
         graphqlx::lossless::LosslessState,
+        graphqlx::lossless::token::Signed,
         graphqlx::{
           error::{LexerErrors, LexerError, DecimalError, HexError, FloatError, HexFloatError, BinaryError, OctalError},
           handlers::{
@@ -383,6 +504,115 @@ macro_rules! token_impl {
       type TokenError = LexerError<$char, LimitExceeded>;
       type TokenErrors = LexerErrors<$char, LimitExceeded>;
       type TokenErrorOnlyResult = Result<(), TokenError>;
+
+      /// The `-` rule's callback: the operator, or the sign of the number the `-` begins.
+      ///
+      /// This grammar's number patterns take no sign, so it matches a `-` alone. The sign's
+      /// grammar holds every rule a `-` can begin and reads the lexeme from the `-`. This lexer
+      /// bumps to that lexeme's end, and then runs exactly what the matched rule's unsigned twin
+      /// in this grammar runs. So the ceiling's check, the one charge, the handler's reading of
+      /// what follows and any refusal are all this lexer's, at the lexeme's extent.
+      #[allow(clippy::result_large_err)]
+      fn minus<$logos_lt>(
+        lexer: &mut tokora::logos::Lexer<$logos_lt, Token<$logos_lt>>,
+      ) -> Result<Signed<$logos_slice>, TokenErrors> {
+        use crate::graphqlx::syntactic::number::sign::{$handlers::Token as Sign, Rule};
+
+        let mut sign = <Sign as Logos>::lexer(lexer.source());
+        sign.bump(lexer.span().start);
+        // `-` alone is a rule of the sign's grammar, so the scan matches at least the `-`.
+        let (rule, end) = match sign.next() {
+          Some(Ok(token)) => (token.rule(), sign.span().end),
+          Some(Err(())) | None => (Rule::Minus, lexer.span().end),
+        };
+        lexer.bump(end.saturating_sub(lexer.span().end));
+
+        match rule {
+          Rule::Minus => one(tt_hook(lexer)).map(|()| Signed::Operator),
+          Rule::Float => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_decimal_suffix(lexer, FloatError::UnexpectedSuffix)
+          }))
+          .map(Signed::Float),
+          Rule::FloatMissingInteger => tt_hook_and_then_into_errors(
+            lexer,
+            handlers::$handlers::handle_float_missing_integer_part_error_then_check_suffix,
+          )
+          .map(Signed::Float),
+          Rule::FloatFractionEmptyExponent => {
+            one(tt_hook_and_then(lexer, handlers::$handlers::handle_exponent_error))
+              .map(Signed::Float)
+          }
+          Rule::FloatEmptyFraction => {
+            one(tt_hook_and_then(lexer, handlers::$handlers::handle_fractional_error))
+              .map(Signed::Float)
+          }
+          Rule::FloatEmptyExponent => {
+            one(tt_hook_and_then(lexer, handlers::$handlers::handle_exponent_error))
+              .map(Signed::Float)
+          }
+          Rule::HexFloat => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_valid_hex_suffix(lexer, HexFloatError::UnexpectedSuffix)
+          }))
+          .map(Signed::HexFloat),
+          Rule::HexFloatMissingExponent => tt_hook_and_then_into_errors(
+            lexer,
+            handlers::$handlers::handle_hex_float_missing_exponent_then_check_suffix,
+          )
+          .map(Signed::HexFloat),
+          Rule::HexFloatMissingInteger => tt_hook_and_then_into_errors(
+            lexer,
+            handlers::$handlers::handle_hex_float_missing_integer_part_error_then_check_suffix,
+          )
+          .map(Signed::HexFloat),
+          Rule::HexFloatFractionEmptyExponent => {
+            one(tt_hook_and_then(lexer, handlers::$handlers::handle_hex_exponent_error))
+              .map(Signed::HexFloat)
+          }
+          Rule::HexFloatEmptyFraction => {
+            one(tt_hook_and_then(lexer, handlers::$handlers::handle_hex_fractional_error))
+              .map(Signed::HexFloat)
+          }
+          Rule::HexFloatEmptyExponent => {
+            one(tt_hook_and_then(lexer, handlers::$handlers::handle_hex_exponent_error))
+              .map(Signed::HexFloat)
+          }
+          Rule::Decimal => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_decimal_suffix(lexer, DecimalError::UnexpectedSuffix)
+          }))
+          .map(Signed::Decimal),
+          Rule::Binary => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_valid_binary_suffix(lexer, BinaryError::UnexpectedSuffix)
+          }))
+          .map(Signed::Binary),
+          Rule::BinaryMissingDigits => {
+            tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_invalid_binary_suffix)
+              .map(Signed::Binary)
+          }
+          Rule::Octal => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_valid_octal_suffix(lexer, OctalError::UnexpectedSuffix)
+          }))
+          .map(Signed::Octal),
+          Rule::OctalMissingDigits => {
+            tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_invalid_octal_suffix)
+              .map(Signed::Octal)
+          }
+          Rule::Hex => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_valid_hex_suffix(lexer, HexError::UnexpectedSuffix)
+          }))
+          .map(Signed::Hex),
+          Rule::HexMissingDigits => {
+            tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_invalid_hex_suffix)
+              .map(Signed::Hex)
+          }
+        }
+      }
+
+      /// One lexeme's answer, with its error in the grammar's error type.
+      #[allow(clippy::result_large_err)]
+      #[inline(always)]
+      fn one<O>(answer: Result<O, TokenError>) -> Result<O, TokenErrors> {
+        answer.map_err(TokenErrors::from)
+      }
 
       impl tokora::Token<'_> for LosslessToken<$slice> {
         type Kind = LosslessTokenKind;
@@ -405,10 +635,12 @@ macro_rules! token_impl {
         /// the cut`, in both dialects and at both doors.
         ///
         /// The exact frontier is not reachable either: a `logos` callback runs only at the leaf
-        /// the DFA accepted, and that leaf is `-`, whose rule carries none — so `State::take_probe`
-        /// has nothing to record. The price of `Unbounded` is paid by a `Partial` consumer alone,
-        /// which buffers until the stream is sealed; every door this workspace ships is
-        /// `Complete`, where there is no holdback at all.
+        /// the DFA accepted, and that leaf is `-`. Its callback reads the rest of the lexeme with
+        /// the sign's grammar and records no probe, so `State::take_probe` has nothing to take:
+        /// over `-.`, a cut of `-.5`, the sign's grammar answers a bare `-` the complete parse does
+        /// not have. The price of `Unbounded` is paid by a `Partial` consumer alone, which buffers
+        /// until the stream is sealed; every door this workspace ships is `Complete`, where there is
+        /// no holdback at all.
         const SCAN_LOOKAHEAD: tokora::ScanLookahead = tokora::ScanLookahead::Unbounded;
 
         #[inline(always)]
@@ -438,12 +670,12 @@ macro_rules! token_impl {
       #[logos(subpattern binary_digit = "[01]")]
       #[logos(subpattern digits_with_sep = "[0-9_]*[0-9][0-9_]*")]
       #[logos(subpattern hex_digits_with_sep = "[0-9a-fA-F_]*[0-9a-fA-F][0-9a-fA-F_]*")]
-      #[logos(subpattern decimal = "-?(?&digit)[0-9_]*")]
-      #[logos(subpattern hex_start = "-?0x_*")]
+      #[logos(subpattern decimal = "(?&digit)[0-9_]*")]
+      #[logos(subpattern hex_start = "0x_*")]
       #[logos(subpattern hex = "(?&hex_start)(?&hex_digit)[0-9a-fA-F_]*")]
-      #[logos(subpattern octal_start = "-?0o_*")]
+      #[logos(subpattern octal_start = "0o_*")]
       #[logos(subpattern octal = "(?&octal_start)(?&octal_digit)[0-7_]*")]
-      #[logos(subpattern binary_start = "-?0b_*")]
+      #[logos(subpattern binary_start = "0b_*")]
       #[logos(subpattern binary = "(?&binary_start)(?&binary_digit)[01_]*")]
       #[logos(subpattern frac = "\\.(?&digits_with_sep)")]
       #[logos(subpattern esign = "[eE][+-]?")]
@@ -503,8 +735,8 @@ macro_rules! token_impl {
         #[token("+", tt_hook)]
         Plus,
 
-        #[token("-", tt_hook)]
-        Minus,
+        #[token("-", minus)]
+        Minus(Signed<$logos_slice>),
 
         #[token("...", tt_hook)]
         #[token(".", |lexer| tt_hook_and_then(lexer, |lexer| TokenErrorOnlyResult::Err(unterminated_spread_operator_error(lexer))))]
@@ -554,7 +786,7 @@ macro_rules! token_impl {
 
         #[regex("(?&decimal)((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_decimal_suffix(lexer, FloatError::UnexpectedSuffix)))]
         #[regex(
-          "-?(?&frac)(?&exp)?",
+          "(?&frac)(?&exp)?",
           |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_float_missing_integer_part_error_then_check_suffix)
         )]
         #[regex("(?&decimal)(?&frac)(?&esign)", |lexer| tt_hook_and_then(lexer, handlers::$handlers::handle_exponent_error))]
@@ -565,7 +797,7 @@ macro_rules! token_impl {
         #[regex("(?&hex)(?&hex_frac)?(?&hex_exp)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_valid_hex_suffix(lexer, HexFloatError::UnexpectedSuffix)))]
         #[regex("(?&hex)(?&hex_frac)", |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_hex_float_missing_exponent_then_check_suffix))]
         #[regex(
-          "-?(?&hex_frac)(?&hex_exp)",
+          "(?&hex_frac)(?&hex_exp)",
           |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_hex_float_missing_integer_part_error_then_check_suffix)
         )]
         #[regex("(?&hex)(?&hex_frac)(?&psign)", |lexer| tt_hook_and_then(lexer, handlers::$handlers::handle_hex_exponent_error))]
@@ -635,7 +867,15 @@ macro_rules! token_impl {
             Token::LitInlineStr($val) => Self::LitInlineStr($convert),
             Token::LitBlockStr($val) => Self::LitBlockStr($convert),
             Token::Plus => Self::Plus,
-            Token::Minus => Self::Minus,
+            Token::Minus(signed) => match signed {
+              Signed::Operator => Self::Minus,
+              Signed::Float($val) => Self::LitFloat(LitFloat::Decimal($convert)),
+              Signed::HexFloat($val) => Self::LitFloat(LitFloat::Hex($convert)),
+              Signed::Decimal($val) => Self::LitInt(LitInt::Decimal($convert)),
+              Signed::Binary($val) => Self::LitInt(LitInt::Binary($convert)),
+              Signed::Octal($val) => Self::LitInt(LitInt::Octal($convert)),
+              Signed::Hex($val) => Self::LitInt(LitInt::Hex($convert)),
+            },
             Token::PathSeparator => Self::PathSeparator,
             Token::Tilde => Self::Tilde,
             Token::DotDot => Self::DotDot,
@@ -662,6 +902,26 @@ macro_rules! token_impl {
       }
     }
   };
+}
+
+/// What the grammar's `-` rule made: the operator, or the number the `-` is the sign of, with the
+/// lexeme's slice.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub(super) enum Signed<S> {
+  /// The `-` operator.
+  Operator,
+  /// A decimal float.
+  Float(S),
+  /// A hexadecimal float.
+  HexFloat(S),
+  /// A decimal integer.
+  Decimal(S),
+  /// A binary integer.
+  Binary(S),
+  /// An octal integer.
+  Octal(S),
+  /// A hexadecimal integer.
+  Hex(S),
 }
 
 pub(super) use token;
