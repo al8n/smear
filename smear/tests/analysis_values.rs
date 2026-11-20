@@ -1350,6 +1350,49 @@ fn a_defaults_prefix_is_reported_once_whoever_asks_first() {
   }
 }
 
+/// One path read both ways, a generic input object's default at an instantiation with an enum,
+/// where it is a value's prefix, and at one with `TypeRef`, where it is a type, reports a failure
+/// both readings meet once, whichever reads it first: `Missing`, which the prefix wants as a type
+/// and the whole path as a module, names nothing. The control's readings fail at two places, `m`,
+/// a module where the prefix wants a type, and `RED`, which `m` does not declare, and each is
+/// reported. Refuses a report for each reading. What the rules say of `TypeRef` as a type argument
+/// is no question of this test's.
+#[test]
+fn a_path_read_both_ways_reports_a_failure_both_meet_once() {
+  const UNRESOLVED: &str = "smear::graphqlx::unresolved-path";
+  let generic = "input In<T> {\n  v: T = Missing::RED\n}\nenum Color {\n  RED\n}\n";
+  for query in [
+    "type Query {\n  a(i: In<Color>): Int\n  b(i: In<TypeRef>): Int\n}\n",
+    "type Query {\n  b(i: In<TypeRef>): Int\n  a(i: In<Color>): Int\n}\n",
+  ] {
+    let text = format!("{query}{generic}");
+    let analysis = analyze_text(&text, &Limits::new());
+    let schema = schema_file(&analysis);
+    let unresolved: Vec<(&str, Location)> = found(&analysis)
+      .into_iter()
+      .filter(|row: &(&str, Location)| row.0 == UNRESOLVED)
+      .collect();
+    assert_eq!(unresolved, [(UNRESOLVED, at(schema, &text, "Missing", 0))]);
+  }
+
+  let text = "type Query {\n  a(i: In<Color>): Int\n  b(i: In<TypeRef>): Int\n}\n\
+              input In<T> {\n  v: T = m::RED\n}\nenum Color {\n  RED\n}\n\
+              mod m {\n  enum Hue {\n    BLUE\n  }\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let unresolved: Vec<(&str, Location)> = found(&analysis)
+    .into_iter()
+    .filter(|row: &(&str, Location)| row.0 == UNRESOLVED)
+    .collect();
+  assert_eq!(
+    unresolved,
+    [
+      (UNRESOLVED, after(schema, text, "T = ", "m")),
+      (UNRESOLVED, after(schema, text, "m::", "RED")),
+    ]
+  );
+}
+
 #[test]
 fn a_later_argument_of_a_name_already_taken_is_not_asked_for() {
   // `@twice` resolves and says nothing of its later `a`, though it is required; `@once`, beside

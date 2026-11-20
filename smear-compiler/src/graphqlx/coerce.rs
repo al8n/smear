@@ -82,6 +82,13 @@
 //! `undefined-type` for one segment with no root, whoever asks first; the value is then
 //! unresolved, and nothing more is said.
 //!
+//! One path can be read both ways, as the default of a generic input object instantiated with an
+//! enum and with `TypeRef` is: a prefix, and a whole path. The path keeps where and why the first
+//! of its two readings to fail failed, and the other reading's failure at that place for that
+//! reason, whatever it wanted there, is not reported again: `Missing::RED` read both ways is one
+//! `unresolved-path`, at `Missing`, which the prefix wants as a type and the whole path as a
+//! module. A failure at another place, or for another reason, is reported as any other.
+//!
 //! An object literal against an input object is read once and kept, by the literal and the input
 //! object: a field whose name is the name of one of the input object's fields, the first of that
 //! name, sets that field; the fields it sets are sorted by the field, one written twice kept twice
@@ -5206,7 +5213,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     if let Some(resolved) = path.prefix {
       return resolved;
     }
-    let resolved = self.resolve_type(path, tree, false);
+    let resolved = self.resolve_type(row, path, tree, false);
     if let Some(kept) = self.raw.paths.get_mut(row as usize) {
       kept.prefix = Some(resolved);
     }
@@ -5219,19 +5226,20 @@ impl<'p> Coercion<'_, 'p, '_> {
     if let Some(resolved) = path.named {
       return resolved;
     }
-    let resolved = self.resolve_type(path, tree, true);
+    let resolved = self.resolve_type(row, path, tree, true);
     if let Some(kept) = self.raw.paths.get_mut(row as usize) {
       kept.named = Some(resolved);
     }
     resolved
   }
 
-  /// What `path`, of `tree`, names as a type, the whole of it when `whole` and its segments but
-  /// the last otherwise: resolved in the module and the source of `tree`, with the one generic
-  /// parameter in scope that the path's first segment names, if it names one. The resolver
-  /// reports what does not resolve, at the path where it is written, with GraphQL's
-  /// `undefined-type` for a whole path of one segment and no root.
-  fn resolve_type(&mut self, path: RawPath, tree: RawTree, whole: bool) -> Resolved {
+  /// What `path`, the path at `row` of `tree`, names as a type, the whole of it when `whole` and
+  /// its segments but the last otherwise: resolved in the module and the source of `tree`, with
+  /// the one generic parameter in scope that the path's first segment names, if it names one. The
+  /// resolver reports what does not resolve, at the path where it is written, with GraphQL's
+  /// `undefined-type` for a whole path of one segment and no root, but for a failure the path's
+  /// other reading met already at the same place for the same reason, which that reading reported.
+  fn resolve_type(&mut self, row: u32, path: RawPath, tree: RawTree, whole: bool) -> Resolved {
     let builder: &ModelBuilder = &*self.builder;
     let all = self.raw.path_segments(path);
     let written = if whole {
@@ -5268,9 +5276,23 @@ impl<'p> Coercion<'_, 'p, '_> {
       },
       params,
     };
-    self
-      .scopes
-      .resolve_segments(builder, self.reporter, &request, path.root, &segments)
+    let mut failed = self
+      .raw
+      .paths
+      .get(row as usize)
+      .and_then(|kept: &RawPath| kept.failed);
+    let resolved = self.scopes.resolve_reading(
+      builder,
+      self.reporter,
+      &request,
+      path.root,
+      &segments,
+      &mut failed,
+    );
+    if let Some(kept) = self.raw.paths.get_mut(row as usize) {
+      kept.failed = failed;
+    }
+    resolved
   }
 
   /// Makes `id` the type value that `node`, the path at `row` of `tree`, names: its whole path
