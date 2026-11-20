@@ -113,6 +113,43 @@ fn a_nested_suffixed_number_keeps_the_count() {
   }
 }
 
+/// A suffixed number inside a `bytes` list is reported once, by lowering. The list's reading meets
+/// the refused element without asking what it is, and says nothing of it, where the default is
+/// written and where an instantiation judges it: the value is left unresolved, and no
+/// `invalid-default-value` joins the report. An element that is no byte keeps its report.
+#[test]
+fn a_suffixed_byte_is_reported_once() {
+  for (text, before) in [
+    ("input I { data: bytes = [1u8] }\n", "data: bytes = ["),
+    (
+      "type Query {\n  f(b: Box<bytes>): Int\n}\ninput Box<T> {\n  v: T = [1u8]\n}\n",
+      "v: T = [",
+    ),
+  ] {
+    let analysis = analyze_text(text);
+    let schema = schema_file(&analysis);
+    assert_eq!(
+      found(&analysis),
+      [(UNKNOWN_ITEM, after(schema, text, before, "1u8"))],
+      "{text:?}"
+    );
+  }
+
+  let text = "input I { data: bytes = [1u8, \"a\"] }\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [
+      (UNKNOWN_ITEM, after(schema, text, "[", "1u8")),
+      (
+        "smear::schema::invalid-default-value",
+        after(schema, text, "1u8, ", "\"a\"")
+      ),
+    ]
+  );
+}
+
 /// The two parser layers lower a suffixed number alike: the same codes at the same places.
 #[cfg(all(feature = "rowan_0_17", feature = "std"))]
 #[test]
@@ -123,6 +160,7 @@ fn both_layers_agree() {
     "input I { n: u8 = 1u8 }\n",
     "input I {\n  a: u8 = 1u8\n  b: f32 = 2.5f32\n}\n",
     "input L { xs: [u8] = [1, 2u8, 3] }\n",
+    "input I { data: bytes = [1u8] }\n",
   ] {
     let syntactic = analyze_text(text);
     let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
