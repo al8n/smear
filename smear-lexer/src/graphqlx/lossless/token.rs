@@ -906,8 +906,12 @@ macro_rules! token_impl {
 
 /// What the grammar's `-` rule made: the operator, or the number the `-` is the sign of, with the
 /// lexeme's slice.
+///
+/// `pub` because the logos token carries it, and that token is reachable at `pub` as
+/// `FromLogos::Logos`. This module is private and nothing re-exports the type, so no caller can
+/// name it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-pub(super) enum Signed<S> {
+pub enum Signed<S> {
   /// The `-` operator.
   Operator,
   /// A decimal float.

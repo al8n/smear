@@ -577,6 +577,7 @@ mod tests {
   ) -> std::vec::Vec<(Option<LosslessTokenKind>, usize, usize)>
   where
     L: Lexer<'a, Token = LosslessToken<S>, Span = tokora::SimpleSpan>,
+    LosslessToken<S>: tokora::Token<'a>,
   {
     let mut items: std::vec::Vec<(Option<LosslessTokenKind>, usize, usize)> = std::vec::Vec::new();
     while let Some(item) = lexer.lex() {
