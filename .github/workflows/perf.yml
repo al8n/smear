@@ -126,7 +126,7 @@ env:
   #
   # `-C debuginfo=0` is kept: it is what `ci.yml` builds under, it is identical on both sides, and
   # debug info is build time and disk rather than anything either instrument reads.
-  RUSTFLAGS: -C debuginfo=0
+  RUSTFLAGS: -C debuginfo=0 -C llvm-args=-align-all-functions=6 -C llvm-args=-align-all-nofallthru-blocks=5
 
 jobs:
   # ── THE PULL-REQUEST GATE ─────────────────────────────────────────────────────────────────
@@ -239,7 +239,7 @@ jobs:
         # All history, every branch (as `origin/<name>`) and every tag, so `base` can name any.
         fetch-depth: 0
     - name: Install Rust
-      run: rustup update stable --no-self-update && rustup default stable
+      run: rustup update stable --no-self-update && rustup default stable && (lscpu | grep 'Model name' || true)
     - name: Cache cargo registry and both sides' target directories
       uses: actions/cache@v6
       with:
