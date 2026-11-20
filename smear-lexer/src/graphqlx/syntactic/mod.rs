@@ -977,9 +977,10 @@ where
 
   #[inline(always)]
   fn lex(&mut self) -> Option<Result<Self::Token, <Self::Token as tokora::Token<'inp>>::Error>> {
-    // The word is the parser's to write, between two calls, so it is read once here and the body
-    // asks a constant: the instance outside a block is the one this inlines, and a block's is kept
-    // out of line.
+    if self.state.in_const_block() {
+      self.probe_block();
+      return None;
+    }
     self.lex_body::<false>()
   }
 
@@ -1032,6 +1033,17 @@ where
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
   <S::Slice<'inp> as Slice<'inp>>::Char: CharLen + CharBody + ByteStrBody,
 {
+  /// A probe. It is handed the lexer, writes one of its fields, and answers nothing.
+  #[cold]
+  #[inline(never)]
+  fn probe_block(&mut self) {
+    let this = core::hint::black_box(self);
+    if core::hint::black_box(false) {
+      panic!("probe");
+    }
+    this.last_error_span = Some(this.last_span);
+  }
+
   /// The loop's instance inside a `const { … }` block.
   #[allow(clippy::type_complexity)]
   #[allow(dead_code)]
