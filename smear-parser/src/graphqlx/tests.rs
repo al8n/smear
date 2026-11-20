@@ -5,7 +5,10 @@
 //! (when enabled), so the AST aliases and parser entry points cannot
 //! accidentally become tied to one source representation.
 
-use smear_lexer::graphqlx::{LitFloat, LitInt, syntactic::SyntacticTokenKind};
+use smear_lexer::graphqlx::{
+  LitFloat, LitInt,
+  syntactic::{SyntacticState, SyntacticTokenKind},
+};
 use tokora::{
   FatalContext, Parse, ParseAttempt, Parser, SimpleSpan, span::AsSpan, utils::Equivalent,
 };
@@ -42,6 +45,21 @@ fn drive_str<'inp, O>(
     f,
   )
   .parse_str(input)
+}
+
+/// Drives `f` over a `str` source under `Fatal<GraphqlxErrors<&str>>`, its lexer started in
+/// `state`.
+fn drive_str_with_state<'inp, O>(
+  f: impl for<'c> FnMut(
+    &mut GraphqlxInput<'inp, 'c, str, StrCtx<'inp>>,
+  ) -> Result<O, GraphqlxErrors<&'inp str>>,
+  input: &'inp str,
+  state: SyntacticState,
+) -> Result<O, GraphqlxErrors<&'inp str>> {
+  Parser::with_parser::<'inp, GraphqlxLexer<'inp, str>, O, GraphqlxErrors<&'inp str>, _, GraphQLx>(
+    f,
+  )
+  .parse_str_with_state(input, state)
 }
 
 /// Drives `f` over a `[u8]` source under `Fatal<GraphqlxErrors<&[u8]>>`.
@@ -504,6 +522,72 @@ fn a_schema_position_reads_the_typed_forms_and_a_constant_one_does_not() {
   ));
   // Type arguments that open neither bracket are refused.
   assert!(drive_str(ast::ConstInputValue::graphqlx_schema, "Box<i32> 1").is_err());
+}
+
+/// A rewind across a block restores the lexer to its state before the block, so what is read after
+/// the rewind is lexed outside the block's mode: the prefixed string the block held is a name and a
+/// string again.
+#[test]
+fn a_rewind_across_a_block_restores_the_lexer_outside_the_block() {
+  let (read, before, after) = drive_str(
+    |inp| {
+      let before = inp.state();
+      let mut read = None;
+      let declined = inp.attempt(|inp| {
+        read = ast::ConstInputValue::graphqlx_schema(inp).ok();
+        None::<()>
+      });
+      assert!(declined.is_none());
+      let after = inp.state();
+      for kind in [
+        SyntacticTokenKind::Identifier,
+        SyntacticTokenKind::LBrace,
+        SyntacticTokenKind::Identifier,
+        SyntacticTokenKind::InlineString,
+        SyntacticTokenKind::RBrace,
+      ] {
+        assert_eq!(inp.next()?.map(|token| token.data().kind()), Some(kind));
+      }
+      assert!(inp.next()?.is_none());
+      Ok::<_, GraphqlxErrors<&str>>((read, before, after))
+    },
+    "const { b\"x\" }",
+  )
+  .expect("the rewound source lexes outside a block");
+  let Some(ast::ConstInputValue::Block(block)) = &read else {
+    panic!("the attempt read the whole block: {read:?}")
+  };
+  assert!(matches!(block.value(), ast::ConstInputValue::Bytes(_)));
+  assert_eq!(after, before);
+  assert!(!after.in_const_block());
+}
+
+/// A scanner's stop inside a block leaves the lexer in the block. The production writes no state
+/// over the stop, so the stop stays one: it is still latched where the production stopped, and a
+/// read there is refused.
+#[test]
+fn a_scanner_stop_inside_a_block_leaves_the_lexer_in_the_block() {
+  use smear_lexer::limits::SyntacticLimits;
+
+  // The block's `{` opens the first bracket and each `(` one more, so a ceiling of three refuses
+  // the third `(`, inside the block.
+  let (stopped, in_block, refused) = drive_str_with_state(
+    |inp| {
+      let read = ast::ConstInputValue::graphqlx_schema(inp);
+      assert!(read.is_err(), "the third `(` is past the ceiling: {read:?}");
+      Ok::<_, GraphqlxErrors<&str>>((
+        inp.at_scanner_stop(),
+        inp.state().in_const_block(),
+        inp.next_or_stop().is_err(),
+      ))
+    },
+    "const { ((((1)))) }",
+    SyntacticState::new(SyntacticLimits::with_max_nesting_depth(3)),
+  )
+  .expect("the cell reads on past the error it caught");
+  assert!(stopped, "the stop is latched where the production stopped");
+  assert!(in_block, "the production wrote no state over the stop");
+  assert!(refused, "a read at the latched stop is refused");
 }
 
 #[test]

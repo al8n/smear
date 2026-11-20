@@ -321,6 +321,9 @@ pub mod ty;
 pub mod use_tree;
 pub mod value;
 
+#[cfg(test)]
+mod tests;
+
 // The three document roots this suite parses, all at the same module level: the mixed one
 // (`parse_document`), the SDL-only one and the executable-only one. A consumer picks a root here,
 // once, rather than parsing the mixed form and filtering the tree.
