@@ -1472,7 +1472,7 @@ mod lossless {
   mod analysis {
     use smear::{
       analysis::graphqlx::{
-        DefId, Layout, Limits, Model, ModuleId, Package, SourceFile, Tier, analyze_with,
+        DefId, Layout, Limits, Model, ModuleId, Options, Package, SourceFile, Tier, analyze_with,
       },
       parser::graphqlx::Lossless,
     };
@@ -1496,7 +1496,13 @@ mod lossless {
       ] {
         let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
           .with_files([SourceFile::new("schema.graphqlx", text)]);
-        let (analysis, _trees) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
+        let (analysis, _trees) = analyze_with(
+          &Lossless::new(),
+          &root,
+          &[],
+          &Limits::new(),
+          &Options::new(),
+        );
         let model: &Model = analysis.model();
         let app_root: ModuleId = model.package(model.root_package()).root_module();
         assert!(
@@ -1517,7 +1523,13 @@ mod lossless {
     fn the_witness_declares_each_item_in_the_module_its_braces_give_it() {
       let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
         .with_files([SourceFile::new("schema.graphqlx", super::WITNESS)]);
-      let (analysis, _trees) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
+      let (analysis, _trees) = analyze_with(
+        &Lossless::new(),
+        &root,
+        &[],
+        &Limits::new(),
+        &Options::new(),
+      );
       let model: &Model = analysis.model();
       let m: ModuleId = model.module_by_path("^::app::m").expect("the `mod m`");
       let n: ModuleId = model.module_by_path("^::app::n").expect("the `mod n`");

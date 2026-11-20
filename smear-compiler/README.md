@@ -102,6 +102,8 @@ and checks a GraphQLx program against smear's own rules and the rules GraphQLx s
   a tier and its files' texts (`&str`, `&[u8]` or a source feature's type). The caller reads the
   files and supplies every package: the analysis does no I/O.
 - **Limits:** `graphqlx::Limits`, the bounds untrusted input runs under.
+- **Options:** `graphqlx::Options`, the switches that relax or tighten what the language accepts,
+  each off by default.
 - **The model:** dense tables read through `Copy` views, of packages, modules, definitions,
   members, type occurrences and interned types, values, directive applications, the schema and the
   built-ins, with canonical names and lookup. It owns every spelling it answers with.
@@ -119,9 +121,9 @@ and checks a GraphQLx program against smear's own rules and the rules GraphQLx s
 | Collection | Builds each package's module tree and collects what each module declares | `smear::graphqlx`: 4 |
 | Declaration | Numbers every module and definition, and checks each module's names | `smear::schema`: 5; `smear::graphqlx`: 1 |
 | Name resolution | Builds every module's scope, resolves its `use` items, and resolves each path where it stands | `smear::schema`: 6; `smear::graphqlx`: 11 |
-| Lowering | Writes what each definition holds: its contributions, type parameters, members, type occurrences and applications, its values as written, and the schema | `smear::schema`: 4; `smear::graphqlx`: 4 |
+| Lowering | Writes what each definition holds: its contributions, type parameters, members, type occurrences and applications, its values as written, and the schema | `smear::schema`: 4; `smear::graphqlx`: 5 |
 | Instantiation | Gives every type occurrence its type and every application its complete type arguments, judges the bounds of every instantiation the program writes, and finds which generic definitions grow | `smear::graphqlx`: 4 |
-| Coercion | Coerces every value to the type expected where it stands, filling what is left out from its default; a value of a custom scalar that is no collection but `null`, or of a type that still names a type parameter, is kept as written, and judged at each instantiation the program writes or derives through the definitions that do not grow | `smear::schema`: 6; `smear::graphqlx`: 4 |
+| Coercion | Coerces every value to the type expected where it stands, filling what is left out from its default; a value of a custom scalar that is no collection but `null`, or of a type that still names a type parameter, is kept as written, and judged at each instantiation the program writes or derives through the definitions that do not grow; an extern collection's other literal is kept as written too, under `Options::extern_collections_as_written` | `smear::schema`: 6; `smear::graphqlx`: 4 |
 | Binding | Binds each scalar to its host types | none |
 | Implementation | Checks what each definition says it implements, transitively and field by field, and a union's members, at each instantiation the program writes or derives through the definitions that do not grow | `smear::schema`: 9; `smear::graphqlx`: 1 |
 | Tiers | Marks what only compile-time metadata reaches, and gives every definition and every type the tier it requires | none |
@@ -132,10 +134,11 @@ and checks a GraphQLx program against smear's own rules and the rules GraphQLx s
 phase's codes and each rule's.
 
 On every GraphQL document of smear's corpora, given as the one file of a `Flat` package, the
-analyzer gives the schema builder's verdict, but for three capacity ceilings of the schema
-representation that GraphQLx does not have. A differential test holds it there, code by code, and
-lists each count it lets differ and why. That is this release's rules: GraphQLx is not bound to
-GraphQL's.
+analyzer gives the schema builder's verdict, but for three capacity ceilings of GraphQL's builder,
+which GraphQLx has only as `Limits` a consumer tightens to them. A differential test holds it
+there, code by code, lists each count it lets differ and why, and holds that under those limits the
+analyzer refuses each document the builder refuses for a ceiling. That is this release's rules:
+GraphQLx is not bound to GraphQL's.
 
 ### Rules of your own
 
@@ -155,7 +158,15 @@ What the analysis builds and spends once it has numbered the packages it is give
 [`graphqlx::Limits`](https://docs.rs/smear-compiler/latest/smear_compiler/graphqlx/struct.Limits.html):
 a bound passed stops that work, is reported as `smear::graphqlx::resource-limit`, and the analysis
 goes on, but for the diagnostic ceiling and the near-miss budget, which limit what the analysis says
-and not what it accepts. Numbering and ordering the packages comes first, under no bound but the
+and not what it accepts. A third kind refuses a shape and stops no work: how many arguments a field
+and a directive declare, and how many list and non-null wrappers a written type has. They cost the
+analysis no more than their text, and a consumer sets them for a representation of its own: at 64,
+64 and 15 they refuse each document GraphQL's schema builder refuses for a ceiling. `max_values`
+bounds the values the analysis reads and makes, each literal a value writes, its own included, each
+list a lone value stands for and each value of a copy: the model holds at most that many plus the
+built-in library's own, plus one unresolved value for each written default or argument refused past
+it. Numbering and
+ordering the packages comes first, under no bound but the
 diagnostic ceiling: each package's files are sorted by path, two files that share a path are
 ordered by their texts, two packages that share a name by everything they hold, and every name and
 path is copied and checked. That work grows with everything the caller supplies, texts included,

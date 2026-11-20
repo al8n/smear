@@ -14,8 +14,8 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Diagnostic, Layout, Limits, Namespace, Package, PackageId, SourceFile, SourceId,
-    Tier, analyze, analyze_with,
+    Analysis, Diagnostic, Layout, Limits, Namespace, Options, Package, PackageId, SourceFile,
+    SourceId, Tier, analyze, analyze_with,
   },
   diagnostic::{Diagnose, Location},
   lexer::{limits::SyntacticLimits, tokora::SimpleSpan},
@@ -116,7 +116,7 @@ fn package(
 /// An analysis of the root package `app`, `Flat`, holding the one file `schema.graphqlx`.
 fn analyze_one(text: &'static str) -> Analysis {
   let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
-  analyze(&root, &[], &Limits::new())
+  analyze(&root, &[], &Limits::new(), &Options::new())
 }
 
 /// An analysis of the root package `app`, `Flat`, holding the one file `schema.graphqlx`, whose
@@ -124,7 +124,7 @@ fn analyze_one(text: &'static str) -> Analysis {
 fn analyze_text(text: &str) -> Analysis {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text)]);
-  analyze(&root, &[], &Limits::new())
+  analyze(&root, &[], &Limits::new(), &Options::new())
 }
 
 /// The id of the file at `path` in the package `package`.
@@ -292,7 +292,7 @@ fn a_members_name_does_not_begin_with_two_underscores() {
   )
   .with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let geo_file = file(&analysis, 4, "geo.graphqlx");
   assert_eq!(
     found(&analysis),
@@ -471,7 +471,7 @@ fn an_extension_repeats_no_member_of_its_definition() {
     Layout::Flat,
     &[("a.graphqlx", first), ("b.graphqlx", second)],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let a = file(&analysis, 3, "a.graphqlx");
   let b = file(&analysis, 3, "b.graphqlx");
   assert_eq!(
@@ -596,7 +596,7 @@ fn a_marker_and_an_extended_definition_are_not_empty() {
   let theirs = "type Point\ninterface Face\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let schema = schema_file(&analysis);
   let geo_file = file(&analysis, 4, "geo.graphqlx");
   assert_eq!(
@@ -1726,7 +1726,7 @@ fn a_report_never_walks_a_path_defaults_fill() {
     }
     let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
       .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
-    let analysis = analyze(&root, &[], &limits);
+    let analysis = analyze(&root, &[], &limits, &Options::new());
     let schema = schema_file(&analysis);
     let span = |start: usize, len: usize| -> Location {
       Location::new(schema.get(), SimpleSpan::new(start, start + len))
@@ -1767,7 +1767,7 @@ fn a_report_never_walks_a_path_defaults_fill() {
       )
     );
     // Under a ceiling of zero, each report is built and counted, and none is kept.
-    let silent = analyze(&root, &[], &limits.with_max_diagnostics(0));
+    let silent = analyze(&root, &[], &limits.with_max_diagnostics(0), &Options::new());
     let diagnostics = silent.diagnostics();
     assert!(diagnostics.is_empty(), "depth {depth}, fields {fields}");
     assert!(diagnostics.truncated());
@@ -1826,7 +1826,7 @@ fn a_written_tree_many_reports_nest_in_is_read_once() {
       );
       let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
         .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
-      let (analysis, _) = analyze_with(&syntactic, &root, &[], &limits);
+      let (analysis, _) = analyze_with(&syntactic, &root, &[], &limits, &Options::new());
       let schema = schema_file(&analysis);
       let leaf = named(schema, &text, "M<Int, ", "Obj", 0);
       let stands = named(schema, &text, "@d<", "V", 0);
@@ -1865,7 +1865,13 @@ fn a_written_tree_many_reports_nest_in_is_read_once() {
         "depth {depth}"
       );
       // Under a ceiling of zero, each report is built and counted, and none is kept.
-      let (silent, _) = analyze_with(&syntactic, &root, &[], &limits.with_max_diagnostics(0));
+      let (silent, _) = analyze_with(
+        &syntactic,
+        &root,
+        &[],
+        &limits.with_max_diagnostics(0),
+        &Options::new(),
+      );
       let diagnostics = silent.diagnostics();
       assert!(diagnostics.is_empty(), "depth {depth}");
       assert!(diagnostics.truncated());
@@ -1896,7 +1902,7 @@ fn instantiations_are_judged_across_files_modules_and_packages() {
   )
   .with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", GEO)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let b = file(&analysis, 3, "b.graphqlx");
   let more = file(&analysis, 3, "m/more.graphqlx");
   let page = file(&analysis, 3, "m/page.graphqlx");
@@ -2206,7 +2212,7 @@ fn a_required_argument_or_input_field_is_not_deprecated() {
       ),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(
     analysis.diagnostics().is_empty(),
     "{:#?}",
@@ -2587,7 +2593,7 @@ fn a_member_many_collections_make_required_is_read_once() {
     }
     let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
       .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
-    let analysis = analyze(&root, &[], &limits);
+    let analysis = analyze(&root, &[], &limits, &Options::new());
     let schema = schema_file(&analysis);
     let deprecated = Some(at(schema, &text, "deprecated", 0));
     let expected: Vec<(&'static str, Location, Option<Location>)> = written
@@ -2618,7 +2624,7 @@ fn a_member_many_collections_make_required_is_read_once() {
       "sets {sets}, tags {tags}"
     );
     // Under a ceiling of zero, each report is built and counted, and none is kept.
-    let silent = analyze(&root, &[], &limits.with_max_diagnostics(0));
+    let silent = analyze(&root, &[], &limits.with_max_diagnostics(0), &Options::new());
     let diagnostics = silent.diagnostics();
     assert!(diagnostics.is_empty(), "sets {sets}, tags {tags}");
     assert!(diagnostics.truncated());
@@ -3420,7 +3426,7 @@ fn each_refused_default_is_refused_once_however_many_uses() {
     }
     let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
       .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
-    let analysis = analyze(&root, &[], &limits);
+    let analysis = analyze(&root, &[], &limits, &Options::new());
     let schema = schema_file(&analysis);
     let stands = Some(named(schema, &text, "value: ", "X", 0));
     let expected: Vec<(&'static str, Location, Option<Location>)> = written
@@ -3444,7 +3450,7 @@ fn each_refused_default_is_refused_once_however_many_uses() {
       "definitions {definitions}, uses {uses}"
     );
     // Under a ceiling of zero, each report is built and counted, and none is kept.
-    let silent = analyze(&root, &[], &limits.with_max_diagnostics(0));
+    let silent = analyze(&root, &[], &limits.with_max_diagnostics(0), &Options::new());
     let diagnostics = silent.diagnostics();
     assert!(
       diagnostics.is_empty(),
@@ -3496,7 +3502,7 @@ fn no_extension_makes_an_input_object_one_of() {
   let theirs = "input In {\n  a: Int!\n}\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["dep"]);
   let dep = package("dep", Layout::Flat, &[("dep.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[dep], &Limits::new());
+  let analysis = analyze(&root, &[dep], &Limits::new(), &Options::new());
   let schema = schema_file(&analysis);
   let dep_file = file(&analysis, 4, "dep.graphqlx");
   assert_eq!(

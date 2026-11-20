@@ -9,11 +9,12 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Diagnostic, DiagnosticKind, Diagnostics, Layout, Limits, Package, SourceFile, Tier,
-    analyze,
+    Analysis, Diagnostic, DiagnosticKind, Diagnostics, Layout, Limits, Options, Package,
+    SourceFile, Tier, analyze, analyze_with,
   },
   diagnostic::{Code, Diagnose, DiagnoseExt, Location, Severity},
   lexer::tokora::SimpleSpan,
+  parser::graphqlx::Syntactic,
 };
 
 /// A consumer's code: the builder takes any.
@@ -276,7 +277,7 @@ fn refused_twice(limits: &Limits) -> Analysis {
   ]);
   let dependencies = [Package::new("core", Layout::Directory, Tier::Std)
     .with_files([SourceFile::new("c.graphqlx", "scalar C\n")])];
-  analyze(&root, &dependencies, limits)
+  analyze(&root, &dependencies, limits, &Options::new())
 }
 
 #[test]
@@ -341,4 +342,42 @@ fn merging_a_truncated_list_is_truncated() {
   assert!(list.truncated());
   assert_eq!(list.len(), 2);
   assert_eq!(list.error_count(), 2);
+}
+
+/// An analysis answers the limits and the options it ran under, through either entrance, and two
+/// analyses of one program made under two configurations are unequal though their models are one.
+#[test]
+fn an_analysis_records_its_limits_and_options() {
+  let root = Package::new("app", Layout::Flat, Tier::Std)
+    .with_files([SourceFile::new("schema.graphqlx", "type Query { ok: Int }")]);
+  let limits = Limits::new()
+    .with_max_diagnostics(7)
+    .with_max_value_steps(1 << 10);
+  let options = Options::new();
+
+  let analysis = analyze(&root, &[], &limits, &options);
+  assert!(analysis.is_ok());
+  assert_eq!(analysis.limits(), &limits);
+  assert_eq!(analysis.limits().max_diagnostics(), 7);
+  assert_eq!(analysis.options(), &options);
+
+  let (layered, _trees) = analyze_with(&Syntactic::new(), &root, &[], &limits, &options);
+  assert_eq!(layered.limits(), &limits);
+  assert_eq!(layered.options(), &options);
+  assert_eq!(layered, analysis);
+
+  let defaults = analyze(&root, &[], &Limits::new(), &Options::new());
+  assert_eq!(defaults.limits(), &Limits::new());
+  assert_eq!(defaults.options(), &Options::default());
+
+  // Two limits that differ and change no answer: the models are equal, the analyses are not.
+  let wider = analyze(&root, &[], &limits.with_max_value_steps(1 << 11), &options);
+  assert!(wider.is_ok());
+  assert_eq!(wider.limits().max_value_steps(), 1 << 11);
+  assert_eq!(wider.model(), analysis.model());
+  assert_eq!(wider.diagnostics(), analysis.diagnostics());
+  assert_ne!(wider, analysis);
+
+  // The same configuration is the same analysis.
+  assert_eq!(analyze(&root, &[], &limits, &options), analysis);
 }

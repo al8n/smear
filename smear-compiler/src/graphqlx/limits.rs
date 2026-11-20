@@ -14,6 +14,12 @@ const DEFAULT_USE_DEPTH: u32 = 32;
 const DEFAULT_GLOB_ITERATIONS: u32 = 1 << 10;
 /// See [`Limits::max_globs`].
 const DEFAULT_GLOBS: u32 = 64;
+/// See [`Limits::max_field_arguments`].
+const DEFAULT_FIELD_ARGUMENTS: u32 = 1 << 10;
+/// See [`Limits::max_directive_arguments`].
+const DEFAULT_DIRECTIVE_ARGUMENTS: u32 = 1 << 10;
+/// See [`Limits::max_type_wrappers`].
+const DEFAULT_TYPE_WRAPPERS: u32 = 64;
 /// See [`Limits::max_generic_depth`].
 const DEFAULT_GENERIC_DEPTH: u32 = 64;
 /// See [`Limits::max_instantiations`].
@@ -24,6 +30,8 @@ const DEFAULT_SUBSTITUTIONS: u32 = 1 << 20;
 const DEFAULT_BOUND_STEPS: u32 = 1 << 20;
 /// See [`Limits::max_value_steps`].
 const DEFAULT_VALUE_STEPS: u32 = 1 << 20;
+/// See [`Limits::max_values`].
+const DEFAULT_VALUES: u32 = 1 << 20;
 /// See [`Limits::max_implementation_steps`].
 const DEFAULT_IMPLEMENTATION_STEPS: u32 = 1 << 20;
 /// See [`Limits::max_source_bytes`].
@@ -49,13 +57,18 @@ const _: () = assert!(
 /// A package set is untrusted input, and these bounds hold what the analysis builds and spends
 /// once it has numbered the package set: the number of definitions and of modules, how deep
 /// modules, `use` trees and types nest, how many segments a path a scope resolves has, how many
-/// rounds the glob fixpoint runs, how many modules one module's globs name, how many instantiations
-/// of generic definitions it interns, how many steps of substitution it takes, how many steps
-/// judging bounds takes, how many steps completing values takes, how many steps checking
-/// implementations takes, and how many bytes the supplied texts hold. A bound that is passed stops
-/// that work, is reported as `smear::graphqlx::resource-limit`, and the analysis goes on. Two
-/// bounds are not refusals: the diagnostic ceiling and the near-miss budget limit what the analysis
-/// says, not what it accepts.
+/// rounds the glob fixpoint runs, how many modules one module's globs name, how many arguments a
+/// field and a directive declare, how many list and non-null wrappers a written type has, how many
+/// instantiations of generic definitions it interns, how many steps of substitution it takes, how
+/// many steps judging bounds takes, how many steps completing values takes, how many values it
+/// reads and makes, how many steps checking implementations takes, and how many bytes the supplied
+/// texts hold. A bound that is passed stops that work, is reported as
+/// `smear::graphqlx::resource-limit`, and the analysis goes on. Two bounds are not refusals: the
+/// diagnostic ceiling and the near-miss budget limit what the analysis says, not what it accepts.
+/// Three refuse a shape and stop no work: how many arguments a field and a directive declare, and
+/// how many list and non-null wrappers a written type has. They cost the analysis no more than
+/// their text, and a consumer sets them for a representation of its own: at 64, 64 and 15 they
+/// refuse each document GraphQL's schema builder refuses for a ceiling.
 ///
 /// Before any bound applies, the diagnostic ceiling aside, the analysis reads what the caller
 /// supplied, to number and order it. It sorts each package's files by path, and orders two files
@@ -77,13 +90,16 @@ const _: () = assert!(
 /// Every bound is a count, and `0` admits none of what it counts, except that the built-in library
 /// is always declared whole and every package has its root module, and that the built-in library's
 /// types are built whatever the generic depth, instantiation and substitution bounds are, its
-/// bounds cost nothing to judge, since it writes no instantiation of a definition with a bound,
-/// its own values cost nothing to complete, where it writes them and in a copy made for an
-/// application it writes, and its implementations cost nothing to check, since it writes no
-/// `implements` entry and no union: see
-/// [`Limits::max_definitions`], [`Limits::max_modules`], [`Limits::max_generic_depth`],
-/// [`Limits::max_instantiations`], [`Limits::max_substitutions`], [`Limits::max_bound_steps`],
-/// [`Limits::max_value_steps`] and [`Limits::max_implementation_steps`].
+/// fields' and directives' arguments and its types' wrappers are counted by none of the three
+/// shape bounds, its bounds cost nothing to judge, since it writes no instantiation of a
+/// definition with a bound, its own values cost nothing to read or complete, where it writes them
+/// and in a copy made for an application it writes, and its implementations cost nothing to check,
+/// since it writes no `implements` entry and no union: see
+/// [`Limits::max_definitions`], [`Limits::max_modules`], [`Limits::max_field_arguments`],
+/// [`Limits::max_directive_arguments`], [`Limits::max_type_wrappers`],
+/// [`Limits::max_generic_depth`], [`Limits::max_instantiations`], [`Limits::max_substitutions`],
+/// [`Limits::max_bound_steps`], [`Limits::max_value_steps`], [`Limits::max_values`] and
+/// [`Limits::max_implementation_steps`].
 ///
 /// # Building one
 ///
@@ -108,11 +124,15 @@ pub struct Limits {
   max_use_depth: u32,
   max_glob_iterations: u32,
   max_globs: u32,
+  max_field_arguments: u32,
+  max_directive_arguments: u32,
+  max_type_wrappers: u32,
   max_generic_depth: u32,
   max_instantiations: u32,
   max_substitutions: u32,
   max_bound_steps: u32,
   max_value_steps: u32,
+  max_values: u32,
   max_implementation_steps: u32,
   max_source_bytes: u32,
   max_diagnostics: u32,
@@ -140,11 +160,15 @@ impl Limits {
       max_use_depth: DEFAULT_USE_DEPTH,
       max_glob_iterations: DEFAULT_GLOB_ITERATIONS,
       max_globs: DEFAULT_GLOBS,
+      max_field_arguments: DEFAULT_FIELD_ARGUMENTS,
+      max_directive_arguments: DEFAULT_DIRECTIVE_ARGUMENTS,
+      max_type_wrappers: DEFAULT_TYPE_WRAPPERS,
       max_generic_depth: DEFAULT_GENERIC_DEPTH,
       max_instantiations: DEFAULT_INSTANTIATIONS,
       max_substitutions: DEFAULT_SUBSTITUTIONS,
       max_bound_steps: DEFAULT_BOUND_STEPS,
       max_value_steps: DEFAULT_VALUE_STEPS,
+      max_values: DEFAULT_VALUES,
       max_implementation_steps: DEFAULT_IMPLEMENTATION_STEPS,
       max_source_bytes: DEFAULT_SOURCE_BYTES,
       max_diagnostics: DEFAULT_DIAGNOSTICS,
@@ -268,6 +292,77 @@ impl Limits {
     self.max_globs
   }
 
+  /// How many arguments one field may declare: those written between its parentheses, of an
+  /// object's or an interface's field, in its type's definition or in an extension of it. A field
+  /// of the built-in library is not counted, and a directive's arguments are counted by
+  /// [`max_directive_arguments`](Self::max_directive_arguments).
+  ///
+  /// Past it, the field is `resource-limit` once, where its name is written, labelled at the first
+  /// argument past the bound, and it keeps every argument it declares. Nothing the analysis spends
+  /// on a field grows with its arguments beyond what their text pays for, or what a budget of
+  /// these limits charges, so the bound stops no work: it refuses a shape a consumer may not take.
+  /// A GraphQL executor coerces a field's arguments at each place a response holds the field, and
+  /// GraphQL's schema builder refuses a field of more than
+  /// [`MAX_FIELD_ARGUMENTS`](crate::schema::MAX_FIELD_ARGUMENTS) for that. At `0`, no field a
+  /// supplied package writes declares an argument.
+  ///
+  /// The default is 2^10: sixteen times that ceiling, and a hundred times the widest field of the
+  /// public schemas it was measured against, ten arguments. So GraphQLx accepts the wider fields
+  /// GraphQL's builder refuses, and refuses only a field no person writes. A consumer that lowers
+  /// to GraphQL sets it to `MAX_FIELD_ARGUMENTS`.
+  #[inline]
+  pub const fn max_field_arguments(&self) -> u32 {
+    self.max_field_arguments
+  }
+
+  /// How many arguments one directive definition may declare, between its parentheses. A
+  /// directive of the built-in library is not counted, and one the root package writes to replace
+  /// a GraphQL built-in is. An extension of a directive declares none.
+  ///
+  /// Past it, the directive is `resource-limit` once, where its name is written, labelled at the
+  /// first argument past the bound, and it keeps every argument it declares: the bound stops no
+  /// work, as [`max_field_arguments`](Self::max_field_arguments) says of a field. An application
+  /// pays for what it leaves out within [`max_value_steps`](Self::max_value_steps), and an
+  /// argument that is neither written, required nor defaulted costs it nothing. GraphQL's schema
+  /// builder refuses a directive of more than
+  /// [`MAX_DIRECTIVE_ARGUMENTS`](crate::schema::MAX_DIRECTIVE_ARGUMENTS), which a document
+  /// validator reads at each of its uses. At `0`, no directive a supplied package writes declares
+  /// an argument.
+  ///
+  /// The default is 2^10, sixteen times that ceiling, which the widest directive of the registries
+  /// it was measured against, four arguments, is far within.
+  #[inline]
+  pub const fn max_directive_arguments(&self) -> u32 {
+    self.max_directive_arguments
+  }
+
+  /// How many list and non-null wrappers one written type may have around what it names: each
+  /// `[…]`, and each `!`, its own, each list's and that of the named type or the type parameter at
+  /// its core. `[[Int!]!]!` has five: two lists and three `!`. A named type's type arguments are
+  /// types of their own, each counted where it is written, so `Page<[Int!]!>!` has one and its
+  /// argument three; and a type parameter counts as it is written, whatever a use puts in its
+  /// place. Every type a supplied package writes is counted, wherever it stands: a member's type, a
+  /// type argument, a type parameter's default, a bound, a directive's argument and an
+  /// application's type argument. The built-in library's are not.
+  ///
+  /// Past it, the type is `resource-limit` once, at the whole of it, and keeps its type: each
+  /// wrapper is a bracket or a `!` its text writes, so the bound stops no work. A type that
+  /// substitution builds can wrap more than any written one, `[[T]]` with `T` a list of lists; it
+  /// is not counted here, and [`max_generic_depth`](Self::max_generic_depth) bounds how deeply it
+  /// nests. A consumer that lowers instantiations to GraphQL counts the types it builds itself.
+  /// GraphQL's schema builder packs a type reference's wrappers into one word and refuses more
+  /// than [`MAX_WRAPPERS`](crate::schema::MAX_WRAPPERS). At `0`, no type a supplied package writes
+  /// is a list or non-null.
+  ///
+  /// The default is 64. At the parser's default bracket ceiling, 24, a written type has at most 49
+  /// wrappers, so the bound decides only for a parser value given a deeper ceiling, or one a
+  /// consumer tightens: at `MAX_WRAPPERS` it refuses each type GraphQL's builder refuses for its
+  /// wrappers.
+  #[inline]
+  pub const fn max_type_wrappers(&self) -> u32 {
+    self.max_type_wrappers
+  }
+
   /// How deeply one type may nest once substitution has filled it: a type argument and a list's
   /// element each nest one level, so `Vec<Map<string, Vec<i32>>>` is three deep, and `[[i32]]` is
   /// two.
@@ -382,31 +477,36 @@ impl Limits {
   /// A step is one of: a value of a copy of a default, which fills an argument an application
   /// leaves out or a field an object literal leaves out, each value nested in the default counting
   /// one, the copies of the defaults its own object literals leave out among them; a read, while a
-  /// count is made, of the count of each default one of its object literals leaves out, and a read
-  /// of a count made already, when a later copy of its default is asked for, each spent whether or
-  /// not a copy is made; a default left out whose copy would hold a copy of itself, which is not
-  /// made; a list that a written value stands for where a list is expected, one for each level of
-  /// list between the value and its type, as `tags: [[Int]] = 1` stands for a list of a list of
-  /// `1`; a required argument an application leaves out, and a required field an object literal
-  /// leaves out, each found left out, reported where it is written and not in a count; a node a
-  /// rebuild of a member's type under type arguments looks at, its root included, once for each
-  /// written type and instantiation; a node of a count made under a type its value is not written
-  /// against, each field that is or may be required that an object literal such a count reads
-  /// leaves out, up to the first found missing, and an identity of a set's element or of a map's
-  /// key that such a count renders to search them for one held twice, a step for each 64 bytes of
-  /// it or part, once for each literal and the type its identities are read against; a field an
-  /// object literal writes, one its input object does not declare included, when a count is the
-  /// first to read the literal against that input object; an argument that may be required, a bare
-  /// nullable type parameter of its directive, that an application with complete type arguments
-  /// leaves out, and a field that may be required that a written object literal of a generic input
-  /// object leaves out; a pair of a closed instantiation, of a type the program writes or of a
-  /// generic directive an application of it makes, and what its definition records, checked under
-  /// the instantiation's arguments: a value whose type names its type parameters, or an argument an
-  /// application in it leaves out whose type is one of them; and converting a decimal integer of
-  /// more than 38 significant digits, the most `u128` arithmetic reads whatever they spell, to an
-  /// integer where an integer type expects one, charged before the conversion as an upper bound of
-  /// its work: `ceil(d / 9) × (d × 3322 / 32000 + 2)` steps for `d` digits, its chunks of nine
-  /// digits times the 32-bit limbs of its value.
+  /// count is made, of the count of each default one of its object literals leaves out, or, for one
+  /// lowering refused past [`max_values`](Self::max_values), which is one row, read and rebuilt for
+  /// nothing, its visit; and a read of a count made already, when a later copy of a default
+  /// lowering did not refuse is asked for; each spent whether or not a copy is made; a default left
+  /// out whose copy would hold a copy of itself, which is not made; a list that a written value
+  /// stands for where a list is expected, one for each level of list between the value and its
+  /// type, as `tags: [[Int]] = 1` stands for a list of a list of `1`; a required argument an
+  /// application leaves out, and a required field an object literal leaves out, each found left
+  /// out, reported where it is written and not in a count; a node a rebuild of a member's type
+  /// under type arguments looks at, its root included, once for each written type and
+  /// instantiation; a node of a count made under a type its value is not written against, each
+  /// field that is or may be required that an object literal such a count reads leaves out, up to
+  /// the first found missing, and an identity of a set's element or of a map's key that such a
+  /// count renders to search them for one held twice, a step for each 64 bytes of it or part, once
+  /// for each literal and the type its identities are read against; a field an object literal
+  /// writes, one its input object does not declare included, when a count is the first to read the
+  /// literal against that input object; an argument that may be required, a bare nullable type
+  /// parameter of its directive, that an application with complete type arguments leaves out, and a
+  /// field that may be required that a written object literal of a generic input object leaves out;
+  /// a pair of a closed instantiation, of a type the program writes, of a generic directive an
+  /// application of it makes, or of one such an instantiation derives through the definitions that
+  /// do not grow, and what its definition records, checked under the instantiation's arguments: a
+  /// value whose type names its type parameters, or an argument an application in it leaves out
+  /// whose type is one of them; while what each written instantiation derives is read, each node a
+  /// rebuild of a type its definition holds looks at, its root included, and each generic named
+  /// type or list the reading meets; and converting a decimal integer of more than 38 significant
+  /// digits, the most `u128` arithmetic reads whatever they spell, to an integer where an integer
+  /// type expects one, charged before the conversion as an upper bound of its work: `ceil(d / 9) ×
+  /// (d × 3322 / 32000 + 2)` steps for `d` digits, its chunks of nine digits times the 32-bit limbs
+  /// of its value.
   ///
   /// Nothing else takes a step, and [`max_source_bytes`](Self::max_source_bytes) bounds the rest of
   /// the work on what is written: a hexadecimal, octal or binary integer converts in one pass, and
@@ -434,10 +534,14 @@ impl Limits {
   /// `resource-limit` at the literal, once; what it writes is still made, what was filled stays,
   /// and none of the rest of its required fields and defaults is read. Its required fields are
   /// asked for before its defaults. A closed instantiation whose definition's values cannot all be
-  /// checked within it is `resource-limit` at each use of it that a supplied package writes. At
-  /// `0`, nothing a supplied package leaves out is filled from a default or found missing, a bare
-  /// `@deprecated`'s reason among them; no list is made for a lone value it writes; no type is
-  /// rebuilt, and no generic definition checked at an instantiation, for its values; and no decimal
+  /// checked within it is `resource-limit` at each use of it that a supplied package writes, and so
+  /// is a written instantiation whose reading of what it derives, or whose check of an
+  /// instantiation it derives, cannot be paid for, as [`analyze`](crate::graphqlx::analyze) says:
+  /// what was read is judged all the same, and what was not is not judged. At `0`, nothing a
+  /// supplied package leaves out is filled from a default or found missing, a bare `@deprecated`'s
+  /// reason among them; no list is made for a lone value it writes; no type is rebuilt, and no
+  /// generic definition checked at an instantiation, for its values; nothing a written
+  /// instantiation derives is read, for coercion or for the implementation check; and no decimal
   /// integer of more than 38 significant digits is converted to an integer: a decimal `u128::MAX`
   /// is `resource-limit` where a `u128` is expected, and is still read where a float is.
   ///
@@ -451,6 +555,51 @@ impl Limits {
   #[inline]
   pub const fn max_value_steps(&self) -> u32 {
     self.max_value_steps
+  }
+
+  /// How many values the analysis may read and make, over the whole analysis: each literal a
+  /// supplied package writes in a default or in an application's argument, a list's, a set's, a
+  /// map's and an object's included, counted where lowering reads it, whatever coercion makes of
+  /// it; each list a value stands for where a list is expected, one for each level; and each value
+  /// of a copy of a default, which fills an argument an application leaves out or a field an object
+  /// literal leaves out. A literal lowering never reads costs nothing: one in an application whose
+  /// directive names nothing, or in an argument its directive does not declare. The built-in
+  /// library's own values cost nothing, and neither does a copy made for an application it writes;
+  /// a copy of one of its defaults made for an application a supplied package writes, a bare
+  /// `@deprecated`'s reason among them, is charged.
+  ///
+  /// The written values are charged first, each before any of it is read, all of it or none, in the
+  /// order the model's walk reaches them. One whose literals are more than is left is
+  /// `resource-limit` where it is written, and is one unresolved value, charged nothing, none of
+  /// its literals read; a later value that fits is still read. Where an application or an object
+  /// literal leaves out the argument or field whose default it is, it is read under no type
+  /// arguments: a count, a check's among them, counts it as one value that fits, and a copy of it
+  /// is one unresolved value of the type that argument or field is written with. Then the lists and
+  /// the copies are charged as they are made, so an application early in the walk can be starved by
+  /// a default written after it. A list a value stands for that cannot be paid for is
+  /// `resource-limit` where the value is written, and is its one unresolved value, under the levels
+  /// that were, as [`max_value_steps`](Self::max_value_steps) says of one it cannot pay for. A copy
+  /// is charged its values before its first is made, all of them or none, as that bound charges its
+  /// steps: an application whose next copy cannot be paid for is `resource-limit` at its path,
+  /// once, and is filled no further, and an object literal likewise, at the literal.
+  ///
+  /// So it holds every literal a value writes, the value's own included, the lists, and the copies.
+  /// The model holds at most this many values plus the built-in library's own, plus one unresolved
+  /// value for each written default or argument refused past it. Those refused values are bounded
+  /// by [`max_source_bytes`](Self::max_source_bytes) alone, an argument written again being kept
+  /// again, so `@d(a: 0, a: 0, …)` past the bound makes one every four bytes. Nor does it bound the
+  /// documents the values are read from, which `max_source_bytes` and the parser's own limits
+  /// bound. Primitive discovery, the pass before lowering that finds the primitives a program
+  /// writes, reads every written value's paths whatever this bound says: a primitive only a refused
+  /// value spells is still declared, one definition per primitive at most, counted by
+  /// [`max_definitions`](Self::max_definitions), and its walk costs what the parsed document
+  /// already holds. At `0`, no value a supplied package writes is read, each is one unresolved
+  /// value, and nothing a supplied package leaves out is filled from a default.
+  ///
+  /// The default is 2^20. GitLab's schema, the largest of smear's fixtures, makes 1,547.
+  #[inline]
+  pub const fn max_values(&self) -> u32 {
+    self.max_values
   }
 
   /// How many steps the analysis may take to check implementations, over the whole analysis:
@@ -603,6 +752,31 @@ impl Limits {
     self
   }
 
+  /// The same limits with `max` as their [`max_field_arguments`](Self::max_field_arguments) bound.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_field_arguments(mut self, max: u32) -> Self {
+    self.max_field_arguments = max;
+    self
+  }
+
+  /// The same limits with `max` as their
+  /// [`max_directive_arguments`](Self::max_directive_arguments) bound.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_directive_arguments(mut self, max: u32) -> Self {
+    self.max_directive_arguments = max;
+    self
+  }
+
+  /// The same limits with `max` as their [`max_type_wrappers`](Self::max_type_wrappers) bound.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_type_wrappers(mut self, max: u32) -> Self {
+    self.max_type_wrappers = max;
+    self
+  }
+
   /// The same limits with `max` as their [`max_generic_depth`](Self::max_generic_depth) bound.
   #[inline]
   #[must_use]
@@ -640,6 +814,14 @@ impl Limits {
   #[must_use]
   pub const fn with_max_value_steps(mut self, max: u32) -> Self {
     self.max_value_steps = max;
+    self
+  }
+
+  /// The same limits with `max` as their [`max_values`](Self::max_values) bound.
+  #[inline]
+  #[must_use]
+  pub const fn with_max_values(mut self, max: u32) -> Self {
+    self.max_values = max;
     self
   }
 

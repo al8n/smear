@@ -4,7 +4,8 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Diagnostic, DiagnosticKind, Layout, Limits, Package, SourceFile, Tier, analyze,
+    Analysis, Diagnostic, DiagnosticKind, Layout, Limits, Options, Package, SourceFile, Tier,
+    analyze,
   },
   diagnostic::Diagnose,
 };
@@ -69,7 +70,7 @@ fn misspelt() -> (Package<&'static str>, Package<&'static str>) {
 #[test]
 fn a_name_that_does_not_resolve_is_offered_the_nearest_visible_one() {
   let (root, geography) = misspelt();
-  let analysis = analyze(&root, &[geography], &Limits::new());
+  let analysis = analyze(&root, &[geography], &Limits::new(), &Options::new());
   let found = helps(&analysis);
   assert_eq!(found.len(), 3, "{:#?}", analysis.diagnostics());
   let expected = [
@@ -96,7 +97,7 @@ fn a_name_that_does_not_resolve_is_offered_the_nearest_visible_one() {
 fn no_suggestion_is_offered_once_the_budget_is_spent() {
   let (root, geography) = misspelt();
   let limits = Limits::new().with_max_near_miss_comparisons(0);
-  let analysis = analyze(&root, &[geography], &limits);
+  let analysis = analyze(&root, &[geography], &limits, &Options::new());
   let found = helps(&analysis);
   assert_eq!(found.len(), 3, "{:#?}", analysis.diagnostics());
   for (_, help) in &found {
@@ -113,7 +114,7 @@ fn a_long_name_is_not_compared() {
   let lib = "scalar AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
              scalar Shortname\n";
   let root = directory("app", &[("schema.graphqlx", long), ("lib/a.graphqlx", lib)]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let found = helps(&analysis);
   assert_eq!(found.len(), 2, "{:#?}", analysis.diagnostics());
   assert!(!found[0].1.contains("did you mean"), "{}", found[0].1);

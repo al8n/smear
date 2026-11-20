@@ -598,7 +598,8 @@ mod lossless {
 mod analysis {
   use smear::{
     analysis::graphqlx::{
-      Analysis, Layout, Limits, Package, SourceFile, SourceText, Tier, Trees, analyze, analyze_with,
+      Analysis, Layout, Limits, Options, Package, SourceFile, SourceText, Tier, Trees, analyze,
+      analyze_with,
     },
     parser::graphqlx::{Layer, Syntactic},
   };
@@ -611,7 +612,7 @@ mod analysis {
     root: &'a Package<S>,
     dependencies: &'a [Package<S>],
   ) -> Analysis {
-    analyze_with(parser, root, dependencies, &Limits::new()).0
+    analyze_with(parser, root, dependencies, &Limits::new(), &Options::new()).0
   }
 
   /// A package of one file holding `text`.
@@ -626,7 +627,7 @@ mod analysis {
     let syntactic = analysis(&Syntactic::new(), &root, &[]);
     assert!(syntactic.is_ok());
     assert!(
-      syntactic == analyze(&root, &[], &Limits::new()),
+      syntactic == analyze(&root, &[], &Limits::new(), &Options::new()),
       "the syntactic layer's analysis is not the one `analyze` answers"
     );
     #[cfg(all(feature = "rowan_0_17", feature = "std"))]
@@ -640,8 +641,13 @@ mod analysis {
   #[test]
   fn the_syntactic_layer_keeps_nothing() {
     let root = package(DOC);
-    let (answer, trees): (Analysis, Trees<()>) =
-      analyze_with(&Syntactic::new(), &root, &[], &Limits::new());
+    let (answer, trees): (Analysis, Trees<()>) = analyze_with(
+      &Syntactic::new(),
+      &root,
+      &[],
+      &Limits::new(),
+      &Options::new(),
+    );
     assert!(answer.is_ok());
     assert_eq!(trees.len(), 1);
   }
@@ -657,6 +663,7 @@ mod analysis {
       &root,
       &[],
       &Limits::new(),
+      &Options::new(),
     );
     assert!(!answer.is_ok());
     assert!(answer.diagnostics().error_count() >= 1);
@@ -676,6 +683,7 @@ mod analysis {
       &root,
       &[],
       &Limits::new(),
+      &Options::new(),
     );
     assert!(answer.is_ok());
     drop(root);

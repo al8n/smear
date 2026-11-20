@@ -18,6 +18,7 @@ use super::{
   limits::Limits,
   lower,
   model::{Model, ModelBuilder, PackageKind},
+  options::Options,
   package::Package,
   parse::{self, Documents},
   resolve,
@@ -30,7 +31,8 @@ use super::{
   visitor::{Packages, Visitor, drive},
 };
 
-/// What one analysis found: the model, the diagnostics, and the source map.
+/// What one analysis found: the model, the diagnostics, and the source map, and the limits and
+/// options it ran under.
 ///
 /// It has no type parameter and no lifetime: it is the same type whatever text type the packages
 /// were supplied in, and it borrows nothing from them. Whatever was refused, the model holds every
@@ -38,26 +40,29 @@ use super::{
 /// what was refused, as far as their ceiling keeps them, and [`is_ok`](Self::is_ok) is the verdict.
 ///
 /// Two analyses are equal when their models, their diagnostics (the list, the error count and
-/// whether the list is truncated), their source maps and the diagnostic ceilings they were made
-/// under are equal. So two analyses of one package set made under two ceilings are unequal, even
-/// when neither list was truncated: a walk over each keeps to its own ceiling. The models are
-/// compared as [`Model`]'s equality says, every row and every id, which is the question to ask of
-/// two analyses of the same packages: [`analyze_with`] says when two parser layers answer equal
-/// ones. It is `PartialEq` and not `Eq` because a float value is compared as an `f64` is; no
-/// literal spells a NaN, so an analysis is equal to itself.
+/// whether the list is truncated), their source maps and the limits and the options they were made
+/// under are equal. So two analyses of one package set made under two configurations are unequal,
+/// even when every answer is the same: a walk over each keeps to its own ceiling, and a backend
+/// reads each one's switches. The models are compared as [`Model`]'s equality says, every row and
+/// every id, which is the question to ask of two analyses of the same packages: [`analyze_with`]
+/// says when two parser layers answer equal ones. It is `PartialEq` and not `Eq` because a float
+/// value is compared as an `f64` is; no literal spells a NaN, so an analysis is equal to itself.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Analysis {
   model: Model,
   diagnostics: Diagnostics,
   sources: SourceMap,
-  /// The diagnostic ceiling it was made with, which a consumer's walk keeps to as well.
-  ceiling: usize,
+  /// The limits it was made within: the diagnostic ceiling among them, which a consumer's walk
+  /// keeps to as well.
+  limits: Limits,
+  /// The options it was made under.
+  options: Options,
 }
 
 impl Analysis {
   /// The analysis `analyze` would conclude from the finished `model`, with `rules` run in place of
   /// smear's own rule set, as the test-support door hands it to its tests: a source map of the
-  /// model's packages' sources, and `limits`' diagnostic ceiling.
+  /// model's packages' sources, `limits`' diagnostic ceiling, and every option off.
   #[cfg(feature = "test-support")]
   pub(crate) fn of_model<V: Visitor + ?Sized>(
     model: Model,
@@ -66,14 +71,27 @@ impl Analysis {
   ) -> Self {
     let sources = SourceMap::of_model(&model);
     let reporter = Reporter::new(limits.max_diagnostics() as usize);
-    conclude(model, sources, reporter, rules)
+    conclude(model, sources, reporter, limits, &Options::new(), rules)
   }
 
   /// The diagnostic ceiling the analysis was made with: how many diagnostics a list it answers,
   /// or a walk over it answers, keeps.
   #[inline]
   pub(crate) fn ceiling(&self) -> usize {
-    self.ceiling
+    self.limits.max_diagnostics() as usize
+  }
+
+  /// The limits the analysis ran within.
+  #[inline]
+  pub const fn limits(&self) -> &Limits {
+    &self.limits
+  }
+
+  /// The options the analysis ran under: what a backend that relies on a switch checks, since a
+  /// program the switch would refuse is accepted without it.
+  #[inline]
+  pub const fn options(&self) -> &Options {
+    &self.options
   }
 
   /// The model of what the packages declare.
@@ -103,7 +121,7 @@ impl Analysis {
   }
 }
 
-/// Analyzes `root` beside `dependencies`, within `limits`.
+/// Analyzes `root` beside `dependencies`, within `limits`, under `options`.
 ///
 /// # What it does
 ///
@@ -186,7 +204,14 @@ impl Analysis {
 ///   arguments and the arguments its directive declares, in the directive's order, an argument
 ///   written twice twice; one it does not declare is `undefined-directive-argument`, with the
 ///   nearest name it does declare in its help. Each value written is read as it is written, for
-///   coercion. Then the schema's
+///   coercion. A field, or a directive, that declares more arguments than
+///   [`Limits::max_field_arguments`], or [`Limits::max_directive_arguments`], admits is
+///   `resource-limit` once, at its name, labelled at the first argument past it; and so is a
+///   written type of more list and non-null wrappers than [`Limits::max_type_wrappers`] admits, at
+///   the whole of it. Each keeps what it writes. A value a supplied package writes is charged its
+///   literals to [`Limits::max_values`] before any of it is read: one whose literals are more than
+///   the bound has left is `resource-limit` once, at the whole of it, and is one unresolved value,
+///   none of it read and nothing more spent on it or said of it. Then the schema's
 ///   contributions: every package's schema definitions, then its schema extensions, each by source
 ///   and position and each marked as what it is. The root package's first schema definition gives
 ///   the schema its description, its roots and its applications, and each schema extension the
@@ -252,8 +277,9 @@ impl Analysis {
 ///   member's type for its default and an argument's for its value, with its `!`: `null` where it
 ///   is nullable; a list's elements each against its element, and any other value where a list is
 ///   expected the one-element list that holds it, a list for each level, each list a step of
-///   [`Limits::max_value_steps`]; a boolean; an integer in its width's range, read at any length, a
-///   decimal one of more than 38 significant digits converted within the same budget; a float, or
+///   [`Limits::max_value_steps`] and a value of [`Limits::max_values`]; a boolean; an integer in
+///   its width's range, read at any length, a decimal one of more than 38 significant digits
+///   converted within the step budget; a float, or
 ///   an integer, rounded once to `f32` or `f64` and finite there; a string, cooked; for `id` a
 ///   string or an integer in `i32`'s range; for `bytes` a string's UTF-8 encoding or a list of
 ///   integers from 0 to 255; for `NonZero` an integer that is not zero; for an enum one of its
@@ -269,8 +295,11 @@ impl Analysis {
 ///   takes a copy of it, as an argument does, but a OneOf input object's. A set takes a set literal
 ///   and a map a map literal, each element, key and value coerced against the collection's types,
 ///   a key or an element never `null`; any other literal there, and a set or a map literal where no
-///   collection of its shape is expected, is `collection-literal`, and so is an element or a key
-///   written twice, told by its coerced value, at the later occurrence. `TypeRef` takes a path,
+///   collection of its shape is expected, is `collection-literal`, except that under
+///   [`Options::extern_collections_as_written`] an extern collection, one its own package binds
+///   with `@extern`, keeps any literal that is no collection literal and not `null` as written; an
+///   element or a key written twice is `collection-literal` too, told by its coerced value, at the
+///   later occurrence. `TypeRef` takes a path,
 ///   resolved as a type where it is written, that names a definition of any kind. Any other scalar
 ///   takes any literal, kept as written, and so does a type that still names a type parameter or
 ///   can take no value, with nothing said. A prefix, or a type value's path, that names nothing is the
@@ -350,7 +379,10 @@ impl Analysis {
 ///   and the type they are read against, is a step of [`Limits::max_value_steps`]: past it the
 ///   application is `resource-limit`
 ///   once, at its path, and filled no further, an object literal likewise at the literal, and an
-///   integer whose conversion it cannot pay for is `resource-limit` where it is written. Last,
+///   integer whose conversion it cannot pay for is `resource-limit` where it is written. Each row
+///   of a copy is a value of [`Limits::max_values`] as well, a copy's values charged with its
+///   steps, all or none and the steps asked first: past that bound the application, or the object
+///   literal, is starved as past the steps, the report naming the bound. Last,
 ///   names and texts
 ///   past what the model's `u32` offsets address, which only a [`Limits::max_source_bytes`] far
 ///   above its default admits, are reported at the root package's package source.
@@ -488,7 +520,12 @@ impl Analysis {
 ///   one of its own type parameters in an argument's type, every such definition is judged, since
 ///   an operation can fill that parameter with any of them. A report within a definition both
 ///   reach has a last label at where the reach from outside metadata entered, which for what such
-///   a parameter can receive is that argument's type. GraphQL's own rules
+///   a parameter can receive is that argument's type. Under
+///   [`Options::judged_metadata`] none of it is skipped: the rule judges compile-time metadata as
+///   it judges every other use, `@heap` on a directive's argument included, and an application of
+///   another package's generic directive by the type arguments it leaves to its directive's
+///   defaults, at its path, labelled at the default that raised the need; `Def::is_metadata` and
+///   `Def::tier` answer the same either way. GraphQL's own rules
 ///   judge what a definition a supplied package wrote holds, a GraphQL built-in the root package
 ///   replaces among them, with GraphQL's codes: a member whose name begins with `__` is
 ///   `reserved-field-name`, `reserved-argument-name`, `reserved-enum-value-name`,
@@ -626,6 +663,7 @@ pub fn analyze<S: SourceText>(
   root: &Package<S>,
   dependencies: &[Package<S>],
   limits: &Limits,
+  options: &Options,
 ) -> Analysis {
   let mut prepared = prepare(views(root, dependencies), limits);
   let documents = parse::files(
@@ -636,17 +674,19 @@ pub fn analyze<S: SourceText>(
     &mut prepared.reporter,
     None,
   );
-  finish(prepared, &documents, limits)
+  finish(prepared, &documents, limits, options)
 }
 
-/// Analyzes `root` beside `dependencies`, within `limits`, with `parser` reading every supplied
-/// file: [`analyze`], with the parser chosen by the caller, and what the parser kept for each file.
+/// Analyzes `root` beside `dependencies`, within `limits`, under `options`, with `parser` reading
+/// every supplied file: [`analyze`], with the parser chosen by the caller, and what the parser kept
+/// for each file.
 ///
 /// `parser` is a [`Layer`] of GraphQLx. [`Syntactic`] is one: it stops at a file's first syntax
 /// error, keeps nothing, and is what [`analyze`] reads with. The other is `smear-parser`'s lossless
 /// layer, behind its `rowan_0_17` and `std` features: it recovers, so the well-formed rest of a
 /// broken file is analyzed, and it keeps each file's tree. A layer's limits, such as the nesting
-/// depth a parse descends to, are the layer value's, where [`Limits`] bounds the analysis.
+/// depth a parse descends to, are the layer value's, where [`Limits`] bounds the analysis and
+/// [`Options`] relaxes or tightens what it accepts.
 ///
 /// Everything [`analyze`] does around the parse is done here, in the same order. Each supplied file
 /// that is text, or bytes that are UTF-8, is read by `parser`, and every syntax error it lends is a
@@ -664,17 +704,19 @@ pub fn analyze<S: SourceText>(
 /// over the layer that keeps the trees past the packages bounds `P::Tree: 'static`.
 ///
 /// For a package set no layer reports a syntax error for, every layer answers an equal
-/// [`Analysis`], the rules' diagnostics and marks included: the layers hand the same phases the
-/// same documents in the same order. Where a layer reports a syntax error, the package ids and the
-/// source ids are still those every other layer answers, and nothing else is promised. The source
-/// map records which files a layer read whole, [`Source::is_complete`](super::Source::is_complete),
-/// so on a package set a layer reports a syntax error for, the maps can differ only there, as the
-/// analyses do. The trees are beside the analysis, and no part of its equality.
+/// [`Analysis`] under the same limits and options, the rules' diagnostics and marks included: the
+/// layers hand the same phases the same documents in the same order. Where a layer reports a
+/// syntax error, the package ids and the source ids are still those every other layer answers, and
+/// nothing else is promised. The source map records which files a layer read whole,
+/// [`Source::is_complete`](super::Source::is_complete), so on a package set a layer reports a
+/// syntax error for, the maps can differ only there, as the analyses do. The trees are beside the
+/// analysis, and no part of its equality.
 pub fn analyze_with<'a, P, S>(
   parser: &P,
   root: &'a Package<S>,
   dependencies: &'a [Package<S>],
   limits: &Limits,
+  options: &Options,
 ) -> (Analysis, Trees<P::Tree>)
 where
   P: Layer<'a>,
@@ -690,7 +732,10 @@ where
     &mut prepared.reporter,
     Some(&mut trees),
   );
-  (finish(prepared, &documents, limits), Trees { trees })
+  (
+    finish(prepared, &documents, limits, options),
+    Trees { trees },
+  )
 }
 
 /// Every package of one analysis, read through its getters, in id order: the built-ins, then
@@ -737,7 +782,12 @@ fn prepare<'a>(packages: Vec<PackageView<'a>>, limits: &Limits) -> Prepared<'a> 
 
 /// Everything after the parse, compiled once whatever the caller's text type and whatever the
 /// parser: the phases that read the documents, and the rules.
-fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits) -> Analysis {
+fn finish<'a>(
+  prepared: Prepared<'a>,
+  documents: &Documents<'a>,
+  limits: &Limits,
+  options: &Options,
+) -> Analysis {
   let Prepared {
     packages,
     mut reporter,
@@ -773,8 +823,9 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
     &sources,
     &mut builder,
     &mut reporter,
+    limits,
   );
-  let mut types = Types::new(*limits);
+  let mut types = Types::new(*limits, *options);
   instantiate::instantiate(
     &declarations,
     &sources,
@@ -804,7 +855,14 @@ fn finish<'a>(prepared: Prepared<'a>, documents: &Documents<'a>, limits: &Limits
   );
   tiers::tiers(&declarations, &mut builder);
 
-  conclude(builder.finish(), sources, reporter, &mut Rules::default())
+  conclude(
+    builder.finish(),
+    sources,
+    reporter,
+    limits,
+    options,
+    &mut Rules::of(options),
+  )
 }
 
 /// The model of `root` beside `dependencies` as name resolution leaves it, before lowering, and
@@ -995,15 +1053,17 @@ impl<T> ExactSizeIterator for TreesIntoIter<T> {}
 impl<T> FusedIterator for TreesIntoIter<T> {}
 
 /// What every analysis ends with, once its phases have written `model` and reported into
-/// `reporter`: the phases' marks applied, `rules` walked over every supplied package and reporting
-/// into the same list, and the marks of the rules' errors applied once the walk has ended.
+/// `reporter`, made with the diagnostic ceiling of `limits`: the phases' marks applied, `rules`
+/// walked over every supplied package and reporting into the same list, and the marks of the rules'
+/// errors applied once the walk has ended. The analysis records `limits` and `options`.
 fn conclude<V: Visitor + ?Sized>(
   mut model: Model,
   sources: SourceMap,
   mut reporter: Reporter,
+  limits: &Limits,
+  options: &Options,
   rules: &mut V,
 ) -> Analysis {
-  let ceiling = reporter.ceiling();
   // The rules read the phases' marks.
   model.mark(&reporter.take_marks());
   // Theirs are kept aside until every rule has walked, so no rule sees another's.
@@ -1014,7 +1074,8 @@ fn conclude<V: Visitor + ?Sized>(
     model,
     diagnostics,
     sources,
-    ceiling,
+    limits: *limits,
+    options: *options,
   }
 }
 

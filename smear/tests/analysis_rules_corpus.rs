@@ -13,8 +13,9 @@ use std::path::{Path, PathBuf};
 use smear::{
   analysis::graphqlx::{
     Analysis, ApplicationId, Contribution, Cx, DefId, DefKind, Diagnostic, Layout, Limits,
-    MemberId, Model, ModuleId, Namespace, ObjectEntry, Origin, Package, PackageId, PackageKind,
-    Packages, SourceFile, SourceId, Tier, TyKind, TypeExprId, ValueId, ValueKind, Visitor, analyze,
+    MemberId, Model, ModuleId, Namespace, ObjectEntry, Options, Origin, Package, PackageId,
+    PackageKind, Packages, SourceFile, SourceId, Tier, TyKind, TypeExprId, ValueId, ValueKind,
+    Visitor, analyze,
     test_support::{self, RULES},
     visit,
   },
@@ -69,7 +70,7 @@ fn analyzed(path: &Path, text: &[u8]) -> Analysis {
   println!("{}", path.display());
   let root: Package<&[u8]> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text)]);
-  analyze(&root, &[], &Limits::new())
+  analyze(&root, &[], &Limits::new(), &Options::new())
 }
 
 /// GraphQL's code for a schema with no query root. Most files of the corpora are parts of a schema
@@ -300,7 +301,10 @@ fn schema_errors(analysis: &Analysis) -> Vec<bool> {
 /// writes.
 fn library_definitions() -> u32 {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
-  analyze(&root, &[], &Limits::new()).model().defs().len()
+  analyze(&root, &[], &Limits::new(), &Options::new())
+    .model()
+    .defs()
+    .len()
 }
 
 /// Every id each hook was handed, in the order it was handed them.
@@ -713,7 +717,7 @@ fn a_dependency_and_an_orphan_extension() -> Analysis {
       "type Point {\n  x: Float\n  y: Float\n}\nunion Shape = Point\n",
     )],
   );
-  analyze(&root, &[geo], &Limits::new())
+  analyze(&root, &[geo], &Limits::new(), &Options::new())
 }
 
 /// A root package that replaces two GraphQL built-ins, a scalar and a directive, and adds a
@@ -741,7 +745,7 @@ fn replaced_and_extended_built_ins() -> Analysis {
       "type Point {\n  x: Float\n  count: Int\n  label: String @deprecated\n}\n",
     )],
   );
-  analyze(&root, &[geo], &Limits::new())
+  analyze(&root, &[geo], &Limits::new(), &Options::new())
 }
 
 /// A root package and two dependencies: generic definitions with a default, a bound and type
@@ -750,7 +754,7 @@ fn replaced_and_extended_built_ins() -> Analysis {
 /// built-in, and the schema.
 fn three_packages_with_refusals() -> Analysis {
   let [root, astro, geo] = three_packages();
-  analyze(&root, &[geo, astro], &Limits::new())
+  analyze(&root, &[geo, astro], &Limits::new(), &Options::new())
 }
 
 /// The packages of `three_packages_with_refusals`: the root package, `astro`, and `geo`.
@@ -830,8 +834,13 @@ fn each_walk_of_a_program_of_several_packages_reaches_what_the_model_says_once()
 #[test]
 fn permuting_the_dependencies_changes_nothing_the_rules_report_or_mark() {
   let [root, astro, geo] = three_packages();
-  let forward = analyze(&root, &[geo.clone(), astro.clone()], &Limits::new());
-  let backward = analyze(&root, &[astro, geo], &Limits::new());
+  let forward = analyze(
+    &root,
+    &[geo.clone(), astro.clone()],
+    &Limits::new(),
+    &Options::new(),
+  );
+  let backward = analyze(&root, &[astro, geo], &Limits::new(), &Options::new());
   // The case is not vacuous: the orphan rule reports a dependency's extension of the other's type
   // and of a built-in, the location rule the `@deprecated` that extension applies to a scalar,
   // the self-reference rule `core`'s `@deprecated`, which that application puts on a cycle through
@@ -981,7 +990,7 @@ fn no_rule_repeats_a_phase_over_refused_programs() {
     Layout::Flat,
     &[("geo.graphqlx", "type Point {\n  x: Int\n}\n")],
   );
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   assert_eq!(codes(&analysis), ["smear::schema::undefined-type"]);
   tolerant(
     &analysis,
@@ -998,7 +1007,7 @@ fn no_rule_repeats_a_phase_over_refused_programs() {
       "schema {\n  query: Missing\n}\nschema {\n  query: Query\n}\ntype Query {\n  ok: Int\n}\n",
     )],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert_eq!(
     codes(&analysis),
     [
@@ -1025,7 +1034,7 @@ fn no_rule_repeats_a_phase_over_refused_programs() {
        type Point {\n  x: Int\n}\n",
     )],
   );
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   assert_eq!(
     codes(&analysis),
     [
@@ -1052,7 +1061,7 @@ fn no_rule_repeats_a_phase_over_refused_programs() {
       "schema {\n  query: Query\n}\ntype Query {\n  ok: Int\n}\nschema {\n  query: u8\n}\n",
     )],
   );
-  let analysis = analyze(&root, &[], &limits);
+  let analysis = analyze(&root, &[], &limits, &Options::new());
   assert_eq!(codes(&analysis), ["smear::graphqlx::resource-limit"]);
   tolerant(&analysis, "a second schema definition that holds a refusal");
 
@@ -1068,7 +1077,7 @@ fn no_rule_repeats_a_phase_over_refused_programs() {
     Layout::Flat,
     &[("geo.graphqlx", "schema {\n  query: u8\n}\n")],
   );
-  let analysis = analyze(&root, &[geo], &limits);
+  let analysis = analyze(&root, &[geo], &limits, &Options::new());
   assert_eq!(codes(&analysis), ["smear::graphqlx::resource-limit"]);
   tolerant(
     &analysis,
@@ -1087,7 +1096,7 @@ fn no_rule_repeats_a_phase_over_refused_programs() {
        @extern(lang: \"rust\", type: \"b\") @extern(lang: 1, type: \"c\")\n",
     )],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert_eq!(
     codes(&analysis),
     ["smear::schema::invalid-directive-argument-value"]
@@ -1103,7 +1112,7 @@ fn no_rule_repeats_a_phase_over_refused_programs() {
       "type Query {\n  x: Int @repr(lang: 1, type: \"i64\", for: Int)\n}\n",
     )],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert_eq!(
     codes(&analysis),
     ["smear::schema::invalid-directive-argument-value"]
@@ -1117,7 +1126,7 @@ fn no_rule_repeats_a_phase_over_refused_programs() {
       "schema.graphqlx",
       "type Query {\n  x: Missing\n  s: String\n}\n",
     )]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert_eq!(codes(&analysis), ["smear::schema::undefined-type"]);
   tolerant(
     &analysis,
@@ -1136,7 +1145,7 @@ fn no_rule_repeats_a_phase_over_refused_programs() {
        interface B implements A {\n  a: Int\n}\ntype T implements B {\n  a: Int\n  m: Marked\n}\n",
     )],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert_eq!(
     codes(&analysis),
     ["smear::schema::missing-transitive-interface"]

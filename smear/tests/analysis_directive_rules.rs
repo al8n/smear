@@ -8,8 +8,8 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, DefId, Diagnostic, Layout, Limits, Package, PackageId, SourceFile, SourceId, Tier,
-    analyze,
+    Analysis, DefId, Diagnostic, Layout, Limits, Options, Package, PackageId, SourceFile, SourceId,
+    Tier, analyze,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -77,7 +77,7 @@ fn package(
 /// An analysis of the root package `app`, `Flat`, holding the one file `schema.graphqlx`.
 fn analyze_one(text: &'static str) -> Analysis {
   let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
-  analyze(&root, &[], &Limits::new())
+  analyze(&root, &[], &Limits::new(), &Options::new())
 }
 
 /// An analysis of the root package `app`, `Flat`, holding the one file `schema.graphqlx`, whose
@@ -85,7 +85,7 @@ fn analyze_one(text: &'static str) -> Analysis {
 fn analyze_text(text: &str) -> Analysis {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text)]);
-  analyze(&root, &[], &Limits::new())
+  analyze(&root, &[], &Limits::new(), &Options::new())
 }
 
 /// The id of the file at `path` in the package `package`.
@@ -830,7 +830,7 @@ fn a_built_in_scalar_takes_no_specified_by() {
       ("m/a.graphqlx", "scalar Int @specifiedBy(url: \"u\")\n"),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(
     analysis.diagnostics().is_empty(),
     "{:#?}",

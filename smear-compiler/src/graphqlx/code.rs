@@ -164,9 +164,11 @@ pub enum DiagnosticKind {
   /// but a custom scalar that is no collection, which keeps any literal, is reported at the
   /// literal; one whose expected type takes no value, or still names a type parameter, is kept as
   /// written, and nothing is said. And a set or a map, an extern one among them, takes its own
-  /// literal and `null`
-  /// alone: any other literal is reported at the literal, with the collection's form in the help.
-  /// Either is unresolved, and nothing it holds is a value of its own. Or a set literal that holds
+  /// literal and `null` alone: any other literal is reported at the literal, with the collection's
+  /// form in the help, unless the switch
+  /// [`extern_collections_as_written`](crate::graphqlx::Options::extern_collections_as_written)
+  /// keeps an extern one's literal that is no collection literal as written. Either is
+  /// unresolved, and nothing it holds is a value of its own. Or a set literal that holds
   /// one element twice, or a map literal that holds one key twice, two being one when their
   /// coerced values are, `1` and `0x1` one integer and `"4"` and `4` one `id`: reported at the
   /// later occurrence, with a label at the first, where the literal is written; the literal keeps
@@ -261,9 +263,13 @@ pub enum DiagnosticKind {
   /// definition writes and an application's type arguments are compile-time metadata, and so is
   /// what a definition holds that only the types of a directive no operation can apply, and
   /// application type arguments, reach, [`Def::is_metadata`](crate::graphqlx::Def::is_metadata):
-  /// none of it is judged. A definition a type outside metadata names too, such as the argument
-  /// type of a directive an operation can apply, is judged where it is written; and while such a
-  /// directive holds one of its own type parameters in an argument's type, every such definition
+  /// none of it is judged, unless the analysis runs under
+  /// [`judged_metadata`](crate::graphqlx::Options::judged_metadata), which judges it as every other
+  /// use is judged, `@heap` on a directive's argument included, and an application of another
+  /// package's generic directive by the type arguments it leaves to its defaults, reported at its
+  /// path and labelled at the default. A definition a type outside metadata names too, such as the
+  /// argument type of a directive an operation can apply, is judged where it is written; and while
+  /// such a directive holds one of its own type parameters in an argument's type, every such definition
   /// is judged, since an operation can fill that parameter with any of them. A report within a
   /// definition compile-time metadata reaches, which a type outside it reaches too, is labelled at
   /// where that reach entered, which for what such a parameter can receive is that argument's type.

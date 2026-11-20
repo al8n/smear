@@ -7,8 +7,8 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, ApplicationId, Extern, Layout, Limits, MemberId, Namespace, Package, PackageId,
-    SourceFile, SourceId, Tier, TyKind, TypeExprId, TypeExprKind, analyze,
+    Analysis, ApplicationId, Extern, Layout, Limits, MemberId, Namespace, Options, Package,
+    PackageId, SourceFile, SourceId, Tier, TyKind, TypeExprId, TypeExprKind, analyze,
   },
   diagnostic::Location,
   lexer::tokora::SimpleSpan,
@@ -61,7 +61,7 @@ fn written_by_answers_the_package_of_the_source() {
   )
   .with_dependencies(["geo"]);
   let geo = package("geo", &[("geo.graphqlx", "type Point { x: Int }")]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let model = analysis.model();
   let sources = analysis.sources();
 
@@ -111,7 +111,7 @@ fn written_args_answers_the_arguments_of_every_shape() {
       "type Page<X> { x: X }\ntype G<T> { a: Page<Int>  b: T<Int>  c: Missing<Int>  d: [Int] }\n",
     )],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let model = analysis.model();
 
   let a = model.type_expr(field_type(&analysis, "^::app::G", "a"));
@@ -157,7 +157,7 @@ fn an_applications_type_and_type_arguments_are_its_instantiation() {
               type Query @tag<Int> { x: Int }\ntype Other @plain { y: Int }\n\
               type Third @tag<Int, Int, Int> { z: Int }\ntype Fourth @nope { w: Int }\n";
   let root = package("app", &[("schema.graphqlx", text)]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let model = analysis.model();
   let tag = model
     .lookup(Namespace::Directive, "@^::app::tag")
@@ -202,7 +202,7 @@ fn an_extern_answers_the_application_it_is_bound_from() {
               extend scalar Money @extern(lang: \"typescript\", type: \"string\")\n\
               type Query { m: Money }\n";
   let root = package("app", &[("schema.graphqlx", text)]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(
     analysis.diagnostics().is_empty(),
     "{:#?}",

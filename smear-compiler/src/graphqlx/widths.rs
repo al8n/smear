@@ -14,6 +14,11 @@
 //! written, so that the walk counts its definition against `Limits::max_definitions` when it is
 //! made, and takes it back when the limit refuses it.
 //!
+//! The pass reads every written value's paths whatever `Limits::max_values` says, since it runs
+//! before lowering charges a value: a primitive only a value lowering refuses spells is still
+//! written, and declared, one definition per primitive at most, counted by
+//! `Limits::max_definitions`, and the walk costs what the parsed document already holds.
+//!
 //! Every walk here is written once, generic over a document's slice type, and nested types,
 //! values and `use` groups are walked with explicit stacks.
 

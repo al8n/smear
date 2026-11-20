@@ -333,11 +333,12 @@ All notable changes to Smear are documented in this file.
   behind the `graphqlx` feature and a tier.
   - **The entrance.** `graphqlx::analyze` takes a root `Package` and its dependencies, each a
     name, a `Layout`, a `Tier`, its `SourceFile`s and optionally an `IntegerProvider`, each file's
-    text any `SourceText` (`&str`, `&[u8]` or a source feature's type), within `Limits`, and
-    answers an `Analysis`, which has no type parameter: a `Model`, its `Diagnostics` and a
-    `SourceMap`. It is Sans-I/O: the caller supplies every package. `graphqlx::analyze_with` is
-    the same analysis read by a parser layer the caller passes, such as the lossless one, which
-    recovers, and answers beside it the `Trees` that layer kept, one for each file it read.
+    text any `SourceText` (`&str`, `&[u8]` or a source feature's type), within `Limits` and under
+    `Options`, and answers an `Analysis`, which has no type parameter: a `Model`, its
+    `Diagnostics` and a `SourceMap`, and the limits and options it ran under. It is Sans-I/O: the
+    caller supplies every package. `graphqlx::analyze_with` is the same analysis read by a parser
+    layer the caller passes, such as the lossless one, which recovers, and answers beside it the
+    `Trees` that layer kept, one for each file it read.
   - **The model.** Dense tables read through `Copy` views, each numbered by a dense `u32` id in a
     fixed order that permuting the dependencies or a package's files does not change: packages,
     modules, definitions and their contributions, members, type occurrences and interned types,
@@ -379,8 +380,8 @@ All notable changes to Smear are documented in this file.
     orphan rule refuses grows nothing either, so a growth only it writes is not found, and
     `UnboundedInstantiation` does not report it; the orphan rule reports the extension. A
     `resource-limit` is said once for each written occurrence and kind of limit, whichever phase
-    meets it there first: each phase's step budget is a kind of its own, and a limit on types one
-    kind across the phases.
+    meets it there first: each phase's step budget is a kind of its own, `max_values` another, and
+    a limit on types one kind across the phases.
   - **The rules.** 33 rules, each a visitor on the public trait, judge what the supplied packages
     wrote once the phases have written the model: smear's own rules on GraphQLx, under eleven
     `smear::graphqlx` codes, and the type-system rules GraphQLx shares with GraphQL in this
@@ -393,11 +394,12 @@ All notable changes to Smear are documented in this file.
   - **The verdict.** `Analysis::is_ok` is whether no error was reported, kept by the diagnostic
     ceiling or not, and no syntax error was counted that a parser did not lend. On every GraphQL
     document of smear's corpora, each given as the one file of a `Flat` package, it is the verdict
-    the schema builder gives, but for three capacity ceilings of the schema representation that
-    GraphQLx does not have; a differential test holds that, counting each of GraphQL's codes on
-    both sides, and beside the three ceilings lists by document each count it lets differ, every
-    one on a document both refuse. A root package with no query root is not ok, unless a file of
-    the root package was not read whole, whose own diagnostic stands.
+    the schema builder gives, but for GraphQL's builder's three capacity ceilings, which GraphQLx
+    has only as `Limits` a consumer tightens to them; a differential test holds that, counting each
+    of GraphQL's codes on both sides, and beside the three ceilings lists by document each count
+    it lets differ, every one on a document both refuse, and under those limits that the analyzer
+    refuses each document the builder refuses for a ceiling. A root package with no query root is
+    not ok, unless a file of the root package was not read whole, whose own diagnostic stands.
   - **Codes.** `DiagnosticKind` lists the 39 codes of the analyzer's own family, `smear::graphqlx`,
     in `DiagnosticKind::ALL`, all errors but the warning `shadowed-primitive`; `graphqlx::schema`
     holds the 68 `smear::schema` codes it shares with GraphQL's own validator as public constants,
@@ -412,12 +414,25 @@ All notable changes to Smear are documented in this file.
     at compile time: a tuple of up to twelve, an `Option` of one, a `&mut` or a `Box` of one, and
     `()`. `SourceMap::written_by` answers the package that wrote a location, and
     `TypeExpr::written_args` the arguments written on an occurrence of any shape.
-  - **Limits.** Sixteen bounds, each a `u32` count with its getter and its `with_*` setter, and
+  - **Limits.** Twenty bounds, each a `u32` count with its getter and its `with_*` setter, and
     one passed is `smear::graphqlx::resource-limit`, never a panic: definitions 2^20, modules
     2^16, module depth 64, path segments 64, `use` depth 32, glob iterations 2^10, globs 64,
-    generic depth 64, instantiations 2^16, substitutions 2^20, bound steps 2^20, value steps 2^20,
+    field arguments 2^10, directive arguments 2^10, type wrappers 64, generic depth 64,
+    instantiations 2^16, substitutions 2^20, bound steps 2^20, value steps 2^20, values 2^20,
     implementation steps 2^20, source bytes 2^26, diagnostics 16 384, and near-miss comparisons
-    2^20, the last two limiting what the analysis says and not what it accepts.
+    2^20, the last two limiting what the analysis says and not what it accepts. The arguments of a
+    field and of a directive, and a written type's wrappers, refuse a shape and stop no work: at 64,
+    64 and 15 they refuse each document GraphQL's builder refuses for a ceiling. `max_values` counts
+    each literal a value writes, its own included, each list a value stands for, and each value of a
+    copy; the model holds at most that many values plus the built-in library's own, plus one
+    unresolved value for each written default or argument refused past it.
+  - **Options.** `Options` holds the switches that relax or tighten what the language accepts, each
+    off by default and the analysis's whole, built as `Limits` is.
+    `extern_collections_as_written` lets an extern collection, a set or a map its own package
+    binds with `@extern`, keep a literal that is no collection literal as written, as an extern
+    scalar keeps its value. `judged_metadata` makes the tier rule judge compile-time metadata too,
+    which it skips by default, an application's left-out type arguments and `@heap` on a
+    directive's argument included; `Def::is_metadata` answers the same either way.
   - **Stability.** The `graphqlx` module makes no semver promise yet: a release may change any
     path, signature or answer of it, and which programs it accepts.
   - **Tests.** A `test-support` feature, which `smear/test-support` forwards, compiles a hidden

@@ -7,8 +7,8 @@
 use smear::{
   analysis::graphqlx::{
     Analysis, Builtins, DefId, DefKind, Diagnostic, IntegerProvider, Layout, Limits, Model,
-    ModuleId, Namespace, Origin, Package, PackageId, PackageKind, Primitive, SourceFile, SourceId,
-    Tier, analyze,
+    ModuleId, Namespace, Options, Origin, Package, PackageId, PackageKind, Primitive, SourceFile,
+    SourceId, Tier, analyze,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -51,7 +51,7 @@ fn package(
 /// An analysis of a root package that holds no file: the built-in library alone.
 fn library() -> Analysis {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
-  analyze(&root, &[], &Limits::new())
+  analyze(&root, &[], &Limits::new(), &Options::new())
 }
 
 /// The id of the file at `path` in the package `package`.
@@ -114,7 +114,7 @@ fn names(model: &Model, module: ModuleId) -> Vec<&str> {
 #[test]
 fn the_built_in_library_analyzes_with_no_diagnostic() {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   let model = analysis.model();
@@ -169,7 +169,7 @@ fn each_shape_the_library_relies_on_parses_alone() {
   ];
   for (path, text, declared) in shapes {
     let root = package("app", Layout::Flat, &[(path, text)]);
-    let analysis = analyze(&root, &[], &Limits::new());
+    let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
     let source = file(&analysis, 3, path);
     let here: Vec<String> = analysis
       .diagnostics()
@@ -251,7 +251,7 @@ fn each_second_name_finds_its_definition() {
     Layout::Flat,
     &[("schema.graphqlx", "type Query { a: Int, b: Float }\n")],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   for (alias, target) in [
@@ -330,7 +330,7 @@ const WRITES: &str =
 #[test]
 fn core_materialises_the_written_primitives_first_in_their_order() {
   let root = package("app", Layout::Flat, &[("schema.graphqlx", WRITES)]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
 
@@ -394,7 +394,7 @@ fn a_width_beyond_cores_own_is_materialised_only_for_a_package_with_a_provider()
   // Without a provider, the program writes widths it may not have, and none is materialised: each
   // spelling is reported where it is used, as a type the field's place cannot name.
   let root = package("app", Layout::Flat, &[("schema.graphqlx", wide)]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let schema = file(&analysis, 3, "schema.graphqlx");
   assert_eq!(
     undefined(&analysis),
@@ -412,7 +412,7 @@ fn a_width_beyond_cores_own_is_materialised_only_for_a_package_with_a_provider()
   // With `numo`, each is.
   let root = package("app", Layout::Flat, &[("schema.graphqlx", wide)])
     .with_integers(IntegerProvider::numo());
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let builtins = analysis.model().builtins();
   for width in [
     Primitive::signed(256),
@@ -434,7 +434,7 @@ fn a_width_beyond_cores_own_is_materialised_only_for_a_package_with_a_provider()
     &[("geo.graphqlx", "scalar G\ntype P { a: i256 }\n")],
   )
   .with_integers(IntegerProvider::numo());
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let schema = file(&analysis, 3, "schema.graphqlx");
   assert_eq!(
     undefined(&analysis),
@@ -465,7 +465,7 @@ fn a_root_module_replaces_graphql_built_ins_and_they_keep_their_ids() {
   )
   .with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", ELSEWHERE)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let schema = file(&analysis, 3, "schema.graphqlx");
   // The one diagnostic is GraphQL's own refusal of the `@specifiedBy` the root's `Int` applies: the
   // replacement is the built-in, which takes none.
@@ -545,7 +545,7 @@ fn a_root_module_replaces_graphql_built_ins_and_they_keep_their_ids() {
 fn only_the_first_scalar_of_a_graphql_name_replaces_and_only_a_scalar() {
   let text = "scalar Int\nscalar Int\ntype Float { x: i8 }\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let model = analysis.model();
   let schema = file(&analysis, 3, "schema.graphqlx");
 

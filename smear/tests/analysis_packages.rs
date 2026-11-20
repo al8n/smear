@@ -6,8 +6,8 @@
 use smear::{
   analysis::graphqlx::{
     Analysis, Bound, Diagnostic, DiagnosticBuilder, DiagnosticKind, Diagnostics, IdIter, IdRange,
-    IntegerProvider, Layout, Limits, Model, Package, PackageId, PackageInfo, PackageKind, Source,
-    SourceFile, SourceId, SourceMap, Tier, analyze,
+    IntegerProvider, Layout, Limits, Model, Options, Package, PackageId, PackageInfo, PackageKind,
+    Source, SourceFile, SourceId, SourceMap, Tier, analyze,
   },
   diagnostic::{Diagnose, Location, Severity},
 };
@@ -98,7 +98,7 @@ fn a_clean_package_set_reports_nothing() {
     .with_integers(IntegerProvider::numo());
   let geo = Package::new("geo", Layout::Flat, Tier::Alloc)
     .with_files([SourceFile::new("point.graphqlx", "type Point { x: Int }\n")]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
   assert!(analysis.diagnostics().is_empty());
   assert!(!analysis.diagnostics().truncated());
@@ -135,7 +135,7 @@ fn the_built_ins_come_first_then_the_root_then_the_dependencies_by_name() {
     package("zeta", &[("z.graphqlx", OK)]),
     package("alpha", &[("a.graphqlx", OK)]),
   ];
-  let analysis = analyze(&root, &dependencies, &Limits::new());
+  let analysis = analyze(&root, &dependencies, &Limits::new(), &Options::new());
   assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
 
   let model = analysis.model();
@@ -190,7 +190,7 @@ fn each_package_has_a_package_source_then_its_files_by_path_segment_by_segment()
       ("media/vision.graphqlx", "scalar Image\n"),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
 
   let model = analysis.model();
@@ -251,7 +251,7 @@ fn each_package_has_a_package_source_then_its_files_by_path_segment_by_segment()
 #[test]
 fn two_files_with_one_path_are_refused() {
   let root = package("app", &[("a.graphqlx", OK), ("a.graphqlx", "scalar A\n")]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   only(
     &analysis,
     DiagnosticKind::DuplicateFilePath,
@@ -274,7 +274,7 @@ fn a_file_path_is_relative_slash_separated_utf8_and_plain() {
     SourceFile::new("up/../dot.graphqlx", OK),
     SourceFile::new(&b"not-\xffutf8.graphqlx"[..], OK),
   ]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   only(
     &analysis,
     DiagnosticKind::InvalidFilePath,
@@ -299,6 +299,7 @@ fn a_package_name_is_a_name() {
     &root,
     &[package("my-geo", &[("g.graphqlx", OK)])],
     &Limits::new(),
+    &Options::new(),
   );
   only(
     &analysis,
@@ -308,7 +309,7 @@ fn a_package_name_is_a_name() {
   );
 
   let root = package("9lives", &[("a.graphqlx", OK)]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   only(
     &analysis,
     DiagnosticKind::InvalidPackageName,
@@ -325,6 +326,7 @@ fn a_supplied_package_cannot_take_a_built_in_name() {
     &root,
     &[package("core", &[("c.graphqlx", OK)])],
     &Limits::new(),
+    &Options::new(),
   );
   only(
     &analysis,
@@ -340,7 +342,12 @@ fn a_supplied_package_cannot_take_a_built_in_name() {
     [PackageId::new(0)]
   );
 
-  let analysis = analyze(&package("std", &[("a.graphqlx", OK)]), &[], &Limits::new());
+  let analysis = analyze(
+    &package("std", &[("a.graphqlx", OK)]),
+    &[],
+    &Limits::new(),
+    &Options::new(),
+  );
   only(
     &analysis,
     DiagnosticKind::ReservedPackageName,
@@ -356,8 +363,13 @@ fn two_supplied_packages_cannot_share_a_name() {
   let first = package("geo", &[("a.graphqlx", OK)]);
   let second = package("geo", &[("b.graphqlx", OK)]);
   let root = package("app", &[("a.graphqlx", OK)]);
-  let forward = analyze(&root, &[first.clone(), second.clone()], &Limits::new());
-  let backward = analyze(&root, &[second, first], &Limits::new());
+  let forward = analyze(
+    &root,
+    &[first.clone(), second.clone()],
+    &Limits::new(),
+    &Options::new(),
+  );
+  let backward = analyze(&root, &[second, first], &Limits::new(), &Options::new());
   only(
     &forward,
     DiagnosticKind::DuplicatePackageName,
@@ -371,6 +383,7 @@ fn two_supplied_packages_cannot_share_a_name() {
     &root,
     &[package("app", &[("b.graphqlx", OK)])],
     &Limits::new(),
+    &Options::new(),
   );
   only(
     &analysis,
@@ -383,7 +396,7 @@ fn two_supplied_packages_cannot_share_a_name() {
 #[test]
 fn a_declared_dependency_must_be_supplied() {
   let root = package("app", &[("a.graphqlx", OK)]).with_dependencies(["geo", "geo"]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   // A name declared twice is declared once.
   only(
     &analysis,
@@ -398,6 +411,7 @@ fn a_declared_dependency_must_be_supplied() {
     &package("app", &[("a.graphqlx", OK)]),
     &[geo],
     &Limits::new(),
+    &Options::new(),
   );
   only(
     &analysis,
@@ -440,7 +454,7 @@ fn quoting(name: &str, limits: &Limits) -> Analysis {
     ],
   )
   .with_dependencies(["geo"]);
-  analyze(&root, &[], limits)
+  analyze(&root, &[], limits, &Options::new())
 }
 
 /// A message quotes a long name by its first and its last 64 bytes, so it holds a fixed number of
@@ -500,6 +514,7 @@ fn a_long_name_is_cut_between_characters_and_bounded_when_it_is_not_utf8() {
     &package(&accented, &[("a.graphqlx", OK)]),
     &[],
     &Limits::new(),
+    &Options::new(),
   );
   only(
     &analysis,
@@ -519,7 +534,7 @@ fn a_long_name_is_cut_between_characters_and_bounded_when_it_is_not_utf8() {
   let invalid = [0xFF_u8; 300];
   let root = Package::new(&invalid[..], Layout::Directory, Tier::Std)
     .with_files([SourceFile::new("a.graphqlx", OK)]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   only(
     &analysis,
     DiagnosticKind::InvalidPackageName,
@@ -549,7 +564,7 @@ fn a_name_of_128_bytes_is_quoted_whole_and_one_of_129_by_its_two_ends() {
     (format!("{head}M{tail}"), format!("{head}…{tail}")),
   ] {
     let root = package(&name, &[("a.graphqlx", OK)]).with_dependencies(["geo"]);
-    let analysis = analyze(&root, &[], &Limits::new());
+    let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
     only(
       &analysis,
       DiagnosticKind::MissingDependency,
@@ -574,7 +589,7 @@ fn the_supplied_sources_have_a_size_limit() {
 
   // Over the limit: refused at the root, and no file is parsed, so the syntax error goes unsaid.
   let over = Limits::new().with_max_source_bytes(u32::try_from(total - 1).expect("small"));
-  let analysis = analyze(&root, &[], &over);
+  let analysis = analyze(&root, &[], &over, &Options::new());
   only(
     &analysis,
     DiagnosticKind::ResourceLimit,
@@ -584,7 +599,7 @@ fn the_supplied_sources_have_a_size_limit() {
 
   // At the limit: parsed, and the syntax error is the only diagnostic.
   let at = Limits::new().with_max_source_bytes(u32::try_from(total).expect("small"));
-  let analysis = analyze(&root, &[], &at);
+  let analysis = analyze(&root, &[], &at, &Options::new());
   let codes: Vec<&str> = found(&analysis)
     .into_iter()
     .map(|(code, _): (&'static str, Location)| code)
@@ -681,9 +696,9 @@ fn permuting_the_dependencies_and_the_files_changes_no_id_and_no_diagnostic() {
   };
 
   let (root, dependencies) = build(false);
-  let forward = analyze(&root, &dependencies, &Limits::new());
+  let forward = analyze(&root, &dependencies, &Limits::new(), &Options::new());
   let (root, dependencies) = build(true);
-  let backward = analyze(&root, &dependencies, &Limits::new());
+  let backward = analyze(&root, &dependencies, &Limits::new(), &Options::new());
 
   // The case is not vacuous: every kind it is built to provoke is there.
   let codes: Vec<&str> = found(&forward)

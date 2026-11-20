@@ -9,8 +9,8 @@ use std::path::PathBuf;
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, DefId, Diagnostic, Layout, Limits, Model, Namespace, Package, PackageId, SourceFile,
-    SourceId, Tier, analyze, test_support,
+    Analysis, DefId, Diagnostic, Layout, Limits, Model, Namespace, Options, Package, PackageId,
+    SourceFile, SourceId, Tier, analyze, test_support,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -40,11 +40,11 @@ const ORPHAN: &str = "smear::graphqlx::orphan-extension";
 const DERIVES: &str = "this derives that instantiation";
 
 /// An analysis of the root package `app`, `Flat`, at tier `Std`, holding the one file
-/// `schema.graphqlx`, within `limits`.
+/// `schema.graphqlx`, within `limits`, every option off.
 fn analyze_text(text: &str, limits: &Limits) -> Analysis {
   let root = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text)]);
-  analyze(&root, &[], limits)
+  analyze(&root, &[], limits, &Options::new())
 }
 
 /// The root package's one file, `schema.graphqlx`.
@@ -279,7 +279,7 @@ fn def_grows_agrees_with_the_opt_in_rule_on_every_definition_of_the_corpus() {
     println!("{}", path.display());
     let root: Package<&[u8]> = Package::new("app", Layout::Flat, Tier::Std)
       .with_files([SourceFile::new("schema.graphqlx", text.as_slice())]);
-    let analysis = analyze(&root, &[], &Limits::new());
+    let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
     let model = analysis.model();
     assert_eq!(
       grown(model),
@@ -1513,7 +1513,7 @@ fn a_foreign_implements_entry_makes_nothing_relevant() {
   let dependencies = [Package::new("dep", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("dep.graphqlx", theirs)])];
   for limits in [Limits::new().with_max_value_steps(0), Limits::new()] {
-    let analysis = analyze(&root, &dependencies, &limits);
+    let analysis = analyze(&root, &dependencies, &limits, &Options::new());
     assert!(
       codes_at(&analysis, LIMIT).is_empty(),
       "{:#?}",
@@ -1573,14 +1573,15 @@ fn an_argument_name_written_twice_is_one_name_to_the_relevance_scan() {
 }
 
 /// An analysis of the root package `app`, its one file `schema.graphqlx` holding `ours`, beside the
-/// dependency `dep`, its one file `dep.graphqlx` holding `theirs`, within `limits`.
+/// dependency `dep`, its one file `dep.graphqlx` holding `theirs`, within `limits`, every option
+/// off.
 fn analyze_beside(ours: &str, theirs: &str, limits: &Limits) -> Analysis {
   let root = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", ours)])
     .with_dependencies(["dep"]);
   let dependencies = [Package::new("dep", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("dep.graphqlx", theirs)])];
-  analyze(&root, &dependencies, limits)
+  analyze(&root, &dependencies, limits, &Options::new())
 }
 
 /// Each diagnostic of `analysis` in the dependency `dep`'s file, its code and where it is, in the

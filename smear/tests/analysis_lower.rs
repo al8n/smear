@@ -13,10 +13,10 @@
 use smear::{
   analysis::graphqlx::{
     Analysis, ApplicationArgument, ApplicationId, Contribution, Cx, DefId, Description, Diagnostic,
-    DirectiveLocation, IdRange, Layout, Limits, MemberId, MemberKind, Model, Namespace, Origin,
-    Package, PackageId, Packages, Path, PathRoot, Primitive, Resolution, Root, RootOperation,
-    SourceFile, SourceId, Sym, Tier, TyKind, TypeExprId, TypeExprKind, ValueId, ValueKind, Visitor,
-    analyze, visit,
+    DirectiveLocation, IdRange, Layout, Limits, MemberId, MemberKind, Model, Namespace, Options,
+    Origin, Package, PackageId, Packages, Path, PathRoot, Primitive, Resolution, Root,
+    RootOperation, SourceFile, SourceId, Sym, Tier, TyKind, TypeExprId, TypeExprKind, ValueId,
+    ValueKind, Visitor, analyze, visit,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -59,7 +59,7 @@ fn package(
 /// An analysis of the root package `app`, `Flat`, holding the one file `schema.graphqlx`.
 fn analyze_one(text: &'static str) -> Analysis {
   let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
-  analyze(&root, &[], &Limits::new())
+  analyze(&root, &[], &Limits::new(), &Options::new())
 }
 
 /// The id of the file at `path` in the package `package`.
@@ -984,7 +984,7 @@ fn contributions_order_members_by_source_then_position() {
       ("a.graphqlx", a),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let (a_file, b_file, c_file, m_file) = (
@@ -1242,7 +1242,7 @@ fn a_mismatched_extension_of_a_long_name_quotes_an_excerpt() {
   let text = format!("enum {name} {{\n  A\n}}\nextend type {name} {{\n  f: Int\n}}\n");
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let messages: Vec<String> = reported(&analysis)
     .into_iter()
     .map(|diagnostic: &Diagnostic| diagnostic.to_string())
@@ -1279,7 +1279,7 @@ fn a_type_keeps_its_written_path_arguments_and_nullness() {
     Layout::Flat,
     &[("p.graphqlx", "type Point {\n  x: Int\n}\n")],
   );
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let model = analysis.model();
   let schema = file(&analysis, 3, "schema.graphqlx");
 
@@ -1684,7 +1684,7 @@ fn extensions_order_by_source_and_position_whatever_their_modules() {
     Layout::Directory,
     &[("b.graphqlx", b), ("a/x.graphqlx", x)],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let shape = def(model, Namespace::Type, "^::app::Shape");
@@ -1719,7 +1719,7 @@ fn a_contributions_paths_resolve_where_it_is_written() {
     Layout::Directory,
     &[("b.graphqlx", b), ("m/x.graphqlx", x)],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let shape = def(model, Namespace::Type, "^::app::Shape");
@@ -1885,7 +1885,7 @@ fn the_near_miss_budget_is_spent_in_walk_order_whatever_the_order_given() {
     [("two.graphqlx", two), ("one.graphqlx", one)],
   ] {
     let root = package("app", Layout::Flat, &files);
-    let analysis = analyze(&root, &[], &limits);
+    let analysis = analyze(&root, &[], &limits, &Options::new());
     runs.push(
       reported(&analysis)
         .into_iter()
@@ -2209,7 +2209,7 @@ fn an_unknown_argument_with_a_long_name_quotes_an_excerpt() {
   let text = format!("directive @d(a: Int) on OBJECT\ntype T @d({name}: 1) {{\n  f: Int\n}}\n");
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let messages: Vec<String> = reported(&analysis)
     .into_iter()
     .map(|diagnostic: &Diagnostic| diagnostic.to_string())
@@ -2232,7 +2232,7 @@ const REASON: &str = "Explains why this element was deprecated, usually also inc
 #[test]
 fn the_built_in_library_lowers_with_no_diagnostic() {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let builtins = model.builtins();
@@ -2375,7 +2375,7 @@ fn the_schemas_contributions_are_its_definitions_then_its_extensions_each_marked
       ("a/x.graphqlx", SCHEMA_A),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(
     analysis.diagnostics().is_empty(),
     "{:#?}",
@@ -2444,7 +2444,7 @@ fn a_second_schema_definition_and_a_dependencys_are_contributions_and_nothing_el
   )
   .with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("g.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let model = analysis.model();
   let one_file = file(&analysis, 3, "one.graphqlx");
   let two_file = file(&analysis, 3, "two.graphqlx");
@@ -2512,7 +2512,7 @@ fn a_second_schema_definition_and_a_dependencys_are_contributions_and_nothing_el
   )
   .with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("g.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let model = analysis.model();
   let geo_file = file(&analysis, 4, "g.graphqlx");
   assert_eq!(
@@ -2723,7 +2723,7 @@ fn default_roots_are_presumed_only_with_no_schema_definition() {
     Layout::Flat,
     &[("g.graphqlx", "type Mutation {\n  run: Int\n}\n")],
   );
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   assert_eq!(roots(analysis.model()), [None::<String>, None, None]);
 
@@ -3011,10 +3011,10 @@ fn program(reversed: bool) -> (Package<&'static str>, Vec<Package<&'static str>>
 #[test]
 fn reversing_files_and_dependencies_changes_no_id_and_no_diagnostic() {
   let (root, dependencies) = program(false);
-  let forward = analyze(&root, &dependencies, &Limits::new());
+  let forward = analyze(&root, &dependencies, &Limits::new(), &Options::new());
   assert!(forward.is_ok(), "{:#?}", forward.diagnostics());
   let (root, dependencies) = program(true);
-  let backward = analyze(&root, &dependencies, &Limits::new());
+  let backward = analyze(&root, &dependencies, &Limits::new(), &Options::new());
   assert_eq!(render(&forward), render(&backward));
 
   // What the render compares is what lowering wrote: `Query`'s members, the extension's among

@@ -31,9 +31,9 @@ use std::path::{Path, PathBuf};
 use smear::{
   analysis::graphqlx::{
     Analysis, ApplicationArgument, ApplicationId, Cx, DefId, Diagnostic, Diagnostics, IdRange,
-    Layout, Limits, MemberId, Model, Origin, Package, Packages, Resolution, SourceFile, Tier, TyId,
-    TyKind, TypeExprId, TypeExprKind, UnboundedInstantiation, ValueId, ValueKind, Visitor, analyze,
-    visit,
+    Layout, Limits, MemberId, Model, Options, Origin, Package, Packages, Resolution, SourceFile,
+    Tier, TyId, TyKind, TypeExprId, TypeExprKind, UnboundedInstantiation, ValueId, ValueKind,
+    Visitor, analyze, visit,
   },
   diagnostic::Diagnose,
 };
@@ -89,7 +89,7 @@ fn analyzed(path: &Path, text: &[u8]) -> Analysis {
   println!("{}", path.display());
   let root: Package<&[u8]> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text)]);
-  analyze(&root, &[], &Limits::new())
+  analyze(&root, &[], &Limits::new(), &Options::new())
 }
 
 /// GraphQL's code for a schema with no query root. Most files of the corpora are parts of a schema
@@ -628,7 +628,7 @@ fn w13_holds_on_every_ok_analysis_of_the_corpora() {
 fn w13_holds_on_programs_that_assert_ok() {
   let mut failures: Vec<String> = Vec::new();
   for (origin, root, dependencies) in programs() {
-    let analysis = analyze(&root, &dependencies, &Limits::new());
+    let analysis = analyze(&root, &dependencies, &Limits::new(), &Options::new());
     assert!(
       analysis.is_ok() && !analysis.diagnostics().truncated(),
       "{origin}: {:#?}",

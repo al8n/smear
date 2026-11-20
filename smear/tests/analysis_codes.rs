@@ -16,7 +16,8 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Layout, Limits, Package, SourceFile, Tier, analyze, schema, test_support::RULES,
+    Analysis, Layout, Limits, Options, Package, SourceFile, Tier, analyze, schema,
+    test_support::RULES,
   },
   diagnostic::{Code, Diagnose},
   validator::SchemaErrorKind,
@@ -36,7 +37,7 @@ use corpus::SCHEMA_FIXTURES;
 fn analyzed(sdl: &str) -> Analysis {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", sdl)]);
-  analyze(&root, &[], &Limits::new())
+  analyze(&root, &[], &Limits::new(), &Options::new())
 }
 
 /// Each shared code, with the kind of the schema builder's it is, in the module's declaration

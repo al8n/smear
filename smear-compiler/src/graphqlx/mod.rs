@@ -8,7 +8,8 @@
 //! A [`Package`] is a name, a [`Layout`], a [`Tier`], its [`SourceFile`]s, the names of the
 //! packages it depends on, and optionally an [`IntegerProvider`]. A file's text is any
 //! [`SourceText`]: `&str`, `&[u8]`, or one of the texts behind the source features. [`Limits`]
-//! bounds what an analysis may spend.
+//! bounds what an analysis may spend and the shapes it admits, and [`Options`] relaxes or tightens
+//! what it accepts.
 //!
 //! The analysis is Sans-I/O: the caller walks its directories, applies its include rules, reads
 //! its files and reads its manifest, and supplies every package up front.
@@ -21,8 +22,11 @@
 //! [`Analysis::is_ok`] is the verdict: whether no error was reported, counted whether the
 //! diagnostic ceiling kept it or not, and no syntax error was counted that a parser did not lend.
 //! On every GraphQL document of smear's corpora, each given as the one file of a `Flat` package,
-//! it is the verdict the schema builder gives, but for three capacity ceilings of the schema
-//! representation that GraphQLx does not have. A differential test holds that. It counts each of
+//! it is the verdict the schema builder gives, but for three capacity ceilings of GraphQL's
+//! builder, which GraphQLx has only as bounds a consumer tightens: at 64, 64 and 15,
+//! [`Limits::max_field_arguments`], [`Limits::max_directive_arguments`] and
+//! [`Limits::max_type_wrappers`] refuse each document the builder refuses for a ceiling, as
+//! `smear::graphqlx::resource-limit`. A differential test holds that. It counts each of
 //! GraphQL's codes on both sides, and beside the three ceilings lists by document each count it
 //! lets differ, every one on a document both refuse. That is what this release's rules give,
 //! and no promise: GraphQLx is not bound to GraphQL's rules, and a GraphQL document whose one
@@ -32,11 +36,11 @@
 //! it waives any code (see "Waiving a rule" below).
 //!
 //! ```
-//! use smear_compiler::graphqlx::{Layout, Limits, Package, SourceFile, Tier, analyze};
+//! use smear_compiler::graphqlx::{Layout, Limits, Options, Package, SourceFile, Tier, analyze};
 //!
 //! let root = Package::new("app", Layout::Directory, Tier::Std)
 //!   .with_files([SourceFile::new("schema.graphqlx", "type Query { ok: Int }")]);
-//! let analysis = analyze(&root, &[], &Limits::new());
+//! let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
 //! assert!(analysis.is_ok());
 //!
 //! // The texts stay with the caller, and are paired with the analysis again to render.
@@ -58,7 +62,7 @@
 //! | Collection | Each package's module tree, from its directories and its inline `mod`s, and every item each module declares | `smear::graphqlx`: `invalid-directory-name`, `module-defined-twice`, `unknown-item`, `resource-limit` |
 //! | Declaration | Every module and every definition, numbered, the built-in library's and the primitives the program writes included; a GraphQL built-in the root package's root module defines again, replaced; each module's names | `smear::schema`: `duplicate-type-name`, `duplicate-directive-definition`, `reserved-type-name`, `reserved-directive-name`, `redefined-built-in-type`; `smear::graphqlx`: `module-type-collision` |
 //! | Name resolution | Every module's scope, its `use` items resolved to a fixpoint; and each path, resolved where it stands for the phases after it | `smear::schema`: `undefined-type`, `undefined-directive`, `undefined-extension-target`, `undefined-implements-interface`, `undefined-union-member`, `undefined-root-operation-type`; `smear::graphqlx`: `unknown-package`, `unresolved-path`, `ambiguous-glob`, `url-unsupported`, `file-path-use`, `use-resolution-changed`, `use-declaration-collision`, `use-name-collision`, `shadowed-primitive`, `unknown-item`, `resource-limit` |
-//! | Lowering | What each definition holds beyond its identity: its contributions, its type parameters and bounds, a directive's locations, and its members; every type occurrence and application, its path resolved where it is written; every value, as written; and the schema's contributions and roots | `smear::schema`: `extension-kind-mismatch`, `undefined-extension-target`, `undefined-directive-argument`, `duplicate-root-operation-type`; `smear::graphqlx`: `generic-arity`, `invalid-bound`, `unresolved-path`, `unknown-item` |
+//! | Lowering | What each definition holds beyond its identity: its contributions, its type parameters and bounds, a directive's locations, and its members; every type occurrence and application, its path resolved where it is written; every value, as written; and the schema's contributions and roots | `smear::schema`: `extension-kind-mismatch`, `undefined-extension-target`, `undefined-directive-argument`, `duplicate-root-operation-type`; `smear::graphqlx`: `generic-arity`, `invalid-bound`, `unresolved-path`, `unknown-item`, `resource-limit` |
 //! | Instantiation | Each definition's built-in meaning and its defaults; every occurrence's type, each type interned once; each application's complete type arguments; the bounds of every instantiation the program writes; and, last, which generic definitions grow | `smear::graphqlx`: `generic-arity`, `generic-default`, `unsatisfied-bound`, `resource-limit` |
 //! | Coercion | Every value, by the type expected where it stands, an argument or a field left out filled from its default; and a generic definition's values, at each closed instantiation of it a supplied package writes, and at each one such an instantiation derives through the definitions that do not grow | `smear::schema`: `invalid-default-value`, `invalid-directive-argument-value`, `missing-required-directive-argument`, `undefined-input-object-field`, `missing-required-input-object-field`, `input-object-default-value-cycle`; `smear::graphqlx`: `width-overflow`, `nonzero-zero`, `collection-literal`, `resource-limit` |
 //! | Binding | Each scalar's host types, from the `@extern`s its own package writes on it | none |
@@ -117,9 +121,10 @@
 //! object's fields are found by name, a set's elements and a map's entries are each coerced against
 //! their collection's types, a `TypeRef` value is the definition its path names, and a value of a
 //! custom scalar that is no collection but `null`, of a type that still names a type parameter, or
-//! of a type that can take none is kept as written, a [`ValueKind::Literal`], but a whole `null` at
-//! a type that still names a type parameter and that no instantiation takes, which is refused and
-//! [`ValueKind::Unresolved`].
+//! of a type that can take none is kept as written, a [`ValueKind::Literal`], and, under
+//! [`Options::extern_collections_as_written`], so is an extern collection's literal that is not its
+//! own, but a whole `null` at a type that still names a type parameter and that no instantiation
+//! takes, which is refused and [`ValueKind::Unresolved`].
 //!
 //! [`Model::application`] answers each directive application, an [`Application`]: its directive,
 //! its type arguments and its path as written, its location, and its arguments in its directive's
@@ -156,8 +161,9 @@
 //! - every application's arguments are its directive's, in its order, each at most once, every
 //!   required one present, each value coerced to its argument's type under the application's type
 //!   arguments, or kept as written while that type still names a type parameter;
-//! - every definition's [`tier`](Def::tier) is at most its package's, GraphQL's meta-types and
-//!   the definitions only compile-time metadata reaches, [`is_metadata`](Def::is_metadata), aside;
+//! - every definition's [`tier`](Def::tier) is at most its package's, GraphQL's meta-types and,
+//!   but under [`Options::judged_metadata`], the definitions only compile-time metadata reaches,
+//!   [`is_metadata`](Def::is_metadata), aside;
 //! - every rule of the table under "Rules" holds, the type-system rules GraphQLx shares with
 //!   GraphQL in this release among them.
 //!
@@ -251,14 +257,14 @@
 //!
 //! ```
 //! use smear_compiler::graphqlx::{
-//!   Diagnostic, Layout, Limits, Package, SourceFile, Tier, analyze, schema,
+//!   Diagnostic, Layout, Limits, Options, Package, SourceFile, Tier, analyze, schema,
 //! };
 //! use tokora::diagnostic::Diagnose;
 //!
 //! // A library has no query root, so analyzed as the root package it is not ok.
 //! let library = Package::new("geo", Layout::Flat, Tier::Std)
 //!   .with_files([SourceFile::new("geo.graphqlx", "type Point { x: Float! y: Float! }")]);
-//! let analysis = analyze(&library, &[], &Limits::new());
+//! let analysis = analyze(&library, &[], &Limits::new(), &Options::new());
 //! assert!(!analysis.is_ok());
 //!
 //! // Waived by its code, on a list the ceiling did not cut, nothing else remains.
@@ -278,9 +284,12 @@
 //! [`Limits`] bounds what the analysis builds and spends once it has numbered what it was given: a
 //! bound passed stops that work, is reported as `smear::graphqlx::resource-limit`, and the
 //! analysis goes on, but for the diagnostic ceiling and the near-miss budget, which limit what the
-//! analysis says and not what it accepts. From instantiation on, a written occurrence reports one
-//! for each kind of bound, whichever phase or path passes it there first: each phase's step budget
-//! is a kind of its own, and a bound on the types the phases build one kind across them.
+//! analysis says and not what it accepts, and the three bounds on a field's and a directive's
+//! arguments and a written type's wrappers, which refuse a shape and stop no work. From
+//! instantiation on, a written occurrence reports one for each kind of bound, whichever phase or
+//! path passes it there first: each phase's step budget is a kind of its own,
+//! [`max_values`](Limits::max_values) another, and a bound on the types the phases build one kind
+//! across them.
 //!
 //! Before any bound applies, the diagnostic ceiling aside, the analysis reads what the caller
 //! supplied, to number and order it. It sorts each package's files by path, and orders two files
@@ -295,8 +304,9 @@
 //!
 //! Each bound is a `u32` count, and `0` admits none of what it counts, but that every package has
 //! its root module and the built-in library is always declared whole, its types built whatever the
-//! generic depth, instantiation and substitution bounds, and its bounds, its own values and its
-//! implementations costing nothing to judge, complete or check.
+//! generic depth, instantiation and substitution bounds, its fields' and directives' arguments and
+//! its types' wrappers counted by none of the three shape bounds, and its bounds, its own values
+//! and its implementations costing nothing to judge, to read or complete, or to check.
 //!
 //! | Bound | Default | What it counts | At `0` |
 //! |---|---|---|---|
@@ -307,11 +317,15 @@
 //! | [`max_use_depth`](Limits::max_use_depth) | 32 | How deeply one `use` tree nests its braces | No braced group in a `use` item |
 //! | [`max_glob_iterations`](Limits::max_glob_iterations) | 2^10 | The rounds the glob fixpoint of one module's `use` items runs | No round |
 //! | [`max_globs`](Limits::max_globs) | 64 | The modules the glob `use` items of one module name | No glob |
+//! | [`max_field_arguments`](Limits::max_field_arguments) | 2^10 | The arguments one field declares | No field a supplied package writes declares an argument |
+//! | [`max_directive_arguments`](Limits::max_directive_arguments) | 2^10 | The arguments one directive definition declares | No directive a supplied package writes declares an argument |
+//! | [`max_type_wrappers`](Limits::max_type_wrappers) | 64 | The list and non-null wrappers one written type has around what it names | No type a supplied package writes is a list or non-null |
 //! | [`max_generic_depth`](Limits::max_generic_depth) | 64 | How deeply one type nests once substitution has filled it | No list, and no type with an argument, that a supplied package writes |
 //! | [`max_instantiations`](Limits::max_instantiations) | 2^16 | The distinct instantiations of generic definitions the analysis interns | No instantiation a supplied package needs |
 //! | [`max_substitutions`](Limits::max_substitutions) | 2^20 | The steps of filling the type arguments a use leaves out, the first time each definition's set of written arguments is filled: one for each argument left out, and one for each node of a default the filling walks | No type argument a supplied package leaves out is filled |
 //! | [`max_bound_steps`](Limits::max_bound_steps) | 2^20 | The steps of judging bounds: one for each bound taken under an instantiation's arguments, each node a rebuild of a bound's interface type looks at, each `implements` entry or type parameter's bound looked at, and each pair of types or argument compared | No bound is taken: each written instantiation of a definition with a bound is reported, a `HashMap` among them, and so is each application of a directive with one whose type arguments are complete |
 //! | [`max_value_steps`](Limits::max_value_steps) | 2^20 | The steps of completing values beyond what is written: counting and copying a default for what an application or an object literal leaves out, making the lists a lone written value stands for, finding an argument or field left out that is or may be required, rebuilding an argument's or field's type under type arguments, checking a generic definition's values, and the arguments its applications leave out, at each closed instantiation of it, written or derived, reading what each written instantiation derives, and converting a decimal integer of more than 38 significant digits to an integer | Nothing a supplied package leaves out is filled from a default or found missing, a bare `@deprecated`'s reason among them; no list is made for a lone value it writes; no type is rebuilt, and no generic definition checked at an instantiation, for its values; nothing a written instantiation derives is read, for coercion or for the implementation check; and no decimal integer of more than 38 significant digits is converted to an integer, though one is still read where a float is expected |
+//! | [`max_values`](Limits::max_values) | 2^20 | The values read and made: each literal a value writes, the value's own included, each list a value stands for, and each value of a copy of a default. The model holds at most this many plus the built-in library's own, plus one unresolved value for each written default or argument refused past it | No value a supplied package writes is read, each one unresolved, and nothing a supplied package leaves out is filled from a default |
 //! | [`max_implementation_steps`](Limits::max_implementation_steps) | 2^20 | The steps of checking implementations, and of comparing entries and members under an instantiation's arguments: one for each `implements` entry, field, argument, bound or union member looked at, each node a rebuild under type arguments looks at, and each pair of types compared | Each check that would take a step stops and is reported, a definition's at the entry it was checking |
 //! | [`max_source_bytes`](Limits::max_source_bytes) | 2^26, 64 MiB | The bytes of the supplied files' texts, together; not their paths | No byte of a supplied text is parsed |
 //! | [`max_diagnostics`](Limits::max_diagnostics) | 16 384 | The diagnostics one analysis keeps, the least of them | None is kept, and every error is still counted |
@@ -319,6 +333,20 @@
 //!
 //! The parser's own ceilings are not among these: they belong to the parser value, as [`Limits`]
 //! says.
+//!
+//! # Options
+//!
+//! [`Options`] holds the switches that relax or tighten what the language accepts, each off by
+//! default, so [`Options::new`] is the language as this documentation describes it. A switch
+//! changes which programs are accepted, and never what a program accepted both ways means: one
+//! that relaxes accepts more, to the same model, and one that tightens refuses more. The switches
+//! are the analysis's, not a package's: one setting holds for every package analyzed together, and
+//! [`Analysis::options`] answers what an analysis ran under.
+//!
+//! | Switch | Kind | What it does when on |
+//! |---|---|---|
+//! | [`extern_collections_as_written`](Options::extern_collections_as_written) | relaxes | An extern collection, a set or a map its own package binds with `@extern`, keeps a literal that is neither `set!{…}`, `map!{…}` nor `null` as written, as an extern scalar keeps its value |
+//! | [`judged_metadata`](Options::judged_metadata) | tightens | The tier rule judges compile-time metadata too: the types a directive definition writes, every application's type arguments, left-out ones included, and the definitions [`is_metadata`](Def::is_metadata) marks; `@heap` on a directive's argument is judged, and no value is |
 //!
 //! # Rules
 //!
@@ -367,7 +395,7 @@
 //! | `smear::schema`: `missing-query-root-operation-type` | A schema with no query root, neither written nor presumed, while every file of the root package was read whole |
 //! | `smear::graphqlx`: `extern-misuse` | An `@extern` whose `lang` an earlier one of its scalar has, and one the root package writes on a GraphQL built-in it replaces |
 //! | `smear::graphqlx`: `repr-misuse` | An `@repr` on the schema with no `for`, one elsewhere that writes `for`, and one that chooses twice for a language at a position, or for a type and a language on the schema |
-//! | `smear::graphqlx`: `tier` | Below `std`, a use above the tier its package declares: a list in a `core` package, another package's definition that needs more, `@heap` in a `core` package, an extern's `tier` above its package's. What a directive definition writes, an application's type arguments, and what a definition holds that only those of a directive no operation can apply and application type arguments reach, [`is_metadata`](Def::is_metadata), are compile-time metadata and count nowhere; a definition a type outside metadata names too is judged where it is written, and while a directive an operation can apply holds one of its own type parameters in an argument's type, every such definition is judged, since an operation can fill that parameter with any of them |
+//! | `smear::graphqlx`: `tier` | Below `std`, a use above the tier its package declares: a list in a `core` package, another package's definition that needs more, `@heap` in a `core` package, an extern's `tier` above its package's. What a directive definition writes, an application's type arguments, and what a definition holds that only those of a directive no operation can apply and application type arguments reach, [`is_metadata`](Def::is_metadata), are compile-time metadata and count nowhere, but under [`Options::judged_metadata`]; a definition a type outside metadata names too is judged where it is written, and while a directive an operation can apply holds one of its own type parameters in an argument's type, every such definition is judged, since an operation can fill that parameter with any of them |
 //! | `smear::schema`: `circular-non-null-input-field`, `circular-one-of-input-field` | An input object that requires a value of itself, through fields each non-null and no list, or by way of a OneOf none of whose fields can be given a finite value, a generic input object requiring what its type arguments must hold; never one a finite value satisfies, and in a program with type parameters it may miss one |
 //!
 //! # A rule a backend composes
@@ -392,13 +420,15 @@
 //! them.
 //!
 //! ```
-//! use smear_compiler::graphqlx::{Layout, Limits, Package, SourceFile, SourceId, Tier, analyze};
+//! use smear_compiler::graphqlx::{
+//!   Layout, Limits, Options, Package, SourceFile, SourceId, Tier, analyze,
+//! };
 //! use tokora::diagnostic::Diagnose;
 //!
 //! let text = "type Query { a: Missing }";
 //! let root = Package::new("app", Layout::Flat, Tier::Std)
 //!   .with_files([SourceFile::new("schema.graphqlx", text)]);
-//! let analysis = analyze(&root, &[], &Limits::new());
+//! let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
 //!
 //! // A renderer is handed each diagnostic's source by its path and its text.
 //! let texts = analysis.sources().bind(&root, &[]);
@@ -471,6 +501,7 @@ mod instantiate;
 mod limits;
 mod lower;
 mod model;
+mod options;
 mod package;
 mod parse;
 mod positions;
@@ -509,6 +540,7 @@ pub use model::{
   Path, PathRoot, Primitive, Resolution, Root, RootOperation, Schema, Ty, TyKind, TypeBound,
   TypeExpr, TypeExprKind, TypeParam, TypeParamRef, TypeParams, Value, ValueKind,
 };
+pub use options::Options;
 pub use package::{IntegerProvider, Layout, Package, SourceFile, Tier};
 pub use rules::UnboundedInstantiation;
 pub use source::{Bound, Source, SourceMap};

@@ -9,8 +9,8 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Diagnostic, IntegerProvider, Layout, Limits, MemberId, Model, Namespace, Package,
-    PackageId, SourceFile, SourceId, Tier, TyId, analyze,
+    Analysis, Diagnostic, IntegerProvider, Layout, Limits, MemberId, Model, Namespace, Options,
+    Package, PackageId, SourceFile, SourceId, Tier, TyId, analyze,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -78,7 +78,7 @@ fn package(
 /// An analysis of the root package `app`, `Flat`, holding the one file `schema.graphqlx`.
 fn analyze_one(text: &'static str) -> Analysis {
   let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
-  analyze(&root, &[], &Limits::new())
+  analyze(&root, &[], &Limits::new(), &Options::new())
 }
 
 /// An analysis of the root package `app`, `Flat`, holding the one file `schema.graphqlx`, whose
@@ -86,7 +86,7 @@ fn analyze_one(text: &'static str) -> Analysis {
 fn analyze_text(text: &str) -> Analysis {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text)]);
-  analyze(&root, &[], &Limits::new())
+  analyze(&root, &[], &Limits::new(), &Options::new())
 }
 
 /// The id of the file at `path` in the package `package`.
@@ -461,7 +461,7 @@ fn another_supplied_packages_extension_is_the_orphan_rules_alone() {
     let root =
       package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
     let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
-    let analysis = analyze(&root, &[geo], &Limits::new());
+    let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
     assert_eq!(
       codes(&analysis),
       [ORPHAN],
@@ -619,7 +619,7 @@ fn a_dependencys_input_object_reached_from_the_roots_argument_is_refused() {
     Package::new("geo", Layout::Flat, Tier::Core).with_files([SourceFile::new("geo.graphqlx", GEO)])
   };
   let root = package("app", Layout::Flat, &[("schema.graphqlx", OURS)]).with_dependencies(["geo"]);
-  let analysis = analyze(&root, &[geo()], &Limits::new());
+  let analysis = analyze(&root, &[geo()], &Limits::new(), &Options::new());
   let schema = schema_file(&analysis);
   let geo_file = file(&analysis, 4, "geo.graphqlx");
   assert_eq!(
@@ -633,7 +633,7 @@ fn a_dependencys_input_object_reached_from_the_roots_argument_is_refused() {
     analysis.diagnostics()
   );
   // Alone, as the root package, the dependency is ok.
-  let analysis = analyze(&geo(), &[], &Limits::new());
+  let analysis = analyze(&geo(), &[], &Limits::new(), &Options::new());
   assert!(
     analysis.diagnostics().is_empty(),
     "{:#?}",
@@ -981,7 +981,7 @@ fn a_report_reads_what_a_chain_of_lists_names_once() {
     text.push_str("): Int\n}\n");
     let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
       .with_files([SourceFile::new("schema.graphqlx", text.as_str())]);
-    let analysis = analyze(&root, &[], &limits);
+    let analysis = analyze(&root, &[], &limits, &Options::new());
     let schema = schema_file(&analysis);
     let span = |start: usize, len: usize| -> Location {
       Location::new(schema.get(), SimpleSpan::new(start, start + len))
@@ -1023,7 +1023,7 @@ fn a_report_reads_what_a_chain_of_lists_names_once() {
       ]
     );
     // Under a ceiling of zero, each report is built and counted, and none is kept.
-    let silent = analyze(&root, &[], &limits.with_max_diagnostics(0));
+    let silent = analyze(&root, &[], &limits.with_max_diagnostics(0), &Options::new());
     let diagnostics = silent.diagnostics();
     assert!(diagnostics.is_empty(), "depth {depth}, fields {fields}");
     assert!(diagnostics.truncated());
@@ -1045,7 +1045,7 @@ fn non_zeros_argument_is_an_integer_primitive() {
   // `u0` is a width beyond `core`'s, which a provider gives.
   let root = package("app", Layout::Flat, &[("schema.graphqlx", NON_ZEROS)])
     .with_integers(IntegerProvider::numo());
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let schema = schema_file(&analysis);
   let model = analysis.model();
   // At the occurrence, with a label at the argument as written, its `!` included.
@@ -1253,7 +1253,7 @@ fn an_extensions_list_names_each_type_parameter_once() {
     &[("schema.graphqlx", "type Query {\n  ok: Int\n}\n")],
   )
   .with_dependencies(["geo"]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let extension = file(&analysis, 4, "b.graphqlx");
   assert_eq!(
     found(&analysis),

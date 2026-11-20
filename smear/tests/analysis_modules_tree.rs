@@ -6,7 +6,7 @@
 use smear::{
   analysis::graphqlx::{
     Analysis, DefId, Diagnostic, DiagnosticKind, Layout, Limits, Model, Module, ModuleId,
-    ModuleKind, Package, PackageId, SourceFile, SourceId, Sym, Tier, analyze,
+    ModuleKind, Options, Package, PackageId, SourceFile, SourceId, Sym, Tier, analyze,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -146,7 +146,7 @@ fn a_directory_package_has_a_module_per_directory_and_its_files_share_it() {
       ("deep/er/d.graphqlx", "scalar D\n"),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   let model = analysis.model();
@@ -197,7 +197,7 @@ fn a_flat_package_has_every_file_in_its_root_module() {
       ("not-a-name/d.graphqlx", "scalar D\n"),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   assert_eq!(tree(analysis.model()), [(3, vec![], ModuleKind::Root)]);
 }
@@ -215,7 +215,7 @@ fn an_inline_mod_declares_a_child_of_the_module_it_is_written_in() {
       layout,
       &[("a.graphqlx", NESTED), ("b.graphqlx", OTHER)],
     );
-    let analysis = analyze(&root, &[], &Limits::new());
+    let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
     assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
     let model = analysis.model();
@@ -300,7 +300,7 @@ fn defined_twice(diagnostic: &Diagnostic, at: Location, first: Location, label: 
 fn two_mods_of_one_path_in_one_file_are_one_module_declared_twice() {
   let text = "mod twice {\n  scalar A\n}\nmod twice {\n  scalar B\n}\n";
   let root = package("app", Layout::Directory, &[("a.graphqlx", text)]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let a = file(&analysis, 3, "a.graphqlx");
   let diagnostics = reported(&analysis);
   assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
@@ -336,7 +336,7 @@ fn a_mod_in_two_files_of_one_directory_is_one_module_declared_twice() {
     Layout::Directory,
     &[("x/b.graphqlx", second), ("x/a.graphqlx", first)],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let a = file(&analysis, 3, "x/a.graphqlx");
   let b = file(&analysis, 3, "x/b.graphqlx");
   let diagnostics = reported(&analysis);
@@ -368,7 +368,7 @@ fn a_mod_of_a_directory_module_declares_that_module_twice() {
       ("media/photo.graphqlx", "scalar Photo\n"),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let written = file(&analysis, 3, "schema.graphqlx");
   let diagnostics = reported(&analysis);
   assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
@@ -399,7 +399,7 @@ fn a_mod_of_a_directory_module_declares_that_module_twice() {
 fn every_later_declaration_of_a_nested_mod_is_reported() {
   let text = "mod a {\n  mod b {}\n}\nmod a {\n  mod b {}\n}\n";
   let root = package("app", Layout::Directory, &[("a.graphqlx", text)]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let a = file(&analysis, 3, "a.graphqlx");
   let diagnostics = reported(&analysis);
   assert_eq!(diagnostics.len(), 2, "{diagnostics:#?}");
@@ -438,7 +438,7 @@ fn a_directory_whose_name_is_not_a_name_is_reported_once_and_places_no_file() {
       ("fine/e.graphqlx", "scalar E\n"),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let whole = package_source(&analysis, 3);
   let broken = file(&analysis, 3, "my-dir/b.graphqlx");
 
@@ -488,7 +488,7 @@ fn a_module_deeper_than_the_limit_is_a_resource_limit() {
     &[("a/x.graphqlx", text), ("a/b/y.graphqlx", "scalar Y\n")],
   );
   let limits = Limits::new().with_max_module_depth(1);
-  let analysis = analyze(&root, &[], &limits);
+  let analysis = analyze(&root, &[], &limits, &Options::new());
   let x = file(&analysis, 3, "a/x.graphqlx");
   let resource = code(DiagnosticKind::ResourceLimit);
   // The directory `a/b` at the package source, and the `mod` at its name, which is inside `a` and
@@ -511,11 +511,21 @@ fn a_module_deeper_than_the_limit_is_a_resource_limit() {
   );
 
   // At the depth the program needs, nothing is refused.
-  let analysis = analyze(&root, &[], &Limits::new().with_max_module_depth(3));
+  let analysis = analyze(
+    &root,
+    &[],
+    &Limits::new().with_max_module_depth(3),
+    &Options::new(),
+  );
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   // With no depth, only the root module is.
-  let analysis = analyze(&root, &[], &Limits::new().with_max_module_depth(0));
+  let analysis = analyze(
+    &root,
+    &[],
+    &Limits::new().with_max_module_depth(0),
+    &Options::new(),
+  );
   assert_eq!(found(&analysis).len(), 1, "{:#?}", analysis.diagnostics());
   assert_eq!(tree(analysis.model()), [(3, vec![], ModuleKind::Root)]);
 }
@@ -594,9 +604,9 @@ fn module_ids_follow_the_package_then_the_path_segment_by_segment() {
   };
 
   let (root, dependencies) = build(false);
-  let forward = analyze(&root, &dependencies, &Limits::new());
+  let forward = analyze(&root, &dependencies, &Limits::new(), &Options::new());
   let (root, dependencies) = build(true);
-  let backward = analyze(&root, &dependencies, &Limits::new());
+  let backward = analyze(&root, &dependencies, &Limits::new(), &Options::new());
 
   // `Z` sorts before `a`, and `a` with every module inside it before `a0`, which a comparison of
   // the joined paths would put first; the root's modules before `alpha`'s, and `alpha`'s before
@@ -655,7 +665,7 @@ fn a_modules_descendants_come_before_its_next_sibling() {
     (directories, ModuleKind::Directory),
     (mods, ModuleKind::Inline),
   ] {
-    let analysis = analyze(&root, &[], &Limits::new());
+    let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
     assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
     assert_eq!(
       tree(analysis.model()),
@@ -691,7 +701,12 @@ fn a_mod_past_the_module_limit_is_refused_and_no_module_after_it() {
   let text = "mod a {\n  scalar A\n}\nmod b {\n  mod c {}\n  scalar B\n}\nmod d {}\nscalar C\n";
   let root = package("app", Layout::Flat, &[("lib.graphqlx", text)]);
   let max = ROOTS + 1;
-  let analysis = analyze(&root, &[], &Limits::new().with_max_modules(max));
+  let analysis = analyze(
+    &root,
+    &[],
+    &Limits::new().with_max_modules(max),
+    &Options::new(),
+  );
   let lib = file(&analysis, 3, "lib.graphqlx");
   assert_eq!(
     found(&analysis),
@@ -746,7 +761,12 @@ fn a_directory_past_the_module_limit_is_refused_and_no_module_after_it() {
     ],
   );
   let max = ROOTS + 1;
-  let analysis = analyze(&root, &[], &Limits::new().with_max_modules(max));
+  let analysis = analyze(
+    &root,
+    &[],
+    &Limits::new().with_max_modules(max),
+    &Options::new(),
+  );
   assert_eq!(
     found(&analysis),
     [(
@@ -787,11 +807,21 @@ fn the_module_limit_met_exactly_is_no_error() {
     &[("lib.graphqlx", text), ("d/1.graphqlx", "scalar D\n")],
   );
   // The four root modules, then `d`, `a`, `b` and `b::c`.
-  let analysis = analyze(&root, &[], &Limits::new().with_max_modules(ROOTS + 4));
+  let analysis = analyze(
+    &root,
+    &[],
+    &Limits::new().with_max_modules(ROOTS + 4),
+    &Options::new(),
+  );
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   assert_eq!(analysis.model().modules().len(), ROOTS + 4);
 
-  let analysis = analyze(&root, &[], &Limits::new().with_max_modules(ROOTS + 3));
+  let analysis = analyze(
+    &root,
+    &[],
+    &Limits::new().with_max_modules(ROOTS + 3),
+    &Options::new(),
+  );
   let lib = file(&analysis, 3, "lib.graphqlx");
   assert_eq!(
     found(&analysis),
@@ -819,7 +849,12 @@ fn every_root_module_counts_toward_the_module_limit_and_is_always_held() {
     &[("m/1.graphqlx", "scalar M\n")],
   )];
   for max in [ROOTS + 1, 0] {
-    let analysis = analyze(&root, &dependencies, &Limits::new().with_max_modules(max));
+    let analysis = analyze(
+      &root,
+      &dependencies,
+      &Limits::new().with_max_modules(max),
+      &Options::new(),
+    );
     let lib = file(&analysis, 3, "lib.graphqlx");
     assert_eq!(
       found(&analysis),
@@ -852,7 +887,7 @@ fn a_mod_of_a_module_the_package_has_is_not_refused_at_the_limit() {
 
   let text = "mod a {\n  scalar A\n}\nmod a {\n  scalar B\n}\n";
   let root = package("app", Layout::Flat, &[("lib.graphqlx", text)]);
-  let analysis = analyze(&root, &[], &limits);
+  let analysis = analyze(&root, &[], &limits, &Options::new());
   let lib = file(&analysis, 3, "lib.graphqlx");
   assert_eq!(
     found(&analysis),
@@ -870,7 +905,7 @@ fn a_mod_of_a_module_the_package_has_is_not_refused_at_the_limit() {
     Layout::Directory,
     &[("a/1.graphqlx", "scalar A\n"), ("lib.graphqlx", text)],
   );
-  let analysis = analyze(&root, &[], &limits);
+  let analysis = analyze(&root, &[], &limits, &Options::new());
   let lib = file(&analysis, 3, "lib.graphqlx");
   assert_eq!(
     found(&analysis),
@@ -911,9 +946,9 @@ fn the_module_limit_refuses_the_same_modules_whatever_the_order_given() {
   let limits = Limits::new().with_max_modules(ROOTS + 4);
 
   let (root, dependencies) = build(false);
-  let forward = analyze(&root, &dependencies, &limits);
+  let forward = analyze(&root, &dependencies, &limits, &Options::new());
   let (root, dependencies) = build(true);
-  let backward = analyze(&root, &dependencies, &limits);
+  let backward = analyze(&root, &dependencies, &limits, &Options::new());
 
   let zero = file(&forward, 3, "0.graphqlx");
   assert_eq!(
@@ -968,7 +1003,7 @@ fn a_long_module_name_is_not_read_again_for_each_module_under_it() {
   text.push_str("}\n");
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("lib.graphqlx", text.as_str())]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   let model = analysis.model();

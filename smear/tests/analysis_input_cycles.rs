@@ -8,7 +8,8 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Diagnostic, Layout, Limits, Package, PackageId, SourceFile, SourceId, Tier, analyze,
+    Analysis, Diagnostic, Layout, Limits, Options, Package, PackageId, SourceFile, SourceId, Tier,
+    analyze,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -39,7 +40,7 @@ fn package(
 /// An analysis of the root package `app`, `Flat`, holding the one file `schema.graphqlx`.
 fn analyze_one(text: &'static str) -> Analysis {
   let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
-  analyze(&root, &[], &Limits::new())
+  analyze(&root, &[], &Limits::new(), &Options::new())
 }
 
 /// An analysis of the root package `app`, `Flat`, holding the one file `schema.graphqlx`, whose
@@ -47,7 +48,7 @@ fn analyze_one(text: &'static str) -> Analysis {
 fn analyze_text(text: &str) -> Analysis {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text)]);
-  analyze(&root, &[], &Limits::new())
+  analyze(&root, &[], &Limits::new(), &Options::new())
 }
 
 /// The id of the file at `path` in the package `package`.
@@ -503,7 +504,7 @@ fn a_dependencys_generic_input_object_closes_the_roots_cycle() {
     Layout::Flat,
     &[("geo.graphqlx", "input Wrap<T> {\n  v: T!\n}\n")],
   );
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let schema = schema_file(&analysis);
   assert_eq!(
     found(&analysis),
@@ -519,7 +520,7 @@ fn a_cycle_through_an_extension_and_a_dependency_is_seen() {
   const A: &str = "type Query {\n  ok: Int\n}\ninput A {\n  x: Int\n}\n";
   const B: &str = "extend input A {\n  b: B!\n}\ninput B {\n  a: A!\n}\n";
   let root = package("app", Layout::Flat, &[("a.graphqlx", A), ("b.graphqlx", B)]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let b = file(&analysis, 3, "b.graphqlx");
   assert_eq!(
     found(&analysis),

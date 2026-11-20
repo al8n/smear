@@ -11,7 +11,7 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Diagnostic, Layout, Limits, Package, SourceFile, SourceText, Tier, analyze,
+    Analysis, Diagnostic, Layout, Limits, Options, Package, SourceFile, SourceText, Tier, analyze,
     analyze_with,
   },
   diagnostic::Diagnose,
@@ -32,7 +32,7 @@ fn analysis<'a, P: Layer<'a>, S: SourceText>(
   root: &'a Package<S>,
   dependencies: &'a [Package<S>],
 ) -> Analysis {
-  analyze_with(parser, root, dependencies, &Limits::new()).0
+  analyze_with(parser, root, dependencies, &Limits::new(), &Options::new()).0
 }
 
 /// The root package `app`, `Flat`, of the one file `schema.graphqlx`, holding `text`.
@@ -68,14 +68,19 @@ fn nested() -> String {
 #[test]
 fn analyze_is_analyze_with_the_syntactic_layer() {
   for set in sets() {
-    let alone = analyze(&set.root, &set.dependencies, &Limits::new());
+    let alone = analyze(
+      &set.root,
+      &set.dependencies,
+      &Limits::new(),
+      &Options::new(),
+    );
     let with = analysis(&Syntactic::new(), &set.root, &set.dependencies);
     assert!(alone == with, "{}: {}", set.name, differ(&alone, &with));
   }
 
   // `layers_graphqlx.rs`'s broken file.
   let broken = one_file("type Query { hero: String }\ntype Half { f: }");
-  let alone = analyze(&broken, &[], &Limits::new());
+  let alone = analyze(&broken, &[], &Limits::new(), &Options::new());
   assert!(!alone.is_ok(), "the broken file is refused");
   let with = analysis(&Syntactic::new(), &broken, &[]);
   assert!(alone == with, "a syntax error: {}", differ(&alone, &with));
@@ -85,14 +90,14 @@ fn analyze_is_analyze_with_the_syntactic_layer() {
     SourceFile::new("notes.graphqlx", "# Only a comment.\n".as_bytes()),
     SourceFile::new("junk.graphqlx", "# a comment\n}\n".as_bytes()),
   ]);
-  let alone = analyze(&bytes, &[], &Limits::new());
+  let alone = analyze(&bytes, &[], &Limits::new(), &Options::new());
   assert!(!alone.is_ok(), "the stray `}}` is refused");
   let with = analysis(&Syntactic::new(), &bytes, &[]);
   assert!(alone == with, "byte texts: {}", differ(&alone, &with));
 
   let text = nested();
   let deep = one_file(text.as_str());
-  let alone = analyze(&deep, &[], &Limits::new());
+  let alone = analyze(&deep, &[], &Limits::new(), &Options::new());
   assert!(
     too_deep(&alone),
     "nested {DEPTH} deep, the text is not refused at the default ceiling: {:#?}",
@@ -136,19 +141,20 @@ fn the_equality_can_answer_no() {
   let limits = Limits::new();
   // `layers_graphqlx.rs`'s two items, which analyze in silence.
   let text = "type Query { hero: String }\nmod inner { type Inner { f: Int } }\n";
-  let first = analyze(&one_file(text), &[], &limits);
+  let first = analyze(&one_file(text), &[], &limits, &Options::new());
   assert!(
     first.is_ok() && first.diagnostics().is_empty(),
     "{:#?}",
     first.diagnostics()
   );
-  let again = analyze(&one_file(text), &[], &limits);
+  let again = analyze(&one_file(text), &[], &limits, &Options::new());
   assert!(first == again, "a second run: {}", differ(&first, &again));
 
   let renamed = analyze(
     &one_file("type Query { zero: String }\nmod inner { type Inner { f: Int } }\n"),
     &[],
     &limits,
+    &Options::new(),
   );
   assert!(
     first.sources() == renamed.sources() && first.diagnostics() == renamed.diagnostics(),
@@ -165,6 +171,7 @@ fn the_equality_can_answer_no() {
     &one_file(" type Query { hero: String }\nmod inner { type Inner { f: Int } }"),
     &[],
     &limits,
+    &Options::new(),
   );
   assert!(
     first.sources() == later.sources() && first.diagnostics() == later.diagnostics(),
@@ -176,7 +183,12 @@ fn the_equality_can_answer_no() {
     "the same tokens one byte later answer the same analysis"
   );
 
-  let ceiling = analyze(&one_file(text), &[], &limits.with_max_diagnostics(1));
+  let ceiling = analyze(
+    &one_file(text),
+    &[],
+    &limits.with_max_diagnostics(1),
+    &Options::new(),
+  );
   assert!(
     first.model() == ceiling.model()
       && first.diagnostics() == ceiling.diagnostics()
@@ -194,7 +206,7 @@ fn the_equality_can_answer_no() {
 mod lossless {
   use smear::{
     analysis::graphqlx::{
-      Analysis, DefId, Diagnostic, Layout, Limits, Model, ModuleId, Package, PackageKind,
+      Analysis, DefId, Diagnostic, Layout, Limits, Model, ModuleId, Options, Package, PackageKind,
       SourceFile, SourceId, SourceText, Tier, Trees, analyze, analyze_with,
     },
     diagnostic::{Diagnose, DiagnoseExt, Label, Location, Severity},
@@ -272,7 +284,8 @@ mod lossless {
   /// were held to less: the lossless one holds one too, and their source maps are equal.
   fn one_entry<S: SourceText>(name: &str, root: &Package<S>) -> bool {
     let syntactic = analysis(&Syntactic::new(), root, &[]);
-    let (lossless, trees) = analyze_with(&Lossless::new(), root, &[], &Limits::new());
+    let (lossless, trees) =
+      analyze_with(&Lossless::new(), root, &[], &Limits::new(), &Options::new());
     trees_hold_the_texts(&lossless, &trees, root, &[], name);
     if syntax_diagnostics(&syntactic) == 0 {
       assert!(
@@ -335,6 +348,7 @@ mod lossless {
         &set.root,
         &set.dependencies,
         &Limits::new(),
+        &Options::new(),
       );
       assert!(
         lossless == syntactic,
@@ -451,7 +465,13 @@ mod lossless {
     let (mut lending, mut blanks) = (0usize, 0usize);
     for (name, text) in corpus("") {
       let root = one_file(text.as_str());
-      let (analysis, trees) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
+      let (analysis, trees) = analyze_with(
+        &Lossless::new(),
+        &root,
+        &[],
+        &Limits::new(),
+        &Options::new(),
+      );
       assert!(
         !analysis.diagnostics().truncated(),
         "{name}: the list is truncated"
@@ -559,7 +579,7 @@ mod lossless {
       "{broken_type}\ntype Query {{ a: A, c: C }}\n{broken_input}\ntype A {{ x: Int }}\nscalar C\n"
     );
 
-    let alone = analyze(&one_file(whole), &[], &Limits::new());
+    let alone = analyze(&one_file(whole), &[], &Limits::new(), &Options::new());
     assert!(
       alone.is_ok() && alone.diagnostics().is_empty(),
       "the three whole definitions alone: {:#?}",
@@ -567,7 +587,13 @@ mod lossless {
     );
 
     let root = one_file(text.as_str());
-    let (analysis, _trees) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
+    let (analysis, _trees) = analyze_with(
+      &Lossless::new(),
+      &root,
+      &[],
+      &Limits::new(),
+      &Options::new(),
+    );
     let model = analysis.model();
     let app = model.package(model.root_package()).root_module();
     assert_eq!(names(model, app), ["Query", "A", "C"], "{text}");
@@ -600,7 +626,7 @@ mod lossless {
       );
     }
 
-    let alone = analyze(&root, &[], &Limits::new());
+    let alone = analyze(&root, &[], &Limits::new(), &Options::new());
     let model = alone.model();
     let app = model.package(model.root_package()).root_module();
     assert!(
@@ -646,7 +672,7 @@ mod lossless {
 
     let root: Package<&[u8]> = Package::new("app", Layout::Flat, Tier::Std)
       .with_files([SourceFile::new("schema.graphqlx", bytes.as_slice())]);
-    let alone = analyze(&root, &[], &Limits::new());
+    let alone = analyze(&root, &[], &Limits::new(), &Options::new());
     assert!(
       alone
         .diagnostics()
@@ -658,7 +684,7 @@ mod lossless {
     let file = the_file(&alone);
 
     let syntactic = Syntactic::with_limits(SyntacticLimits::with_max_nesting_depth(RAISED));
-    let (with, trees) = analyze_with(&syntactic, &root, &[], &Limits::new());
+    let (with, trees) = analyze_with(&syntactic, &root, &[], &Limits::new(), &Options::new());
     assert!(
       alone == with,
       "the syntactic layer under a raised ceiling: {}",
@@ -667,7 +693,7 @@ mod lossless {
     assert!(trees.get(file).is_none(), "the bytes have a tree");
 
     let lossless = Lossless::with_limits(LosslessLimits::with_max_nesting_depth(RAISED));
-    let (with, trees) = analyze_with(&lossless, &root, &[], &Limits::new());
+    let (with, trees) = analyze_with(&lossless, &root, &[], &Limits::new(), &Options::new());
     assert!(
       alone == with,
       "the lossless layer under a raised ceiling: {}",
@@ -687,6 +713,7 @@ mod lossless {
         &set.root,
         &set.dependencies,
         &Limits::new(),
+        &Options::new(),
       );
       held += trees_hold_the_texts(&analysis, &trees, &set.root, &set.dependencies, set.name);
     }
@@ -706,7 +733,13 @@ mod lossless {
     let text = format!("{}type Query {{ ok: Int }}", "? ".repeat(64));
     let root = one_file(text.as_str());
 
-    let (whole, _) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
+    let (whole, _) = analyze_with(
+      &Lossless::new(),
+      &root,
+      &[],
+      &Limits::new(),
+      &Options::new(),
+    );
     assert!(
       !whole.diagnostics().truncated(),
       "the whole reading's list is truncated"
@@ -720,7 +753,7 @@ mod lossless {
 
     for ceiling in [8usize, 0] {
       let layer = Lossless::with_limits(LosslessLimits::new().with_max_diagnostics(ceiling));
-      let (analysis, trees) = analyze_with(&layer, &root, &[], &Limits::new());
+      let (analysis, trees) = analyze_with(&layer, &root, &[], &Limits::new(), &Options::new());
       let syntax = syntax_diagnostics(&analysis);
       println!(
         "a ceiling of {ceiling}: {syntax} syntax diagnostics, {} errors counted where the whole \
@@ -834,8 +867,19 @@ mod lossless {
       let broken = format!("{QUERY}{broken}");
       let repaired = format!("{QUERY}{repaired}");
       let root = one_file(broken.as_str());
-      let (recovered, _trees) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
-      let whole = analyze(&one_file(repaired.as_str()), &[], &Limits::new());
+      let (recovered, _trees) = analyze_with(
+        &Lossless::new(),
+        &root,
+        &[],
+        &Limits::new(),
+        &Options::new(),
+      );
+      let whole = analyze(
+        &one_file(repaired.as_str()),
+        &[],
+        &Limits::new(),
+        &Options::new(),
+      );
       assert!(
         syntax_diagnostics(&recovered) > 0,
         "{row}: the broken text holds no syntax error: {:#?}",

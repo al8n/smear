@@ -24,8 +24,11 @@
 //!
 //! Every phase that shares these services says a `resource-limit` once for each written occurrence
 //! and kind of limit, whichever phase or path meets it there first, as `say_limit` keeps them: each
-//! phase's step budget is a kind of its own, and a limit on types, which every phase shares, one
-//! kind across the phases.
+//! phase's step budget is a kind of its own, `Limits::max_values` another, and a limit on types,
+//! which every phase shares, one kind across the phases.
+//!
+//! They also carry the analysis's limits and options for the phases after lowering, which read
+//! them through `Types::limits` and `Types::options` and keep no copy of their own.
 
 use std::{
   collections::{BTreeMap, BTreeSet},
@@ -38,6 +41,7 @@ use crate::graphqlx::{
   id::{DefId, TyId},
   limits::Limits,
   model::{ModelBuilder, Shape, TypeParamRef},
+  options::Options,
   rules::Meanings,
   source::SourceMap,
 };
@@ -150,12 +154,18 @@ impl Stop {
 }
 
 /// A kind of `resource-limit`: the step budget of the phase that ran out of it, each phase's its
-/// own, or a limit on the types a phase builds or derives, which every phase shares.
+/// own, `Limits::max_values`, or a limit on the types a phase builds or derives, which every phase
+/// shares.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Spent {
   /// `Limits::max_bound_steps`, the judging of bounds.
   Bounds,
-  /// `Limits::max_value_steps`, coercion's.
+  /// `Limits::max_value_steps`, the steps coercion spends on values.
+  ValueSteps,
+  /// `Limits::max_values`, what coercion's lists and copies find left of it. Lowering, which runs
+  /// before these services, says its own once at each written value it refuses; coercion says this
+  /// kind at an application's path, an object literal or a lone value it makes, and makes a value
+  /// lowering refused one unresolved value and says nothing of it: the two never meet at one place.
   Values,
   /// `Limits::max_implementation_steps`, the implementation check's.
   Implementation,
@@ -168,6 +178,8 @@ pub(crate) enum Spent {
 pub(crate) struct Types {
   /// The analysis's limits.
   limits: Limits,
+  /// The analysis's options, which coercion reads.
+  options: Options,
   /// `Limits::max_substitutions`: the filling of the type arguments a use leaves out.
   pub(crate) substitutions: Counter,
   /// `Limits::max_bound_steps`: the judging of bounds.
@@ -193,10 +205,12 @@ fn spot(at: Location) -> Option<Spot> {
 }
 
 impl Types {
-  /// The services of an analysis run within `limits`, with nothing spent and nothing derived.
-  pub(crate) fn new(limits: Limits) -> Self {
+  /// The services of an analysis run within `limits` and under `options`, with nothing spent and
+  /// nothing derived.
+  pub(crate) fn new(limits: Limits, options: Options) -> Self {
     Self {
       limits,
+      options,
       substitutions: Counter::new(limits.max_substitutions()),
       bound_steps: Counter::new(limits.max_bound_steps()),
       closure: closure::Closure::default(),
@@ -217,6 +231,11 @@ impl Types {
   /// The analysis's limits.
   pub(crate) const fn limits(&self) -> &Limits {
     &self.limits
+  }
+
+  /// The analysis's options, which coercion reads.
+  pub(crate) const fn options(&self) -> &Options {
+    &self.options
   }
 
   /// Whether a `resource-limit` of the kind `spent` is still to be said at `at`, which this marks

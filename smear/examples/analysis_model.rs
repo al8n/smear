@@ -11,7 +11,7 @@
 use smear::{
   analysis::graphqlx::{
     Cx, DefId, DefKind, Diagnostic, Layout, Limits, MemberId, MemberKind, Model, Namespace,
-    Package, PackageKind, Packages, Resolution, SourceFile, SourceId, Tier, TyId, TyKind,
+    Options, Package, PackageKind, Packages, Resolution, SourceFile, SourceId, Tier, TyId, TyKind,
     ValueKind, Visitor, analyze, visit,
   },
   diagnostic::{Code, Diagnose},
@@ -132,7 +132,7 @@ fn main() {
     .with_files([SourceFile::new("schema.graphqlx", APP)]);
   // Kept, to pair the analysis with the same texts again below.
   let dependencies = [geo];
-  let analysis = analyze(&app, &dependencies, &Limits::new());
+  let analysis = analyze(&app, &dependencies, &Limits::new(), &Options::new());
   assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
 

@@ -6,7 +6,8 @@
 use smear::{
   analysis::graphqlx::{
     Analysis, DefId, DefKind, Diagnostic, DiagnosticKind, Layout, Limits, Model, ModuleId,
-    ModuleKind, Namespace, Origin, Package, PackageId, SourceFile, SourceId, Tier, analyze,
+    ModuleKind, Namespace, Options, Origin, Package, PackageId, SourceFile, SourceId, Tier,
+    analyze,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -138,7 +139,7 @@ const EVERY_KIND: &str = "\"A scalar.\"\nscalar S\ntype O { f: i32 }\ninterface 
 #[test]
 fn every_kind_of_definition_is_a_definition_of_its_module() {
   let root = package("app", Layout::Flat, &[("schema.graphqlx", EVERY_KIND)]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let schema = file(&analysis, 3, "schema.graphqlx");
@@ -261,7 +262,7 @@ fn def_ids_follow_the_package_the_module_path_the_source_and_the_position() {
   };
 
   let (root, dependencies) = build(false);
-  let forward = analyze(&root, &dependencies, &Limits::new());
+  let forward = analyze(&root, &dependencies, &Limits::new(), &Options::new());
   assert!(clean(&forward), "{:#?}", forward.diagnostics());
   let model = forward.model();
   assert_eq!(declared(model), ["A", "B2", "B1", "C", "Z", "Alpha", "G"]);
@@ -280,7 +281,7 @@ fn def_ids_follow_the_package_the_module_path_the_source_and_the_position() {
 
   // No permutation of the files or the dependencies changes an id or a diagnostic.
   let (root, dependencies) = build(true);
-  let backward = analyze(&root, &dependencies, &Limits::new());
+  let backward = analyze(&root, &dependencies, &Limits::new(), &Options::new());
   assert_eq!(summary(&forward), summary(&backward));
 }
 
@@ -319,7 +320,7 @@ const TWICE: &str = "scalar X\nscalar X\ndirective @d on FIELD\ndirective @d on 
 #[test]
 fn two_definitions_of_one_name_in_one_namespace_of_one_module_are_reported() {
   let root = package("app", Layout::Flat, &[("schema.graphqlx", TWICE)]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let schema = file(&analysis, 3, "schema.graphqlx");
   // The later of each pair, with a label at the first; a type and a directive of one name are in
   // two namespaces, and so are no duplicate.
@@ -377,7 +378,7 @@ fn two_files_of_one_directory_share_its_names() {
     Layout::Directory,
     &[("dir/b.graphqlx", second), ("dir/a.graphqlx", first)],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let a = file(&analysis, 3, "dir/a.graphqlx");
   let b = file(&analysis, 3, "dir/b.graphqlx");
   assert_eq!(
@@ -398,7 +399,7 @@ fn two_files_of_one_directory_share_its_names() {
       ("x/b.graphqlx", "mod shared {\n  scalar B\n}\n"),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let codes: Vec<&str> = found(&analysis)
     .into_iter()
     .map(|(code, _, _): (&'static str, Location, Option<Location>)| code)
@@ -416,7 +417,7 @@ fn a_type_named_as_a_child_module_of_its_module_collides() {
   let text = "mod media {\n  scalar M\n}\nscalar media\ndirective @media on FIELD\n\
               mod a {\n  mod b {}\n}\nscalar b\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let schema = file(&analysis, 3, "schema.graphqlx");
   // The type, labelled at the `mod`; the directive is in another namespace, and `b` is a child of
   // `a`, not of the module that holds the type `b`.
@@ -444,7 +445,7 @@ fn a_type_named_as_a_child_module_of_its_module_collides() {
       ("schema.graphqlx", "scalar media\n"),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let schema = file(&analysis, 3, "schema.graphqlx");
   assert_eq!(
     found(&analysis),
@@ -462,7 +463,7 @@ fn a_supplied_name_that_begins_with_two_underscores_is_reserved() {
               scalar __Twice\nscalar __Twice\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]).with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", "scalar __Geo\n")]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let schema = file(&analysis, 3, "schema.graphqlx");
   let geo = file(&analysis, 4, "geo.graphqlx");
   // The second `__Twice` is a duplicate, and only that: the name it would reserve is the first's.
@@ -507,7 +508,7 @@ fn a_meta_types_name_in_the_root_module_redefines_a_built_in() {
               enum __TypeKind {\n  A\n}\ndirective @__Type on FIELD\n\
               type __Type {\n  kind: String\n}\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let schema = file(&analysis, 3, "schema.graphqlx");
   assert_eq!(
     found(&analysis),
@@ -564,7 +565,7 @@ fn a_meta_types_name_in_the_root_module_redefines_a_built_in() {
   )
   .with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", sub)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let sub_file = file(&analysis, 3, "sub/a.graphqlx");
   let geo_file = file(&analysis, 4, "geo.graphqlx");
   assert_eq!(
@@ -603,7 +604,7 @@ fn a_file_that_holds_only_what_the_lexer_skips_declares_nothing() {
       ("schema.graphqlx", "scalar Real\n"),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   assert_eq!(declared(model), ["Real"]);
@@ -617,7 +618,7 @@ fn a_file_that_holds_only_what_the_lexer_skips_declares_nothing() {
     SourceFile::new("notes.graphqlx", "# Only a comment.\n".as_bytes()),
     SourceFile::new("junk.graphqlx", "# a comment\n}\n".as_bytes()),
   ]);
-  let analysis = analyze(&bytes, &[], &Limits::new());
+  let analysis = analyze(&bytes, &[], &Limits::new(), &Options::new());
   let junk = file(&analysis, 3, "junk.graphqlx");
   let codes: Vec<(&str, u32)> = found(&analysis)
     .into_iter()
@@ -640,7 +641,7 @@ fn the_shared_codes_are_the_schema_builders() {
               scalar __Y\ndirective @__y on FIELD\nextend type X {\n  f: Int\n}\n\
               scalar Z @d(nope: 1)\nschema {\n  query: X\n  query: X\n}\nschema {\n  query: X\n}\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let mut codes: Vec<&str> = analysis
     .diagnostics()
     .iter()
@@ -668,7 +669,10 @@ fn the_shared_codes_are_the_schema_builders() {
 /// writes.
 fn library_definitions() -> u32 {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
-  analyze(&root, &[], &Limits::new()).model().defs().len()
+  analyze(&root, &[], &Limits::new(), &Options::new())
+    .model()
+    .defs()
+    .len()
 }
 
 /// The definition limit counts every definition the model would hold, the built-in library's
@@ -681,7 +685,12 @@ fn the_first_definition_past_the_limit_is_reported_and_nothing_after_it_is_decla
   let text = "scalar A\nscalar B\ntype C {\n  b: B\n}\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
   let max = library + 1;
-  let analysis = analyze(&root, &[], &Limits::new().with_max_definitions(max));
+  let analysis = analyze(
+    &root,
+    &[],
+    &Limits::new().with_max_definitions(max),
+    &Options::new(),
+  );
   let schema = file(&analysis, 3, "schema.graphqlx");
   assert_eq!(
     found(&analysis),
@@ -700,7 +709,12 @@ fn the_first_definition_past_the_limit_is_reported_and_nothing_after_it_is_decla
 
   // A limit below the built-in library's own count admits no supplied definition, and the library
   // is declared whole all the same.
-  let analysis = analyze(&root, &[], &Limits::new().with_max_definitions(0));
+  let analysis = analyze(
+    &root,
+    &[],
+    &Limits::new().with_max_definitions(0),
+    &Options::new(),
+  );
   let schema = file(&analysis, 3, "schema.graphqlx");
   assert_eq!(
     found(&analysis),
@@ -725,7 +739,12 @@ fn the_definition_limit_met_exactly_is_no_error() {
     Layout::Flat,
     &[("schema.graphqlx", "scalar A\nscalar B\n")],
   );
-  let analysis = analyze(&root, &[], &Limits::new().with_max_definitions(library + 2));
+  let analysis = analyze(
+    &root,
+    &[],
+    &Limits::new().with_max_definitions(library + 2),
+    &Options::new(),
+  );
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   assert_eq!(declared(analysis.model()), ["A", "B"]);
   assert_eq!(analysis.model().defs().len(), library + 2);
@@ -741,7 +760,12 @@ fn a_written_primitive_counts_toward_the_definition_limit() {
   let text = "type Query {\n  a: i32\n}\nscalar Real\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
 
-  let analysis = analyze(&root, &[], &Limits::new().with_max_definitions(library + 2));
+  let analysis = analyze(
+    &root,
+    &[],
+    &Limits::new().with_max_definitions(library + 2),
+    &Options::new(),
+  );
   let schema = file(&analysis, 3, "schema.graphqlx");
   assert_eq!(
     found(&analysis),
@@ -755,7 +779,12 @@ fn a_written_primitive_counts_toward_the_definition_limit() {
   assert_eq!(model.defs().len(), library + 2);
 
   // `i32`, refused, is no definition, so the field that names it names nothing either.
-  let analysis = analyze(&root, &[], &Limits::new().with_max_definitions(library + 1));
+  let analysis = analyze(
+    &root,
+    &[],
+    &Limits::new().with_max_definitions(library + 1),
+    &Options::new(),
+  );
   let schema = file(&analysis, 3, "schema.graphqlx");
   let i32_at = named(schema, text, "a: ", "i32", 0);
   assert_eq!(
@@ -791,11 +820,21 @@ fn a_replacing_definition_counts_only_the_primitive_it_makes() {
   let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
 
   // `String` and `@deprecated` take their built-ins' places, and `Int` makes `i32`.
-  let analysis = analyze(&root, &[], &Limits::new().with_max_definitions(library + 1));
+  let analysis = analyze(
+    &root,
+    &[],
+    &Limits::new().with_max_definitions(library + 1),
+    &Options::new(),
+  );
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   assert_eq!(analysis.model().defs().len(), library + 1);
 
-  let analysis = analyze(&root, &[], &Limits::new().with_max_definitions(library));
+  let analysis = analyze(
+    &root,
+    &[],
+    &Limits::new().with_max_definitions(library),
+    &Options::new(),
+  );
   let schema = file(&analysis, 3, "schema.graphqlx");
   assert_eq!(
     found(&analysis),

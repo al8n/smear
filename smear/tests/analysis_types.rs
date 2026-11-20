@@ -10,8 +10,8 @@
 use smear::{
   analysis::graphqlx::{
     Analysis, Collection, Cx, DefId, Diagnostic, IdRange, Layout, Limits, MemberId, Model,
-    Namespace, Package, PackageId, Packages, Root, RootOperation, SourceFile, SourceId, Sym, Tier,
-    TyId, TyKind, TypeExprId, TypeExprKind, Visitor, analyze, visit,
+    Namespace, Options, Package, PackageId, Packages, Root, RootOperation, SourceFile, SourceId,
+    Sym, Tier, TyId, TyKind, TypeExprId, TypeExprKind, Visitor, analyze, visit,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -86,7 +86,7 @@ fn package(
 /// An analysis of the root package `app`, `Flat`, holding the one file `schema.graphqlx`.
 fn analyze_one(text: &'static str) -> Analysis {
   let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
-  analyze(&root, &[], &Limits::new())
+  analyze(&root, &[], &Limits::new(), &Options::new())
 }
 
 /// An analysis of the root package `app`, `Flat`, holding the files `a.graphqlx`, `a`, and
@@ -97,7 +97,7 @@ fn analyze_two(a: &'static str, b: &'static str, reversed: bool) -> Analysis {
     files.reverse();
   }
   let root = package("app", Layout::Flat, &files);
-  analyze(&root, &[], &Limits::new())
+  analyze(&root, &[], &Limits::new(), &Options::new())
 }
 
 /// The id of the file at `path` in the package `package`.
@@ -193,7 +193,7 @@ fn messages(analysis: &Analysis) -> Vec<String> {
 fn analyze_text(text: &str, limits: &Limits) -> Analysis {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text)]);
-  analyze(&root, &[], limits)
+  analyze(&root, &[], limits, &Options::new())
 }
 
 /// The type `id`, written out: a definition's name, with its arguments in `<>` when it has any; a
@@ -580,7 +580,7 @@ fn markers_and_collections_are_read_off_cores_directives() {
   let theirs = "scalar Bag<T>\ntype G {\n  g: Bag<Int>\n}\n";
   let root = package("app", Layout::Flat, &[("schema.graphqlx", ours)]).with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", theirs)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   let schema = schema_file(&analysis);
   let geo_file = file(&analysis, 4, "geo.graphqlx");
   assert_eq!(
@@ -627,7 +627,7 @@ fn markers_and_collections_are_read_off_cores_directives() {
       ("inner/x.graphqlx", "extend scalar ~::Bag @set\n"),
     ],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let bag = def(model, Namespace::Type, "^::app::Bag");
@@ -1762,7 +1762,7 @@ fn the_built_in_library_is_built_whatever_the_limits() {
     .with_max_value_steps(0)
     .with_max_implementation_steps(0);
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
-  let analysis = analyze(&root, &[], &limits);
+  let analysis = analyze(&root, &[], &limits, &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   // `core`'s lists have their types.
   assert_eq!(
@@ -1941,7 +1941,7 @@ fn a_bounds_interface_is_typed_as_any_occurrence() {
 #[test]
 fn the_built_in_library_instantiates_with_no_diagnostic() {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
   assert!(!holds_unresolved(&analysis));
   let model = analysis.model();
@@ -2045,7 +2045,7 @@ fn reversing_files_and_dependencies_changes_no_type_and_no_diagnostic() {
     if reversed {
       dependencies.reverse();
     }
-    let analysis = analyze(&root, &dependencies, &Limits::new());
+    let analysis = analyze(&root, &dependencies, &Limits::new(), &Options::new());
     let codes: Vec<&str> = found(&analysis)
       .into_iter()
       .map(|(code, _, _): (&'static str, Location, Option<Location>)| code)

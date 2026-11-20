@@ -84,15 +84,17 @@ impl ObjectEntry {
 ///
 /// Three kinds of value are kept as written, as a [`Literal`] with nothing coerced beyond syntax: a
 /// value of a custom scalar that is no collection, an extern one included, but `null`, which is
-/// `null` where the scalar is nullable; a value whose expected type still names a type parameter,
-/// inside a generic definition or under a directive application with no complete type arguments,
-/// which only an instantiation can check, but a whole `null` that no instantiation takes, its type
-/// written non-null or a collection's key or element, which is refused and
-/// [`ValueKind::Unresolved`]; and a value whose expected type can take none, an output
-/// type or a path that names nothing among them, which is another rule's or phase's to refuse. A
-/// value under a generic directive's application with complete type arguments is coerced against
-/// its type under them, and so is a field's value of an instantiation of a generic input object,
-/// under its type's arguments.
+/// `null` where the scalar is nullable, and, under the switch
+/// [`extern_collections_as_written`](crate::graphqlx::Options::extern_collections_as_written), a
+/// value of an extern collection that is neither a collection literal nor `null`; a value whose
+/// expected type still names a type parameter, inside a generic definition or under a directive
+/// application with no complete type arguments, which only an instantiation can check, but a whole
+/// `null` that no instantiation takes, its type written non-null or a collection's key or element,
+/// which is refused and [`ValueKind::Unresolved`]; and a value whose expected type can take none,
+/// an output type or a path that names nothing among them, which is another rule's or phase's to
+/// refuse. A value under a generic directive's application with complete type arguments is coerced
+/// against its type under them, and so is a field's value of an instantiation of a generic input
+/// object, under its type's arguments.
 #[derive(Debug, Clone, Copy, PartialEq, IsVariant, Unwrap, TryUnwrap)]
 #[unwrap(ref, ref_mut)]
 #[try_unwrap(ref, ref_mut)]
@@ -132,17 +134,23 @@ pub enum ValueKind<'a> {
   /// the input object declares, one written twice twice, in written order, and each one it leaves
   /// out that has a default, a copy of the default; no absent one. A field left out is absent when
   /// its default's copy would hold a copy of itself, or when
-  /// [`Limits::max_value_steps`](crate::graphqlx::Limits::max_value_steps) could not pay for the
-  /// copy. A OneOf input object's fields left out are never filled.
+  /// [`Limits::max_value_steps`](crate::graphqlx::Limits::max_value_steps) or
+  /// [`Limits::max_values`](crate::graphqlx::Limits::max_values) could not pay for it. A OneOf
+  /// input object's fields left out are never filled.
   Object(&'a [ObjectEntry]),
-  /// A value kept as written: of a custom scalar that is no collection, but `null`; of a type that
+  /// A value kept as written: of a custom scalar that is no collection, but `null`, and, under the
+  /// switch
+  /// [`extern_collections_as_written`](crate::graphqlx::Options::extern_collections_as_written),
+  /// of an extern collection when it is neither a collection literal nor `null`; of a type that
   /// still names a type parameter, but a whole `null` no instantiation takes, which is
   /// [`ValueKind::Unresolved`]; or of a type that can take no value.
   Literal(Literal<'a>),
-  /// A value that did not coerce or resolve. Only an analysis that is not ok has one. It lies
-  /// within the extent of the error that says why, but for a copy of a default: its error is where
-  /// the default is written, or at the application, the literal or the instantiation's occurrence
-  /// whose type arguments it does not fit, which may stand in another definition.
+  /// A value that did not coerce or resolve, or that
+  /// [`Limits::max_values`](crate::graphqlx::Limits::max_values) kept from being read. Only an
+  /// analysis that is not ok has one. It lies within the extent of the error that says why, but
+  /// for a copy of a default: its error is where the default is written, or at the application,
+  /// the literal or the instantiation's occurrence whose type arguments it does not fit, which may
+  /// stand in another definition.
   #[unwrap(ignore)]
   #[try_unwrap(ignore)]
   Unresolved,
@@ -372,8 +380,10 @@ impl<'a> Value<'a> {
   /// The type it was coerced against.
   //
   // Coercion gives it the type expected where it stands, with its `!`, the list a lone value
-  // stands for included. A value whose expected type is unknown, which only a type that could not
-  // be written has, answers the one unresolved type.
+  // stands for included; an unresolved value lowering refused, or whose type could not be built
+  // under type arguments, the type its argument or field is written with. A value whose expected
+  // type is unknown, which only a type that could not be written has, answers the one unresolved
+  // type.
   #[inline]
   pub fn ty(&self) -> TyId {
     self.row().ty

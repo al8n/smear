@@ -131,7 +131,7 @@ use self::{
 };
 use super::{
   ApplicationId, Contribution, Cx, DefId, DefKind, Model, PackageId, PackageKind, Resolution,
-  SourceMap, TypeExprId, TypeExprKind, id::dense,
+  SourceMap, TypeExprId, TypeExprKind, id::dense, options::Options,
 };
 
 pub(crate) use self::orphan_extension::{Accepted, Meanings, accepted, accepts_application};
@@ -293,9 +293,10 @@ impl Nesting {
 /// ```
 ///
 /// Each rule implements `Visitor` and `Default`, and resets its state in `begin`; the set derives
-/// `Default`, so `Rules::default()` is the set ready to run. The table, `TABLE`, lists each rule by
-/// its type's name, in field order, and is compiled where something reads it: this crate's unit
-/// tests and the test-support door.
+/// `Default`, so `Rules::default()` is the set ready to run, and `Rules::of` the set ready to run
+/// under an analysis's options. The table, `TABLE`, lists each rule by its type's name, in field
+/// order, and is compiled where something reads it: this crate's unit tests and the test-support
+/// door.
 macro_rules! rule_set {
   (
     $(#[$meta:meta])*
@@ -528,6 +529,20 @@ rule_set! {
       super::code::schema::CIRCULAR_NON_NULL_INPUT_FIELD,
       super::code::schema::CIRCULAR_ONE_OF_INPUT_FIELD,
     ],
+  }
+}
+
+impl Rules {
+  /// smear's rules, ready to run under `options`: the set's default, but that the tier rule also
+  /// judges compile-time metadata when `options` says so.
+  ///
+  /// A switch a rule reads gets its value here, when the set is made, and not through the walk's
+  /// context, which a consumer's own visitor reads: a rule's `begin` resets what it keeps of a
+  /// walk and leaves its configuration alone.
+  pub(crate) fn of(options: &Options) -> Self {
+    let mut rules = Self::default();
+    rules.tier_violation.judge_metadata = options.judged_metadata();
+    rules
   }
 }
 

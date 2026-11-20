@@ -496,7 +496,8 @@ impl<'a> Def<'a> {
   /// hold one another share the greatest tier any of them reaches.
   ///
   /// In an analysis that [`is_ok`](crate::graphqlx::Analysis::is_ok), it is at most its package's
-  /// [`tier`](crate::graphqlx::PackageInfo::tier), a meta-type and a
+  /// [`tier`](crate::graphqlx::PackageInfo::tier), a meta-type and, but under the switch
+  /// [`judged_metadata`](crate::graphqlx::Options::judged_metadata), a
   /// [metadata](Self::is_metadata) definition aside: a use above a package's tier is
   /// [`Tier`](crate::graphqlx::DiagnosticKind::Tier).
   #[inline]
@@ -534,9 +535,12 @@ impl<'a> Def<'a> {
   /// An occurrence a phase refused but kept the complete type of, as one whose bound fails, still
   /// reaches what that type names.
   ///
-  /// The tier rule judges nothing a metadata definition holds, so in an analysis that is ok its
-  /// [`tier`](Self::tier) may be above its package's. A backend that emits only what runs leaves it
-  /// out, and one that emits it for a compiler reads its tier. It is computed whatever the verdict.
+  /// The tier rule judges nothing a metadata definition holds, unless the analysis runs under
+  /// [`Options::judged_metadata`](crate::graphqlx::Options::judged_metadata), so in an analysis
+  /// that is ok its [`tier`](Self::tier) may be above its package's. A backend that emits only what
+  /// runs leaves it out, and one that emits it for a compiler reads its tier. It is computed
+  /// whatever the verdict and whatever that switch says: the switch changes what the tier rule
+  /// judges, and not this answer.
   ///
   /// # Examples
   ///
@@ -544,14 +548,16 @@ impl<'a> Def<'a> {
   /// it though it needs `alloc`:
   ///
   /// ```
-  /// use smear_compiler::graphqlx::{Layout, Limits, Namespace, Package, SourceFile, Tier, analyze};
+  /// use smear_compiler::graphqlx::{
+  ///   Layout, Limits, Namespace, Options, Package, SourceFile, Tier, analyze,
+  /// };
   ///
   /// let text = "type Query { ok: Int }\n\
   ///             input Binding { lang: string! }\n\
   ///             directive @bind(b: Binding) on OBJECT\n";
   /// let root = Package::new("app", Layout::Flat, Tier::Core)
   ///   .with_files([SourceFile::new("schema.graphqlx", text)]);
-  /// let analysis = analyze(&root, &[], &Limits::new());
+  /// let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   /// assert!(analysis.is_ok());
   /// let model = analysis.model();
   /// let binding = model.lookup(Namespace::Type, "^::app::Binding").expect("defined");
@@ -611,14 +617,16 @@ impl<'a> Def<'a> {
   /// # Examples
   ///
   /// ```
-  /// use smear_compiler::graphqlx::{Layout, Limits, Namespace, Package, SourceFile, Tier, analyze};
+  /// use smear_compiler::graphqlx::{
+  ///   Layout, Limits, Namespace, Options, Package, SourceFile, Tier, analyze,
+  /// };
   ///
   /// let text = "type Query { nest: Nest<i32> }\n\
   ///             type Nest<T> { v: Box<T> deeper: Nest<[T]> }\n\
   ///             type Box<T> { v: T }\n";
   /// let root = Package::new("app", Layout::Flat, Tier::Std)
   ///   .with_files([SourceFile::new("schema.graphqlx", text)]);
-  /// let analysis = analyze(&root, &[], &Limits::new());
+  /// let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   /// assert!(analysis.is_ok());
   /// let model = analysis.model();
   /// let nest = model.lookup(Namespace::Type, "^::app::Nest").expect("defined");

@@ -11,7 +11,8 @@ use core::ops::Range;
 use smear::{
   analysis::graphqlx::{
     Analysis, Contribution, DefId, Diagnostic, IdRange, Layout, Limits, MemberId, Model,
-    ModuleKind, Namespace, Package, PackageId, Primitive, SourceFile, SourceId, Tier, analyze,
+    ModuleKind, Namespace, Options, Package, PackageId, Primitive, SourceFile, SourceId, Tier,
+    analyze,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -91,7 +92,7 @@ fn analyzed(files: &[File]) -> Analysis {
     package_of(files, "geo", Layout::Flat),
     package_of(files, "astro", Layout::Flat),
   ];
-  analyze(&root, &dependencies, &Limits::new())
+  analyze(&root, &dependencies, &Limits::new(), &Options::new())
 }
 
 /// The text of the file `path` of the package `package` in `files`.
@@ -313,7 +314,7 @@ fn every_kind_of_entity_answers_its_extent() {
 #[test]
 fn what_has_no_text_of_its_own_answers_no_span() {
   let root = package("app", Layout::Flat, &[("schema.graphqlx", WRITES)]);
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   assert!(analysis.is_ok(), "{:#?}", analysis.diagnostics());
   let model = analysis.model();
   let core = model
@@ -355,7 +356,7 @@ fn what_has_no_text_of_its_own_answers_no_span() {
     Layout::Directory,
     &[("x/b.graphqlx", second), ("x/a.graphqlx", first)],
   );
-  let analysis = analyze(&root, &[], &Limits::new());
+  let analysis = analyze(&root, &[], &Limits::new(), &Options::new());
   let a = file(&analysis, "app", "x/a.graphqlx");
   let shared = analysis
     .model()
@@ -404,7 +405,7 @@ fn a_contribution_answers_its_own_files_extent() {
   )
   .with_dependencies(["geo"]);
   let geo = package("geo", Layout::Flat, &[("geo.graphqlx", ELSEWHERE)]);
-  let analysis = analyze(&root, &[geo], &Limits::new());
+  let analysis = analyze(&root, &[geo], &Limits::new(), &Options::new());
   // The one diagnostic is GraphQL's own refusal of the `@specifiedBy` the root's `Int` applies; no
   // extent depends on what an error marks.
   let codes: Vec<&str> = analysis
@@ -601,7 +602,7 @@ mod lossless {
   use smear::{
     analysis::graphqlx::{
       Analysis, DefId, DefKind, Diagnostic, Layout, Limits, MemberId, MemberKind, Model, Namespace,
-      Package, PackageKind, SourceFile, SourceId, Tier, Trees, analyze_with,
+      Options, Package, PackageKind, SourceFile, SourceId, Tier, Trees, analyze_with,
     },
     diagnostic::{Diagnose, Location, Severity},
     lexer::tokora::SimpleSpan,
@@ -782,18 +783,31 @@ mod lossless {
         &set.root,
         &set.dependencies,
         &Limits::new(),
+        &Options::new(),
       );
       reach(set.name, &analysis, &trees, &mut all);
     }
     for (name, text) in corpus("") {
       let root = one_file(text.as_str());
-      let (analysis, trees) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
+      let (analysis, trees) = analyze_with(
+        &Lossless::new(),
+        &root,
+        &[],
+        &Limits::new(),
+        &Options::new(),
+      );
       reach(&name, &analysis, &trees, &mut all);
     }
     for broken in SIX {
       let text = format!("{QUERY}\n{broken}");
       let root = one_file(text.as_str());
-      let (analysis, trees) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
+      let (analysis, trees) = analyze_with(
+        &Lossless::new(),
+        &root,
+        &[],
+        &Limits::new(),
+        &Options::new(),
+      );
       reach(
         &format!("`{broken}` after `{QUERY}`"),
         &analysis,
@@ -1077,7 +1091,13 @@ mod lossless {
     let (mut held, mut inside) = (0usize, 0usize);
     for (name, text) in &texts {
       let root = one_file(text.as_str());
-      let (analysis, _trees) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
+      let (analysis, _trees) = analyze_with(
+        &Lossless::new(),
+        &root,
+        &[],
+        &Limits::new(),
+        &Options::new(),
+      );
       if !only_syntax_errors(&analysis) {
         continue;
       }
@@ -1131,7 +1151,13 @@ mod lossless {
   fn a_definition_read_past_a_mistake_holds_it_unmarked() {
     let text = UNCLOSED;
     let root = one_file(text);
-    let (analysis, _trees) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
+    let (analysis, _trees) = analyze_with(
+      &Lossless::new(),
+      &root,
+      &[],
+      &Limits::new(),
+      &Options::new(),
+    );
     assert!(
       only_syntax_errors(&analysis),
       "{text}: {:#?}",
@@ -1165,7 +1191,13 @@ mod lossless {
 
     let text = "type Query { ok: Int";
     let root = one_file(text);
-    let (analysis, _trees) = analyze_with(&Lossless::new(), &root, &[], &Limits::new());
+    let (analysis, _trees) = analyze_with(
+      &Lossless::new(),
+      &root,
+      &[],
+      &Limits::new(),
+      &Options::new(),
+    );
     assert!(
       only_syntax_errors(&analysis) && !analysis.is_ok(),
       "{text}: {:#?}",

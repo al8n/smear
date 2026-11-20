@@ -11,6 +11,11 @@
 //! are the analysis's own: lowering builds them, coercion reads them, and they are dropped when
 //! coercion ends. What coercion reads of a node is kept outside the node, in coercion's own tables,
 //! which the node's one slot indexes.
+//!
+//! A value a supplied package writes whose literals are more than `Limits::max_values` had left
+//! when lowering came to it is read no further: its tree is one node, a refused one, where the
+//! whole value is written. The budget travels with the trees: lowering spends it on the literals it
+//! reads, and coercion goes on spending it on the values it makes that no literal writes.
 
 use std::{collections::BTreeMap, vec::Vec};
 
@@ -20,6 +25,7 @@ use super::{
   id::{ApplicationId, MemberId, ModuleId, Sym, dense},
   model::{PathRoot, Run, Segments},
   resolve::{Resolved, Root},
+  types::Counter,
 };
 
 /// The radix an integer literal is written in.
@@ -48,6 +54,10 @@ pub(crate) enum RawKind {
   /// An object: its first row of the table's fields, the row of its first field, each later field
   /// the next row.
   Object(u32),
+  /// A value lowering did not read, its literals past `Limits::max_values`: the one node of its
+  /// tree, where the whole value is written. Coercion makes it one unresolved row, and says
+  /// nothing, lowering having said why.
+  Refused,
 }
 
 /// How a float literal is spelled: [`RawKind::Float`]'s payload. One byte, so the kind stays one
@@ -148,11 +158,16 @@ pub(crate) struct RawValues<'p> {
   pub(crate) arguments: Vec<RawArgument>,
   /// Each source's text, by `SourceId`: a package source's is empty.
   pub(crate) texts: Vec<&'p [u8]>,
+  /// `Limits::max_values`, and what is spent of it: lowering spends a literal for each node it
+  /// reads, and coercion a value for each list a lone value stands for and for each value of a
+  /// copy.
+  pub(crate) budget: Counter,
 }
 
 impl<'p> RawValues<'p> {
-  /// No value yet, each written in one of the sources whose texts `texts` holds.
-  pub(crate) fn new(texts: Vec<&'p [u8]>) -> Self {
+  /// No value yet, within `max_values`, each written in one of the sources whose texts `texts`
+  /// holds.
+  pub(crate) fn new(texts: Vec<&'p [u8]>, max_values: u32) -> Self {
     Self {
       nodes: Vec::new(),
       paths: Vec::new(),
@@ -162,6 +177,7 @@ impl<'p> RawValues<'p> {
       defaults: BTreeMap::new(),
       arguments: Vec::new(),
       texts,
+      budget: Counter::new(max_values),
     }
   }
 
@@ -222,6 +238,13 @@ impl<'p> RawValues<'p> {
       module,
     });
     tree
+  }
+
+  /// Appends a value lowering did not read, written at `span` in the source `source` and in the
+  /// module `module`: one node of [`RawKind::Refused`], closed, and its tree. Its tree's index.
+  pub(crate) fn push_refused(&mut self, span: SimpleSpan, source: u32, module: ModuleId) -> u32 {
+    let root = self.push_node(RawKind::Refused, span);
+    self.push_tree(root, source, module)
   }
 
   /// The text written at `span` in the source `source`: none for a span that does not fit its

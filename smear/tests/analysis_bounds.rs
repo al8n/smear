@@ -8,9 +8,9 @@
 
 use smear::{
   analysis::graphqlx::{
-    Analysis, Cx, DefId, Diagnostic, IdRange, Layout, Limits, MemberId, Model, Namespace, Package,
-    PackageId, Packages, SourceFile, SourceId, Tier, TyId, TyKind, TypeExprId, TypeExprKind,
-    Visitor, analyze, visit,
+    Analysis, Cx, DefId, Diagnostic, IdRange, Layout, Limits, MemberId, Model, Namespace, Options,
+    Package, PackageId, Packages, SourceFile, SourceId, Tier, TyId, TyKind, TypeExprId,
+    TypeExprKind, Visitor, analyze, visit,
   },
   diagnostic::{Diagnose, Location},
   lexer::tokora::SimpleSpan,
@@ -105,7 +105,7 @@ fn package(
 /// An analysis of the root package `app`, `Flat`, holding the one file `schema.graphqlx`.
 fn analyze_one(text: &'static str) -> Analysis {
   let root = package("app", Layout::Flat, &[("schema.graphqlx", text)]);
-  analyze(&root, &[], &Limits::new())
+  analyze(&root, &[], &Limits::new(), &Options::new())
 }
 
 /// The id of the file at `path` in the package `package`.
@@ -236,7 +236,7 @@ fn field_shown(model: &Model, owner: &str, field: &str) -> String {
 fn analyze_text(text: &str, limits: &Limits) -> Analysis {
   let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)
     .with_files([SourceFile::new("schema.graphqlx", text)]);
-  analyze(&root, &[], limits)
+  analyze(&root, &[], limits, &Options::new())
 }
 
 /// The ids `range` holds, in order.
@@ -1400,7 +1400,7 @@ fn the_built_in_library_is_judged_whatever_the_limits() {
       "schema.graphqlx",
       "type Query {\n  x: Int\n}\n",
     )]);
-  let analysis = analyze(&root, &[], &limits);
+  let analysis = analyze(&root, &[], &limits, &Options::new());
   assert!(clean(&analysis), "{:#?}", analysis.diagnostics());
 
   // The root package's map is refused beside it, in the root package's file alone.
@@ -1641,7 +1641,7 @@ fn reversing_files_and_dependencies_changes_no_verdict() {
     if reversed {
       dependencies.reverse();
     }
-    let analysis = analyze(&root, &dependencies, &Limits::new());
+    let analysis = analyze(&root, &dependencies, &Limits::new(), &Options::new());
     assert_eq!(
       codes(&analysis),
       [UNSATISFIED, UNSATISFIED, UNSATISFIED],

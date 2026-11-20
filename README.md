@@ -71,7 +71,7 @@ absent, it is absent — not partial.
 | §5 Validation | All 30 executable-document rules. Introspection can be switched off too, by an opt-in policy rule that is not a draft rule: `Rule::NoSchemaIntrospection`, which `RuleSet::ALL` leaves out |
 | §6 Execution | **All three operations, behind the non-default `proto` feature.** `smear::proto`'s Sans-I/O executor does collect, coerce arguments, complete, resolve abstract types and propagate nulls. §6.2.2's serial mutation is structural rather than a contract — the top-level fields are withheld from `poll_resolve` rather than queued — and §6.2.3's subscription is a third value of the same at-most-one operation-kind phase, not a second type: `start` runs §6.2.3.1 and hands the driver the one source field to resolve into an event stream, each event it pushes back is one whole execution, and §6.2.3.2's one-result-per-event ordering is owned by the intake. What is still absent is the transport: the crate owns no stream, no clock and no timers, so the connection state machine and backpressure a long-lived operation needs live in a driver |
 | §7 Response | **The tree, and the document written from it.** A finished execution hands back the response as a walkable tree, and its field errors carry §7.1.2's `path` and `locations`; `smear::diagnostic` carries the same response paths for a consumer that has no executor. All three of §7.1's result kinds are modelled — §7.1.1's execution result; §7.1.3's request error result as a distinct type with no `data` accessor at all, whose non-empty `errors` lists the executor's own §6.1 refusal or the driver's request errors — the syntax errors, validation failures and variable coercion failures raised where no executor exists, each a `RequestError` carrying its message, its §7.1.6 `locations` and its own `extensions`, built directly or from any `Diagnose`, under three ceilings of their own (`max_request_errors`, `max_request_error_message_bytes`, `max_request_error_locations`); and §7.1.2's response stream as the state of a running subscription rather than a container, because a crate that owns no stream cannot hold one. The response map's third entry is there too — the driver attaches a §7.1.7 *Extensions* map, a container that cannot hold a non-map, cannot grow past `max_extension_entries` or `max_extension_key_bytes`, and cannot be attached outside the one phase a response could carry it in; the executor hands the values back unread, at both of §7.1.7's sites. The per-*error* `extensions` of §7.1.6's error result format is carried in the same container, on a field error the driver reports through `handle_field_error_with` and on a driver's request error entry — which settles what [#126] had reserved here — while an error the executor raises carries none, field error and §6.1 refusal alike. `graphql-proto` writes nothing out, because serialising a driver's leaf is the driver's; `smear::json`, above it and behind the same feature, writes both result kinds as §7.2.1 JSON, each error's `locations` and `extensions` included, with the leaf written by the value's own `WriteJson` or by a closure the driver passes |
-| GraphQLx schemas | Analyzed by `smear::analysis`, behind the non-default `analysis` feature: 39 codes of the analyzer's own family, `smear::graphqlx`, one of them reported only by the rule a backend composes, and 68 of GraphQL's, `smear::schema`, listed in `DiagnosticKind::ALL` and `graphqlx::schema::ALL`. On every GraphQL document of smear's corpora, given as one `Flat` package, it gives the schema builder's verdict, but for three capacity ceilings of the schema representation that GraphQLx does not have; a differential test holds that code by code, and lists each count it lets differ |
+| GraphQLx schemas | Analyzed by `smear::analysis`, behind the non-default `analysis` feature: 39 codes of the analyzer's own family, `smear::graphqlx`, one of them reported only by the rule a backend composes, and 68 of GraphQL's, `smear::schema`, listed in `DiagnosticKind::ALL` and `graphqlx::schema::ALL`. On every GraphQL document of smear's corpora, given as one `Flat` package, it gives the schema builder's verdict, but for three capacity ceilings of GraphQL's builder, which GraphQLx has only as `Limits` a consumer tightens to them; a differential test holds that code by code, lists each count it lets differ, and holds that under those limits the analyzer refuses each document the builder refuses for a ceiling |
 
 Both counts are enumerable rather than asserted. `Rule::ALL` holds 33 entries — the 29 §5 rules that
 need a runtime check, three non-specification resource budgets, and the opt-in policy rule that
@@ -306,7 +306,9 @@ as the default has.
 
 ```rust
 # #[cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))] {
-use smear::analysis::graphqlx::{Layout, Limits, Namespace, Package, SourceFile, Tier, analyze};
+use smear::analysis::graphqlx::{
+  Layout, Limits, Namespace, Options, Package, SourceFile, Tier, analyze,
+};
 
 // A library, and the root package that depends on it. smear reads no file: the caller supplies
 // every package's texts.
@@ -318,7 +320,7 @@ let app = Package::new("app", Layout::Flat, Tier::Std)
     "schema.graphqlx",
     "type Page<T> { items: [T!]! } type Query { points: Page<^::geo::Point> }",
   )]);
-let analysis = analyze(&app, &[geo], &Limits::new());
+let analysis = analyze(&app, &[geo], &Limits::new(), &Options::new());
 assert!(analysis.is_ok());
 
 // Every written type is resolved and interned: `Page<^::geo::Point>` is one instantiation.
