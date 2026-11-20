@@ -34,7 +34,7 @@ use std::{
 
 use smear::parser::{
   graphqlx::kinds::SyntaxKind as X,
-  lexer::graphqlx::lossless::{LosslessLexer, LosslessToken, LosslessTokenKind},
+  lexer::graphqlx::lossless::{LosslessLexer, LosslessState, LosslessToken, LosslessTokenKind},
   lossless::{KindSpace, test_support::assert_kind_space_is_well_formed},
 };
 
@@ -81,6 +81,9 @@ const TOKEN_IMAGES: &[&str] = &[
   "Percent",
   "Shl",
   "Char",
+  "Shr",
+  "Separator",
+  "PrefixedString",
   "Bom",
   "Comma",
   "Space",
@@ -522,6 +525,9 @@ fn the_image_block_matches_the_graphqlx_lexer() {
     LosslessTokenKind::Percent,
     LosslessTokenKind::Shl,
     LosslessTokenKind::Char,
+    LosslessTokenKind::Shr,
+    LosslessTokenKind::Separator,
+    LosslessTokenKind::PrefixedString,
   ];
 
   for (index, kind) in LEXER_KINDS.iter().enumerate() {
@@ -681,6 +687,9 @@ fn image_of(kind: LosslessTokenKind) -> X {
     LosslessTokenKind::Percent => X::Percent,
     LosslessTokenKind::Shl => X::Shl,
     LosslessTokenKind::Char => X::Char,
+    LosslessTokenKind::Shr => X::Shr,
+    LosslessTokenKind::Separator => X::Separator,
+    LosslessTokenKind::PrefixedString => X::PrefixedString,
     // `LosslessTokenKind` is `#[non_exhaustive]`, so this arm is forced. It is a panic rather
     // than a fallback kind: an image with no tree kind must stop the suite, not land in the tree
     // as something else.
@@ -694,7 +703,7 @@ fn image_of(kind: LosslessTokenKind) -> X {
 /// string literals' constructors are `pub(crate)`, so they cannot be built from here at all. The
 /// broad one is better: a hand-built token proves only that a variant exists, while a lexed one
 /// proves the GraphQLx lexer *emits* it — which is what the image block claims about all
-/// forty-one of them. One snippet per image, so a snippet that lexes into something unexpected
+/// forty-four of them. One snippet per image, so a snippet that lexes into something unexpected
 /// shows up as a missing kind rather than being absorbed by a neighbour.
 fn lexed_samples() -> BTreeMap<LosslessTokenKind, LosslessToken<&'static str>> {
   use tokora::lexer::Lexer as _;
@@ -742,10 +751,23 @@ fn lexed_samples() -> BTreeMap<LosslessTokenKind, LosslessToken<&'static str>> {
     "<<",
     "'a'",
   ];
+  // The three kinds a lexer makes inside a `const { … }` block alone, lexed from a state that has
+  // entered one.
+  const BLOCK_SNIPPETS: &[&str] = &[">>", ",", "b\"x\""];
 
+  let mut block = LosslessState::default();
+  block.enter_const_block();
   let mut samples = BTreeMap::new();
-  for snippet in SNIPPETS {
-    let mut lexer = LosslessLexer::<&str>::new(snippet);
+  let snippets = SNIPPETS
+    .iter()
+    .map(|snippet: &&str| (*snippet, LosslessState::default()))
+    .chain(
+      BLOCK_SNIPPETS
+        .iter()
+        .map(|snippet: &&str| (*snippet, block)),
+    );
+  for (snippet, state) in snippets {
+    let mut lexer = LosslessLexer::<&str>::with_state(snippet, state);
     while let Some(item) = lexer.lex() {
       let token =
         item.unwrap_or_else(|e| panic!("the sample snippet {snippet:?} does not lex: {e:?}"));

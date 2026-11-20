@@ -329,6 +329,12 @@ pub enum LexerErrorData<Char = char, StateError = ()> {
   #[unwrap(ignore)]
   #[try_unwrap(ignore)]
   UnterminatedChar,
+  /// Inside a `const { … }` block, a name touching a quote that makes no prefixed string: any name
+  /// before a string but `b` and `i`, and any name before a `char` literal. The error covers the
+  /// name and the literal after it, whose own errors, when it is refused, follow this one.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
+  ReservedPrefix,
   /// How many more errors a comment held than its refusal keeps: N more errors in this comment
   /// were found and not kept.
   ///
@@ -380,6 +386,7 @@ impl<Char, StateError> LexerErrorData<Char, StateError> {
       Self::InvalidUtf8(_) => SyntaxErrorKind::InvalidUtf8,
       Self::EmptyChar | Self::LongChar => SyntaxErrorKind::InvalidChar,
       Self::UnterminatedChar => SyntaxErrorKind::UnterminatedChar,
+      Self::ReservedPrefix => SyntaxErrorKind::ReservedPrefix,
       Self::Omitted(_) | Self::Other(_) => SyntaxErrorKind::InvalidSyntax,
     }
   }
@@ -418,7 +425,8 @@ impl<Char, StateError> LexerErrorData<Char, StateError> {
       | Self::InvalidUtf8(_)
       | Self::EmptyChar
       | Self::LongChar
-      | Self::UnterminatedChar => f.write_str(self.kind().message()),
+      | Self::UnterminatedChar
+      | Self::ReservedPrefix => f.write_str(self.kind().message()),
     }
   }
 
@@ -777,6 +785,41 @@ pub(crate) fn char_refusal<Char, StateError>(
       CharFault::Unterminated => LexerErrorData::UnterminatedChar,
     };
     errors.push(LexerError::const_new(span, data));
+  }
+  errors
+}
+
+/// Why the literal a name touches inside a `const { … }` block is refused: a string's errors, or a
+/// `char` literal's refusal.
+pub(crate) enum TouchedLiteral<Char> {
+  /// A string literal's errors.
+  String(StringErrors<Char>),
+  /// A `char` literal's refusal.
+  Char(crate::string_lexer::char_literal::CharRefusal<Char>),
+}
+
+/// The refusal of a name and the literal it touches inside a block, one token over `span`: first
+/// a `ReservedPrefix` when the name is no string prefix, and after it the literal's own errors
+/// when the literal is refused. One of the two is always there.
+pub(crate) fn prefixed_refusal<Char, StateError>(
+  span: Span,
+  reserved: bool,
+  literal: Option<TouchedLiteral<Char>>,
+) -> LexerErrors<Char, StateError> {
+  let mut errors = LexerErrors::default();
+  if reserved {
+    errors.push(LexerError::const_new(span, LexerErrorData::ReservedPrefix));
+  }
+  match literal {
+    Some(TouchedLiteral::String(string)) => {
+      errors.push(LexerError::const_new(span, LexerErrorData::String(string)));
+    }
+    Some(TouchedLiteral::Char(refusal)) => {
+      errors.extend(std::vec::Vec::from(char_refusal::<Char, StateError>(
+        refusal, span,
+      )));
+    }
+    None => {}
   }
   errors
 }

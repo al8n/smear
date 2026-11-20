@@ -83,3 +83,6 @@ pub type Percent = tokora::punct::Percent<tokora::SimpleSpan>;
 
 /// The `<<` punctuator.
 pub type Shl = tokora::punct::ShiftLeft<tokora::SimpleSpan>;
+
+/// The `>>` punctuator.
+pub type Shr = tokora::punct::ShiftRight<tokora::SimpleSpan>;

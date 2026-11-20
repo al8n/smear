@@ -94,6 +94,13 @@ pub enum SyntaxErrorKind {
   /// A GraphQLx `char` literal that a line terminator or the end of input cuts before its
   /// closing `'` (GraphQLx only).
   UnterminatedChar,
+  /// Inside a GraphQLx `const { … }` block, a name touching a quote that makes no prefixed
+  /// string: any name before a string but `b` and `i`, and any name before a `char` literal
+  /// (GraphQLx only).
+  ReservedPrefix,
+  /// A `\x` in the body of a GraphQLx `b"…"` string that two hexadecimal digits do not follow
+  /// (GraphQLx only).
+  InvalidByteEscape,
   /// A `(`, `[` or `{` — or, in GraphQLx, a `<` — that is never closed.
   UnclosedDelimiter,
   /// An integer literal that does not fit the width a materialising parse reads it at.
@@ -149,6 +156,8 @@ impl SyntaxErrorKind {
     Self::LeadingPathSeparator,
     Self::InvalidChar,
     Self::UnterminatedChar,
+    Self::ReservedPrefix,
+    Self::InvalidByteEscape,
     Self::UnclosedDelimiter,
     Self::IntOverflow,
     Self::FloatOverflow,
@@ -184,6 +193,8 @@ impl SyntaxErrorKind {
       Self::LeadingPathSeparator => Code::new("smear::syntax::leading-path-separator"),
       Self::InvalidChar => Code::new("smear::syntax::invalid-char"),
       Self::UnterminatedChar => Code::new("smear::syntax::unterminated-char"),
+      Self::ReservedPrefix => Code::new("smear::syntax::reserved-prefix"),
+      Self::InvalidByteEscape => Code::new("smear::syntax::invalid-byte-escape"),
       Self::UnclosedDelimiter => Code::new("smear::syntax::unclosed-delimiter"),
       Self::IntOverflow => Code::new("smear::syntax::int-overflow"),
       Self::FloatOverflow => Code::new("smear::syntax::float-overflow"),
@@ -220,6 +231,8 @@ impl SyntaxErrorKind {
       Self::LeadingPathSeparator => "a path cannot start with `::`",
       Self::InvalidChar => "a character literal holds exactly one character",
       Self::UnterminatedChar => "unterminated character literal",
+      Self::ReservedPrefix => "a name touching a literal is a reserved prefix",
+      Self::InvalidByteEscape => "a `\\x` escape takes two hexadecimal digits",
       Self::UnclosedDelimiter => "unclosed delimiter",
       Self::IntOverflow => "integer out of range",
       Self::FloatOverflow => "float out of range",
@@ -266,6 +279,11 @@ impl SyntaxErrorKind {
       Self::LeadingPathSeparator => Some("a dependency path starts with `^::`"),
       Self::InvalidChar => Some("write one character between the quotes, or a string between `\"`"),
       Self::UnterminatedChar => Some("close the literal with `'` before the end of its line"),
+      Self::ReservedPrefix => Some(
+        "`b` and `i` are the string prefixes; a name and a string that are two operands take a \
+         comma between them",
+      ),
+      Self::InvalidByteEscape => Some("write `\\x` and two hexadecimal digits, as `\\x41`"),
       Self::UnclosedDelimiter => Some("add the matching closing delimiter"),
       Self::IntOverflow => Some("a larger integer needs a `Float`, a `String` or a custom scalar"),
       Self::FloatOverflow => Some("a `Float` is a finite IEEE 754 double"),
@@ -310,6 +328,8 @@ impl SyntaxErrorKind {
       | Self::LeadingPathSeparator
       | Self::InvalidChar
       | Self::UnterminatedChar
+      | Self::ReservedPrefix
+      | Self::InvalidByteEscape
       | Self::UnclosedDelimiter
       | Self::IntOverflow
       | Self::FloatOverflow

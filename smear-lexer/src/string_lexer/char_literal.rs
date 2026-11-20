@@ -66,7 +66,7 @@ pub(crate) trait CharBody: Sized {
 
 impl CharBody for char {
   fn read_char_literal(after: &[u8], start: usize) -> CharLiteral<char> {
-    let extent = Extent::of(after);
+    let extent = Extent::of(after, b'\'');
     match core::str::from_utf8(extent.body(after)) {
       Ok(body) => extent.read(StringToken::lexer(body), start),
       // Not reached: a text source's bytes are UTF-8, and the body ends before an ASCII byte or at
@@ -88,28 +88,30 @@ impl CharBody for char {
 
 impl CharBody for u8 {
   fn read_char_literal(after: &[u8], start: usize) -> CharLiteral<u8> {
-    let extent = Extent::of(after);
+    let extent = Extent::of(after, b'\'');
     extent.read(BytesStringToken::lexer(extent.body(after)), start)
   }
 }
 
-/// Where a `char` literal's body ends, and what ends it.
+/// Where a one-line literal's body ends, and what ends it: a `char` literal's, or a `b"…"`
+/// string's.
 #[derive(Clone, Copy)]
-struct Extent {
+pub(super) struct Extent {
   /// The body's length in bytes.
-  body: usize,
-  /// Whether the closing `'` ends the body, rather than a line terminator or the end of input.
-  closed: bool,
+  pub(super) body: usize,
+  /// Whether the closing quote ends the body, rather than a line terminator or the end of input.
+  pub(super) closed: bool,
 }
 
 impl Extent {
-  /// The extent of the body that `after` begins with.
+  /// The extent of the body that `after` begins with, in a literal that `quote` closes.
   ///
-  /// The closing quote is the first `'` that is not the second byte of an escape. Only `\'` holds a
-  /// `'`, and `\\` is the one escape whose second byte is a backslash, so a backslash takes the `'`
-  /// or the `\` after it and nothing else. A line terminator after a backslash still ends the line.
-  /// Each cut is before an ASCII byte or at the end, so none splits a character.
-  fn of(after: &[u8]) -> Self {
+  /// The closing quote is the first `quote` that is not the second byte of an escape. Of the
+  /// escapes, only `\'` holds a `'` and `\"` a `"`, and `\\` is the one whose second byte is a
+  /// backslash, so a backslash takes the quote or the `\` after it and nothing else. A line
+  /// terminator after a backslash still ends the line. Each cut is before an ASCII byte or at the
+  /// end, so none splits a character.
+  pub(super) fn of(after: &[u8], quote: u8) -> Self {
     let mut at = 0;
     loop {
       match after.get(at) {
@@ -119,25 +121,31 @@ impl Extent {
             closed: false,
           };
         }
-        Some(b'\'') => {
+        Some(&byte) if byte == quote => {
           return Self {
             body: at,
             closed: true,
           };
         }
-        Some(b'\\') if matches!(after.get(at + 1), Some(b'\'' | b'\\')) => at += 2,
+        Some(b'\\')
+          if after
+            .get(at + 1)
+            .is_some_and(|&next| next == quote || next == b'\\') =>
+        {
+          at += 2;
+        }
         Some(_) => at += 1,
       }
     }
   }
 
   /// The body, out of the bytes after the opening quote.
-  fn body(self, after: &[u8]) -> &[u8] {
+  pub(super) fn body(self, after: &[u8]) -> &[u8] {
     after.get(..self.body).unwrap_or_default()
   }
 
   /// The literal's length: its opening quote, its body, and its closing quote when it has one.
-  fn len(self) -> usize {
+  pub(super) fn len(self) -> usize {
     1 + self.body + usize::from(self.closed)
   }
 

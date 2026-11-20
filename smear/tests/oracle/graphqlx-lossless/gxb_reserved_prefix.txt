@@ -1,0 +1,7 @@
+ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 4 }, data: ReservedPrefix }])
+OK  4..5  Newline
+ERR LexerErrors([LexerError { span: SimpleSpan { start: 5, end: 9 }, data: ReservedPrefix }])
+OK  9..10  Newline
+ERR LexerErrors([LexerError { span: SimpleSpan { start: 10, end: 14 }, data: ReservedPrefix }])
+OK  14..15  Newline
+ERR LexerErrors([LexerError { span: SimpleSpan { start: 15, end: 19 }, data: ReservedPrefix }])

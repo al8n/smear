@@ -1,6 +1,12 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use tokora::{SimpleSpan, state::RecursionLimitExceeded, utils::DisplayHuman};
 
+use crate::{
+  LitBlockStr, LitComplexBlockStr, LitComplexInlineStr, LitInlineStr, LitPlainBlockStr,
+  LitPlainInlineStr, LitStr, skip_block_str_from_bytes, skip_inline_str_simd,
+  string_lexer::byte_str::ByteStrBody,
+};
+
 /// Errors for GraphQLx lexers
 pub mod error;
 
@@ -50,6 +56,9 @@ mod handlers;
 #[cfg(test)]
 #[path = "number/tests.rs"]
 mod number_tests;
+
+#[cfg(test)]
+mod block_tests;
 
 /// A GraphQLx integer literal, which can be in decimal, hexadecimal, binary, or octal format.
 #[derive(
@@ -359,6 +368,109 @@ impl<S> LitChar<S> {
   }
 }
 
+/// What a string's prefix makes it, inside a `const { … }` block: `b"…"` bytes, `i"…"` an id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, IsVariant)]
+#[non_exhaustive]
+pub enum StrPrefix {
+  /// `b`: the bytes its body spells, where `\x` and two hexadecimal digits is any one byte.
+  Bytes,
+  /// `i`: the id its body spells.
+  Id,
+}
+
+/// A prefixed string, which only a lexer inside a `const { … }` block makes: its prefix, and the
+/// string after it, which [`literal`](Self::literal) reads.
+///
+/// The token's span begins at the prefix's letter. What the token keeps begins at the string's
+/// quote: the literal's own slice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LitPrefixedStr<S> {
+  prefix: StrPrefix,
+  block: bool,
+  source: S,
+}
+
+impl<S> LitPrefixedStr<S> {
+  /// A prefixed string whose literal, a block string when `block`, is `source`.
+  #[inline(always)]
+  pub(crate) const fn new(prefix: StrPrefix, block: bool, source: S) -> Self {
+    Self {
+      prefix,
+      block,
+      source,
+    }
+  }
+
+  /// The string's prefix.
+  #[inline(always)]
+  pub const fn prefix(&self) -> StrPrefix {
+    self.prefix
+  }
+
+  /// Whether the string is a block string.
+  #[inline(always)]
+  pub(crate) const fn is_block(&self) -> bool {
+    self.block
+  }
+
+  /// The string's slice, from its opening quote.
+  #[inline(always)]
+  pub(crate) const fn source_ref(&self) -> &S {
+    &self.source
+  }
+}
+
+impl<S: Clone + AsRef<[u8]>> LitPrefixedStr<S> {
+  /// The string after the prefix, read again from its slice by the readers the lexers read it
+  /// with: a block string, or an inline string, `Complex` when its body holds an escape.
+  ///
+  /// Under `b` an inline string's body may hold `\x` and two hexadecimal digits, one byte, which
+  /// the literal's `required_capacity` counts as one. No text door reads that escape:
+  /// [`decode_string_value`](crate::decode_string_value) refuses the backslash, and the `Cow`
+  /// conversion copies it through. A block string's body has no such escape: `b"""\x41"""`
+  /// is the four characters it shows.
+  pub fn literal(&self) -> LitStr<S> {
+    let bytes = self.source.as_ref();
+    if self.block {
+      let block = match skip_block_str_from_bytes::<true>(bytes.get(3..).unwrap_or_default()) {
+        Ok(LitBlockStr::Complex(c)) => LitBlockStr::Complex(LitComplexBlockStr::new(
+          self.source.clone(),
+          c.num_escaped_triple_quotes(),
+          c.has_cr_terminators(),
+          c.leading_blank_lines(),
+          c.trailing_blank_lines(),
+          c.common_indent(),
+          c.total_lines(),
+          c.required_capacity(),
+        )),
+        // A literal the lexer accepted is not refused here; a refusal answers the plain literal.
+        Ok(LitBlockStr::Plain(_)) | Err(_) => {
+          LitBlockStr::Plain(LitPlainBlockStr::new(self.source.clone()))
+        }
+      };
+      return LitStr::Block(block);
+    }
+
+    let body = bytes.get(1..).unwrap_or_default();
+    let capacity = match self.prefix {
+      StrPrefix::Bytes => <u8 as ByteStrBody>::read_byte_str(body, 0)
+        .read
+        .ok()
+        .flatten(),
+      StrPrefix::Id => match skip_inline_str_simd::<true>(1, body) {
+        Ok(LitInlineStr::Complex(c)) => Some(c.required_capacity()),
+        Ok(LitInlineStr::Plain(_)) | Err(_) => None,
+      },
+    };
+    LitStr::Inline(match capacity {
+      Some(capacity) => {
+        LitInlineStr::Complex(LitComplexInlineStr::new(self.source.clone(), capacity))
+      }
+      None => LitInlineStr::Plain(LitPlainInlineStr::new(self.source.clone())),
+    })
+  }
+}
+
 /// One whole literal, re-scanned by the lexer that produced it.
 ///
 /// The private half of `LitInt`'s, `LitFloat`'s and `LitChar`'s `TryFrom<&str>`, which carry the
@@ -398,9 +510,19 @@ fn scan_one_token<'de: 'a, 'a>(
   value: &'de str,
   what: &'static str,
 ) -> Result<syntactic::SyntacticToken<&'a str>, error::LexerErrors<char, RecursionLimitExceeded>> {
+  scan_one_token_from(value, what, syntactic::SyntacticState::default())
+}
+
+/// [`scan_one_token`] from `state`: a door for a token only a lexer inside a `const { … }` block
+/// makes reads its slice from a state that has entered one.
+fn scan_one_token_from<'de: 'a, 'a>(
+  value: &'de str,
+  what: &'static str,
+  state: syntactic::SyntacticState,
+) -> Result<syntactic::SyntacticToken<&'a str>, error::LexerErrors<char, RecursionLimitExceeded>> {
   use tokora::Lexer as _;
 
-  let mut lexer = syntactic::SyntacticLexer::<'de, str>::new(value);
+  let mut lexer = syntactic::SyntacticLexer::<'de, str>::with_state(value, state);
   let Some(first) = lexer.lex() else {
     return Err(
       error::LexerError::const_new(
@@ -511,6 +633,27 @@ impl<'de: 'a, 'a> TryFrom<&'de str> for LitFloat<&'a str> {
     const WHAT: &str = "float";
     match scan_one_token(value, WHAT)? {
       syntactic::SyntacticToken::LitFloat(lit) => Ok(lit),
+      _ => Err(not_one_token(value.len(), WHAT)),
+    }
+  }
+}
+
+impl<'de: 'a, 'a> TryFrom<&'de str> for LitPrefixedStr<&'a str> {
+  type Error = error::LexerErrors<char, RecursionLimitExceeded>;
+
+  /// The scanner's own reading of `value` as one whole prefixed string, from a state that has
+  /// entered a `const { … }` block, the only place a prefixed string is lexed: outside one the
+  /// slice is a name and then a string.
+  ///
+  /// [`LitInt`]'s twin — see [`LitInt::try_from`] for what "whole" means. The lexer's own refusal
+  /// of a reserved prefix or a malformed string passes through unchanged.
+  #[inline]
+  fn try_from(value: &'de str) -> Result<Self, Self::Error> {
+    const WHAT: &str = "prefixed string";
+    let mut state = syntactic::SyntacticState::default();
+    state.enter_const_block();
+    match scan_one_token_from(value, WHAT, state)? {
+      syntactic::SyntacticToken::LitPrefixedStr(lit) => Ok(lit),
       _ => Err(not_one_token(value.len(), WHAT)),
     }
   }

@@ -612,6 +612,13 @@ fn syntactic_token_kind_census() {
     Percent => SyntacticToken::Percent,
     Shl => SyntacticToken::Shl,
     Char => SyntacticToken::LitChar(crate::graphqlx::LitChar::new("'a'", 'a')),
+    Shr => SyntacticToken::Shr,
+    Separator => SyntacticToken::Separator,
+    PrefixedString => SyntacticToken::LitPrefixedStr(crate::graphqlx::LitPrefixedStr::new(
+      crate::graphqlx::StrPrefix::Bytes,
+      false,
+      "\"ab\"",
+    )),
   }
 }
 

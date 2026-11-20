@@ -3,7 +3,7 @@ use tokora::state::LimitExceeded;
 
 use super::{
   super::{LitBlockStr, LitInlineStr},
-  LitChar, LitFloat, LitInt, error,
+  LitChar, LitFloat, LitInt, LitPrefixedStr, error,
 };
 
 use token::{token, token_impl};
@@ -45,7 +45,9 @@ pub type LosslessLexerErrors = error::LexerErrors<char, LimitExceeded>;
 /// Unlike [`SyntacticToken`](super::syntactic::SyntacticToken), `LosslessToken` includes variants for all trivia:
 /// - **Whitespace**: [`Space`](LosslessToken::Space), [`Tab`](LosslessToken::Tab), [`Newline`](LosslessToken::Newline), [`CarriageReturn`](LosslessToken::CarriageReturn), [`CarriageReturnAndNewline`](LosslessToken::CarriageReturnAndNewline)
 /// - **Comments**: [`Comment`](LosslessToken::Comment) - preserves `# ...` comments with their content
-/// - **Commas**: [`Comma`](LosslessToken::Comma)
+/// - **Commas**: [`Comma`](LosslessToken::Comma), outside a `const { … }` block, and inside one
+///   while a `<` is open. Inside a block, from a [`LosslessState`] that has entered one, a comma
+///   with no `<` open is the token [`Separator`](LosslessToken::Separator), which is no trivia
 /// - **Byte Order Mark**: [`Bom`](LosslessToken::Bom) - preserves `\u{FEFF}` characters
 ///
 /// # Use Cases
@@ -63,7 +65,7 @@ pub type LosslessLexerErrors = error::LexerErrors<char, LimitExceeded>;
 /// |---------|------------------|-----------------|
 /// | Whitespace | ❌ Skipped | ✅ Preserved |
 /// | Comments | ❌ Skipped | ✅ Preserved |
-/// | Commas | ❌ Skipped | ✅ Preserved |
+/// | Commas, outside a block | ❌ Skipped | ✅ Preserved |
 /// | Performance | ⚡ Fast | 🐢 Slower |
 /// | Use case | Servers, execution | Formatters, linters, IDEs |
 ///
@@ -236,6 +238,16 @@ pub enum LosslessToken<S> {
   #[unwrap(ignore)]
   #[try_unwrap(ignore)]
   Shl,
+  /// Shift-right `>>` token, which only a lexer inside a `const { … }` block makes, where no `<`
+  /// is open
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
+  Shr,
+  /// Separator `,` token, which only a lexer inside a `const { … }` block makes, where no `<` is
+  /// open
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
+  Separator,
   /// Identifier token
   Identifier(S),
   /// Float literal token
@@ -248,6 +260,9 @@ pub enum LosslessToken<S> {
   LitBlockStr(LitBlockStr<S>),
   /// Character literal token
   LitChar(LitChar<S>),
+  /// Prefixed string token, `b"…"` or `i"…"`, which only a lexer inside a `const { … }` block
+  /// makes
+  LitPrefixedStr(LitPrefixedStr<S>),
 }
 
 impl<S> LosslessToken<S> {
@@ -303,6 +318,9 @@ impl<S> LosslessToken<S> {
       Self::Percent => LosslessTokenKind::Percent,
       Self::Shl => LosslessTokenKind::Shl,
       Self::LitChar(_) => LosslessTokenKind::Char,
+      Self::Shr => LosslessTokenKind::Shr,
+      Self::Separator => LosslessTokenKind::Separator,
+      Self::LitPrefixedStr(_) => LosslessTokenKind::PrefixedString,
       Self::Asterisk => LosslessTokenKind::Asterisk,
       Self::Space => LosslessTokenKind::Space,
       Self::Tab => LosslessTokenKind::Tab,
@@ -421,6 +439,12 @@ pub enum LosslessTokenKind {
   Shl,
   /// Character literal token
   Char,
+  /// Shift-right `>>` token
+  Shr,
+  /// Separator `,` token
+  Separator,
+  /// Prefixed string token
+  PrefixedString,
 }
 
 /// The kind as a diagnostic names what it found: punctuation in backticks, and every class —
@@ -469,6 +493,9 @@ impl core::fmt::Display for LosslessTokenKind {
       Self::Percent => f.write_str("`%`"),
       Self::Shl => f.write_str("`<<`"),
       Self::Char => f.write_str("character"),
+      Self::Shr => f.write_str("`>>`"),
+      Self::Separator => f.write_str("`,`"),
+      Self::PrefixedString => f.write_str("string"),
     }
   }
 }
@@ -557,6 +584,13 @@ mod tests {
       Percent => LosslessToken::Percent,
       Shl => LosslessToken::Shl,
       Char => LosslessToken::LitChar(LitChar::new("'a'", 'a')),
+      Shr => LosslessToken::Shr,
+      Separator => LosslessToken::Separator,
+      PrefixedString => LosslessToken::LitPrefixedStr(LitPrefixedStr::new(
+        crate::graphqlx::StrPrefix::Bytes,
+        false,
+        "\"ab\"",
+      )),
     }
   }
 
@@ -647,6 +681,41 @@ mod tests {
       #[cfg(feature = "bytes_1")]
       assert_eq!(
         kinds_and_spans(LosslessLexer::<bytes_1::Bytes>::new(row.as_bytes())),
+        text,
+        "{row:?}: bytes::Bytes"
+      );
+    }
+  }
+
+  /// Each arm of the grammar's macro lexes a block's tokens alike, from a state that has entered
+  /// one: the separating comma, `-`, `>>` and the count of open `<`, the prefixed strings, the
+  /// reserved prefix and `\x` in `b"…"`. Each arm spells the five rules that read the word.
+  #[test]
+  fn each_arm_lexes_a_blocks_tokens_alike() {
+    const ROWS: &[&str] = &[
+      "[1, 2,]\nPair<A, B>",
+      "HOUR-1\nHOUR -1\n- 1\n1e-5\n-.5\n-0x",
+      "1 << 4 >> 5\nWrap<Box<u8>>(1) >> 1\n{ a: Box<u8 } >> 1",
+      "b\"ab\"\ni\"7\"\nb\"\"\"x\"\"\"\ni\"\"\"x\"\"\"\nb\"\\x89PNG\\r\\n\"\nb\"é\"",
+      "r\"x\"\nA\"d\"\nb'a'\ni'a'",
+      "b\"\\x4\"\nb\"\\xZZ\"\ni\"\\x41\"\n\"\\x41\"\nb\"\"\"\\x41\"\"\"",
+    ];
+    let mut entered = LosslessState::default();
+    entered.enter_const_block();
+    for row in ROWS {
+      let text = kinds_and_spans(LosslessLexer::<&str>::with_state(row, entered));
+      assert!(!text.is_empty(), "{row:?}: the `&str` stream is empty");
+      assert_eq!(
+        kinds_and_spans(LosslessLexer::<&[u8]>::with_state(row.as_bytes(), entered)),
+        text,
+        "{row:?}: &[u8]"
+      );
+      #[cfg(feature = "bytes_1")]
+      assert_eq!(
+        kinds_and_spans(LosslessLexer::<bytes_1::Bytes>::with_state(
+          row.as_bytes(),
+          entered
+        )),
         text,
         "{row:?}: bytes::Bytes"
       );

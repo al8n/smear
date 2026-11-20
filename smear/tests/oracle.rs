@@ -565,6 +565,8 @@ fn same_string_error(byte: &StringError<u8>, str_: &StringError<char>) -> bool {
     // `IncompleteEscape`'s payload is a span, which carries no `Char` -- same
     // concrete type either side.
     (StringError::IncompleteEscape(b), StringError::IncompleteEscape(s)) => b == s,
+    // `InvalidByteEscape`'s payload is a span too.
+    (StringError::InvalidByteEscape(b), StringError::InvalidByteEscape(s)) => b == s,
     // `Unterminated`'s payload (`UnexpectedEnd<LitStrDelimiterHint>`) carries
     // no `Char` -- same concrete type either side.
     (StringError::Unterminated(b), StringError::Unterminated(s)) => b == s,
@@ -1014,6 +1016,45 @@ const GRAPHQLX_TOKENS: &[(&str, &str)] = &[
   ),
 ];
 
+/// What a lexer inside a `const { … }` block lexes otherwise, each lexer made from a state that has
+/// entered one: the separating comma, `-`, `>>` and the count of open `<`, the prefixed strings,
+/// the reserved prefix, and `\x` in `b"…"`. Each source is its cases joined by `\n`, so that no
+/// comma stands between two cases.
+#[cfg(feature = "graphqlx")]
+const GRAPHQLX_BLOCK: &[(&str, &str)] = &[
+  ("gxb_separator", "[1, 2,]\nPair<A, B>"),
+  ("gxb_minus", "HOUR-1\nHOUR -1\n- 1\n1e-5\n-.5\n-0x"),
+  (
+    "gxb_shift",
+    "1 << 4 >> 5\nWrap<Box<u8>>(1) >> 1\n{ a: Box<u8 } >> 1",
+  ),
+  (
+    "gxb_prefixed_string",
+    "b\"ab\"\ni\"7\"\nb\"\"\"x\"\"\"\ni\"\"\"x\"\"\"\nb\"\\x89PNG\\r\\n\"\nb\"é\"",
+  ),
+  ("gxb_reserved_prefix", "r\"x\"\nA\"d\"\nb'a'\ni'a'"),
+  (
+    "gxb_byte_escape",
+    "b\"\\x4\"\nb\"\\xZZ\"\ni\"\\x41\"\n\"\\x41\"\nb\"\"\"\\x41\"\"\"",
+  ),
+];
+
+/// A syntactic lexer's state inside a `const { … }` block, with no `<` open.
+#[cfg(feature = "graphqlx")]
+fn gx_block_state() -> smear::lexer::graphqlx::syntactic::SyntacticState {
+  let mut state = smear::lexer::graphqlx::syntactic::SyntacticState::default();
+  state.enter_const_block();
+  state
+}
+
+/// A lossless lexer's state inside a `const { … }` block, with no `<` open.
+#[cfg(feature = "graphqlx")]
+fn gx_block_lossless_state() -> smear::lexer::graphqlx::lossless::LosslessState {
+  let mut state = smear::lexer::graphqlx::lossless::LosslessState::default();
+  state.enter_const_block();
+  state
+}
+
 /// The lossless row `gx_sign_ceilings` lexes this under every token ceiling
 /// from 0 to 10, one past its ten lexemes: a number with its sign, a lone `-`,
 /// a sign before a refused float, a signed hexadecimal number, and a `-`
@@ -1188,6 +1229,8 @@ fn graphqlx_syntactic_simd_low_recursion_parity() {
 // `LitInt`/`LitFloat` tokens the GraphQL comparators don't cover.
 
 #[cfg(feature = "graphqlx")]
+use smear::lexer::LitStr;
+#[cfg(feature = "graphqlx")]
 use smear::lexer::graphqlx::{
   LitFloat, LitInt,
   error::{
@@ -1289,7 +1332,8 @@ fn same_gx_error_data(
     (GxErrorData::Other(b), GxErrorData::Other(s)) => b == s,
     (GxErrorData::EmptyChar, GxErrorData::EmptyChar)
     | (GxErrorData::LongChar, GxErrorData::LongChar)
-    | (GxErrorData::UnterminatedChar, GxErrorData::UnterminatedChar) => true,
+    | (GxErrorData::UnterminatedChar, GxErrorData::UnterminatedChar)
+    | (GxErrorData::ReservedPrefix, GxErrorData::ReservedPrefix) => true,
     _ => false,
   }
 }
@@ -1340,7 +1384,7 @@ fn same_gx_lit_float<B: AsRef<[u8]>>(byte: &LitFloat<B>, str_: &LitFloat<&str>) 
 }
 
 #[cfg(feature = "graphqlx")]
-fn same_gx_token<B: AsRef<[u8]>>(byte: &GxToken<B>, str_: &GxToken<&str>) -> bool {
+fn same_gx_token<B: Clone + AsRef<[u8]>>(byte: &GxToken<B>, str_: &GxToken<&str>) -> bool {
   use GxToken as Tok;
   if byte.kind() != str_.kind() {
     return false;
@@ -1353,6 +1397,14 @@ fn same_gx_token<B: AsRef<[u8]>>(byte: &GxToken<B>, str_: &GxToken<&str>) -> boo
     (Tok::LitBlockStr(b), Tok::LitBlockStr(s)) => same_block_str(b, s),
     (Tok::LitChar(b), Tok::LitChar(s)) => {
       b.source_ref().as_ref() == s.source_ref().as_bytes() && b.value() == s.value()
+    }
+    (Tok::LitPrefixedStr(b), Tok::LitPrefixedStr(s)) => {
+      b.prefix() == s.prefix()
+        && match (b.literal(), s.literal()) {
+          (LitStr::Inline(b), LitStr::Inline(s)) => same_inline_str(&b, &s),
+          (LitStr::Block(b), LitStr::Block(s)) => same_block_str(&b, &s),
+          _ => false,
+        }
     }
     // Every other variant carries no payload; the `kind()` check above already
     // confirmed they're the same punctuation/spread token.
@@ -1374,9 +1426,18 @@ macro_rules! assert_gx_matches_str_stream {
       same_gx_lexer_errors
     )
   };
-  ($label:expr, $fixture:expr, $byte_lexer:expr, $str_src:expr, $err_eq:expr) => {{
+  ($label:expr, $fixture:expr, $byte_lexer:expr, $str_src:expr, $err_eq:expr) => {
+    assert_gx_matches_str_stream!(
+      @lexers $label,
+      $fixture,
+      $byte_lexer,
+      GxSimd::<str>::new($str_src),
+      $err_eq
+    )
+  };
+  (@lexers $label:expr, $fixture:expr, $byte_lexer:expr, $str_lexer:expr, $err_eq:expr) => {{
     let mut byte_lex = $byte_lexer;
-    let mut str_lex = GxSimd::<str>::new($str_src);
+    let mut str_lex = $str_lexer;
     let mut idx = 0usize;
     loop {
       match (byte_lex.lex(), str_lex.lex()) {
@@ -1593,9 +1654,28 @@ fn the_two_graphqlx_lexers_agree_trivia_apart() {
     "CarriageReturnAndNewline",
     "Comma",
   ];
-  for (name, src) in GRAPHQLX_TOKENS.iter().chain(GRAPHQLX_KEPT) {
-    let syntactic = render_stream!(SyntacticLexer::<str>::new(src));
-    let lossless = render_stream!(LosslessLexer::<&str>::new(src));
+  // Each row from the state a document starts in, and the block's rows from a state that has
+  // entered one: `Separator` is no trivia, and a comma inside type arguments is the trivia `Comma`.
+  let rows = GRAPHQLX_TOKENS
+    .iter()
+    .chain(GRAPHQLX_KEPT)
+    .map(|row: &(&str, &str)| (row, false))
+    .chain(GRAPHQLX_BLOCK.iter().map(|row: &(&str, &str)| (row, true)));
+  for ((name, src), block) in rows {
+    let (syntactic, lossless) = if block {
+      (
+        render_stream!(SyntacticLexer::<str>::with_state(src, gx_block_state())),
+        render_stream!(LosslessLexer::<&str>::with_state(
+          src,
+          gx_block_lossless_state()
+        )),
+      )
+    } else {
+      (
+        render_stream!(SyntacticLexer::<str>::new(src)),
+        render_stream!(LosslessLexer::<&str>::new(src)),
+      )
+    };
     let kept: Vec<&str> = lossless
       .lines()
       .filter(|line: &&str| {
@@ -1611,5 +1691,53 @@ fn the_two_graphqlx_lexers_agree_trivia_apart() {
       syntactic.lines().collect::<Vec<&str>>(),
       "{name}: the lexers part, trivia apart"
     );
+  }
+}
+
+/// The block's rows, each lexer made from a state that has entered a `const { … }` block. The
+/// design is their oracle: a stream that differs is read against it before a golden moves.
+#[cfg(feature = "graphqlx")]
+#[test]
+fn graphqlx_block_oracle() {
+  use smear::lexer::graphqlx::lossless::LosslessLexer;
+
+  let mut mismatches = Vec::new();
+  for (name, src) in GRAPHQLX_BLOCK {
+    let rendered = render_stream!(GxSimd::<str>::with_state(src, gx_block_state()));
+    check("graphqlx-syntactic", name, &rendered, &mut mismatches);
+    let rendered = render_stream!(LosslessLexer::<&str>::with_state(
+      src,
+      gx_block_lossless_state()
+    ));
+    check("graphqlx-lossless", name, &rendered, &mut mismatches);
+  }
+  assert_no_mismatches(&mismatches);
+}
+
+/// The block's rows through the byte matrix, each lexer made from a state that has entered a block:
+/// a byte source answers what a text source does, its prefixed strings' literals and its `char`
+/// literals' values included.
+#[cfg(feature = "graphqlx")]
+#[test]
+fn graphqlx_block_source_matrix() {
+  for (name, src) in GRAPHQLX_BLOCK {
+    assert_gx_matches_str_stream!(
+      @lexers "[u8]",
+      name,
+      GxSimd::<[u8]>::with_state(src.as_bytes(), gx_block_state()),
+      GxSimd::<str>::with_state(src, gx_block_state()),
+      same_gx_lexer_errors
+    );
+    #[cfg(feature = "bytes_1")]
+    {
+      let owned = bytes_1::Bytes::copy_from_slice(src.as_bytes());
+      assert_gx_matches_str_stream!(
+        @lexers "Bytes",
+        name,
+        GxSimd::<bytes_1::Bytes>::with_state(&owned, gx_block_state()),
+        GxSimd::<str>::with_state(src, gx_block_state()),
+        same_gx_lexer_errors
+      );
+    }
   }
 }

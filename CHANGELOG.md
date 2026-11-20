@@ -4,6 +4,25 @@ All notable changes to Smear are documented in this file.
 
 ## [Unreleased]
 
+- `smear-lexer`!: each GraphQLx lexer has a `const { … }` block's lexing mode, held in its state.
+  - **The state.** `SyntacticState` and `LosslessState` gain one word, and `in_const_block`,
+    `open_angles`, `enter_const_block` and `leave_const_block`. A lexer never enters or leaves a
+    block by what it reads: its parser does, and no parser does yet. Outside a block both lexers
+    lex as they did.
+  - **What a block lexes otherwise.** A comma is the token `Separator` while no `<` is open, `-`
+    is always `Minus` and no number carries a sign, `>>` is the token `Shr` where no `<` is open,
+    and a brace clears the count of open `<`. A name touching a quote is one token: `b` or `i`
+    before a string is a `LitPrefixedStr`, whose `literal()` reads the string, and any other name
+    before a string, or any name before a `char` literal, is refused as a reserved prefix. In
+    `b"…"` a `\x` and two hexadecimal digits is one byte.
+  - **Tokens.** `Shr`, `Separator` and `LitPrefixedStr`, with their kinds, `StrPrefix`,
+    `smear_lexer::punctuator::Shr`, and `PunctuatorToken`'s `shr` and `comma`. `LitPrefixedStr<&str>`
+    has a `TryFrom<&str>` door, which reads from a state inside a block.
+  - **Refusals.** `LexerErrorData::ReservedPrefix` and `StringError::InvalidByteEscape`, with the
+    kinds `ReservedPrefix`, `smear::syntax::reserved-prefix`, and `InvalidByteEscape`,
+    `smear::syntax::invalid-byte-escape`.
+- `smear-parser`!: GraphQLx's `SyntaxKind` gains the images `Shr`, `Separator` and
+  `PrefixedString` after `Char`, which moves the raw value of every later kind by three.
 - `smear-lexer`!: GraphQLx's two lexers make the tokens the dialect has outside a `const` block
   and in one.
   - **Punctuators.** `/`, `%` and `<<` are the tokens `Slash`, `Percent` and `Shl`, with their

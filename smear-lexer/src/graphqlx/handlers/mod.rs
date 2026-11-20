@@ -26,6 +26,8 @@ where
   handlers::increase_recursion_depth_and_token(lexer)
 }
 
+/// The `{` rule's callback: an opening brace's hook, after the brace's clear of the block's count
+/// of open `<`, which outside a block is the identity.
 #[inline(always)]
 pub(super) fn open_brace<'a, C, T>(
   lexer: &mut Lexer<'a, T>,
@@ -33,6 +35,7 @@ pub(super) fn open_brace<'a, C, T>(
 where
   T: Logos<'a, Extras = LosslessState>,
 {
+  lexer.extras.clear_angles();
   handlers::open_brace(lexer)
 }
 

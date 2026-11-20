@@ -6,9 +6,9 @@ use tokora::{
   Lexer, SimpleSpan, Slice, Source, Token,
   lexer::{FromLogos, LogosLexer},
   punct::{
-    Ampersand, Asterisk, At, Caret, CloseAngle, CloseBrace, CloseBracket, CloseParen, Colon,
+    Ampersand, Asterisk, At, Caret, CloseAngle, CloseBrace, CloseBracket, CloseParen, Colon, Comma,
     Dollar, DoubleColon, Equal, Exclamation, FatArrow, Hyphen, OpenAngle, OpenBrace, OpenBracket,
-    OpenParen, Percent, Pipe, Plus, ShiftLeft, Slash, Spread, Tilde,
+    OpenParen, Percent, Pipe, Plus, ShiftLeft, ShiftRight, Slash, Spread, Tilde,
   },
   state::RecursionLimitExceeded,
   utils::{CharLen, DowncastRef},
@@ -17,10 +17,11 @@ use tokora::{
 use crate::{
   LitComplexBlockStr, LitComplexInlineStr, LitPlainBlockStr, LitPlainInlineStr,
   error::{BadStateError, UnterminatedSpreadOperatorError},
-  graphqlx::error::{LexerError, LexerErrorData, LexerErrors},
+  graphqlx::error::{LexerError, LexerErrorData, LexerErrors, TouchedLiteral},
   skip_block_str_from_bytes, skip_inline_str_simd,
   string_lexer::{
     DelegateStringError, DelegatedRefusal,
+    byte_str::{ByteStr, ByteStrBody},
     char_literal::{CharBody, CharLiteral},
   },
   utf8::IllFormedUtf8,
@@ -32,6 +33,12 @@ use crate::simd::{
   Delegated, LexFailure, LexedToken, LogosSourceOf, NumberKind, ScannedNumber, memchr_newline,
   scan_identifier, scan_number, skip_ws_and_comma,
 };
+
+// The four whitespace bytes without the comma, which inside a `const { … }` block with no `<`
+// open is the token `Separator`. GraphQL's lexer never calls it.
+memspan::skip_class! {
+  fn skip_ws(bytes = [b' ', b'\t', b'\r', b'\n']);
+}
 
 // The nesting ceiling and the budget that carries it, surfaced beside the lexer they govern.
 // This position used to hold `DEFAULT_RECURSION_LIMIT = 500`, a constant that only restated
@@ -45,7 +52,7 @@ mod state;
 
 use super::{
   super::{LitBlockStr, LitInlineStr},
-  ContextualKeyword, LitChar, LitFloat, LitInt, error,
+  ContextualKeyword, LitChar, LitFloat, LitInt, LitPrefixedStr, StrPrefix, error,
 };
 
 /// The focused GraphQLx number sub-lexer the SIMD lexer delegates malformed and
@@ -94,10 +101,12 @@ pub type SyntacticLexerErrors = error::LexerErrors<char, RecursionLimitExceeded>
 /// The following tokens are automatically skipped during lexing and will NOT appear in the token stream:
 /// - **Whitespace**: spaces, tabs, newlines, carriage returns
 /// - **Comments**: `# ...` (from `#` to end of line)
-/// - **Commas**: `,`
+/// - **Commas**: `,`, outside a `const { … }` block, and inside one while a `<` is open
 /// - **Byte Order Mark (BOM)**: `\u{FEFF}`
 ///
 /// These trivia tokens are defined by the lexer's skip pattern and are discarded during tokenization.
+/// Inside a block, from a [`SyntacticState`] that has entered one, a comma with no `<` open is the
+/// token [`Separator`](Self::Separator).
 ///
 /// # Use Cases
 ///
@@ -112,7 +121,7 @@ pub type SyntacticLexerErrors = error::LexerErrors<char, RecursionLimitExceeded>
 /// |---------|------------------|----------------------------------------------|
 /// | Whitespace | ❌ Skipped | ✅ Preserved |
 /// | Comments | ❌ Skipped | ✅ Preserved |
-/// | Commas | ❌ Skipped | ✅ Preserved |
+/// | Commas, outside a block | ❌ Skipped | ✅ Preserved |
 /// | Performance | ⚡ Fast | 🐢 Slower |
 /// | Use case | Servers, execution | Formatters, linters, IDEs |
 ///
@@ -254,6 +263,16 @@ pub enum SyntacticToken<S> {
   #[unwrap(ignore)]
   #[try_unwrap(ignore)]
   Shl,
+  /// Shift-right `>>` token, which only a lexer inside a `const { … }` block makes, where no `<`
+  /// is open
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
+  Shr,
+  /// Separator `,` token, which only a lexer inside a `const { … }` block makes, where no `<` is
+  /// open
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
+  Separator,
   /// Identifier token
   Identifier(S),
   /// Float literal token
@@ -266,6 +285,9 @@ pub enum SyntacticToken<S> {
   LitBlockStr(LitBlockStr<S>),
   /// Character literal token
   LitChar(LitChar<S>),
+  /// Prefixed string token, `b"…"` or `i"…"`, which only a lexer inside a `const { … }` block
+  /// makes
+  LitPrefixedStr(LitPrefixedStr<S>),
 }
 
 impl<S> SyntacticToken<S> {
@@ -306,6 +328,9 @@ impl<S> SyntacticToken<S> {
       Self::Percent => SyntacticTokenKind::Percent,
       Self::Shl => SyntacticTokenKind::Shl,
       Self::LitChar(_) => SyntacticTokenKind::Char,
+      Self::Shr => SyntacticTokenKind::Shr,
+      Self::Separator => SyntacticTokenKind::Separator,
+      Self::LitPrefixedStr(_) => SyntacticTokenKind::PrefixedString,
     }
   }
 }
@@ -588,6 +613,18 @@ where
   fn shl() -> Option<Self::Kind> {
     Some(SyntacticTokenKind::Shl)
   }
+
+  #[inline(always)]
+  fn shr() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Shr)
+  }
+
+  /// The comma that is a token: `Separator`, which a lexer makes inside a `const { … }` block
+  /// alone. Outside one a comma is skipped, as GraphQL's is.
+  #[inline(always)]
+  fn comma() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Separator)
+  }
 }
 
 /// The kind of a [`SyntacticToken`], without the associated source data.
@@ -665,6 +702,12 @@ pub enum SyntacticTokenKind {
   Shl,
   /// Character literal token
   Char,
+  /// Shift-right `>>` token
+  Shr,
+  /// Separator `,` token
+  Separator,
+  /// Prefixed string token
+  PrefixedString,
 }
 
 macro_rules! into_token_kind {
@@ -707,6 +750,8 @@ into_token_kind!(
   Slash::Slash,
   Percent::Percent,
   ShiftLeft::Shl,
+  ShiftRight::Shr,
+  Comma::Separator,
 );
 
 /// The kind as a diagnostic names what it found: punctuation in backticks, and every class as a
@@ -747,6 +792,9 @@ impl core::fmt::Display for SyntacticTokenKind {
       Self::Percent => f.write_str("`%`"),
       Self::Shl => f.write_str("`<<`"),
       Self::Char => f.write_str("character"),
+      Self::Shr => f.write_str("`>>`"),
+      Self::Separator => f.write_str("`,`"),
+      Self::PrefixedString => f.write_str("string"),
     }
   }
 }
@@ -797,7 +845,7 @@ where
     >,
   NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>:
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
-  <S::Slice<'inp> as Slice<'inp>>::Char: CharLen + CharBody,
+  <S::Slice<'inp> as Slice<'inp>>::Char: CharLen + CharBody + ByteStrBody,
 {
   type State = SyntacticState;
 
@@ -884,6 +932,93 @@ where
 
   #[inline(always)]
   fn lex(&mut self) -> Option<Result<Self::Token, <Self::Token as tokora::Token<'inp>>::Error>> {
+    // The word is the parser's to write, between two calls, so it is read once here and the body
+    // asks a constant: the instance outside a block is the one this inlines, and a block's is kept
+    // out of line.
+    if self.state.in_const_block() {
+      self.lex_in_block()
+    } else {
+      self.lex_body::<false>()
+    }
+  }
+
+  /// Extend the current token's end by `n`, mirroring `logos::Lexer::bump`:
+  /// the span start is kept while the end — and `cursor`, which always tracks
+  /// the last token's end after a lex — grow by `n`, so `span()`/`slice()`
+  /// include the bumped bytes. The new end is then validated as a source
+  /// boundary.
+  ///
+  /// # Panics
+  ///
+  /// Panics with `"Invalid Lexer bump"` if the new end is not a boundary of
+  /// the source — past its byte length, or (for `str` sources) in the middle
+  /// of a UTF-8 code point — exactly as `logos::Lexer::bump` does.
+  #[inline(always)]
+  fn bump(&mut self, n: &Self::Offset) {
+    let new_end = self.last_span.end() + *n;
+    self.last_span = SimpleSpan::new(self.last_span.start(), new_end);
+    self.cursor = new_end;
+    assert!(self.src.is_boundary(new_end), "Invalid Lexer bump");
+  }
+}
+
+// The lexing loop, with the trait impl's bound set and one constant more. `lex` runs the instance
+// outside a block itself, and the instance inside one through `lex_in_block`, kept out of line so
+// that `lex`'s own code does not double. Both are this one text, so they cannot drift apart.
+//
+// `DelegateStringError`, `NumberLexerToken`, `CharBody` and `ByteStrBody` are crate-internal; they
+// appear here only as bounds on private methods, never as nameable API, so silence
+// `private_bounds` rather than widen their visibility.
+#[allow(private_bounds)]
+impl<'inp, S> SyntacticLexer<'inp, S>
+where
+  SyntacticToken<S::Slice<'inp>>:
+    Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
+  S: Source<usize>
+    + AsRef<LogosSourceOf<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>>
+    + DelegateStringError<Char = <S::Slice<'inp> as Slice<'inp>>::Char>
+    + ?Sized,
+  S::Slice<'inp>: AsRef<[u8]>,
+  NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>: FromLogos<'inp>,
+  LogosLexer<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>: Lexer<
+      'inp,
+      State = SyntacticLimits,
+      Source = LogosSourceOf<'inp, NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>,
+      Token = NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>,
+      Offset = usize,
+    >,
+  NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>:
+    Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
+  <S::Slice<'inp> as Slice<'inp>>::Char: CharLen + CharBody + ByteStrBody,
+{
+  /// The loop's instance inside a `const { … }` block.
+  #[allow(clippy::type_complexity)]
+  #[inline(never)]
+  fn lex_in_block(
+    &mut self,
+  ) -> Option<
+    Result<
+      SyntacticToken<S::Slice<'inp>>,
+      LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>,
+    >,
+  > {
+    self.lex_body::<true>()
+  }
+
+  /// The lexing loop: one item from the cursor. `IN_BLOCK` says whether the state is inside a
+  /// `const { … }` block, and each place the block lexes otherwise asks it, never the state: the
+  /// skip before a token, `-`, `<`, `>`, the braces, a comma, and a name touching a quote. Inside
+  /// a block the count of open `<` is read from the state at each of those places.
+  #[allow(clippy::type_complexity)]
+  #[inline(always)]
+  fn lex_body<const IN_BLOCK: bool>(
+    &mut self,
+  ) -> Option<
+    Result<
+      SyntacticToken<S::Slice<'inp>>,
+      LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>,
+    >,
+  > {
     // Post-token recursion gate, mirroring `LogosLexer::lex`: after a token is
     // scanned it re-checks the limiter and, while the depth is over the limit,
     // yields the recursion error in the token's place. The conversion is
@@ -948,7 +1083,12 @@ where
     }
 
     loop {
-      self.skip_ws_and_comma();
+      // Inside a block with no `<` open a comma is a token, so the skip leaves it.
+      if IN_BLOCK && self.state.open_angles() == 0 {
+        self.skip_ws();
+      } else {
+        self.skip_ws_and_comma();
+      }
 
       let token_start = self.cursor;
       // Both `None` exits below are EOF. Mirror `LogosLexer`, whose span resets
@@ -970,6 +1110,10 @@ where
       match b0 {
         b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
           let len = scan_identifier(bytes);
+          // Inside a block a name touching a quote is a prefix: one byte's peek.
+          if IN_BLOCK && matches!(bytes.get(len), Some(b'"' | b'\'')) {
+            return self.prefixed(token_start, len);
+          }
           self.cursor += len;
           self.last_span = SimpleSpan::new(token_start, self.cursor);
           let ident = self.src.slice(&token_start..&(token_start + len))?;
@@ -984,6 +1128,8 @@ where
         // re-deriving the number grammar, so `-` always delegates and
         // `NumberToken` returns the correct single token either way (its
         // `#[token("-")] Minus` arm covers the bare operator).
+        // Inside a block no number carries a sign: `-` is always the operator.
+        b'-' if IN_BLOCK => return Some(emit_punct!(self: token_start, SyntacticToken::Minus)),
         b'0'..=b'9' | b'-' => match scan_number(bytes) {
           // Valid *decimal* int/float: emit inline, byte-identical to what the
           // delegated grammar produces (`NumberToken::Decimal`/`Float` map to
@@ -1032,16 +1178,48 @@ where
         b'%' => return Some(emit_punct!(self: token_start, SyntacticToken::Percent)),
         b'(' => return Some(increase_recursion!(self: token_start, SyntacticToken::LParen)),
         b'[' => return Some(increase_recursion!(self: token_start, SyntacticToken::LBracket)),
-        b'{' => return Some(increase_recursion!(self: token_start, SyntacticToken::LBrace)),
+        b'{' => {
+          // A brace clears the count of open `<`, inside a block.
+          if IN_BLOCK {
+            self.state.clear_angles();
+          }
+          return Some(increase_recursion!(self: token_start, SyntacticToken::LBrace));
+        }
         // `<<` is one token by longest match, and a shift opens nothing: it steps no tally.
         b'<' if bytes.get(1) == Some(&b'<') => {
           return Some(emit_punct2!(self: token_start, SyntacticToken::Shl));
         }
-        b'<' => return Some(increase_recursion!(self: token_start, SyntacticToken::LAngle)),
+        b'<' => {
+          // Inside a block a lone `<` is counted as it steps the tally, before the tally's check.
+          if IN_BLOCK {
+            self.state.open_angle();
+          }
+          return Some(increase_recursion!(self: token_start, SyntacticToken::LAngle));
+        }
         b')' => return Some(decrease_recursion!(self: token_start, SyntacticToken::RParen)),
         b']' => return Some(decrease_recursion!(self: token_start, SyntacticToken::RBracket)),
-        b'}' => return Some(decrease_recursion!(self: token_start, SyntacticToken::RBrace)),
-        b'>' => return Some(decrease_recursion!(self: token_start, SyntacticToken::RAngle)),
+        b'}' => {
+          if IN_BLOCK {
+            self.state.clear_angles();
+          }
+          return Some(decrease_recursion!(self: token_start, SyntacticToken::RBrace));
+        }
+        b'>' => {
+          if IN_BLOCK {
+            // With no `<` open, `>>` is a shift, which steps no tally; a `>` alone is the stray
+            // closer it is outside a block. With one open, the `>` closes it.
+            if self.state.open_angles() == 0 {
+              if bytes.get(1) == Some(&b'>') {
+                return Some(emit_punct2!(self: token_start, SyntacticToken::Shr));
+              }
+            } else {
+              self.state.close_angle();
+            }
+          }
+          return Some(decrease_recursion!(self: token_start, SyntacticToken::RAngle));
+        }
+        // Inside a block with no `<` open the skip left the comma: it is the token `Separator`.
+        b',' if IN_BLOCK => return Some(emit_punct!(self: token_start, SyntacticToken::Separator)),
         // Two-byte punctuation: peek one byte so `::`/`=>` win over the
         // single-byte `:`/`=`, replicating Logos's longest match.
         b':' => {
@@ -1246,23 +1424,118 @@ where
     }
   }
 
-  /// Extend the current token's end by `n`, mirroring `logos::Lexer::bump`:
-  /// the span start is kept while the end — and `cursor`, which always tracks
-  /// the last token's end after a lex — grow by `n`, so `span()`/`slice()`
-  /// include the bumped bytes. The new end is then validated as a source
-  /// boundary.
-  ///
-  /// # Panics
-  ///
-  /// Panics with `"Invalid Lexer bump"` if the new end is not a boundary of
-  /// the source — past its byte length, or (for `str` sources) in the middle
-  /// of a UTF-8 code point — exactly as `logos::Lexer::bump` does.
+  /// A name touching a quote inside a block: one item over the name, `name_len` bytes from
+  /// `token_start`, and the literal after it. `b` or `i` before a string makes a prefixed string,
+  /// and any other name before a string, or any name before a `char` literal, the reserved
+  /// prefix's refusal, whose record holds the literal's own errors after its own when the literal
+  /// is refused too. Kept out of line: it is the block's alone, and a name is the commonest token.
+  #[allow(clippy::type_complexity)]
+  #[inline(never)]
+  fn prefixed(
+    &mut self,
+    token_start: usize,
+    name_len: usize,
+  ) -> Option<
+    Result<
+      SyntacticToken<S::Slice<'inp>>,
+      LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>,
+    >,
+  > {
+    let quote = token_start + name_len;
+    let rest = self.src.slice(&token_start..)?;
+    let bytes: &[u8] = rest.as_ref();
+    let prefix = match bytes.get(..name_len) {
+      Some(b"b") => Some(StrPrefix::Bytes),
+      Some(b"i") => Some(StrPrefix::Id),
+      _ => None,
+    };
+    let char_literal = bytes.get(name_len) == Some(&b'\'');
+    let block = !char_literal
+      && bytes
+        .get(name_len..)
+        .is_some_and(|literal: &[u8]| literal.starts_with(b"\"\"\""));
+    let after: &[u8] = bytes.get(name_len + 1..).unwrap_or_default();
+
+    // Where the literal ends, and its refusal when it is refused.
+    let (end, refused) = if char_literal {
+      let CharLiteral { len, read } =
+        <<S::Slice<'inp> as Slice<'inp>>::Char as CharBody>::read_char_literal(after, quote);
+      (quote + len, read.err().map(TouchedLiteral::Char))
+    } else if prefix == Some(StrPrefix::Bytes) && !block {
+      let ByteStr { len, read } =
+        <<S::Slice<'inp> as Slice<'inp>>::Char as ByteStrBody>::read_byte_str(after, quote);
+      (quote + len, read.err().map(TouchedLiteral::String))
+    } else {
+      match self.string_at(quote, block) {
+        Ok(end) => (end, None),
+        Err(DelegatedRefusal { errors, end }) => (end, Some(TouchedLiteral::String(errors))),
+      }
+    };
+
+    self.cursor = end;
+    let span = SimpleSpan::new(token_start, end);
+    self.last_span = span;
+    match (prefix, char_literal, refused) {
+      (Some(prefix), false, None) => {
+        let slice = self.src.slice(&quote..&end)?;
+        let token = SyntacticToken::LitPrefixedStr(LitPrefixedStr::new(prefix, block, slice));
+        Some(match self.state.limits().check() {
+          Ok(()) => Ok(token),
+          Err(e) => Err(self.over_recursion_limit(e)),
+        })
+      }
+      (prefix, char_literal, refused) => {
+        self.last_error_span = Some(span);
+        Some(Err(error::prefixed_refusal(
+          span,
+          prefix.is_none() || char_literal,
+          refused,
+        )))
+      }
+    }
+  }
+
+  /// Where the string literal whose opening quote is at `quote` ends, a block string when `block`,
+  /// read as the dispatch reads a string: by the scanners, and a refused literal by the string
+  /// sub-lexer, whose refusal this answers.
   #[inline(always)]
-  fn bump(&mut self, n: &Self::Offset) {
-    let new_end = self.last_span.end() + *n;
-    self.last_span = SimpleSpan::new(self.last_span.start(), new_end);
-    self.cursor = new_end;
-    assert!(self.src.is_boundary(new_end), "Invalid Lexer bump");
+  fn string_at(
+    &self,
+    quote: usize,
+    block: bool,
+  ) -> Result<usize, DelegatedRefusal<<S::Slice<'inp> as Slice<'inp>>::Char>> {
+    let Some(rest) = self.src.slice(&quote..) else {
+      return Err(self.src.delegate_string_error(quote, block));
+    };
+    let bytes: &[u8] = rest.as_ref();
+    if block {
+      let body = bytes.get(3..).unwrap_or_default();
+      let scanned = if <S as DelegateStringError>::UTF8 {
+        skip_block_str_from_bytes::<false>(body)
+      } else {
+        skip_block_str_from_bytes::<true>(body)
+      };
+      return match scanned {
+        Ok(lit) => Ok(quote + 3 + *lit.source_ref()),
+        Err(_) => Err(self.src.delegate_string_error(quote, true)),
+      };
+    }
+    match bytes.get(1) {
+      Some(b'"') => Ok(quote + 2),
+      None => Err(self.src.delegate_string_error(quote, false)),
+      Some(_) => {
+        let body = bytes.get(1..).unwrap_or_default();
+        let scanned = if <S as DelegateStringError>::UTF8 {
+          skip_inline_str_simd::<false>(quote + 1, body)
+        } else {
+          skip_inline_str_simd::<true>(quote + 1, body)
+        };
+        match scanned {
+          Ok(lit) => Ok(quote + 1 + *lit.source_ref()),
+          Err(_) => Err(self.src.delegate_string_error(quote, false)),
+        }
+      }
+    }
   }
 }
 
@@ -1452,6 +1725,17 @@ where
       return;
     };
     let n = skip_ws_and_comma(rest.as_ref());
+    self.cursor += n;
+  }
+
+  /// Skip the four whitespace bytes at the cursor, and stop at a comma: inside a `const { … }`
+  /// block with no `<` open a comma is the token `Separator`.
+  #[inline(always)]
+  fn skip_ws(&mut self) {
+    let Some(rest) = self.src.slice(&self.cursor..) else {
+      return;
+    };
+    let n = skip_ws(rest.as_ref());
     self.cursor += n;
   }
 

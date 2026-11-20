@@ -49,7 +49,9 @@ macro_rules! token_impl {
       use crate::{
         error::StringErrors,
         graphqlx::lossless::LosslessState,
-        graphqlx::lossless::token::Signed,
+        graphqlx::lossless::token::{
+          AngleCloser, CommaRole, Named, Signed, close_angle, close_brace, comma, open_angle,
+        },
         graphqlx::{
           error::{LexerErrors, LexerError, DecimalError, HexError, FloatError, HexFloatError, BinaryError, OctalError},
           handlers::{
@@ -58,10 +60,10 @@ macro_rules! token_impl {
             open_brace,
           },
           lossless::{LosslessToken, LosslessTokenKind},
-          LitChar, LitInt, LitFloat,
+          LitChar, LitInt, LitFloat, LitPrefixedStr,
         },
         handlers::{
-          close_brace, decrease_recursion_depth_and_increase_token,
+          decrease_recursion_depth_and_increase_token,
           unterminated_spread_operator_error,
         },
         LitBlockStr, LitInlineStr, SealedWrapper,
@@ -83,6 +85,11 @@ macro_rules! token_impl {
         lexer: &mut tokora::logos::Lexer<$logos_lt, Token<$logos_lt>>,
       ) -> Result<Signed<$logos_slice>, TokenErrors> {
         use crate::graphqlx::syntactic::number::sign::{$handlers::Token as Sign, Rule};
+
+        // Inside a block no number carries a sign: the `-` is the operator.
+        if lexer.extras.in_const_block() {
+          return one(tt_hook(lexer)).map(|()| Signed::Operator);
+        }
 
         let mut sign = <Sign as Logos>::lexer(lexer.source());
         sign.bump(lexer.span().start);
@@ -206,6 +213,21 @@ macro_rules! token_impl {
       #[inline(always)]
       fn one<O>(answer: Result<O, TokenError>) -> Result<O, TokenErrors> {
         answer.map_err(TokenErrors::from)
+      }
+
+      /// The name rule's callback: a name; or, inside a block, when a quote touches the name, the
+      /// one lexeme the name and the literal make, read out of line.
+      #[allow(clippy::result_large_err)]
+      #[inline(always)]
+      fn name<$logos_lt>(
+        lexer: &mut tokora::logos::Lexer<$logos_lt, Token<$logos_lt>>,
+      ) -> Result<Named<$logos_slice>, TokenErrors> {
+        if lexer.extras.in_const_block()
+          && matches!(AsRef::<[u8]>::as_ref(&lexer.remainder()).first(), Some(b'"' | b'\''))
+        {
+          return handlers::$handlers::prefixed(lexer).map(Named::Prefixed);
+        }
+        one(tt_hook_map(lexer, |lexer| Named::Identifier(lexer.slice())))
       }
 
       impl<'b: $slice_lt, $slice_lt: 'b> tokora::Token<'b> for LosslessToken<$slice> {
@@ -289,8 +311,8 @@ macro_rules! token_impl {
         #[token("@", tt_hook)]
         At,
 
-        #[token(">", decrease_recursion_depth_and_increase_token)]
-        RAngle,
+        #[token(">", close_angle)]
+        RAngle(AngleCloser),
 
         #[token("}", close_brace)]
         RBrace,
@@ -313,7 +335,7 @@ macro_rules! token_impl {
         #[token("!", tt_hook)]
         Bang,
 
-        #[token("<", increase_recursion_depth_and_token)]
+        #[token("<", open_angle)]
         LAngle,
 
         #[token("{", open_brace)]
@@ -365,8 +387,8 @@ macro_rules! token_impl {
         #[token("=>", tt_hook)]
         FatArrow,
 
-        #[token(",", tt_hook)]
-        Comma,
+        #[token(",", comma)]
+        Comma(CommaRole),
 
         #[token(" ", tt_hook)]
         Space,
@@ -389,8 +411,8 @@ macro_rules! token_impl {
         #[regex($comment, |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::comment))]
         Comment($logos_slice),
 
-        #[regex("(?&ident)", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]
-        Identifier($logos_slice),
+        #[regex("(?&ident)", name)]
+        Identifier(Named<$logos_slice>),
 
         #[regex("(?&decimal)((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_decimal_suffix(lexer, FloatError::UnexpectedSuffix)))]
         #[regex(
@@ -457,7 +479,8 @@ macro_rules! token_impl {
             Token::Ampersand => Self::Ampersand,
             Token::At => Self::At,
             Token::Asterisk => Self::Asterisk,
-            Token::RAngle => Self::RAngle,
+            Token::RAngle(AngleCloser::Closer) => Self::RAngle,
+            Token::RAngle(AngleCloser::Shr) => Self::Shr,
             Token::RBrace => Self::RBrace,
             Token::RBracket => Self::RBracket,
             Token::RParen => Self::RParen,
@@ -474,7 +497,12 @@ macro_rules! token_impl {
             Token::Spread => Self::Spread,
             Token::Float($val) => Self::LitFloat(LitFloat::Decimal($convert)),
             Token::HexFloat($val) => Self::LitFloat(LitFloat::Hex($convert)),
-            Token::Identifier($val) => Self::Identifier($convert),
+            Token::Identifier(Named::Identifier($val)) => Self::Identifier($convert),
+            Token::Identifier(Named::Prefixed(lit)) => {
+              let (prefix, block) = (lit.prefix(), lit.is_block());
+              let $val = *lit.source_ref();
+              Self::LitPrefixedStr(LitPrefixedStr::new(prefix, block, $convert))
+            }
             Token::Decimal($val) => Self::LitInt(LitInt::Decimal($convert)),
             Token::Hex($val) => Self::LitInt(LitInt::Hex($convert)),
             Token::Binary($val) => Self::LitInt(LitInt::Binary($convert)),
@@ -503,7 +531,8 @@ macro_rules! token_impl {
               let $val = *lit.source_ref();
               Self::LitChar(LitChar::new($convert, value))
             }
-            Token::Comma => Self::Comma,
+            Token::Comma(CommaRole::Trivia) => Self::Comma,
+            Token::Comma(CommaRole::Separator) => Self::Separator,
             Token::Space => Self::Space,
             Token::Tab => Self::Tab,
             Token::Newline => Self::Newline,
@@ -540,7 +569,9 @@ macro_rules! token_impl {
       use crate::{
         error::StringErrors,
         graphqlx::lossless::LosslessState,
-        graphqlx::lossless::token::Signed,
+        graphqlx::lossless::token::{
+          AngleCloser, CommaRole, Named, Signed, close_angle, close_brace, comma, open_angle,
+        },
         graphqlx::{
           error::{LexerErrors, LexerError, DecimalError, HexError, FloatError, HexFloatError, BinaryError, OctalError},
           handlers::{
@@ -549,10 +580,10 @@ macro_rules! token_impl {
             open_brace,
           },
           lossless::{LosslessToken, LosslessTokenKind},
-          LitChar, LitInt, LitFloat,
+          LitChar, LitInt, LitFloat, LitPrefixedStr,
         },
         handlers::{
-          close_brace, decrease_recursion_depth_and_increase_token,
+          decrease_recursion_depth_and_increase_token,
           unterminated_spread_operator_error,
         },
         LitBlockStr, LitInlineStr, SealedWrapper,
@@ -574,6 +605,11 @@ macro_rules! token_impl {
         lexer: &mut tokora::logos::Lexer<$logos_lt, Token<$logos_lt>>,
       ) -> Result<Signed<$logos_slice>, TokenErrors> {
         use crate::graphqlx::syntactic::number::sign::{$handlers::Token as Sign, Rule};
+
+        // Inside a block no number carries a sign: the `-` is the operator.
+        if lexer.extras.in_const_block() {
+          return one(tt_hook(lexer)).map(|()| Signed::Operator);
+        }
 
         let mut sign = <Sign as Logos>::lexer(lexer.source());
         sign.bump(lexer.span().start);
@@ -699,6 +735,21 @@ macro_rules! token_impl {
         answer.map_err(TokenErrors::from)
       }
 
+      /// The name rule's callback: a name; or, inside a block, when a quote touches the name, the
+      /// one lexeme the name and the literal make, read out of line.
+      #[allow(clippy::result_large_err)]
+      #[inline(always)]
+      fn name<$logos_lt>(
+        lexer: &mut tokora::logos::Lexer<$logos_lt, Token<$logos_lt>>,
+      ) -> Result<Named<$logos_slice>, TokenErrors> {
+        if lexer.extras.in_const_block()
+          && matches!(AsRef::<[u8]>::as_ref(&lexer.remainder()).first(), Some(b'"' | b'\''))
+        {
+          return handlers::$handlers::prefixed(lexer).map(Named::Prefixed);
+        }
+        one(tt_hook_map(lexer, |lexer| Named::Identifier(lexer.slice())))
+      }
+
       impl tokora::Token<'_> for LosslessToken<$slice> {
         type Kind = LosslessTokenKind;
         type Error = TokenErrors;
@@ -780,8 +831,8 @@ macro_rules! token_impl {
         #[token("@", tt_hook)]
         At,
 
-        #[token(">", decrease_recursion_depth_and_increase_token)]
-        RAngle,
+        #[token(">", close_angle)]
+        RAngle(AngleCloser),
 
         #[token("}", close_brace)]
         RBrace,
@@ -804,7 +855,7 @@ macro_rules! token_impl {
         #[token("!", tt_hook)]
         Bang,
 
-        #[token("<", increase_recursion_depth_and_token)]
+        #[token("<", open_angle)]
         LAngle,
 
         #[token("{", open_brace)]
@@ -856,8 +907,8 @@ macro_rules! token_impl {
         #[token("=>", tt_hook)]
         FatArrow,
 
-        #[token(",", tt_hook)]
-        Comma,
+        #[token(",", comma)]
+        Comma(CommaRole),
 
         #[token(" ", tt_hook)]
         Space,
@@ -880,8 +931,8 @@ macro_rules! token_impl {
         #[regex($comment, |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::comment))]
         Comment($logos_slice),
 
-        #[regex("(?&ident)", |lexer| { tt_hook_map(lexer, |lexer| lexer.slice()) })]
-        Identifier($logos_slice),
+        #[regex("(?&ident)", name)]
+        Identifier(Named<$logos_slice>),
 
         #[regex("(?&decimal)((?&frac)(?&exp)|(?&frac)|(?&exp))", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_decimal_suffix(lexer, FloatError::UnexpectedSuffix)))]
         #[regex(
@@ -948,7 +999,8 @@ macro_rules! token_impl {
             Token::Ampersand => Self::Ampersand,
             Token::At => Self::At,
             Token::Asterisk => Self::Asterisk,
-            Token::RAngle => Self::RAngle,
+            Token::RAngle(AngleCloser::Closer) => Self::RAngle,
+            Token::RAngle(AngleCloser::Shr) => Self::Shr,
             Token::RBrace => Self::RBrace,
             Token::RBracket => Self::RBracket,
             Token::RParen => Self::RParen,
@@ -965,7 +1017,12 @@ macro_rules! token_impl {
             Token::Spread => Self::Spread,
             Token::Float($val) => Self::LitFloat(LitFloat::Decimal($convert)),
             Token::HexFloat($val) => Self::LitFloat(LitFloat::Hex($convert)),
-            Token::Identifier($val) => Self::Identifier($convert),
+            Token::Identifier(Named::Identifier($val)) => Self::Identifier($convert),
+            Token::Identifier(Named::Prefixed(lit)) => {
+              let (prefix, block) = (lit.prefix(), lit.is_block());
+              let $val = *lit.source_ref();
+              Self::LitPrefixedStr(LitPrefixedStr::new(prefix, block, $convert))
+            }
             Token::Decimal($val) => Self::LitInt(LitInt::Decimal($convert)),
             Token::Hex($val) => Self::LitInt(LitInt::Hex($convert)),
             Token::Binary($val) => Self::LitInt(LitInt::Binary($convert)),
@@ -994,7 +1051,8 @@ macro_rules! token_impl {
               let $val = *lit.source_ref();
               Self::LitChar(LitChar::new($convert, value))
             }
-            Token::Comma => Self::Comma,
+            Token::Comma(CommaRole::Trivia) => Self::Comma,
+            Token::Comma(CommaRole::Separator) => Self::Separator,
             Token::Space => Self::Space,
             Token::Tab => Self::Tab,
             Token::Newline => Self::Newline,
@@ -1042,5 +1100,119 @@ pub enum Signed<S> {
   Hex(S),
 }
 
+use tokora::{
+  logos::{Lexer, Logos, Source},
+  state::LimitExceeded,
+};
+
+use crate::{
+  graphqlx::{
+    LitPrefixedStr,
+    error::LexerError,
+    handlers::{increase_recursion_depth_and_token, tt_hook},
+    lossless::LosslessState,
+  },
+  handlers::decrease_recursion_depth_and_increase_token,
+};
+
 pub(super) use token;
 pub(super) use token_impl;
+
+/// What the grammar's `,` rule made: the trivia `Comma`; or, inside a `const { … }` block with no
+/// `<` open, the token `Separator`.
+///
+/// `pub` for the reason [`Signed`] is.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum CommaRole {
+  /// The trivia `Comma`.
+  Trivia,
+  /// The token `Separator`.
+  Separator,
+}
+
+/// What the grammar's `>` rule made: a closer; or, inside a `const { … }` block with no `<` open
+/// and a `>` after it, `Shr`, which took that `>` too.
+///
+/// `pub` for the reason [`Signed`] is.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum AngleCloser {
+  /// A closer.
+  Closer,
+  /// The shift `>>`.
+  Shr,
+}
+
+/// What the grammar's name rule made: a name; or, inside a `const { … }` block, a prefixed string,
+/// the one lexeme a name and the string it touches make.
+///
+/// `pub` for the reason [`Signed`] is.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub enum Named<S> {
+  /// A name.
+  Identifier(S),
+  /// A prefixed string.
+  Prefixed(LitPrefixedStr<S>),
+}
+
+/// The `,` rule's callback: one token's charge, as the trivia comma's, and which token it is.
+#[inline(always)]
+pub(super) fn comma<'a, C, T>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<CommaRole, LexerError<C, LimitExceeded>>
+where
+  T: Logos<'a, Extras = LosslessState>,
+{
+  let role = if lexer.extras.in_const_block() && lexer.extras.open_angles() == 0 {
+    CommaRole::Separator
+  } else {
+    CommaRole::Trivia
+  };
+  tt_hook(lexer).map(|()| role)
+}
+
+/// The `<` rule's callback: an opener's hook, with the block's count of open `<` stepped first,
+/// before the tally's check.
+#[inline(always)]
+pub(super) fn open_angle<'a, C, T>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<(), LexerError<C, LimitExceeded>>
+where
+  T: Logos<'a, Extras = LosslessState>,
+{
+  lexer.extras.open_angle();
+  increase_recursion_depth_and_token(lexer)
+}
+
+/// The `>` rule's callback. Inside a block with no `<` open and a `>` after it: the shift, which
+/// takes that `>`, charges one token and steps no tally. Otherwise a closer's hook, and inside a
+/// block with a `<` open, the count of open `<` lowered with the tally.
+#[inline(always)]
+pub(super) fn close_angle<'a, C, T>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<AngleCloser, LexerError<C, LimitExceeded>>
+where
+  T: Logos<'a, Extras = LosslessState>,
+  <T::Source as Source>::Slice<'a>: AsRef<[u8]>,
+{
+  if lexer.extras.in_const_block()
+    && lexer.extras.open_angles() == 0
+    && lexer.remainder().as_ref().first() == Some(&b'>')
+  {
+    lexer.bump(1);
+    return tt_hook(lexer).map(|()| AngleCloser::Shr);
+  }
+  lexer.extras.close_angle();
+  decrease_recursion_depth_and_increase_token(lexer);
+  Ok(AngleCloser::Closer)
+}
+
+/// The `}` rule's callback: a closing brace's hook, after the brace's clear of the block's count
+/// of open `<`, which outside a block is the identity.
+#[inline(always)]
+pub(super) fn close_brace<'a, T>(lexer: &mut Lexer<'a, T>)
+where
+  T: Logos<'a, Extras = LosslessState>,
+{
+  lexer.extras.clear_angles();
+  crate::handlers::close_brace(lexer);
+}

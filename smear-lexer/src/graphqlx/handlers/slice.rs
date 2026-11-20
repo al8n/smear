@@ -1,6 +1,6 @@
 use crate::{
   graphqlx::{
-    LitChar,
+    LitChar, LitPrefixedStr,
     error::{BinaryError, HexError, OctalError},
     lossless::LosslessState,
   },
@@ -12,6 +12,7 @@ use tokora::{
   SimpleSpan,
   error::UnexpectedEnd,
   logos::{Lexer, Logos, Source},
+  state::LimitExceeded,
   utils::Lexeme,
 };
 
@@ -584,4 +585,86 @@ where
     Ok(value) => Ok(LitChar::new(lexer.slice(), value)),
     Err(refusal) => Err(error::char_refusal(refusal, lexer.span().into())),
   }
+}
+
+/// The lossless name rule's callback inside a `const { … }` block, when a quote touches the name,
+/// over a byte source: one lexeme over the name and the literal after it. `b` or `i` before a
+/// string makes a prefixed string; any other name before a string, and any name before a `char`
+/// literal, is the reserved prefix's refusal, whose record holds the literal's own errors after its
+/// own. The literal is read first, so the lexeme's one charge is checked at its whole extent. Kept
+/// out of line: the name rule is the grammar's commonest, and this is the block's alone.
+#[allow(clippy::result_large_err)]
+#[inline(never)]
+pub(crate) fn prefixed<'a, S, T>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<LitPrefixedStr<S::Slice<'a>>, LexerErrors<LimitExceeded>>
+where
+  T: Logos<'a, Source = S, Extras = LosslessState>,
+  S: ?Sized + Source + 'a,
+  S::Slice<'a>: AsRef<[u8]>,
+{
+  use crate::{
+    LitBlockStr, LitInlineStr, SealedWrapper,
+    error::StringErrors,
+    graphqlx::{StrPrefix, error::TouchedLiteral},
+    string_lexer::{
+      byte_str::{ByteStr, ByteStrBody},
+      char_literal::{CharBody, CharLiteral},
+    },
+  };
+  use tokora::lexer::Lexable;
+
+  let quote = lexer.span().end;
+  let name = lexer.slice();
+  let prefix = match AsRef::<[u8]>::as_ref(&name) {
+    b"b" => Some(StrPrefix::Bytes),
+    b"i" => Some(StrPrefix::Id),
+    _ => None,
+  };
+  let rest = lexer.remainder();
+  let after: &[u8] = AsRef::<[u8]>::as_ref(&rest);
+  let char_literal = after.first() == Some(&b'\'');
+  let block = !char_literal && after.starts_with(b"\"\"\"");
+  let body: &[u8] = after.get(1..).unwrap_or_default();
+
+  // The literal, read to its end, and its refusal when it is refused.
+  let refused = if char_literal {
+    let CharLiteral { len, read } = <u8 as CharBody>::read_char_literal(body, quote);
+    lexer.bump(len);
+    read.err().map(TouchedLiteral::Char)
+  } else if prefix == Some(StrPrefix::Bytes) && !block {
+    let ByteStr { len, read } = <u8 as ByteStrBody>::read_byte_str(body, quote);
+    lexer.bump(len);
+    read.err().map(TouchedLiteral::String)
+  } else if block {
+    lexer.bump(3);
+    <LitBlockStr<S::Slice<'a>> as Lexable<_, StringErrors<u8>>>::lex(
+      SealedWrapper::<Lexer<'a, T>>::from_mut(lexer),
+    )
+    .err()
+    .map(TouchedLiteral::String)
+  } else {
+    lexer.bump(1);
+    <LitInlineStr<S::Slice<'a>> as Lexable<_, StringErrors<u8>>>::lex(
+      SealedWrapper::<Lexer<'a, T>>::from_mut(lexer),
+    )
+    .err()
+    .map(TouchedLiteral::String)
+  };
+  let end = lexer.span().end;
+
+  super::tt_hook_and_then_into_errors(lexer, |lexer: &mut Lexer<'a, T>| {
+    match (prefix, char_literal, refused) {
+      (Some(prefix), false, None) => match lexer.source().slice(quote..end) {
+        Some(slice) => Ok(LitPrefixedStr::new(prefix, block, slice)),
+        // Not reached: both ends are positions this lexer stood on. Refused all the same.
+        None => Err(error::prefixed_refusal(lexer.span().into(), true, None)),
+      },
+      (prefix, char_literal, refused) => Err(error::prefixed_refusal(
+        lexer.span().into(),
+        prefix.is_none() || char_literal,
+        refused,
+      )),
+    }
+  })
 }

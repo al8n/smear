@@ -10,8 +10,9 @@
 //! - **A fourth balanced pair.** GraphQLx's `<>` is depth-counted by the lexer alongside `()`,
 //!   `[]` and `{}` (`smear-lexer/src/graphqlx/syntactic/mod.rs:807-814`), so the `unclosed` list
 //!   below has four entries and [`crate::graphqlx::error::Unclosed`] a fourth variant.
-//! - **A wider image space.** Fourteen images GraphQL has no counterpart for — `<`, `>`, `::`,
-//!   `~`, `..`, `^`, `=>`, `*`, `+`, `-`, `/`, `%`, `<<` and a character literal — which is why [`crate::graphqlx::kinds::SyntaxKind`] cannot be
+//! - **A wider image space.** Seventeen images GraphQL has no counterpart for — `<`, `>`, `::`,
+//!   `~`, `..`, `^`, `=>`, `*`, `+`, `-`, `/`, `%`, `<<`, `>>`, a separating `,`, a character
+//!   literal and a prefixed string — which is why [`crate::graphqlx::kinds::SyntaxKind`] cannot be
 //!   GraphQL's space with a tail appended, and why [`kind_map`] is not GraphQL's mapper with arms
 //!   added.
 //! - **A different expectation vocabulary.** The two dialects' `Expectation` enums agree on their
@@ -254,8 +255,9 @@ crate::lossless::lossless_error_impls! {
 /// and are reached from productions that name a value shape directly.
 ///
 /// The ten rows GraphQL has no counterpart for — `<`, `>`, `*`, `+`, `-`, `::`, `~`, `..`, `^`,
-/// `=>` — are ten of the fourteen images that widened the kind space. No production expects the
-/// other four, `/`, `%`, `<<` and a character literal, so they have no row.
+/// `=>` — are ten of the seventeen images that widened the kind space. No production expects the
+/// other seven, `/`, `%`, `<<`, `>>`, a separating `,`, a character literal and a prefixed string,
+/// so they have no row.
 fn expectation_of(expected: Option<Expected<'_, LosslessTokenKind>>) -> Expectation {
   match expected {
     Some(Expected::One(kind)) => match kind {
