@@ -1185,17 +1185,21 @@ lossless_production! {
   ///
   /// `after_value` says whether that token directly follows a value. The run takes an expression's
   /// tokens, an operator's, a `>`, and a `^` after a value, into one `Error` with no report of its
-  /// own, and a value that follows them, read as the value it is. A `(` where the run would read a
-  /// value, and the `(` that begins the run, is skipped balanced to its own `)` into an `Error` of
-  /// its own, and counts as a value (R3′). A number whose token begins with `-` is a value wherever
-  /// it stands, as in `HOUR-1`. Any other value that follows a value ends the run, a `(` among
-  /// them, so in a list it is the next element, and a map entry's `=>` is left to the entry.
+  /// own, and a value that follows them, read as the value it is. A `(` that begins the run is
+  /// reported and taken by the shared balanced skip, as junk at every position the run begins at
+  /// was taken before the block was offered, so a member list keeps the members and the `)` that
+  /// skip leaves it; it counts as a value. A `(` where the run would read an operand is skipped to
+  /// its own `)` into an `Error` of its own, and counts as a value (R3′), so a map entry's `=>`
+  /// after it is the entry's. A number whose token begins with `-` is a value wherever it stands,
+  /// as in `HOUR-1`. Any other value that follows a value ends the run, a `(` among them, so in a
+  /// list it is the next element.
   fn expression_run<'inp, Src, Ctx>(inp, after_value: bool) {
     let mut after_value = after_value;
-    recover::report_unexpected::<Src, Ctx>(inp, CONST_BLOCK_HEADS)?;
     if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
-      expression_group::<Src, Ctx>(inp)?;
+      recover::unexpected::<Src, Ctx>(inp, CONST_BLOCK_HEADS)?;
       after_value = true;
+    } else {
+      recover::report_unexpected::<Src, Ctx>(inp, CONST_BLOCK_HEADS)?;
     }
     // Every turn consumes or returns: the tokens' arm takes at least the one it peeked, the group's
     // the `(` it peeked, and the value's arm reads a value whose head it peeked.
@@ -1242,8 +1246,8 @@ lossless_production! {
     Ok(())
   }
 
-  /// A `(` the run meets where a value may stand, and what it opens, to the `)` that balances it,
-  /// into one `Error` node, built as a skipped token's is and reported by no one.
+  /// A `(` the run meets where it would read an operand, and what it opens, to the `)` that
+  /// balances it, into one `Error` node, built as a skipped token's is and reported by no one.
   ///
   /// The `)` is the last token it takes, so the trivia after it is its caller's, and a map entry's
   /// `=>` after it is the entry's. A `]` or a `}` it did not open closes something around the
