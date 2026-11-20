@@ -628,7 +628,9 @@ where
 {
   match peeked.pop_front() {
     Some(token) if matches!(token.token(), GraphqlxToken::<'inp, Src>::RBrace) => Ok(Action::Stop),
-    Some(token) if SCHEMA && goes_on_with_an_expression(token.token().kind(), token.token()) => {
+    Some(token)
+      if SCHEMA && goes_on_with_an_expression::<Src>(token.token().kind(), token.token()) =>
+    {
       Err(expression_refused::<Src, Ctx>(
         token.token().kind(),
         *token.span(),
@@ -742,7 +744,9 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  match inp.peek_head_map(|token| goes_on_with_an_expression(token.data.kind(), token.data))? {
+  match inp
+    .peek_head_map(|token| goes_on_with_an_expression::<Src>(token.data.kind(), token.data))?
+  {
     Some(true) => unexpected_here(inp, Expectation::ConstBlock),
     _ => Ok(()),
   }
