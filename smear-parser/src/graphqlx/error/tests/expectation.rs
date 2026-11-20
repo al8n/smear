@@ -67,6 +67,10 @@ fn every_expectation_renders_as_the_object_of_expected() {
     ),
     (Expectation::Unspecified, ""),
     (Expectation::OperatorOrSeparator, "an operator or `,`"),
+    (
+      Expectation::ConstBlock,
+      "a `const { … }` block around the expression",
+    ),
   ] {
     assert_eq!(expectation.to_string(), text, "{expectation:?}");
   }

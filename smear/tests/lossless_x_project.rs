@@ -4301,6 +4301,16 @@ const SITES: &[Site] = &[
     "Ok",
     Absent::Token(K::ObjectValue, "}"),
   ),
+  // An expression outside a block: the block is offered at its first token, and the run keeps the
+  // operator as an `Error`, so the probe leaves a hole.
+  (
+    "value.rs",
+    "report",
+    "input I { a: u32 = HOUR - 1 }",
+    Root::Mixed,
+    "hole",
+    Absent::Not,
+  ),
   (
     "directive.rs",
     "unclosed",
@@ -4548,7 +4558,7 @@ fn every_report_and_build_site_has_a_measured_answer() {
   };
   assert_eq!(
     (total("report"), total("unclosed")),
-    (72, 22),
+    (73, 22),
     "the two families' populations"
   );
 

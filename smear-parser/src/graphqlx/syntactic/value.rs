@@ -21,7 +21,9 @@
 //! the `}`; inside, a block holds one expression, whose operand may be a parenthesis, a prefixed
 //! string `b"…"` or `i"…"`, a block inside the block, which switches nothing, or a list, a set, a
 //! map, an object or a typed form, whose members a `,` separates and each of which is an
-//! expression.
+//! expression. Outside a block an expression is refused at its first token, against the block it
+//! offers: an operator's token or a `(` at a value's head, and an operator's token, a `>` or a `^`
+//! after a value where no second value may follow.
 //!
 //! See the [GraphQL Input Values specification](https://spec.graphql.org/draft/#sec-Input-Values).
 
@@ -544,7 +546,10 @@ where
   })
 }
 
-fn decide_const_value_head<'inp, Src, Ctx>(
+/// The member test of a constant list: a value's head goes on, and in a schema position, where
+/// `SCHEMA` holds, so does an operator's token or a `(`, which the value's own dispatch then refuses
+/// for the block it offers.
+fn decide_const_value_head<'inp, Src, Ctx, const SCHEMA: bool>(
   mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U1>,
   _: EmitterView<'_, 'inp, GraphqlxLexer<'inp, Src>, Ctx::Emitter, GraphQLx>,
 ) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
@@ -563,6 +568,7 @@ where
 {
   Ok(match peeked.pop_front() {
     Some(token) if const_value_head(token.token()) => Action::Continue,
+    Some(token) if SCHEMA && begins_an_expression(token.token().kind()) => Action::Continue,
     _ => Action::Stop,
   })
 }
@@ -589,6 +595,115 @@ where
     Some(_) => Action::Continue,
     None => Action::Stop,
   })
+}
+
+/// The member test of a constant object and of a typed object: a `}` ends the fields, and in a
+/// schema position, where `SCHEMA` holds, what goes on with an expression is refused at the token
+/// the test peeked, against the block it offers.
+fn decide_field_member<'inp, Src, Ctx, const SCHEMA: bool>(
+  mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U1>,
+  _: EmitterView<'_, 'inp, GraphqlxLexer<'inp, Src>, Ctx::Emitter, GraphQLx>,
+) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  match peeked.pop_front() {
+    Some(token) if matches!(token.token(), GraphqlxToken::<'inp, Src>::RBrace) => Ok(Action::Stop),
+    Some(token) if SCHEMA && continues_an_expression(token.token().kind()) => Err(
+      expression_refused::<Src, Ctx>(token.token().kind(), *token.span()),
+    ),
+    Some(_) => Ok(Action::Continue),
+    None => Ok(Action::Stop),
+  }
+}
+
+/// Whether `kind` is one of the nine tokens an expression's operator is written with outside a
+/// block: `+`, `-`, `*`, `/`, `%`, `<<`, `&`, `|` and `!`.
+pub(super) const fn is_operator(kind: SyntacticTokenKind) -> bool {
+  matches!(
+    kind,
+    SyntacticTokenKind::Plus
+      | SyntacticTokenKind::Minus
+      | SyntacticTokenKind::Asterisk
+      | SyntacticTokenKind::Slash
+      | SyntacticTokenKind::Percent
+      | SyntacticTokenKind::Shl
+      | SyntacticTokenKind::Ampersand
+      | SyntacticTokenKind::Pipe
+      | SyntacticTokenKind::Bang
+  )
+}
+
+/// Whether `kind`, at a value's head in a schema position, begins an expression: an operator's
+/// token, or a `(`.
+const fn begins_an_expression(kind: SyntacticTokenKind) -> bool {
+  is_operator(kind) || matches!(kind, SyntacticTokenKind::LParen)
+}
+
+/// Whether `kind`, directly after a value where no second value may follow, can only go on with an
+/// expression: an operator's token, a `>`, which closes nothing there, or a `^`.
+pub(super) const fn continues_an_expression(kind: SyntacticTokenKind) -> bool {
+  is_operator(kind) || matches!(kind, SyntacticTokenKind::RAngle | SyntacticTokenKind::Caret)
+}
+
+/// The refusal of an expression's token in a schema position: what was found, where it was found,
+/// against a `const { … }` block around the expression.
+pub(super) fn expression_refused<'inp, Src, Ctx>(
+  kind: SyntacticTokenKind,
+  span: SimpleSpan,
+) -> GraphqlxError<'inp, Src, Ctx>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  DialectGraphqlxError::unexpected_token(kind, Expectation::ConstBlock, span).into()
+}
+
+/// After a value where no second value may follow, in a schema position: what goes on with an
+/// expression is refused at the token found, against the block it offers, and anything else is
+/// left for the reader that comes next. One read of the staged head, and no lex.
+pub(super) fn refuse_expression_after<'inp, Src, Ctx>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<(), GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  match super::peek_kind(inp)? {
+    Some(kind) if continues_an_expression(kind) => unexpected_here(inp, Expectation::ConstBlock),
+    _ => Ok(()),
+  }
 }
 
 value_parser!(
@@ -636,7 +751,7 @@ value_parser!(
   ConstList<GraphqlxSlice<'inp, Src>>,
   {
   (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| const_member::<Src, Ctx, SCHEMA>(inp))
-    .repeated_while::<_, U1>(decide_const_value_head::<_, Ctx>)
+    .repeated_while::<_, U1>(decide_const_value_head::<_, Ctx, SCHEMA>)
     .delimited_by_brackets()
     .collect_with(Default::default())
     .spanned_trimmed()
@@ -760,7 +875,7 @@ value_parser!(
   ConstObject<GraphqlxSlice<'inp, Src>>,
   {
   (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| const_field_member::<Src, Ctx, SCHEMA>(inp))
-    .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
+    .repeated_while::<_, U1>(decide_field_member::<_, Ctx, SCHEMA>)
     .delimited_by_braces()
     .collect_with(Default::default())
     .spanned_trimmed()
@@ -822,7 +937,18 @@ value_parser!(
   inp,
   ConstMapEntry<GraphqlxSlice<'inp, Src>>,
   {
-    const_member::<Src, Ctx, SCHEMA>
+    // In a schema position a key that an expression's token follows is refused there, against
+    // the block it offers, rather than at the missing `=>`.
+    (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| -> Result<
+      ConstInputValue<GraphqlxSlice<'inp, Src>>,
+      GraphqlxError<'inp, Src, Ctx>,
+    > {
+      let key = const_member::<Src, Ctx, SCHEMA>(inp)?;
+      if SCHEMA {
+        refuse_expression_after(inp)?;
+      }
+      Ok(key)
+    })
       .then_ignore(fat_arrow)
       .then(const_member::<Src, Ctx, SCHEMA>)
       .spanned_trimmed()
@@ -1288,6 +1414,11 @@ value_parser!(
         }
       }
       Some(SyntacticTokenKind::PathSeparator) => leading_path_separator(inp),
+      // In a schema position an operator's token or a `(` at a value's head begins an expression,
+      // which only a `const { … }` block reads: the block is offered.
+      Some(kind) if SCHEMA && begins_an_expression(kind) => {
+        unexpected_here(inp, Expectation::ConstBlock)
+      }
       _ => unexpected_here(inp, Expectation::ConstInputValue),
     },
   }
@@ -1387,7 +1518,7 @@ where
     }
     Some(SyntacticTokenKind::LBrace) => {
       (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| schema_object_field(inp))
-        .repeated_while::<_, U1>(decide_brace_member::<_, Ctx>)
+        .repeated_while::<_, U1>(decide_field_member::<_, Ctx, true>)
         .delimited_by_braces()
         .collect_with(Default::default())
         .spanned_trimmed()
@@ -1404,8 +1535,17 @@ where
       // Not the `Delimited`'s own span, as `committed_arguments` explains: the trimmed cursor is
       // the `(`'s own start, and the span since it ends at the `)`.
       let node_start = inp.cursor_trimmed()?;
+      // The one value, and then what goes on with an expression is refused where it stands,
+      // against the block it offers, rather than at the missing `)`.
       let parsed = parens::<_, _, _, _, ConstInputValue<GraphqlxSlice<'inp, Src>>, _>(
-        |inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| schema_value(inp),
+        |inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| -> Result<
+          ConstInputValue<GraphqlxSlice<'inp, Src>>,
+          GraphqlxError<'inp, Src, Ctx>,
+        > {
+          let value = schema_value(inp)?;
+          refuse_expression_after(inp)?;
+          Ok(value)
+        },
       )(inp)?;
       let (_, _, _, value) = parsed.into_components();
       let end = inp.span_since_trimmed(&node_start).end();

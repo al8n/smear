@@ -148,6 +148,13 @@ pub enum Expectation {
   /// Raised at a token that does neither, a second operand written beside the first among them, so
   /// the message names what is missing between the two.
   OperatorOrSeparator,
+  /// A `const { … }` block around the expression: what a schema position offers where its value
+  /// would be an expression, which only a block reads.
+  ///
+  /// Raised at the expression's first token: an operator's, or a `(`, at a value's head; and after
+  /// a value where no second value may follow, an operator's, a `>`, a `^` or a number written with
+  /// its `-`.
+  ConstBlock,
 }
 
 /// What a message says was expected, as the object of "expected …": punctuation and keywords in
@@ -205,6 +212,7 @@ impl core::fmt::Display for Expectation {
       Self::Production(production) => f.write_str(production),
       Self::Unspecified => Ok(()),
       Self::OperatorOrSeparator => f.write_str("an operator or `,`"),
+      Self::ConstBlock => f.write_str("a `const { … }` block around the expression"),
     }
   }
 }

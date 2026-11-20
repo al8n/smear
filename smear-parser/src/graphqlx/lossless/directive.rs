@@ -47,10 +47,13 @@ use super::coverage::node;
 
 use super::{
   GraphqlxLosslessInput, recover,
-  recover::{ARGUMENT_HEADS, PARENS_CLOSER_HEADS, closes_enclosing_block, opener_span},
+  recover::{
+    ARGUMENT_HEADS, PARENS_CLOSER_HEADS, closes_enclosing_block, continues_an_expression,
+    opener_span,
+  },
   trivia::{eat_if, expect, peek_kind},
   ty::type_path,
-  value::{Constness, required_value},
+  value::{Constness, expression_run, required_value},
 };
 
 use crate::lossless::{lossless_drivers, lossless_production};
@@ -104,6 +107,11 @@ lossless_production! {
               return recover::report_unexpected::<Src, Ctx>(inp, PARENS_CLOSER_HEADS);
             }
             Some(Kind::Identifier) => argument::<Src, Ctx>(inp, konst)?,
+            // At a schema position's member position, what goes on with an expression offers a
+            // block, and the run consumes.
+            Some(head) if konst == Constness::Schema && continues_an_expression(head) => {
+              expression_run::<Src, Ctx>(inp, true)?
+            }
             Some(_) => recover::unexpected::<Src, Ctx>(inp, ARGUMENT_HEADS)?,
           }
         }

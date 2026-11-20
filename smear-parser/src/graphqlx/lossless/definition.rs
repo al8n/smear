@@ -82,11 +82,12 @@ use super::{
   recover::{
     DESCRIBED_MEMBER_HEADS, FIELDS_BLOCK_HEADS, NAME_HEADS, OPERATION_TYPE_HEADS,
     PARENS_CLOSER_HEADS, PATH_HEADS, ROOT_OPERATION_TYPES_HEADS, TYPE_SYSTEM_DEFINITION_HEADS,
-    UNION_MEMBERS_HEADS, closes_enclosing_block, opener_span, starts_description,
+    UNION_MEMBERS_HEADS, closes_enclosing_block, continues_an_expression, opener_span,
+    starts_description,
   },
   trivia::{eat_if, expect, peek_as, peek_kind},
   ty::{type_path, type_ref},
-  value::{Constness, default_value},
+  value::{Constness, default_value, expression_run},
 };
 
 // The twenty directive-location spellings, from Task 7's macro. Written out per dialect
@@ -119,6 +120,12 @@ lossless_production! {
         // `DefaultValue` node and an absent default opens nothing.
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Equal) {
           default_value::<Src, Ctx>(inp, Constness::Schema)?;
+          // After a written default, what goes on with an expression offers a block, and the run
+          // reads on beside the `DefaultValue`, in the member's node. The read crosses what the
+          // directives' own probe crosses there, in the same node.
+          if peek_kind::<Src, Ctx>(inp)?.is_some_and(continues_an_expression) {
+            expression_run::<Src, Ctx>(inp, true)?;
+          }
         }
         directives::<Src, Ctx>(inp, Constness::Schema)
       },

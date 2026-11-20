@@ -259,13 +259,18 @@ crate::lossless::lossless_error_impls! {
 /// other seven, `/`, `%`, `<<`, `>>`, a separating `,`, a character literal and a prefixed string,
 /// so they have no row.
 ///
-/// A report through a head set answers [`Expectation::Unspecified`], whatever the set, but for one
-/// set read by its contents: inside a `const { … }` block, what may follow an operand, which
-/// answers [`Expectation::OperatorOrSeparator`] as the syntactic layer's refusal there does.
+/// A report through a head set answers [`Expectation::Unspecified`], whatever the set, but for two
+/// sets read by their contents: inside a `const { … }` block, what may follow an operand, which
+/// answers [`Expectation::OperatorOrSeparator`]; and the two tokens a block opens with, offered
+/// where a schema position's value would be an expression, which answers
+/// [`Expectation::ConstBlock`]. Each is what the syntactic layer's refusal there says.
 fn expectation_of(expected: Option<Expected<'_, LosslessTokenKind>>) -> Expectation {
   match expected {
     Some(Expected::OneOf(set)) if set.as_slice() == recover::OPERATOR_OR_SEPARATOR_HEADS => {
       Expectation::OperatorOrSeparator
+    }
+    Some(Expected::OneOf(set)) if set.as_slice() == recover::CONST_BLOCK_HEADS => {
+      Expectation::ConstBlock
     }
     Some(Expected::One(kind)) => match kind {
       LosslessTokenKind::Identifier => Expectation::Name,

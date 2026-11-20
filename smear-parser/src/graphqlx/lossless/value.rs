@@ -54,6 +54,11 @@
 //! nothing, and a list, a set, a map, an object and the typed forms, each of whose members is an
 //! `Expression` of its own, with a `Separator` between two.
 //!
+//! **8. Outside a block, an expression is refused at its first token,** against the block it
+//! offers: an operator's token or a `(` at a schema value's head, and an operator's token, a `>`
+//! or a `^` after a value where no second value may follow. One report, and then the run reads on
+//! for as long as the text is an expression, into the node the refusal stands in.
+//!
 //! What did **not** widen: an `ObjectField`'s key is still a plain `Name` (`object_field` in
 //! `graphqlx/syntactic/value.rs`, `name then_ignore(colon) then(value)`). Only the value side
 //! moved.
@@ -80,9 +85,10 @@ use super::coverage::{node, node_at};
 use super::{
   GraphqlxLosslessError, GraphqlxLosslessInput, Keyword, recover,
   recover::{
-    BLOCK_OPERAND_HEADS, BRACE_CLOSER_HEADS, CONST_VALUE_HEADS, LIST_CLOSER_HEADS,
-    OBJECT_FIELD_HEADS, OPERATOR_OR_SEPARATOR_HEADS, PARENS_CLOSER_HEADS, TYPED_FORM_HEADS,
-    VALUE_HEADS, closes_enclosing_block, is_closer, opener_span, starts_value,
+    BLOCK_OPERAND_HEADS, BRACE_CLOSER_HEADS, CONST_BLOCK_HEADS, CONST_VALUE_HEADS,
+    LIST_CLOSER_HEADS, OBJECT_FIELD_HEADS, OPERATOR_OR_SEPARATOR_HEADS, PARENS_CLOSER_HEADS,
+    TYPED_FORM_HEADS, VALUE_HEADS, closes_enclosing_block, continues_an_expression, is_closer,
+    is_operator, opener_span, starts_value,
   },
   trivia::{eat_if, expect, peek_as, peek_kind},
   ty::{path, path_root, path_tail, type_generics},
@@ -347,6 +353,11 @@ lossless_production! {
       match peek_kind::<Src, Ctx>(inp)? {
         None => return recover::unclosed_object::<Src, Ctx>(inp, open),
         Some(Kind::Identifier) => object_field::<Src, Ctx>(inp, konst)?,
+        // At a schema position's member position, what goes on with an expression offers a block,
+        // and the run consumes.
+        Some(head) if konst == Constness::Schema && continues_an_expression(head) => {
+          expression_run::<Src, Ctx>(inp, true)?
+        }
         // The head is checked here rather than left to `object_field`'s own `expect`, because
         // that `expect` would return `Err` and abort the whole value — the list's recovery
         // would then have no counterpart inside an object.
@@ -382,6 +393,13 @@ lossless_production! {
       K::MapEntry.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         value::<Src, Ctx>(inp, konst)?;
+        // After a schema position's key, what goes on with an expression offers a block, and the
+        // run reads on to the `=>`. The read is the one `expect` makes, in the same node.
+        if konst == Constness::Schema
+          && peek_kind::<Src, Ctx>(inp)?.is_some_and(continues_an_expression)
+        {
+          expression_run::<Src, Ctx>(inp, true)?;
+        }
         expect::<Src, Ctx>(inp, Kind::FatArrow)?;
         required_value::<Src, Ctx>(inp, konst)
       },
@@ -429,6 +447,15 @@ lossless_production! {
               // from doing the same, which is the same trade `object_value` makes.
               Collection::Map => map_entry::<Src, Ctx>(inp, konst)?,
             },
+            // A set's member in a schema position: an operator's token or a `(` begins an
+            // expression, which `value` offers a block for, and its run consumes.
+            Some(head)
+              if collection == Collection::Set
+                && konst == Constness::Schema
+                && (is_operator(head) || head == Kind::LParen) =>
+            {
+              value::<Src, Ctx>(inp, konst)?
+            }
             Some(_) => recover::unexpected::<Src, Ctx>(inp, VALUE_HEADS)?,
           }
         }
@@ -628,6 +655,11 @@ lossless_production! {
             None => return recover::unclosed_parens::<Src, Ctx>(inp, open),
             Some(Kind::RBrace) if closes_enclosing_block(open_at, inp.state().brace_depth()) => {
               return recover::report_unexpected::<Src, Ctx>(inp, PARENS_CLOSER_HEADS);
+            }
+            // After the one value a schema position's typed value holds, what goes on with an
+            // expression offers a block, and the run consumes.
+            Some(head) if konst == Constness::Schema && continues_an_expression(head) => {
+              expression_run::<Src, Ctx>(inp, true)?
             }
             // `unexpected` reports and consumes, so every turn returns or consumes.
             Some(_) => recover::unexpected::<Src, Ctx>(inp, PARENS_CLOSER_HEADS)?,
@@ -1121,8 +1153,66 @@ lossless_production! {
           Constness::Const | Constness::NonConst => enum_value::<Src, Ctx>(inp),
         },
       },
+      // In a schema position an operator's token or a `(` at a value's head begins an expression,
+      // which only a `const { … }` block reads: the block is offered, and the run reads on.
+      Some(head) if konst == Constness::Schema && (is_operator(head) || head == Kind::LParen) => {
+        expression_run::<Src, Ctx>(inp, false)
+      }
       _ => recover::unexpected::<Src, Ctx>(inp, konst.value_heads()),
     }
+  }
+
+  /// An expression written outside a block, at the token a schema position's reader found instead
+  /// of a value or of what follows one: reported once there, against a `const { … }` block, and read
+  /// on, into the node its caller has open, for as long as the text goes on being an expression.
+  ///
+  /// `after_value` says whether that token directly follows a value. The run takes an expression's
+  /// tokens, an operator's, a `>`, and a `^` after a value, into one `Error` with no report of its
+  /// own, and a value that follows them, read as the value it is. A value that follows a value ends
+  /// the run, so in a list it is the next element. A `(` that begins the run is skipped balanced
+  /// into the `Error` its report builds, and counts as a value; a `(` later in the run ends it.
+  fn expression_run<'inp, Src, Ctx>(inp, after_value: bool) {
+    let mut after_value = after_value;
+    if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
+      recover::unexpected::<Src, Ctx>(inp, CONST_BLOCK_HEADS)?;
+      after_value = true;
+    } else {
+      recover::report_unexpected::<Src, Ctx>(inp, CONST_BLOCK_HEADS)?;
+    }
+    // Every turn consumes or returns: the tokens' arm takes at least the one it peeked, and the
+    // value's arm reads a value whose head it peeked.
+    loop {
+      match peek_kind::<Src, Ctx>(inp)? {
+        Some(head)
+          if is_operator(head) || head == Kind::RAngle || (after_value && head == Kind::Caret) =>
+        {
+          expression_tokens::<Src, Ctx>(inp)?;
+          after_value = false;
+        }
+        Some(head) if !after_value && starts_value(head) => {
+          value::<Src, Ctx>(inp, Constness::Schema)?;
+          after_value = true;
+        }
+        _ => return Ok(()),
+      }
+    }
+  }
+
+  /// A run of an expression's tokens at the head, its first token any of them and every later one
+  /// an operator's or a `>`, into one `Error` node, built as a skipped token's is and reported by no
+  /// one: the run that reads them reported once, at its first token.
+  fn expression_tokens<'inp, Src, Ctx>(inp) {
+    let mark = inp.cst_mark();
+    loop {
+      inp.try_expect_or_stop(|_| true)?;
+      match peek_kind::<Src, Ctx>(inp)? {
+        Some(head) if is_operator(head) || head == Kind::RAngle => {}
+        _ => break,
+      }
+    }
+    inp.cst_start_at(mark, K::Error.raw());
+    inp.cst_finish(K::Error.raw());
+    Ok(())
   }
 }
 

@@ -333,6 +333,37 @@ pub(crate) const OPERATOR_OR_SEPARATOR_HEADS: &[Kind] = &[
   Kind::Separator,
 ];
 
+/// The two tokens a `const { … }` block opens with, `const` and `{`: what a schema position offers
+/// where its value would be an expression. A report through this set renders as
+/// [`ConstBlock`](crate::graphqlx::error::Expectation::ConstBlock), which no other set of this module
+/// has the contents of.
+pub(crate) const CONST_BLOCK_HEADS: &[Kind] = &[Kind::Identifier, Kind::LBrace];
+
+/// Whether `kind` is one of the nine tokens an expression's operator is written with outside a
+/// block: `+`, `-`, `*`, `/`, `%`, `<<`, `&`, `|` and `!`.
+#[inline]
+pub(crate) const fn is_operator(kind: Kind) -> bool {
+  matches!(
+    kind,
+    Kind::Plus
+      | Kind::Minus
+      | Kind::Asterisk
+      | Kind::Slash
+      | Kind::Percent
+      | Kind::Shl
+      | Kind::Ampersand
+      | Kind::Pipe
+      | Kind::Bang
+  )
+}
+
+/// Whether `kind`, directly after a value where no second value may follow, can only go on with an
+/// expression: an operator's token, a `>`, which closes nothing there, or a `^`.
+#[inline]
+pub(crate) const fn continues_an_expression(kind: Kind) -> bool {
+  is_operator(kind) || matches!(kind, Kind::RAngle | Kind::Caret)
+}
+
 /// Whether `kind` can begin a value.
 ///
 /// [`VALUE_HEADS`] as a predicate. The two are kept in step by

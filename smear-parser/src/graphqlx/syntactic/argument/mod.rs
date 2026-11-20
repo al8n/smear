@@ -24,7 +24,7 @@ use smear_lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
 use super::{
   GraphqlxError, GraphqlxInput, GraphqlxLexer, GraphqlxSlice, GraphqlxToken, try_name,
   unexpected_here,
-  value::{const_value, schema_value, value},
+  value::{const_value, continues_an_expression, expression_refused, schema_value, value},
 };
 use crate::{
   combinator::{ParseCtx, try_colon},
@@ -209,7 +209,10 @@ where
   const_argument_body::<Src, Ctx, true>(inp)
 }
 
-fn decide_argument_head<'inp, Src, Ctx>(
+/// The member test of an argument list: a `)` ends the arguments, and in a schema position, where
+/// `SCHEMA` holds, what goes on with an expression is refused at the token the test peeked, against
+/// the block it offers.
+fn decide_argument_head<'inp, Src, Ctx, const SCHEMA: bool>(
   mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U1>,
   _: EmitterView<'_, 'inp, GraphqlxLexer<'inp, Src>, Ctx::Emitter, GraphQLx>,
 ) -> Result<Action, GraphqlxError<'inp, Src, Ctx>>
@@ -225,12 +228,16 @@ where
       State = smear_lexer::graphqlx::syntactic::SyntacticState,
     >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  Ok(match peeked.pop_front() {
-    Some(token) if matches!(token.token(), GraphqlxToken::<'inp, Src>::RParen) => Action::Stop,
-    Some(_) => Action::Continue,
-    None => Action::Stop,
-  })
+  match peeked.pop_front() {
+    Some(token) if matches!(token.token(), GraphqlxToken::<'inp, Src>::RParen) => Ok(Action::Stop),
+    Some(token) if SCHEMA && continues_an_expression(token.token().kind()) => Err(
+      expression_refused::<Src, Ctx>(token.token().kind(), *token.span()),
+    ),
+    Some(_) => Ok(Action::Continue),
+    None => Ok(Action::Stop),
+  }
 }
 
 argument_parser!(
@@ -246,7 +253,7 @@ argument_parser!(
     let node_start = inp.cursor_trimmed()?;
     let parsed = parens::<_, _, _, _, Vec<Argument<GraphqlxSlice<'inp, Src>>>, _>(
       (|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| argument(inp))
-        .repeated_while::<_, U1>(decide_argument_head::<Src, Ctx>)
+        .repeated_while::<_, U1>(decide_argument_head::<Src, Ctx, false>)
         .collect_with(Vec::new()),
     )(inp)?;
     let (_, _, _, arguments) = parsed.into_components();
@@ -334,7 +341,7 @@ where
         const_argument(inp)
       }
     })
-    .repeated_while::<_, U1>(decide_argument_head::<Src, Ctx>)
+    .repeated_while::<_, U1>(decide_argument_head::<Src, Ctx, SCHEMA>)
     .collect_with(Vec::new()),
   )(inp)?;
   Ok(match parsed {

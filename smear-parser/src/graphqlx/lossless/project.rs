@@ -120,20 +120,22 @@
 //! GraphQLx's lossless productions **report and continue**: a violation goes on the diagnostic
 //! channel and the node is built anyway, so `Parse::has_errors()` sees it and the *shape* does not.
 //! Every one of those shapes reaches this projection looking well-formed, and each needs an
-//! answer. The population is every call that reports without building a hole — **72**
+//! answer. The population is every call that reports without building a hole — **73**
 //! `recover::report_unexpected::<…>` sites and **22** `recover::unclosed_{list,object,parens,angle}::<…>`
 //! sites across `graphqlx/lossless/*.rs`, the counts `grep -c` gives for those spellings — and
-//! **all 94 are mapped** in the table below, one probe each: a text that reaches the site with a
+//! **all 95 are mapped** in the table below, one probe each: a text that reaches the site with a
 //! hole-free tree, and what this projection answers for it. The table is executable:
 //! `every_report_and_build_site_has_a_measured_answer` holds the same rows, asserts their count
 //! per file and family against the source's own spelling of each call, and measures every answer.
 //!
-//! **One site has no hole-free probe**, and its row says so. A `(`, `[` or `<` list that meets a
+//! **Two sites have no hole-free probe**, and each row says so. A `(`, `[` or `<` list that meets a
 //! `}` closing a brace that was open before the list reports its own closer as missing and leaves
 //! the brace to the block around it — eight sites, one per list. Seven of them stand inside a
 //! block of the grammar, whose loop then takes the brace. A variables definition stands inside
 //! none: the brace open in front of it is one a failed definition left, and the `}` it leaves is a
-//! stray the root takes into an `Error`.
+//! stray the root takes into an `Error`. The other is the refusal of an expression written outside
+//! a `const { … }` block: the run that recovers it keeps the expression's tokens as an `Error`, so
+//! every text that reaches it leaves a hole.
 //!
 //! **The "what the site leaves out" column is where the lenient set comes from.** A site either
 //! leaves out one token with **no AST image** (a closer, `on`), leaves out a constituent
@@ -143,10 +145,10 @@
 //! without the token — and the cell derives the missing-token table below from exactly that and
 //! asserts the two are the same set.
 //!
-//! **Twenty-nine project; sixty-five refuse.** The twenty-nine are the lenient rows a site can leave
+//! **Twenty-nine project; sixty-six refuse.** The twenty-nine are the lenient rows a site can leave
 //! with a well-formed value. The others refuse either the shape the site built, or — for the
 //! unclosed sites whose definition the parser cannot finish at end of input — the rubble the
-//! document is left holding, or, for the one row above, the hole.
+//! document is left holding, or, for the two rows above, the hole.
 //!
 //! **A refusal in the last column is its variant and the kinds its payload names, in field order.**
 //! `UnexpectedChild(Document, InlineString)` reads "parent `Document`, found `InlineString`";
@@ -242,6 +244,7 @@
 //! | `value.rs` | report | `input I { a: T = const { [1 } }` | `]` of `ListValue` — **no image** | **projects** |
 //! | `value.rs` | unclosed | `input I { a: T = const { [1` | `]` of `ListValue` — **no image** | **projects** |
 //! | `value.rs` | unclosed | `input I { a: T = const { {b: 1` | `}` of `ObjectValue` — **no image** | **projects** |
+//! | `value.rs` | report | `input I { a: u32 = HOUR - 1 }` | nothing — a present token is refused | **a hole** — the run keeps the `-` as an `Error` |
 //! | `directive.rs` | unclosed | `{ f(a: 1` | `)` of `Arguments` — **no image** | **projects** |
 //! | `directive.rs` | report | `{ f(a: 1 }` | `)` of `Arguments` — **no image** | **projects** |
 //! | `ty.rs` | unclosed | `type T { f: A<B` | `>` of `TypeGenerics` — **no image** | **projects** |
