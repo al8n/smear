@@ -1,0 +1,6 @@
+OK  0..5  Identifier("const")
+OK  6..8  Identifier("KB")
+OK  8..9  Colon
+OK  10..13  Identifier("u32")
+OK  14..15  Equal
+OK  16..20  LitInt(Decimal("1024"))

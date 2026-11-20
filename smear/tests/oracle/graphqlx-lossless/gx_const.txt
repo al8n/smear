@@ -1,0 +1,10 @@
+OK  0..5  Identifier("const")
+OK  5..6  Space
+OK  6..8  Identifier("KB")
+OK  8..9  Colon
+OK  9..10  Space
+OK  10..13  Identifier("u32")
+OK  13..14  Space
+OK  14..15  Equal
+OK  15..16  Space
+OK  16..20  LitInt(Decimal("1024"))

@@ -1,0 +1,2 @@
+OK  0..6  LitInt(Hex("0x1f32"))
+OK  7..14  LitInt(Hex("0x1_f32"))

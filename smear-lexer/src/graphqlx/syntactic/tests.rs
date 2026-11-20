@@ -610,3 +610,28 @@ fn syntactic_token_kind_census() {
     Caret => SyntacticToken::Caret,
   }
 }
+
+/// Each GraphQLx token is the size of its largest payload, a block string literal: a slice, six
+/// `usize` and a `bool`, whose spare values hold the token's own discriminant. A payload that
+/// outgrew it would make every token larger, in a document that never writes one.
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn a_token_is_the_size_of_a_block_string_literal() {
+  use crate::{LitBlockStr, graphqlx::lossless::LosslessToken};
+
+  assert_eq!(
+    core::mem::size_of::<LitBlockStr<&str>>(),
+    72,
+    "a block string literal"
+  );
+  assert_eq!(
+    core::mem::size_of::<SyntacticToken<&str>>(),
+    72,
+    "the syntactic token"
+  );
+  assert_eq!(
+    core::mem::size_of::<LosslessToken<&str>>(),
+    72,
+    "the lossless token"
+  );
+}

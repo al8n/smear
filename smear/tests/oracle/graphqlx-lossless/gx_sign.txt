@@ -1,0 +1,30 @@
+OK  0..4  Identifier("HOUR")
+OK  4..6  LitInt(Decimal("-1"))
+OK  6..7  Newline
+OK  7..11  Identifier("HOUR")
+OK  11..12  Space
+OK  12..14  LitInt(Decimal("-1"))
+OK  14..15  Newline
+OK  15..16  Minus
+OK  16..17  Space
+OK  17..18  LitInt(Decimal("1"))
+OK  18..19  Newline
+OK  19..23  LitFloat(Decimal("1e-5"))
+OK  23..24  Newline
+ERR LexerErrors([LexerError { span: SimpleSpan { start: 24, end: 27 }, data: Float(MissingIntegerPart(SimpleSpan { start: 24, end: 27 })) }])
+OK  27..28  Newline
+ERR LexerErrors([LexerError { span: SimpleSpan { start: 28, end: 31 }, data: Hex(UnexpectedEnd(UnexpectedEnd { offset: 0, name: Some(CowStr { inner: "hex" }), hint: Digit, expected: None, terminal: false, _lang: PhantomData<()> })) }])
+OK  31..32  Newline
+OK  32..34  LitInt(Decimal("-5"))
+OK  34..35  Newline
+OK  35..39  LitFloat(Decimal("-2.5"))
+OK  39..40  Newline
+OK  40..45  LitInt(Hex("-0xFF"))
+OK  45..46  Newline
+OK  46..47  Minus
+OK  47..49  LitInt(Decimal("-5"))
+OK  49..50  Newline
+OK  50..51  Minus
+OK  51..52  Identifier("x")
+OK  52..53  Newline
+OK  53..54  Minus
