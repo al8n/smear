@@ -34,6 +34,38 @@ use crate::simd::{
   scan_identifier, scan_number, skip_ws_and_comma,
 };
 
+/// Whether the `.` that `bytes` begins with begins a number with no integer part, as the number
+/// grammars read one: `(?&frac)(?&exp)?`, a `.` and a run of digits and `_` that holds a digit, or
+/// `(?&hex_frac)(?&hex_exp)`, a `.`, a run of hexadecimal digits and `_` that holds a digit, and an
+/// exponent: `p` or `P`, a sign or none, and a run of digits and `_` that holds a digit.
+///
+/// It reads the number's own bytes and no further, so its cost is the token's.
+fn dot_begins_a_fraction(bytes: &[u8]) -> bool {
+  /// Whether `run` is a run of `digit`s and `_` holding at least one `digit`, before `rest`.
+  fn holds_a_digit(run: &[u8], digit: fn(&u8) -> bool) -> (bool, &[u8]) {
+    let len = run
+      .iter()
+      .take_while(|&byte: &&u8| digit(byte) || *byte == b'_')
+      .count();
+    let held = run.get(..len).unwrap_or_default();
+    (held.iter().any(digit), run.get(len..).unwrap_or_default())
+  }
+
+  let after = bytes.get(1..).unwrap_or_default();
+  if holds_a_digit(after, u8::is_ascii_digit).0 {
+    return true;
+  }
+  let (hex, rest) = holds_a_digit(after, u8::is_ascii_hexdigit);
+  let Some((b'p' | b'P', exponent)) = rest.split_first() else {
+    return false;
+  };
+  let exponent = match exponent.split_first() {
+    Some((b'+' | b'-', digits)) => digits,
+    _ => exponent,
+  };
+  hex && holds_a_digit(exponent, u8::is_ascii_digit).0
+}
+
 // The four whitespace bytes without the comma, which inside a `const { … }` block with no `<`
 // open is the token `Separator`. GraphQL's lexer never calls it.
 memspan::skip_class! {
@@ -1252,7 +1284,12 @@ where
           // and reports the exact "missing integer part" error (plus any chained
           // suffix error), so hand the whole token to it rather than
           // mis-emitting an unterminated-spread-operator error.
-          if matches!(bytes.get(1), Some(b'0'..=b'9')) {
+          //
+          // Inside a block the `-` before a fraction is an operator of its own, so the fraction
+          // after it is lexed alone, where the lossless grammar's longest match reads `._5` and
+          // `.ap1` as numbers too: the dispatch follows it there.
+          if matches!(bytes.get(1), Some(b'0'..=b'9')) || (IN_BLOCK && dot_begins_a_fraction(bytes))
+          {
             return self.delegate_number_to_logos(token_start);
           }
           // A lone `.` (or `.` before any non-digit) is an unterminated spread

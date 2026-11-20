@@ -402,3 +402,52 @@ fn a_refused_number_leaves_the_word_as_it_was() {
   }
   assert_eq!(seen, expected, "lossless");
 }
+
+/// Each item `lexer` answers, as its kind's name or its errors' `Debug`, with its span.
+macro_rules! items {
+  ($lexer:expr) => {{
+    let mut lexer = $lexer;
+    let mut items: Vec<(String, SimpleSpan)> = Vec::new();
+    while let Some(item) = lexer.lex() {
+      let what = match item {
+        Ok(token) => std::format!("{:?}", token.kind()),
+        Err(errors) => std::format!("{errors:?}"),
+      };
+      items.push((what, lexer.span()));
+    }
+    items
+  }};
+}
+
+/// Inside a block a `-` before a fraction is the operator, and the fraction after it is lexed
+/// alone, by the number grammars' longest match in both lexers: `-._5,` is `Minus`, one refusal
+/// over `._5`, and `Separator`, and a hexadecimal fraction with its exponent is one number too.
+#[test]
+fn a_fraction_after_a_blocks_minus_is_one_number_in_both_lexers() {
+  for src in [
+    "-._5,",
+    "-._5e3,",
+    "-.5,",
+    "-.ap1,",
+    "-._a_p-1_,",
+    "-._,",
+    "-.a,",
+    "-.ap,",
+  ] {
+    // No source here holds trivia, so the two streams compare item for item.
+    let syntactic = items!(SyntacticLexer::<str>::with_state(src, entered()));
+    let lossless = items!(LosslessLexer::<&str>::with_state(src, lossless_entered()));
+    assert_eq!(syntactic, lossless, "{src:?}");
+  }
+
+  let missing = "LexerErrors([LexerError { span: SimpleSpan { start: 1, end: 4 }, data: \
+                 Float(MissingIntegerPart(SimpleSpan { start: 1, end: 4 })) }])";
+  assert_eq!(
+    items!(SyntacticLexer::<str>::with_state("-._5,", entered())),
+    [
+      (String::from("Minus"), SimpleSpan::new(0, 1)),
+      (String::from(missing), SimpleSpan::new(1, 4)),
+      (String::from("Separator"), SimpleSpan::new(4, 5)),
+    ]
+  );
+}
