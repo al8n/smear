@@ -632,13 +632,13 @@ const TRIED: &[((&str, &str), usize)] = &[
 const TRIED_TOTAL: usize = 144_947;
 
 /// Skeleton-unfaithful: the no-panic obligation only.
-const UNFAITHFUL: usize = 128_339;
+const UNFAITHFUL: usize = 128_591;
 
 /// Skeleton-faithful, nothing lenient missing, and the projection equal to the parse.
-const EQUAL: usize = 12_440;
+const EQUAL: usize = 12_185;
 
 /// Skeleton-faithful, nothing lenient missing, and both refusing.
-const BOTH_REFUSE: usize = 3548;
+const BOTH_REFUSE: usize = 3551;
 
 /// Skeleton-faithful with a lenient token missing, and the projection equal to the restored parse.
 const LENIENT_EQUAL: usize = 486;

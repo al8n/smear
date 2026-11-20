@@ -2469,6 +2469,11 @@ fn a_typed_object_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
   );
 }
 
+/// One row of [`a_typed_form_adds_the_green_levels_its_rows_record`]: the chain's name, how a
+/// chain of a given depth is written, and the green levels its deepest clean parse measures.
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
+type GreenRow = (&'static str, fn(usize) -> String, usize);
+
 /// The green levels a typed form adds for each of its brackets, at a ceiling of `HARD_MAX`: the
 /// rows of `WORST_DOOR_GREEN_TREE`'s table in `smear-parser/src/lossless/project.rs` for the two
 /// shapes. For each, the deepest chain that parses clean — `HARD_MAX` open brackets, the input
@@ -2496,7 +2501,7 @@ fn a_typed_form_adds_the_green_levels_its_rows_record() {
   }
 
   let limits = || LosslessLimits::with_max_nesting_depth(HARD_MAX);
-  let rows: [(&str, fn(usize) -> String, usize); 2] = [
+  let rows: [GreenRow; 2] = [
     ("typed values", typed_values, 263),
     ("typed objects", typed_objects, 517),
   ];
