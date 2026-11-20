@@ -654,8 +654,8 @@ use tokora::SimpleSpan;
 use smear_lexer::{
   LitStr,
   graphqlx::{
-    ContextualKeyword, LitChar, LitFloat, LitInt, LitPrefixedStr, StrPrefix, identifier,
-    keyword::contextual_keyword,
+    ContextualKeyword, LitChar, LitFloat, LitInt, LitPrefixedStr, StrPrefix, float_in_block,
+    identifier, int_in_block, keyword::contextual_keyword,
   },
 };
 
@@ -1770,8 +1770,17 @@ fn inline_string_value<'src>(
 /// grammar. A refusal here means the tree labelled `Int` a slice the scanner will not read back as
 /// one — [`MalformedToken`](ProjectErrorKind::MalformedToken), reachable from a caller-minted tree
 /// and never from a parse, whose number tokens come from that scanner.
-fn int_lit(text: &str, span: SimpleSpan) -> Out<LitInt<&str>> {
-  LitInt::try_from(text).map_err(|_| {
+///
+/// Inside a `const { … }` block, where `in_block` holds, the slice is scanned as the scanner reads
+/// it there, from a state that has entered one: a number carries no sign in a block, so a tree that
+/// puts `-1` under a block's `IntValue` is refused, as no parse builds it.
+fn int_lit(text: &str, span: SimpleSpan, in_block: bool) -> Out<LitInt<&str>> {
+  let lit = if in_block {
+    int_in_block(text)
+  } else {
+    LitInt::try_from(text)
+  };
+  lit.map_err(|_| {
     ProjectError::new(
       ProjectErrorKind::MalformedToken(K::Int),
       span.start()..span.end(),
@@ -1784,9 +1793,15 @@ fn int_lit(text: &str, span: SimpleSpan) -> Out<LitInt<&str>> {
 ///
 /// The two doors do not coerce into each other: `LitFloat::try_from("0x1")` refuses rather than
 /// widening an integer, which is what makes a `Float`-labelled integer token a refusal here
-/// instead of a wrongly classified AST literal.
-fn float_lit(text: &str, span: SimpleSpan) -> Out<LitFloat<&str>> {
-  LitFloat::try_from(text).map_err(|_| {
+/// instead of a wrongly classified AST literal. Inside a block, `in_block`, it is scanned as
+/// [`int_lit`] scans there.
+fn float_lit(text: &str, span: SimpleSpan, in_block: bool) -> Out<LitFloat<&str>> {
+  let lit = if in_block {
+    float_in_block(text)
+  } else {
+    LitFloat::try_from(text)
+  };
+  lit.map_err(|_| {
     ProjectError::new(
       ProjectErrorKind::MalformedToken(K::Float),
       span.start()..span.end(),
@@ -4551,7 +4566,7 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
           span,
           range: extent,
         } = leaf(node, source, K::Int, "an integer literal")?;
-        return Ok((G::int(span, int_lit(text, span)?), extent));
+        return Ok((G::int(span, int_lit(text, span, in_block)?), extent));
       }
       K::FloatValue => {
         let LeafText {
@@ -4559,7 +4574,7 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
           span,
           range: extent,
         } = leaf(node, source, K::Float, "a float literal")?;
-        return Ok((G::float(span, float_lit(text, span)?), extent));
+        return Ok((G::float(span, float_lit(text, span, in_block)?), extent));
       }
       K::CharValue => {
         let LeafText {

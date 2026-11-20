@@ -93,6 +93,9 @@ All notable changes to Smear are documented in this file.
     reads the literal again through `LitChar`'s `TryFrom<&str>` door.
 - `smear-compiler`: a GraphQLx `char` literal is reported as `smear::graphqlx::unknown-item`, once
   for a file, at the literal, until the analyzer gives a `char` its meaning.
+- `smear-lexer`: `graphqlx::int_in_block` and `graphqlx::float_in_block`, the scanner's reading of
+  a slice as one whole numeric literal inside a `const { … }` block, where it reads no sign into a
+  number. The lossless projection re-reads a block's numeric leaves through them.
 - `smear-lexer`: outside a `const { … }` block too, the syntactic GraphQLx lexer reads a `.` that
   begins a fraction whose first digit is not the next byte, `._5` and `.ap1`, as one number with no
   integer part, refused as one, as the lossless lexer's longest match does. It used to refuse the

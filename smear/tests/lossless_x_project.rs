@@ -2836,6 +2836,59 @@ fn a_typed_form_named_what_the_value_head_reads_otherwise_refuses() {
 }
 
 #[test]
+fn a_signed_number_inside_a_block_refuses() {
+  // Inside a block the scanner reads no sign into a number, so neither parser builds a block whose
+  // operand is `-1`; a tree that puts one there is refused at the leaf.
+  let block = |node: K, token: K, literal: &str| {
+    let text = std::format!("scalar S@d(n:const{{{literal}}})");
+    let mut tree = Tree::new();
+    tree.open(K::Document);
+    tree.open(K::ScalarTypeDefinition);
+    tree.token(K::Name, "scalar").token(K::Space, " ");
+    tree.open(K::DefinitionName).token(K::Name, "S").close();
+    tree.one_argument("n", |tree| {
+      tree.open(K::ConstBlock);
+      tree.token(K::Name, "const").token(K::LBrace, "{");
+      tree.open(K::Expression);
+      tree.open(node).token(token, literal).close();
+      tree.close();
+      tree.token(K::RBrace, "}");
+      tree.close();
+    });
+    tree.close();
+    tree.close();
+    (tree.finish(), text)
+  };
+  let (tree, text) = block(K::IntValue, K::Int, "-1");
+  assert_eq!(
+    refuse_tree(tree, &text),
+    ProjectErrorKind::MalformedToken(K::Int)
+  );
+  let (tree, text) = block(K::FloatValue, K::Float, "-1.5");
+  assert_eq!(
+    refuse_tree(tree, &text),
+    ProjectErrorKind::MalformedToken(K::Float)
+  );
+  // The control: an unsigned operand is the block's, and outside a block a signed one projects.
+  let (tree, text) = block(K::IntValue, K::Int, "1");
+  assert!(
+    DocumentNode::cast_node(tree)
+      .expect("the synthetic root is a Document")
+      .to_ast(&text)
+      .is_ok(),
+    "{text}"
+  );
+  let (tree, text) = scalar_with_literal(K::IntValue, K::Int, "-1");
+  assert!(
+    DocumentNode::cast_node(tree)
+      .expect("the synthetic root is a Document")
+      .to_ast(&text)
+      .is_ok(),
+    "{text}"
+  );
+}
+
+#[test]
 fn a_tree_that_splits_a_token_projects_the_tree_it_was_handed() {
   // **A decision, not a defect** — see the module header's *what a tree the parser did not build is
   // promised*. Over `[-12]` a caller can build two adjacent `IntValue` tokens; each slice is one

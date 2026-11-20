@@ -585,6 +585,40 @@ pub fn identifier(value: &str) -> Result<&str, error::LexerErrors<char, Recursio
   }
 }
 
+/// The scanner's own reading of `value` as one whole integer literal inside a `const { … }` block,
+/// from a state that has entered one.
+///
+/// [`LitInt`]'s door for the block, and see [`LitInt::try_from`] for what "whole" means. The scanner
+/// reads no sign into a number there, so `-1` is a `-` and then an integer, and fails here as every
+/// other slice that is not one integer inside a block does.
+#[inline]
+pub fn int_in_block(
+  value: &str,
+) -> Result<LitInt<&str>, error::LexerErrors<char, RecursionLimitExceeded>> {
+  const WHAT: &str = "integer";
+  let mut state = syntactic::SyntacticState::default();
+  state.enter_const_block();
+  match scan_one_token_from(value, WHAT, state)? {
+    syntactic::SyntacticToken::LitInt(lit) => Ok(lit),
+    _ => Err(not_one_token(value.len(), WHAT)),
+  }
+}
+
+/// [`int_in_block`]'s twin for a float literal: the scanner's own reading of `value` as one whole
+/// float literal inside a `const { … }` block, where it reads no sign into a number.
+#[inline]
+pub fn float_in_block(
+  value: &str,
+) -> Result<LitFloat<&str>, error::LexerErrors<char, RecursionLimitExceeded>> {
+  const WHAT: &str = "float";
+  let mut state = syntactic::SyntacticState::default();
+  state.enter_const_block();
+  match scan_one_token_from(value, WHAT, state)? {
+    syntactic::SyntacticToken::LitFloat(lit) => Ok(lit),
+    _ => Err(not_one_token(value.len(), WHAT)),
+  }
+}
+
 impl<'de: 'a, 'a> TryFrom<&'de str> for LitInt<&'a str> {
   type Error = error::LexerErrors<char, RecursionLimitExceeded>;
 
