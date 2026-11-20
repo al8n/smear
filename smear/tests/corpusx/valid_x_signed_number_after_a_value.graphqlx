@@ -1,4 +1,4 @@
 input Bounds {
-  steps: [Int!]! = [1 -2]
-  limits: [Limit!]! = [MAX -1]
+  steps: Steps = [1 -2]
+  limits: Limits = [MAX -1]
 }

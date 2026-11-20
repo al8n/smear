@@ -611,29 +611,29 @@ const TRIED: &[((&str, &str), usize)] = &[
   (("executable", "retext"), 1942),
   (("executable", "swap"), 890),
   (("executable", "transplant"), 16_747),
-  (("mixed", "delete"), 4512),
-  (("mixed", "duplicate"), 4512),
+  (("mixed", "delete"), 4487),
+  (("mixed", "duplicate"), 4487),
   (("mixed", "retext"), 5921),
-  (("mixed", "swap"), 2324),
-  (("mixed", "transplant"), 50_151),
-  (("type-system", "delete"), 2830),
-  (("type-system", "duplicate"), 2830),
+  (("mixed", "swap"), 2304),
+  (("mixed", "transplant"), 49_554),
+  (("type-system", "delete"), 2810),
+  (("type-system", "duplicate"), 2810),
   (("type-system", "retext"), 4042),
-  (("type-system", "swap"), 1423),
-  (("type-system", "transplant"), 29_308),
+  (("type-system", "swap"), 1407),
+  (("type-system", "transplant"), 28_964),
 ];
 
 /// Mutations tried in total.
-const TRIED_TOTAL: usize = 130_766;
+const TRIED_TOTAL: usize = 129_699;
 
 /// Skeleton-unfaithful: the no-panic obligation only.
-const UNFAITHFUL: usize = 115_112;
+const UNFAITHFUL: usize = 114_168;
 
 /// Skeleton-faithful, nothing lenient missing, and the projection equal to the parse.
-const EQUAL: usize = 11_430;
+const EQUAL: usize = 11_336;
 
 /// Skeleton-faithful, nothing lenient missing, and both refusing.
-const BOTH_REFUSE: usize = 3624;
+const BOTH_REFUSE: usize = 3595;
 
 /// Skeleton-faithful with a lenient token missing, and the projection equal to the restored parse.
 const LENIENT_EQUAL: usize = 470;

@@ -3,7 +3,7 @@ input Glyphs {
   newline: Char = '\n'
   quote: Char = '"'
   apostrophe: Char = '\''
-  row: [Char!]! = ['a', '\n', '"', '\'']
+  row: Row = ['a', '\n', '"', '\'']
 }
 
 query Q($c: Char = 'a') {

@@ -1,12 +1,12 @@
-Root@0..117
-  Document@0..117
-    InputObjectTypeDefinition@0..116
+Root@0..115
+  Document@0..115
+    InputObjectTypeDefinition@0..114
       Name@0..5 "input"
       Space@5..6 " "
       DefinitionName@6..12
         Name@6..11 "Masks"
         Space@11..12 " "
-      InputFieldsDefinition@12..116
+      InputFieldsDefinition@12..114
         LBrace@12..13 "{"
         Newline@13..14 "\n"
         Space@14..15 " "
@@ -59,55 +59,45 @@ Root@0..117
           Newline@69..70 "\n"
           Space@70..71 " "
           Space@71..72 " "
-        InputValueDefinition@72..94
+        InputValueDefinition@72..93
           Name@72..75 "one"
           Colon@75..76 ":"
           Space@76..77 " "
-          ListType@77..83
-            LBracket@77..78 "["
-            DefinitionTypePath@78..81
-              Path@78..80
-                Name@78..80 "u8"
-              Bang@80..81 "!"
-            RBracket@81..82 "]"
-            Bang@82..83 "!"
-          Space@83..84 " "
-          DefaultValue@84..91
-            Equal@84..85 "="
-            Space@85..86 " "
-            ListValue@86..91
-              LBracket@86..87 "["
-              IntValue@87..90
-                Int@87..90 "1u8"
-              RBracket@90..91 "]"
-          Newline@91..92 "\n"
+          DefinitionTypePath@77..83
+            Path@77..83
+              Name@77..82 "Bytes"
+              Space@82..83 " "
+          DefaultValue@83..90
+            Equal@83..84 "="
+            Space@84..85 " "
+            ListValue@85..90
+              LBracket@85..86 "["
+              IntValue@86..89
+                Int@86..89 "1u8"
+              RBracket@89..90 "]"
+          Newline@90..91 "\n"
+          Space@91..92 " "
           Space@92..93 " "
-          Space@93..94 " "
-        InputValueDefinition@94..115
-          Name@94..97 "two"
-          Colon@97..98 ":"
-          Space@98..99 " "
-          ListType@99..105
-            LBracket@99..100 "["
-            DefinitionTypePath@100..103
-              Path@100..102
-                Name@100..102 "u8"
-              Bang@102..103 "!"
-            RBracket@103..104 "]"
-            Bang@104..105 "!"
-          Space@105..106 " "
-          DefaultValue@106..114
-            Equal@106..107 "="
-            Space@107..108 " "
-            ListValue@108..114
-              LBracket@108..109 "["
-              IntValue@109..110
-                Int@109..110 "1"
-              Space@110..111 " "
-              EnumValue@111..113
-                Path@111..113
-                  Name@111..113 "u8"
-              RBracket@113..114 "]"
-          Newline@114..115 "\n"
-        RBrace@115..116 "}"
-    Newline@116..117 "\n"
+        InputValueDefinition@93..113
+          Name@93..96 "two"
+          Colon@96..97 ":"
+          Space@97..98 " "
+          DefinitionTypePath@98..104
+            Path@98..104
+              Name@98..103 "Bytes"
+              Space@103..104 " "
+          DefaultValue@104..112
+            Equal@104..105 "="
+            Space@105..106 " "
+            ListValue@106..112
+              LBracket@106..107 "["
+              IntValue@107..108
+                Int@107..108 "1"
+              Space@108..109 " "
+              EnumValue@109..111
+                Path@109..111
+                  Name@109..111 "u8"
+              RBracket@111..112 "]"
+          Newline@112..113 "\n"
+        RBrace@113..114 "}"
+    Newline@114..115 "\n"

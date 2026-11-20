@@ -1,68 +1,58 @@
-Root@0..74
-  Document@0..74
-    InputObjectTypeDefinition@0..73
+Root@0..69
+  Document@0..69
+    InputObjectTypeDefinition@0..68
       Name@0..5 "input"
       Space@5..6 " "
       DefinitionName@6..13
         Name@6..12 "Bounds"
         Space@12..13 " "
-      InputFieldsDefinition@13..73
+      InputFieldsDefinition@13..68
         LBrace@13..14 "{"
         Newline@14..15 "\n"
         Space@15..16 " "
         Space@16..17 " "
-        InputValueDefinition@17..43
+        InputValueDefinition@17..41
           Name@17..22 "steps"
           Colon@22..23 ":"
           Space@23..24 " "
-          ListType@24..31
-            LBracket@24..25 "["
-            DefinitionTypePath@25..29
-              Path@25..28
-                Name@25..28 "Int"
-              Bang@28..29 "!"
-            RBracket@29..30 "]"
-            Bang@30..31 "!"
-          Space@31..32 " "
-          DefaultValue@32..40
-            Equal@32..33 "="
-            Space@33..34 " "
-            ListValue@34..40
-              LBracket@34..35 "["
-              IntValue@35..36
-                Int@35..36 "1"
-              Space@36..37 " "
-              IntValue@37..39
-                Int@37..39 "-2"
-              RBracket@39..40 "]"
-          Newline@40..41 "\n"
-          Space@41..42 " "
-          Space@42..43 " "
-        InputValueDefinition@43..72
-          Name@43..49 "limits"
-          Colon@49..50 ":"
-          Space@50..51 " "
-          ListType@51..60
-            LBracket@51..52 "["
-            DefinitionTypePath@52..58
-              Path@52..57
-                Name@52..57 "Limit"
-              Bang@57..58 "!"
-            RBracket@58..59 "]"
-            Bang@59..60 "!"
-          Space@60..61 " "
-          DefaultValue@61..71
-            Equal@61..62 "="
-            Space@62..63 " "
-            ListValue@63..71
-              LBracket@63..64 "["
-              EnumValue@64..68
-                Path@64..68
-                  Name@64..67 "MAX"
-                  Space@67..68 " "
-              IntValue@68..70
-                Int@68..70 "-1"
-              RBracket@70..71 "]"
-          Newline@71..72 "\n"
-        RBrace@72..73 "}"
-    Newline@73..74 "\n"
+          DefinitionTypePath@24..30
+            Path@24..30
+              Name@24..29 "Steps"
+              Space@29..30 " "
+          DefaultValue@30..38
+            Equal@30..31 "="
+            Space@31..32 " "
+            ListValue@32..38
+              LBracket@32..33 "["
+              IntValue@33..34
+                Int@33..34 "1"
+              Space@34..35 " "
+              IntValue@35..37
+                Int@35..37 "-2"
+              RBracket@37..38 "]"
+          Newline@38..39 "\n"
+          Space@39..40 " "
+          Space@40..41 " "
+        InputValueDefinition@41..67
+          Name@41..47 "limits"
+          Colon@47..48 ":"
+          Space@48..49 " "
+          DefinitionTypePath@49..56
+            Path@49..56
+              Name@49..55 "Limits"
+              Space@55..56 " "
+          DefaultValue@56..66
+            Equal@56..57 "="
+            Space@57..58 " "
+            ListValue@58..66
+              LBracket@58..59 "["
+              EnumValue@59..63
+                Path@59..63
+                  Name@59..62 "MAX"
+                  Space@62..63 " "
+              IntValue@63..65
+                Int@63..65 "-1"
+              RBracket@65..66 "]"
+          Newline@66..67 "\n"
+        RBrace@67..68 "}"
+    Newline@68..69 "\n"

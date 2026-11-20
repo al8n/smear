@@ -1,12 +1,12 @@
-Root@0..242
-  Document@0..242
-    InputObjectTypeDefinition@0..147
+Root@0..237
+  Document@0..237
+    InputObjectTypeDefinition@0..142
       Name@0..5 "input"
       Space@5..6 " "
       DefinitionName@6..13
         Name@6..12 "Glyphs"
         Space@12..13 " "
-      InputFieldsDefinition@13..147
+      InputFieldsDefinition@13..142
         LBrace@13..14 "{"
         Newline@14..15 "\n"
         Space@15..16 " "
@@ -75,130 +75,125 @@ Root@0..242
           Newline@104..105 "\n"
           Space@105..106 " "
           Space@106..107 " "
-        InputValueDefinition@107..146
+        InputValueDefinition@107..141
           Name@107..110 "row"
           Colon@110..111 ":"
           Space@111..112 " "
-          ListType@112..120
-            LBracket@112..113 "["
-            DefinitionTypePath@113..118
-              Path@113..117
-                Name@113..117 "Char"
-              Bang@117..118 "!"
-            RBracket@118..119 "]"
-            Bang@119..120 "!"
-          Space@120..121 " "
-          DefaultValue@121..145
-            Equal@121..122 "="
-            Space@122..123 " "
-            ListValue@123..145
-              LBracket@123..124 "["
-              CharValue@124..127
-                Char@124..127 "'a'"
-              Comma@127..128 ","
-              Space@128..129 " "
-              CharValue@129..133
-                Char@129..133 "'\\n'"
+          DefinitionTypePath@112..116
+            Path@112..116
+              Name@112..115 "Row"
+              Space@115..116 " "
+          DefaultValue@116..140
+            Equal@116..117 "="
+            Space@117..118 " "
+            ListValue@118..140
+              LBracket@118..119 "["
+              CharValue@119..122
+                Char@119..122 "'a'"
+              Comma@122..123 ","
+              Space@123..124 " "
+              CharValue@124..128
+                Char@124..128 "'\\n'"
+              Comma@128..129 ","
+              Space@129..130 " "
+              CharValue@130..133
+                Char@130..133 "'\"'"
               Comma@133..134 ","
               Space@134..135 " "
-              CharValue@135..138
-                Char@135..138 "'\"'"
-              Comma@138..139 ","
-              Space@139..140 " "
-              CharValue@140..144
-                Char@140..144 "'\\''"
-              RBracket@144..145 "]"
-          Newline@145..146 "\n"
-        RBrace@146..147 "}"
-    Newline@147..148 "\n"
-    Newline@148..149 "\n"
-    OperationDefinition@149..241
-      Name@149..154 "query"
-      Space@154..155 " "
-      DefinitionName@155..156
-        Name@155..156 "Q"
-      VariablesDefinition@156..172
-        LParen@156..157 "("
-        VariableDefinition@157..171
-          VariableValue@157..159
-            Dollar@157..158 "$"
-            Name@158..159 "c"
-          Colon@159..160 ":"
-          Space@160..161 " "
-          DefinitionTypePath@161..166
-            Path@161..166
-              Name@161..165 "Char"
-              Space@165..166 " "
-          DefaultValue@166..171
-            Equal@166..167 "="
-            Space@167..168 " "
-            CharValue@168..171
-              Char@168..171 "'a'"
-        RParen@171..172 ")"
-      Space@172..173 " "
-      SelectionSet@173..241
-        LBrace@173..174 "{"
-        Newline@174..175 "\n"
-        Space@175..176 " "
-        Space@176..177 " "
-        Field@177..240
-          Name@177..182 "glyph"
-          Arguments@182..239
-            LParen@182..183 "("
-            Argument@183..190
-              Name@183..184 "c"
-              Colon@184..185 ":"
-              Space@185..186 " "
-              CharValue@186..190
-                Char@186..190 "'\\''"
-            Comma@190..191 ","
-            Space@191..192 " "
-            Argument@192..203
-              Name@192..193 "o"
-              Colon@193..194 ":"
-              Space@194..195 " "
-              ObjectValue@195..203
-                LBrace@195..196 "{"
-                ObjectField@196..202
-                  Name@196..197 "c"
-                  Colon@197..198 ":"
-                  Space@198..199 " "
-                  CharValue@199..202
-                    Char@199..202 "'b'"
-                RBrace@202..203 "}"
-            Comma@203..204 ","
-            Space@204..205 " "
-            Argument@205..217
-              Name@205..206 "s"
-              Colon@206..207 ":"
-              Space@207..208 " "
-              SetValue@208..217
-                Name@208..211 "set"
-                Bang@211..212 "!"
-                LBrace@212..213 "{"
-                CharValue@213..216
-                  Char@213..216 "'c'"
-                RBrace@216..217 "}"
-            Comma@217..218 ","
-            Space@218..219 " "
-            Argument@219..238
-              Name@219..220 "m"
-              Colon@220..221 ":"
-              Space@221..222 " "
-              MapValue@222..238
-                Name@222..225 "map"
-                Bang@225..226 "!"
-                LBrace@226..227 "{"
-                MapEntry@227..237
-                  CharValue@227..230
-                    Char@227..230 "'d'"
-                  Space@230..231 " "
-                  FatArrow@231..233 "=>"
-                  Space@233..234 " "
-                  CharValue@234..237
-                    Char@234..237 "'e'"
-                RBrace@237..238 "}"
-            RParen@238..239 ")"
-          Newline@239..240 "\n"
-        RBrace@240..241 "}"
-    Newline@241..242 "\n"
+              CharValue@135..139
+                Char@135..139 "'\\''"
+              RBracket@139..140 "]"
+          Newline@140..141 "\n"
+        RBrace@141..142 "}"
+    Newline@142..143 "\n"
+    Newline@143..144 "\n"
+    OperationDefinition@144..236
+      Name@144..149 "query"
+      Space@149..150 " "
+      DefinitionName@150..151
+        Name@150..151 "Q"
+      VariablesDefinition@151..167
+        LParen@151..152 "("
+        VariableDefinition@152..166
+          VariableValue@152..154
+            Dollar@152..153 "$"
+            Name@153..154 "c"
+          Colon@154..155 ":"
+          Space@155..156 " "
+          DefinitionTypePath@156..161
+            Path@156..161
+              Name@156..160 "Char"
+              Space@160..161 " "
+          DefaultValue@161..166
+            Equal@161..162 "="
+            Space@162..163 " "
+            CharValue@163..166
+              Char@163..166 "'a'"
+        RParen@166..167 ")"
+      Space@167..168 " "
+      SelectionSet@168..236
+        LBrace@168..169 "{"
+        Newline@169..170 "\n"
+        Space@170..171 " "
+        Space@171..172 " "
+        Field@172..235
+          Name@172..177 "glyph"
+          Arguments@177..234
+            LParen@177..178 "("
+            Argument@178..185
+              Name@178..179 "c"
+              Colon@179..180 ":"
+              Space@180..181 " "
+              CharValue@181..185
+                Char@181..185 "'\\''"
+            Comma@185..186 ","
+            Space@186..187 " "
+            Argument@187..198
+              Name@187..188 "o"
+              Colon@188..189 ":"
+              Space@189..190 " "
+              ObjectValue@190..198
+                LBrace@190..191 "{"
+                ObjectField@191..197
+                  Name@191..192 "c"
+                  Colon@192..193 ":"
+                  Space@193..194 " "
+                  CharValue@194..197
+                    Char@194..197 "'b'"
+                RBrace@197..198 "}"
+            Comma@198..199 ","
+            Space@199..200 " "
+            Argument@200..212
+              Name@200..201 "s"
+              Colon@201..202 ":"
+              Space@202..203 " "
+              SetValue@203..212
+                Name@203..206 "set"
+                Bang@206..207 "!"
+                LBrace@207..208 "{"
+                CharValue@208..211
+                  Char@208..211 "'c'"
+                RBrace@211..212 "}"
+            Comma@212..213 ","
+            Space@213..214 " "
+            Argument@214..233
+              Name@214..215 "m"
+              Colon@215..216 ":"
+              Space@216..217 " "
+              MapValue@217..233
+                Name@217..220 "map"
+                Bang@220..221 "!"
+                LBrace@221..222 "{"
+                MapEntry@222..232
+                  CharValue@222..225
+                    Char@222..225 "'d'"
+                  Space@225..226 " "
+                  FatArrow@226..228 "=>"
+                  Space@228..229 " "
+                  CharValue@229..232
+                    Char@229..232 "'e'"
+                RBrace@232..233 "}"
+            RParen@233..234 ")"
+          Newline@234..235 "\n"
+        RBrace@235..236 "}"
+    Newline@236..237 "\n"
