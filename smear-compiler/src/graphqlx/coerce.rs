@@ -616,7 +616,7 @@ pub(crate) fn coerce(
     recorded: Vec::new(),
     checked: BTreeMap::new(),
     written: BTreeSet::new(),
-    owned: BTreeSet::new(),
+    owned_counts: BTreeSet::new(),
     beneath: BTreeMap::new(),
     claimed: BTreeSet::new(),
     paid: 0,
@@ -1656,7 +1656,7 @@ struct Coercion<'c, 'p, 'x> {
   /// them, and each count beneath the default an application reports. The check of a derived
   /// instantiation passes over a row whose value, counted against the type it takes there, is one
   /// of them.
-  owned: BTreeSet<CountKey>,
+  owned_counts: BTreeSet<CountKey>,
   /// Each judged count that does not fit because a count it reads does not, with each such count:
   /// what a report that owns the first owns too.
   beneath: BTreeMap<CountKey, Vec<CountKey>>,
@@ -2879,7 +2879,7 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// own, which this report does not own.
   fn claim_beneath(&mut self, key: CountKey) {
     // Claimed beneath already, by this report's default or by a claim of the default itself.
-    if self.owned.contains(&key) || !self.claimed.insert(key) {
+    if self.owned_counts.contains(&key) || !self.claimed.insert(key) {
       return;
     }
     let count = self.beneath.get(&key).map_or(0, Vec::len);
@@ -2902,7 +2902,7 @@ impl<'p> Coercion<'_, 'p, '_> {
   fn claim(&mut self, key: CountKey) {
     let mut stack: Vec<CountKey> = vec![key];
     while let Some(key) = stack.pop() {
-      if !self.owned.insert(key) {
+      if !self.owned_counts.insert(key) {
         continue;
       }
       if let Some(below) = self.beneath.get(&key) {

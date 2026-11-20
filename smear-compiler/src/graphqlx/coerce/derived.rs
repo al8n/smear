@@ -379,17 +379,29 @@ impl Coercion<'_, '_, '_> {
         defs.push(row.def);
       }
     }
+    // A definition a recorded value made relevant already is not asked about: its answer could add
+    // nothing, and the lookups it would spend are the other definitions'.
     for index in 0..count {
       let def = DefId::new(index);
       if self.builder.type_param_count(def) > 0
-        && self.judged_when_implemented(def, &mut declared)
         && let Some(slot) = building.relevant.get_mut(index as usize)
         && !*slot
+        && self.judged_when_implemented(def, &mut declared)
       {
         *slot = true;
         defs.push(def);
       }
     }
+    debug_assert!(
+      self.recorded.iter().all(|row: &Recorded| {
+        building
+          .relevant
+          .get(row.def.get() as usize)
+          .copied()
+          .unwrap_or(false)
+      }),
+      "the seed holds every definition whose recorded rows a derived instantiation's check reads"
+    );
     if defs.is_empty() {
       return;
     }
@@ -1150,7 +1162,7 @@ impl Coercion<'_, '_, '_> {
       return false;
     };
     match self.rebuilt(written, ty, def, false) {
-      Ok(Some(under)) => self.owned.contains(&CountKey {
+      Ok(Some(under)) => self.owned_counts.contains(&CountKey {
         tree,
         ty: Some(under),
       }),
@@ -1320,14 +1332,20 @@ impl Coercion<'_, '_, '_> {
   /// Reports, at `at`, a use of an instantiation of `user` whose expansion derives an instantiation
   /// of `def`, that `stop` kept what `def` holds from being checked under its arguments.
   fn report_derived_unchecked(&mut self, at: Location, user: DefId, def: DefId, stop: Stop) {
-    let sigil = if self.builder.def_kind(user) == Some(DefKind::Directive) {
-      "@"
-    } else {
-      ""
+    // A directive is named with its `@`, the instantiation's definition as much as the one that
+    // derives it, as `report_unexpanded` and the written check's stop name theirs.
+    let sigil = |named: DefId| -> &'static str {
+      if self.builder.def_kind(named) == Some(DefKind::Directive) {
+        "@"
+      } else {
+        ""
+      }
     };
     let what = format!(
-      "an instantiation of `{}` that `{sigil}{}` derives here",
+      "an instantiation of `{}{}` that `{}{}` derives here",
+      sigil(def),
       Excerpt(self.builder.def_name(def)),
+      sigil(user),
       Excerpt(self.builder.def_name(user))
     );
     let message = match stop {
