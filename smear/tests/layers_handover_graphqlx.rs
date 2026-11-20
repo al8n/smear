@@ -661,6 +661,27 @@ mod lossless {
     }
   }
 
+  /// Type arguments that hold no type, at a typed form's entry out of a block and in one: one code
+  /// and one span in both layers, the unexpected token at the `>`.
+  #[test]
+  fn empty_type_arguments_of_a_typed_form_are_one_error_in_both_layers() {
+    for (text, expected) in [
+      (
+        "input I { a: T = Box<>(1) }",
+        "smear::syntax::unexpected-token at 21..22",
+      ),
+      (
+        "input I { a: T = const { Box<>(1) } }",
+        "smear::syntax::unexpected-token at 29..30",
+      ),
+    ] {
+      let (ours, theirs, _) = said(text);
+      let code_and_span = |line: &str| line.split(": ").next().unwrap_or_default().to_string();
+      assert_eq!(code_and_span(&ours), expected, "{text}");
+      assert_eq!(code_and_span(&theirs), expected, "{text}");
+    }
+  }
+
   // ── The message bound ──────────────────────────────────────────────────────────────────────
 
   /// The most bytes a syntax error's message holds.

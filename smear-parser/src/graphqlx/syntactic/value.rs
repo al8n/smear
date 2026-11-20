@@ -35,7 +35,10 @@ use tokora::{
   cache::{Peeked, PeekedTokenExt},
   combinator::parens,
   span::Spanned,
-  utils::{DowncastRef, IntoComponents, typenum::U1},
+  utils::{
+    DowncastRef, IntoComponents,
+    typenum::{U1, U2},
+  },
 };
 
 use smear_lexer::graphqlx::{ContextualKeyword, StrPrefix, syntactic::SyntacticTokenKind};
@@ -1544,6 +1547,23 @@ where
 {
   let start = path.span().start();
   let path_end = path.span().end();
+  // Type arguments that hold no type are refused at their `>`, against a type, where the lossless
+  // layer refuses them, rather than over the `<>` the list's count would answer: one code and one
+  // span in both layers, in a block and out of one. The window is read only behind a `<`.
+  if super::peek_kind(inp)? == Some(SyntacticTokenKind::LAngle)
+    && let Some(span) = inp.peek_map::<U2, _, _>(|mut window| {
+      window.pop_front();
+      window
+        .pop_front()
+        .filter(|token| matches!(token.token(), GraphqlxToken::<'inp, Src>::RAngle))
+        .map(|token| *token.span())
+    })?
+  {
+    return Err(
+      DialectGraphqlxError::unexpected_token(SyntacticTokenKind::RAngle, Expectation::Type, span)
+        .into(),
+    );
+  }
   let generics = super::ty::try_type_generics(inp)?;
   let end = generics
     .as_ref()
