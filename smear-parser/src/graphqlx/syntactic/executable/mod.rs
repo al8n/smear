@@ -63,6 +63,7 @@ macro_rules! executable_parser {
         Token = GraphqlxToken<'inp, Src>,
         Span = SimpleSpan,
         Offset = usize,
+        State = smear_lexer::graphqlx::syntactic::SyntacticState,
       >,
       Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
       $($bounds)*
@@ -102,8 +103,14 @@ where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 {
   // `peek_head_map`, not a raw `peek`: this classifier's `None` is its word for "the document ended
@@ -145,8 +152,14 @@ where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 {
   // `peek_head_map`, not a raw `peek`: this classifier's `None` is its word for "the document ended
@@ -193,8 +206,14 @@ pub(crate) fn refuse_described_shorthand<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -222,8 +241,14 @@ fn take_classified_identifier<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -245,8 +270,14 @@ fn take_name<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -263,8 +294,14 @@ fn take_dollar<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -281,8 +318,14 @@ fn take_colon<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -298,8 +341,14 @@ fn try_description<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 {
   Ok(
@@ -338,8 +387,14 @@ where
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>,
   GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -397,8 +452,14 @@ fn decide_variable_definition_tail<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 {
   Ok(match peeked.pop_front() {
@@ -417,8 +478,14 @@ fn decide_variables_definition_opener<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 {
   Ok(match peeked.pop_front() {
@@ -469,8 +536,14 @@ where
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>,
   GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -501,8 +574,14 @@ where
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>,
   GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -567,8 +646,14 @@ where
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>,
   GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -607,8 +692,14 @@ where
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>,
   GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -702,8 +793,14 @@ where
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>,
   GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -814,8 +911,14 @@ fn decide_executable_document_tail<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 {
   Ok(if peeked.pop_front().is_some() {
@@ -874,6 +977,7 @@ macro_rules! impl_executable_api {
           Token = GraphqlxToken<'inp, Src>,
           Span = SimpleSpan,
           Offset = usize,
+          State = smear_lexer::graphqlx::syntactic::SyntacticState,
         >,
         Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
         $($bounds)*
@@ -999,7 +1103,14 @@ impl OperationType {
     GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
     GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>,
     GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,
-    GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+    GraphqlxLexer<'inp, Src>: Lexer<
+        'inp,
+        Source = Src,
+        Token = GraphqlxToken<'inp, Src>,
+        Span = SimpleSpan,
+        Offset = usize,
+        State = smear_lexer::graphqlx::syntactic::SyntacticState,
+      >,
     Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
     GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
   {

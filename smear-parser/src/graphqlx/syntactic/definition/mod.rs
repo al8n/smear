@@ -79,6 +79,7 @@ macro_rules! definition_parser {
         Token = GraphqlxToken<'inp, Src>,
         Span = SimpleSpan,
         Offset = usize,
+        State = smear_lexer::graphqlx::syntactic::SyntacticState,
       >,
       Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
       $($bounds)*
@@ -117,6 +118,7 @@ macro_rules! impl_definition_api {
           Token = GraphqlxToken<'inp, Src>,
           Span = SimpleSpan,
           Offset = usize,
+          State = smear_lexer::graphqlx::syntactic::SyntacticState,
         >,
         Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
         $($bounds)*
