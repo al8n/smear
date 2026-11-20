@@ -631,7 +631,7 @@ mod tests {
       "1u8\n-3i256\n0xFF_u32\n0b1010u8\n0o17i16\n0u0",
       "1.5f32\n1f64\n1e3_f32\n0x1p3f32",
       "0x1p10\n0x1p1_0\n0x1p1f\n-0x1p1A\n0x1.8p-1e\n0x1pf",
-      "'a'\n'\\n'\n'\\u{1F600}'\n'\\''\n'\"'\n''\n'ab'\n'a",
+      "'a'\n'\\n'\n'\\u{1F600}'\n'\\''\n'\"'\n'\u{1}'\n''\n'ab'\n'\\u12'\n'a",
       "1 / 2 % 3",
       "b\"ab\"\nr\"x\"\nenum E { A\"d\" B }\nb'a'",
       "1 << 2 >> 3\nPage<Edge<User>>\nBox< <",

@@ -1001,7 +1001,7 @@ const GRAPHQLX_TOKENS: &[(&str, &str)] = &[
   ),
   (
     "gx_char",
-    "'a'\n'\\n'\n'\\u{1F600}'\n'\\''\n'\"'\n''\n'ab'\n'a",
+    "'a'\n'\\n'\n'\\u{1F600}'\n'\\''\n'\"'\n'\u{1}'\n''\n'ab'\n'\\u12'\n'a",
   ),
   ("gx_slash_percent", "1 / 2 % 3"),
   (

@@ -542,35 +542,22 @@ where
 #[inline]
 pub(crate) fn char_literal<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
-) -> Result<LitChar<S::Slice<'a>>, LexerError<Extras>>
+) -> Result<LitChar<S::Slice<'a>>, LexerErrors<Extras>>
 where
   T: Logos<'a, Source = S>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<str>,
 {
-  use crate::string_lexer::char_literal::{CharFault, CharLiteral, read_char_literal};
+  use crate::string_lexer::char_literal::{CharBody, CharLiteral};
 
   let start = lexer.span().start;
   let rest = lexer.remainder();
   let text: &str = rest.as_ref();
-  match read_char_literal(text.as_bytes()) {
-    CharLiteral::Char { value, len } => {
-      lexer.bump(len.saturating_sub(1));
-      Ok(LitChar::new(lexer.slice(), value))
-    }
-    CharLiteral::Refused { fault, len } => {
-      let escaped = match fault {
-        CharFault::Escape => text
-          .get(1..)
-          .and_then(|tail: &str| tail.chars().next())
-          .map(|ch: char| (ch, ch.len_utf8())),
-        _ => None,
-      };
-      lexer.bump(len.saturating_sub(1));
-      Err(LexerError::new(
-        lexer.span(),
-        error::char_refusal(fault, start, escaped),
-      ))
-    }
+  let CharLiteral { len, read } = <char as CharBody>::read_char_literal(text.as_bytes(), start);
+  // The rule took the opening `'`, which `len` counts.
+  lexer.bump(len - 1);
+  match read {
+    Ok(value) => Ok(LitChar::new(lexer.slice(), value)),
+    Err(refusal) => Err(error::char_refusal(refusal, lexer.span().into())),
   }
 }

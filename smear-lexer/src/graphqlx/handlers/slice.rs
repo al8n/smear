@@ -566,32 +566,22 @@ where
 #[inline]
 pub(crate) fn char_literal<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
-) -> Result<LitChar<S::Slice<'a>>, LexerError<Extras>>
+) -> Result<LitChar<S::Slice<'a>>, LexerErrors<Extras>>
 where
   T: Logos<'a, Source = S>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
 {
-  use crate::string_lexer::char_literal::{CharFault, CharLiteral, read_char_literal};
+  use crate::string_lexer::char_literal::{CharBody, CharLiteral};
 
   let start = lexer.span().start;
   let rest = lexer.remainder();
   let bytes: &[u8] = rest.as_ref();
-  match read_char_literal(bytes) {
-    CharLiteral::Char { value, len } => {
-      lexer.bump(len.saturating_sub(1));
-      Ok(LitChar::new(lexer.slice(), value))
-    }
-    CharLiteral::Refused { fault, len } => {
-      let escaped = match fault {
-        CharFault::Escape => bytes.get(1).copied().map(|byte: u8| (byte, 1)),
-        _ => None,
-      };
-      lexer.bump(len.saturating_sub(1));
-      Err(LexerError::new(
-        lexer.span(),
-        error::char_refusal(fault, start, escaped),
-      ))
-    }
+  let CharLiteral { len, read } = <u8 as CharBody>::read_char_literal(bytes, start);
+  // The rule took the opening `'`, which `len` counts.
+  lexer.bump(len - 1);
+  match read {
+    Ok(value) => Ok(LitChar::new(lexer.slice(), value)),
+    Err(refusal) => Err(error::char_refusal(refusal, lexer.span().into())),
   }
 }

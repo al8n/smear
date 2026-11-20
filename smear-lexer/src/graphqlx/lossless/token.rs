@@ -359,7 +359,7 @@ macro_rules! token_impl {
         #[token("<<", tt_hook)]
         Shl,
 
-        #[token("'", |lexer| tt_hook_and_then(lexer, handlers::$handlers::char_literal))]
+        #[token("'", |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::char_literal))]
         LitChar(LitChar<$logos_slice>),
 
         #[token("=>", tt_hook)]
@@ -850,7 +850,7 @@ macro_rules! token_impl {
         #[token("<<", tt_hook)]
         Shl,
 
-        #[token("'", |lexer| tt_hook_and_then(lexer, handlers::$handlers::char_literal))]
+        #[token("'", |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::char_literal))]
         LitChar(LitChar<$logos_slice>),
 
         #[token("=>", tt_hook)]

@@ -757,40 +757,26 @@ impl<Char, StateError> BadStateError for LexerErrors<Char, StateError> {
   }
 }
 
-/// The data of a refused `char` literal that starts at `start`, by the fault its reader found.
-///
-/// `escaped` is, for a backslash that begins no escape, the character after it and that
-/// character's length in bytes. The backslash is the literal's second byte, so that character
-/// is its third. A fault in the body is a string's own error, as the same fault in a string is.
+/// The refusal of a `char` literal over `span`: an error with its body's faults, as a string
+/// reports them, when it has any, and after it an error with its own fault, when it has one.
 pub(crate) fn char_refusal<Char, StateError>(
-  fault: crate::string_lexer::char_literal::CharFault,
-  start: usize,
-  escaped: Option<(Char, usize)>,
-) -> LexerErrorData<Char, StateError> {
-  use crate::string_lexer::char_literal::CharFault;
+  refusal: crate::string_lexer::char_literal::CharRefusal<Char>,
+  span: Span,
+) -> LexerErrors<Char, StateError> {
+  use crate::string_lexer::char_literal::{CharFault, CharRefusal};
 
-  match fault {
-    CharFault::Empty => LexerErrorData::EmptyChar,
-    CharFault::Long => LexerErrorData::LongChar,
-    CharFault::Unterminated => LexerErrorData::UnterminatedChar,
-    CharFault::Escape => match escaped {
-      Some((ch, len)) => {
-        let at = start.saturating_add(2);
-        LexerErrorData::String(StringErrors::from(StringError::UnexpectedEscapedCharacter(
-          EscapedCharacter::new(
-            PositionedChar::with_position(ch, at),
-            Span::new(at.saturating_sub(1), at.saturating_add(len)),
-          ),
-        )))
-      }
-      None => LexerErrorData::UnterminatedChar,
-    },
-    CharFault::Utf8(error) => {
-      let at = start.saturating_add(1).saturating_add(error.valid_up_to());
-      let len = error.error_len().unwrap_or(1);
-      LexerErrorData::String(StringErrors::from(StringError::UnsupportedCharacter(
-        Lexeme::Range(Span::new(at, at.saturating_add(len))),
-      )))
-    }
+  let CharRefusal { string, own } = refusal;
+  let mut errors = LexerErrors::default();
+  if !string.is_empty() {
+    errors.push(LexerError::const_new(span, LexerErrorData::String(string)));
   }
+  if let Some(fault) = own {
+    let data = match fault {
+      CharFault::Empty => LexerErrorData::EmptyChar,
+      CharFault::Long => LexerErrorData::LongChar,
+      CharFault::Unterminated => LexerErrorData::UnterminatedChar,
+    };
+    errors.push(LexerError::const_new(span, data));
+  }
+  errors
 }

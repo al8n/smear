@@ -15,12 +15,14 @@ All notable changes to Smear are documented in this file.
     integer's width fits a `u32`. Otherwise the number is refused as a letter after it is. A
     hexadecimal float's exponent is decimal, so `0x1p1f` is refused at the `f`. `LitInt` and
     `LitFloat` gain `suffix` and `suffix_len`, which answer `IntSuffix` and `FloatSuffix`.
-  - **Character literals.** `'a'` is the token `LitChar`, kind `Char`. Its escapes are a
-    string's, and `\'`. `LitChar` answers its slice and its character, and `LitChar<&str>` has
+  - **Character literals.** `'a'` is the token `LitChar`, kind `Char`. Its body is read by an
+    inline string's rules, with one more escape, `\'`, so a fault in it is refused with the error
+    a string gets for it. `LitChar` answers its slice and its character, and `LitChar<&str>` has
     the `TryFrom<&str>` door its numbers have.
   - **Refusals.** `LexerErrorData` gains `EmptyChar`, `LongChar` and `UnterminatedChar`. Their
     kinds are new: `InvalidChar`, `smear::syntax::invalid-char`, and `UnterminatedChar`,
-    `smear::syntax::unterminated-char`.
+    `smear::syntax::unterminated-char`. A literal refused for its body and for itself reports
+    both, its body's faults first.
   - **`const`.** `ContextualKeyword` gains `Const` and `smear_lexer::keywords` gains `Const`. The
     lexers answer it as a name, as every contextual keyword.
 - `smear-parser`!: GraphQLx's `SyntaxKind` gains the images `Slash`, `Percent`, `Shl` and `Char`

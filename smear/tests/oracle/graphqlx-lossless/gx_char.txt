@@ -8,8 +8,12 @@ OK  21..25  LitChar(LitChar { source: "'\\''", value: '\'' })
 OK  25..26  Newline
 OK  26..29  LitChar(LitChar { source: "'\"'", value: '"' })
 OK  29..30  Newline
-ERR LexerErrors([LexerError { span: SimpleSpan { start: 30, end: 32 }, data: EmptyChar }])
-OK  32..33  Newline
-ERR LexerErrors([LexerError { span: SimpleSpan { start: 33, end: 37 }, data: LongChar }])
-OK  37..38  Newline
-ERR LexerErrors([LexerError { span: SimpleSpan { start: 38, end: 40 }, data: UnterminatedChar }])
+OK  30..33  LitChar(LitChar { source: "'\u{1}'", value: '\u{1}' })
+OK  33..34  Newline
+ERR LexerErrors([LexerError { span: SimpleSpan { start: 34, end: 36 }, data: EmptyChar }])
+OK  36..37  Newline
+ERR LexerErrors([LexerError { span: SimpleSpan { start: 37, end: 41 }, data: LongChar }])
+OK  41..42  Newline
+ERR LexerErrors([LexerError { span: SimpleSpan { start: 42, end: 48 }, data: String(StringErrors([Unicode(Fixed(Incomplete(Range(SimpleSpan { start: 43, end: 47 }))))])) }])
+OK  48..49  Newline
+ERR LexerErrors([LexerError { span: SimpleSpan { start: 49, end: 51 }, data: UnterminatedChar }])

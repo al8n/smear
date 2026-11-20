@@ -21,7 +21,7 @@ use crate::{
   skip_block_str_from_bytes, skip_inline_str_simd,
   string_lexer::{
     DelegateStringError, DelegatedRefusal,
-    char_literal::{CharFault, CharLiteral},
+    char_literal::{CharBody, CharLiteral},
   },
   utf8::IllFormedUtf8,
 };
@@ -797,7 +797,7 @@ where
     >,
   NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>:
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
-  <S::Slice<'inp> as Slice<'inp>>::Char: CharLen,
+  <S::Slice<'inp> as Slice<'inp>>::Char: CharLen + CharBody,
 {
   type State = SyntacticState;
 
@@ -1190,39 +1190,29 @@ where
           }
         }
         // A `char` literal, read to its closing `'` or its line's end by the reader the lossless
-        // lexer shares. A refused literal is one error token over everything it holds.
+        // lexer shares, its body by the inline string's sub-lexer for this source's alphabet. A
+        // refused literal is one error token over everything it holds.
         b'\'' => {
           let after: &[u8] = bytes.get(1..).unwrap_or_default();
-          match crate::string_lexer::char_literal::read_char_literal(after) {
-            CharLiteral::Char { value, len } => {
-              self.cursor += len;
-              self.last_span = SimpleSpan::new(token_start, self.cursor);
+          let CharLiteral { len, read } =
+            <<S::Slice<'inp> as Slice<'inp>>::Char as CharBody>::read_char_literal(
+              after,
+              token_start,
+            );
+          self.cursor += len;
+          let span = SimpleSpan::new(token_start, self.cursor);
+          self.last_span = span;
+          match read {
+            Ok(value) => {
               let slice = self.src.slice(&token_start..&self.cursor)?;
               return Some(finish!(
                 self,
                 SyntacticToken::LitChar(LitChar::new(slice, value))
               ));
             }
-            CharLiteral::Refused { fault, len } => {
-              let escaped = match fault {
-                CharFault::Escape => self
-                  .src
-                  .slice(&(token_start + 2)..)
-                  .and_then(|rest: S::Slice<'inp>| rest.iter().next())
-                  .map(|ch: <S::Slice<'inp> as Slice<'inp>>::Char| {
-                    let len = ch.char_len();
-                    (ch, len)
-                  }),
-                _ => None,
-              };
-              self.cursor += len;
-              let span = SimpleSpan::new(token_start, self.cursor);
-              self.last_span = span;
+            Err(refusal) => {
               self.last_error_span = Some(span);
-              return Some(Err(LexerErrors::from(LexerError::new(
-                span,
-                error::char_refusal(fault, token_start, escaped),
-              ))));
+              return Some(Err(error::char_refusal(refusal, span)));
             }
           }
         }
