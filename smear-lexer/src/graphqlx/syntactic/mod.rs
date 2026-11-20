@@ -998,9 +998,9 @@ where
 // outside a block itself, and the instance inside one through `lex_in_block`, kept out of line so
 // that `lex`'s own code does not double. Both are this one text, so they cannot drift apart.
 //
-// `DelegateStringError`, `NumberLexerToken`, `NumberState`, `CharBody` and `ByteStrBody` are
-// crate-internal; they appear here only as bounds on private methods, never as nameable API, so
-// silence `private_bounds` rather than widen their visibility.
+// `DelegateStringError`, `NumberLexerToken`, `CharBody` and `ByteStrBody` are crate-internal; they
+// appear here only as bounds on private methods, never as nameable API, so silence
+// `private_bounds` rather than widen their visibility.
 #[allow(private_bounds)]
 impl<'inp, S> SyntacticLexer<'inp, S>
 where
@@ -1584,10 +1584,9 @@ where
 // is inside `lex()` above, where the trait impl's full bound set already holds,
 // so this is never more restrictive in practice than the trait impl.
 //
-// `NumberLexerToken` and `NumberState` are the crate-internal delegation adapter
-// and its state (`pub(crate)`); they appear here only as bounds on a private
-// method, never as nameable API, so silence `private_bounds` rather than widen
-// their visibility.
+// `NumberLexerToken` is a crate-internal delegation adapter (`pub(crate)`); it
+// appears here only as a bound on a private method, never as nameable API, so
+// silence `private_bounds` rather than widen the type's visibility.
 #[allow(private_bounds)]
 impl<'inp, S> SyntacticLexer<'inp, S>
 where
