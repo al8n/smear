@@ -682,6 +682,33 @@ mod lossless {
     }
   }
 
+  /// A block object field's `:`, a block map entry's `=>` and a typed value's value, each missing at
+  /// the end of input behind trivia: both layers refuse it where the input ends.
+  #[test]
+  fn a_part_missing_at_the_end_is_refused_where_the_input_ends_in_both_layers() {
+    for (text, expected) in [
+      (
+        "input I { a: T = const { {a # c",
+        "smear::syntax::unexpected-end-of-input at 31..31",
+      ),
+      (
+        "input I { a: T = const { map!{ 1 # c",
+        "smear::syntax::unexpected-end-of-input at 36..36",
+      ),
+      (
+        "input I { a: T = Url( # c",
+        "smear::syntax::unexpected-end-of-input at 25..25",
+      ),
+    ] {
+      let (lossless, syntactic) = lent(text);
+      assert_eq!(syntactic, [expected], "{text}");
+      assert!(
+        lossless.iter().any(|seen| seen == expected),
+        "{text}: {lossless:?}"
+      );
+    }
+  }
+
   // ── The message bound ──────────────────────────────────────────────────────────────────────
 
   /// The most bytes a syntax error's message holds.

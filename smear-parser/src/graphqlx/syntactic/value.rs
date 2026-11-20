@@ -1614,6 +1614,10 @@ where
           ConstInputValue<GraphqlxSlice<'inp, Src>>,
           GraphqlxError<'inp, Src, Ctx>,
         > {
+          // A value missing at the end of input is refused where the input ends.
+          if super::peek_kind(inp)?.is_none() {
+            return at_the_end(inp, Expectation::ConstInputValue);
+          }
           let value = schema_value(inp)?;
           refuse_expression_after(inp)?;
           Ok(value)
@@ -2130,23 +2134,26 @@ value_parser!(
 );
 
 value_parser!(
-  /// A field of an object or a typed object inside a block: a name, `:`, and an expression.
+  /// A field of an object or a typed object inside a block: a name, `:`, and an expression. A `:`
+  /// missing at the end of input is refused where the input ends, as the lossless layer's read for
+  /// it meets the end.
   block_object_field,
   inp,
   ConstObjectField<GraphqlxSlice<'inp, Src>>,
   [complex],
   {
-    super::name
-      .then_ignore(colon)
-      .then(block_expression)
-      .spanned_trimmed()
-      .map(
-        |Spanned {
-           span,
-           data: (name, value),
-         }| ConstObjectField::new(span, name, value),
-      )
-      .parse_input(inp)
+    let node_start = inp.cursor_trimmed()?;
+    let name = super::name(inp)?;
+    if super::peek_kind(inp)?.is_none() {
+      return at_the_end(inp, Expectation::Colon);
+    }
+    colon(inp)?;
+    let value = block_expression(inp)?;
+    Ok(ConstObjectField::new(
+      inp.span_since_trimmed(&node_start),
+      name,
+      value,
+    ))
   }
 );
 
@@ -2225,23 +2232,26 @@ where
 }
 
 value_parser!(
-  /// A map entry inside a block: a key, `=>`, and a value, each an expression.
+  /// A map entry inside a block: a key, `=>`, and a value, each an expression. A `=>` missing at the
+  /// end of input is refused where the input ends, as the lossless layer's read for it meets the
+  /// end.
   block_map_entry,
   inp,
   ConstMapEntry<GraphqlxSlice<'inp, Src>>,
   [complex],
   {
-    block_expression
-      .then_ignore(fat_arrow)
-      .then(block_expression)
-      .spanned_trimmed()
-      .map(
-        |Spanned {
-           span,
-           data: (key, value),
-         }| ConstMapEntry::new(span, key, value),
-      )
-      .parse_input(inp)
+    let node_start = inp.cursor_trimmed()?;
+    let key = block_expression(inp)?;
+    if super::peek_kind(inp)?.is_none() {
+      return at_the_end(inp, Expectation::FatArrow);
+    }
+    fat_arrow(inp)?;
+    let value = block_expression(inp)?;
+    Ok(ConstMapEntry::new(
+      inp.span_since_trimmed(&node_start),
+      key,
+      value,
+    ))
   }
 );
 
