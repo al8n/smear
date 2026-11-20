@@ -599,6 +599,68 @@ mod lossless {
     );
   }
 
+  /// Every error each layer lends for `text`, read as a type-system document, each as
+  /// `code at start..end`: the lossless layer's, and the syntactic layer's.
+  fn lent(text: &str) -> (Vec<String>, Vec<String>) {
+    fn shown_all<E: Diagnose>(errors: &[E]) -> Vec<String> {
+      errors
+        .iter()
+        .map(|error| {
+          let span = error.primary().span();
+          format!(
+            "{} at {}..{}",
+            error.code().as_str(),
+            span.map_or(0, |span| span.start()),
+            span.map_or(0, |span| span.end())
+          )
+        })
+        .collect()
+    }
+    let mut lossless: Vec<Lent<'_>> = Vec::new();
+    let _ = Lossless::new()
+      .type_system_document(text, &mut lossless)
+      .expect("a short text is short enough for a tree");
+    let mut syntactic: Vec<GraphqlxError<&str>> = Vec::new();
+    let _ = Syntactic::new().type_system_document(text, &mut syntactic);
+    (shown_all(&lossless), shown_all(&syntactic))
+  }
+
+  /// A block, a parenthesis, a list and a typed form left unfinished at the end of input: the
+  /// syntactic layer's one error is the lossless layer's at the same place. After an operand the
+  /// opener is unclosed; a part missing at the end is refused where the input ends.
+  #[test]
+  fn an_unfinished_block_is_one_error_in_both_layers() {
+    for (text, expected) in [
+      (
+        "input I { a: T = const { 1",
+        "smear::syntax::unclosed-delimiter at 23..24",
+      ),
+      (
+        "input I { a: T = const { (1",
+        "smear::syntax::unclosed-delimiter at 25..26",
+      ),
+      (
+        "input I { a: T = const { [1",
+        "smear::syntax::unclosed-delimiter at 25..26",
+      ),
+      (
+        "input I { a: T = const { # pending",
+        "smear::syntax::unexpected-end-of-input at 34..34",
+      ),
+      (
+        "input I { a: T = const { Box<i32> # c",
+        "smear::syntax::unexpected-end-of-input at 37..37",
+      ),
+    ] {
+      let (lossless, syntactic) = lent(text);
+      assert_eq!(syntactic, [expected], "{text}");
+      assert!(
+        lossless.iter().any(|seen| seen == expected),
+        "{text}: {lossless:?}"
+      );
+    }
+  }
+
   // ── The message bound ──────────────────────────────────────────────────────────────────────
 
   /// The most bytes a syntax error's message holds.

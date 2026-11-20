@@ -1551,14 +1551,13 @@ where
   let ty = TypePath::new(SimpleSpan::new(start, end), path, generics);
   match super::peek_kind(inp)? {
     Some(SyntacticTokenKind::LBrace) if IN_BLOCK => {
-      lbrace(inp)?;
-      let (fields, close) = block_object_fields(inp)?;
+      let (fields, braces) = block_object_fields(inp)?;
       Ok(ConstInputValue::TypedObject(Box::new(
-        TypedObjectValue::new(SimpleSpan::new(start, close), ty, fields),
+        TypedObjectValue::new(SimpleSpan::new(start, braces.end()), ty, fields),
       )))
     }
     Some(SyntacticTokenKind::LParen) if IN_BLOCK => {
-      lparen(inp)?;
+      let open = *lparen(inp)?.span();
       let value = block_expression(inp)?;
       match try_rparen(inp)? {
         ParseAttempt::Accept(close) => Ok(ConstInputValue::Typed(Nest::new(TypedValue::new(
@@ -1566,7 +1565,7 @@ where
           ty,
           value,
         )))),
-        ParseAttempt::Decline => unexpected_here(inp, Expectation::RParen),
+        ParseAttempt::Decline => unclosed_or_unexpected(inp, open, Expectation::RParen),
       }
     }
     Some(SyntacticTokenKind::LBrace) => {
@@ -1608,6 +1607,10 @@ where
         value,
       ))))
     }
+    None => at_the_end(
+      inp,
+      Expectation::Production("`{` or `(` after the type arguments"),
+    ),
     _ => unexpected_here(
       inp,
       Expectation::Production("`{` or `(` after the type arguments"),
@@ -1647,9 +1650,9 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  lbrace(inp)?;
+  let open = *lbrace(inp)?.span();
   inp.state_mut().enter_const_block();
-  match block_inside(inp) {
+  match block_inside(inp, open) {
     Ok((value, end)) => {
       inp.state_mut().leave_const_block();
       Ok(ConstBlock::new(SimpleSpan::new(start, end), value))
@@ -1667,6 +1670,7 @@ where
 #[inline(always)]
 fn block_inside<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+  open: SimpleSpan,
 ) -> Result<(ConstInputValue<GraphqlxSlice<'inp, Src>>, usize), GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
@@ -1687,7 +1691,7 @@ where
   let value = block_expression(inp)?;
   match try_rbrace(inp)? {
     ParseAttempt::Accept(close) => Ok((value, close.span().end())),
-    ParseAttempt::Decline => unexpected_here(inp, Expectation::RBrace),
+    ParseAttempt::Decline => unclosed_or_unexpected(inp, open, Expectation::RBrace),
   }
 }
 
@@ -1715,8 +1719,8 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  lbrace(inp)?;
-  let (value, end) = block_inside(inp)?;
+  let open = *lbrace(inp)?.span();
+  let (value, end) = block_inside(inp, open)?;
   Ok(ConstBlock::new(SimpleSpan::new(start, end), value))
 }
 
@@ -1810,6 +1814,8 @@ value_parser!(
       Some(SyntacticTokenKind::LParen) => paren_value(inp).map(ConstInputValue::Paren),
       Some(SyntacticTokenKind::LBracket) => block_list_value(inp).map(ConstInputValue::List),
       Some(SyntacticTokenKind::LBrace) => block_object_value(inp).map(ConstInputValue::Object),
+      // A missing operand at the end of input is refused where the input ends.
+      None => at_the_end(inp, Expectation::ConstInputValue),
       // A `::` begins no operand, and is refused as every head that begins none is, so the code
       // is the one the lossless layer reports there.
       _ => unexpected_here(inp, Expectation::ConstInputValue),
@@ -1912,7 +1918,7 @@ value_parser!(
         SimpleSpan::new(open.span().start(), close.span().end()),
         value,
       )),
-      ParseAttempt::Decline => unexpected_here(inp, Expectation::RParen),
+      ParseAttempt::Decline => unclosed_or_unexpected(inp, *open.span(), Expectation::RParen),
     }
   }
 );
@@ -1930,6 +1936,7 @@ fn block_members<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
   closer: SyntacticTokenKind,
   expected: Expectation,
+  open: SimpleSpan,
   mut member: impl FnMut(
     &mut GraphqlxInput<'inp, '_, Src, Ctx>,
   ) -> Result<(), GraphqlxError<'inp, Src, Ctx>>,
@@ -1951,22 +1958,91 @@ where
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   loop {
-    if super::peek_kind(inp)? == Some(closer) {
-      break;
+    match super::peek_kind(inp)? {
+      Some(kind) if kind == closer => break,
+      None => return unclosed_or_unexpected(inp, open, expected),
+      Some(_) => {}
     }
     member(inp)?;
     if let ParseAttempt::Accept(_) = try_comma(inp)? {
       continue;
     }
-    if super::peek_kind(inp)? == Some(closer) {
-      break;
+    match super::peek_kind(inp)? {
+      Some(kind) if kind == closer => break,
+      _ => return unclosed_or_unexpected(inp, open, expected),
     }
-    return unexpected_here(inp, expected);
   }
   match inp.next_or_stop()? {
     Some(Spanned { span, .. }) => Ok(span.end()),
     None => unexpected_here(inp, expected),
   }
+}
+
+/// A closer that is missing inside a block: at the end of input the aggregate `open` begins is
+/// unclosed there, its kind by the closer `expected` names, as the lossless layer reports it; at any
+/// other token that token is refused, against `expected`. A scanner's stop stays terminal, through
+/// the peek.
+fn unclosed_or_unexpected<'inp, Src, Ctx, T>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+  open: SimpleSpan,
+  expected: Expectation,
+) -> Result<T, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
+  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  match super::peek_kind(inp)? {
+    None => Err(
+      match expected {
+        Expectation::RBracket => DialectGraphqlxError::unclosed_list(open),
+        Expectation::RParen => DialectGraphqlxError::unclosed_parentheses(open),
+        _ => DialectGraphqlxError::unclosed_object(open),
+      }
+      .into(),
+    ),
+    Some(_) => unexpected_here(inp, expected),
+  }
+}
+
+/// A part of a schema position's form missing at the end of input, refused where the input ends:
+/// past its last trivia, which is where the lossless layer, having read across that trivia, meets
+/// the end. Reached only from a peek that answered no token, which a scanner's stop never does.
+fn at_the_end<'inp, Src, Ctx, T>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+  expected: Expectation,
+) -> Result<T, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
+  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  let end = inp.source().len();
+  Err(
+    DialectGraphqlxError::maybe_unexpected_token(None, expected, SimpleSpan::new(end, end)).into(),
+  )
 }
 
 value_parser!(
@@ -1976,12 +2052,14 @@ value_parser!(
   ConstList<GraphqlxSlice<'inp, Src>>,
   [complex],
   {
-    let start = lbracket(inp)?.span().start();
+    let open = *lbracket(inp)?.span();
+    let start = open.start();
     let mut values: Nested<ConstInputValue<GraphqlxSlice<'inp, Src>>> = Nested::empty();
     let end = block_members(
       inp,
       SyntacticTokenKind::RBracket,
       Expectation::RBracket,
+      open,
       |inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| {
         values.push(block_expression(inp)?);
         Ok(())
@@ -1998,32 +2076,36 @@ value_parser!(
   ConstObject<GraphqlxSlice<'inp, Src>>,
   [complex],
   {
-    let start = lbrace(inp)?.span().start();
-    let (fields, end) = block_object_fields(inp)?;
-    Ok(ConstObject::new(SimpleSpan::new(start, end), fields))
+    let (fields, span) = block_object_fields(inp)?;
+    Ok(ConstObject::new(span, fields))
   }
 );
 
 value_parser!(
-  /// The fields of an object or a typed object inside a block, its `{` consumed: each a name, `:`
-  /// and an expression, and then the `}`. Answers the fields and where the `}` ends.
+  /// The fields of an object or a typed object inside a block: the `{`, each field a name, `:` and
+  /// an expression, and then the `}`. Answers the fields and the span from the `{` to the `}`.
   #[inline(always)]
   block_object_fields,
   inp,
-  (Nested<ConstObjectField<GraphqlxSlice<'inp, Src>>>, usize),
+  (
+    Nested<ConstObjectField<GraphqlxSlice<'inp, Src>>>,
+    SimpleSpan
+  ),
   [complex],
   {
+    let open = *lbrace(inp)?.span();
     let mut fields: Nested<ConstObjectField<GraphqlxSlice<'inp, Src>>> = Nested::empty();
     let end = block_members(
       inp,
       SyntacticTokenKind::RBrace,
       Expectation::RBrace,
+      open,
       |inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| {
         fields.push(block_object_field(inp)?);
         Ok(())
       },
     )?;
-    Ok((fields, end))
+    Ok((fields, SimpleSpan::new(open.start(), end)))
   }
 );
 
@@ -2070,12 +2152,13 @@ where
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   collection_bang(inp)?;
-  lbrace(inp)?;
+  let open = *lbrace(inp)?.span();
   let mut values: Nested<ConstInputValue<GraphqlxSlice<'inp, Src>>> = Nested::empty();
   let end = block_members(
     inp,
     SyntacticTokenKind::RBrace,
     Expectation::RBrace,
+    open,
     |inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| {
       values.push(block_expression(inp)?);
       Ok(())
@@ -2106,12 +2189,13 @@ where
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   collection_bang(inp)?;
-  lbrace(inp)?;
+  let open = *lbrace(inp)?.span();
   let mut entries: Nested<ConstMapEntry<GraphqlxSlice<'inp, Src>>> = Nested::empty();
   let end = block_members(
     inp,
     SyntacticTokenKind::RBrace,
     Expectation::RBrace,
+    open,
     |inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| {
       entries.push(block_map_entry(inp)?);
       Ok(())
