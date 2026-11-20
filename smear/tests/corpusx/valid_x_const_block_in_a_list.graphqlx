@@ -1,0 +1,5 @@
+input InAList {
+  sizes: Sizes = [KB, const { KB }]
+  numbers: Numbers = [const { 1 }, 2]
+  table: Table = map!{ "a" => const { 1 } "b" => 2 }
+}

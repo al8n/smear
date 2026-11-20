@@ -1,15 +1,17 @@
-//! Typed wrappers over the seventeen value node kinds.
+//! Typed wrappers over the twenty-two value node kinds.
 //!
-//! # Why a value position carries fourteen getters instead of one
+//! # Why a value position carries fifteen getters instead of one
 //!
 //! `apollo-parser` gives a value position a single `value() -> Option<Value>`, where `Value` is a
 //! generated **union enum** casting on any of the value kinds. This layer has no such union: the
 //! inventory is one wrapper per node kind and a union is not a node kind, so [`ObjectField`],
 //! [`DefaultValue`] and [`Argument`](super::directive::Argument) each expose one `opt` getter per
-//! value kind and at most one of the fourteen answers `Some`. Fourteen and not GraphQL's nine,
+//! value kind and at most one of the fifteen answers `Some`. Fifteen and not GraphQL's nine,
 //! because [`SetValue`], [`MapValue`] and [`CharValue`] are values here too, and so are a schema
-//! position's [`TypedObjectValue`] and [`TypedValue`]. A position that reads no typed form never
-//! holds one, so its two getters answer `None` there.
+//! position's [`TypedObjectValue`], [`TypedValue`] and [`ConstBlock`]. A position that reads no
+//! schema form never holds one, so those getters answer `None` there. Inside a block an
+//! [`Expression`] holds the operand, and its getters are the block's own: a parenthesis, bytes and
+//! an id stand there and nowhere else.
 //!
 //! That is complete and it is checkable — every getter is a kind test with a decline to assert —
 //! but it does lose one thing a union would keep: **document order across kinds**. [`ListValue`]
@@ -22,7 +24,7 @@
 //!
 //! - **[`MapEntry`] holds two values.** `Value => Value`, both halves full values and a map key
 //!   not restricted to a name, so an `opt` getter would answer the key whenever the two are the
-//!   same kind and the value would be unreachable. Its fourteen getters are therefore `many`, and a
+//!   same kind and the value would be unreachable. Its fifteen getters are therefore `many`, and a
 //!   consumer that needs the halves apart walks the entry's children: the key is the first, the
 //!   value the one after the `=>`.
 //! - **[`SetValue`] holds a run of them.** `set!{ … }` is a collection like [`ListValue`], not a
@@ -158,6 +160,8 @@ ast_node!(
     typed_object_values: many TypedObjectValue,
     /// Every typed value in the list.
     typed_values: many TypedValue,
+    /// Every block in the list.
+    const_blocks: many ConstBlock,
   }
 );
 
@@ -198,6 +202,8 @@ ast_node!(
     typed_object_values: many TypedObjectValue,
     /// Every typed value in the set.
     typed_values: many TypedValue,
+    /// Every block in the set.
+    const_blocks: many ConstBlock,
   }
 );
 
@@ -244,6 +250,8 @@ ast_node!(
     typed_object_values: many TypedObjectValue,
     /// Every half of the entry that is a typed value.
     typed_values: many TypedValue,
+    /// Every half of the entry that is a block.
+    const_blocks: many ConstBlock,
   }
 );
 
@@ -294,6 +302,8 @@ ast_node!(
     typed_object_value: opt TypedObjectValue,
     /// The field's value, when it is a typed value.
     typed_value: opt TypedValue,
+    /// The field's value, when it is a block.
+    const_block: opt ConstBlock,
   }
 );
 
@@ -337,6 +347,8 @@ ast_node!(
     typed_object_value: opt TypedObjectValue,
     /// The default, when it is a typed value.
     typed_value: opt TypedValue,
+    /// The default, when it is a block.
+    const_block: opt ConstBlock,
   }
 );
 
@@ -400,5 +412,81 @@ ast_node!(
     typed_object_value: opt TypedObjectValue,
     /// The value, when it is a typed value.
     typed_value: opt TypedValue,
+    /// The value, when it is a block.
+    const_block: opt ConstBlock,
+  }
+);
+
+ast_node!(
+  lang = crate::graphqlx::kinds::GraphQLxLang;
+  /// A `const { … }` block — GraphQLx only, in a schema position and inside a block.
+  ///
+  /// The keyword and the braces are its tokens, and the one [`Expression`] between them is its one
+  /// node: a block holds an expression node even around a lone operand.
+  ConstBlock => K::ConstBlock {
+    /// The expression the block holds.
+    expression: opt Expression,
+  }
+);
+
+ast_node!(
+  lang = crate::graphqlx::kinds::GraphQLxLang;
+  /// A parenthesis, `( … )`, inside a block — GraphQLx only.
+  ParenValue => K::ParenValue {
+    /// The expression the parenthesis holds.
+    expression: opt Expression,
+  }
+);
+
+ast_node!(
+  lang = crate::graphqlx::kinds::GraphQLxLang;
+  /// A bytes value, `b"…"`, inside a block — GraphQLx only.
+  BytesValue => K::BytesValue {
+    /// The literal token, its prefix included.
+    prefixed_string_token: tok K::PrefixedString,
+  }
+);
+
+ast_node!(
+  lang = crate::graphqlx::kinds::GraphQLxLang;
+  /// An id value, `i"…"`, inside a block — GraphQLx only.
+  IdValue => K::IdValue {
+    /// The literal token, its prefix included.
+    prefixed_string_token: tok K::PrefixedString,
+  }
+);
+
+ast_node!(
+  lang = crate::graphqlx::kinds::GraphQLxLang;
+  /// The expression a block or a parenthesis holds — GraphQLx only, inside a block.
+  ///
+  /// One node around every expression, a lone operand's too, so its getters are plural: each
+  /// answers the operands of its kind, which is the one operand an expression holds while no
+  /// operator is read.
+  Expression => K::Expression {
+    /// Every operand that is a variable, which a block reports and still builds.
+    variable_values: many VariableValue,
+    /// Every operand that is an integer literal.
+    int_values: many IntValue,
+    /// Every operand that is a float literal.
+    float_values: many FloatValue,
+    /// Every operand that is a string literal.
+    string_values: many StringValue,
+    /// Every operand that is a bytes value.
+    bytes_values: many BytesValue,
+    /// Every operand that is an id value.
+    id_values: many IdValue,
+    /// Every operand that is a `char` literal.
+    char_values: many CharValue,
+    /// Every operand that is `true` or `false`.
+    boolean_values: many BooleanValue,
+    /// Every operand that is `null`.
+    null_values: many NullValue,
+    /// Every operand that is a path.
+    enum_values: many EnumValue,
+    /// Every operand that is a parenthesis.
+    paren_values: many ParenValue,
+    /// Every operand that is a block inside the block.
+    const_blocks: many ConstBlock,
   }
 );

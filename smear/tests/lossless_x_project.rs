@@ -250,6 +250,39 @@ fn boundaries(src: &str) -> Vec<usize> {
   out
 }
 
+/// `src` with `pad` at `marks`: at every one, but that **a comma is no padding inside a block** —
+/// between an outermost `const { … }` block's braces the lexer reads it as a separator.
+fn pad_at(src: &str, marks: &[usize], pad: &str) -> String {
+  if pad != "," {
+    return inject(src, marks, pad);
+  }
+  let blocks: Vec<(usize, usize)> = parse_document(src)
+    .syntax()
+    .descendants()
+    .filter(|node| {
+      node.kind() == K::ConstBlock
+        && !node
+          .ancestors()
+          .skip(1)
+          .any(|ancestor| ancestor.kind() == K::ConstBlock)
+    })
+    .map(|node| {
+      let range = node.text_range();
+      (usize::from(range.start()), usize::from(range.end()))
+    })
+    .collect();
+  let kept: Vec<usize> = marks
+    .iter()
+    .copied()
+    .filter(|&mark| {
+      !blocks
+        .iter()
+        .any(|&(start, end)| start < mark && mark < end)
+    })
+    .collect();
+  inject(src, &kept, pad)
+}
+
 /// Every node type named in a `Debug` rendering, as `tests/support/span_extent.rs` reads them.
 fn owners(dump: &str) -> BTreeSet<String> {
   extent::owners(&extent::spans_of(dump))
@@ -293,7 +326,7 @@ fn the_projection_equals_the_parse_over_the_shared_corpus() {
     for (form, source) in std::iter::once(("compact", src.clone())).chain(
       ALPHABET
         .iter()
-        .map(|(form, pad)| (*form, inject(src, &marks, pad))),
+        .map(|(form, pad)| (*form, pad_at(src, &marks, pad))),
     ) {
       let expected = oracle(&source).unwrap_or_else(|e| {
         panic!("{name} ({form}): the syntactic parser rejects a valid corpus entry: {e:?}")
@@ -362,7 +395,7 @@ fn the_executable_projection_equals_the_parse_over_the_shared_corpus() {
     for (form, source) in std::iter::once(("compact", src.clone())).chain(
       ALPHABET
         .iter()
-        .map(|(form, pad)| (*form, inject(src, &marks, pad))),
+        .map(|(form, pad)| (*form, pad_at(src, &marks, pad))),
     ) {
       let expected = executable_oracle(&source).unwrap_or_else(|e| {
         panic!("{name} ({form}): the syntactic parser rejects an executable corpus entry: {e:?}")
@@ -433,7 +466,7 @@ fn the_type_system_projection_equals_the_parse_over_the_shared_corpus() {
     for (form, source) in std::iter::once(("compact", src.clone())).chain(
       ALPHABET
         .iter()
-        .map(|(form, pad)| (*form, inject(src, &marks, pad))),
+        .map(|(form, pad)| (*form, pad_at(src, &marks, pad))),
     ) {
       let expected = type_system_oracle(&source).unwrap_or_else(|e| {
         panic!("{name} ({form}): the syntactic parser rejects a type-system corpus entry: {e:?}")
@@ -4199,6 +4232,49 @@ const SITES: &[Site] = &[
     "Ok",
     Absent::Token(K::TypedValue, ")"),
   ),
+  // A block's: a `$` reported and still built, an expression with no operand, and a
+  // parenthesis's `)` missing in front of the block's `}` and at the end of input, and the
+  // block's own `}` missing there.
+  (
+    "value.rs",
+    "report",
+    "input I { a: T = const { $v } }",
+    Root::Mixed,
+    "UnexpectedChild Expression VariableValue",
+    Absent::Not,
+  ),
+  (
+    "value.rs",
+    "report",
+    "input I { a: T = const { } }",
+    Root::Mixed,
+    "MissingChild Expression",
+    Absent::Imaged,
+  ),
+  (
+    "value.rs",
+    "report",
+    "input I { a: T = const { (1 } }",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::ParenValue, ")"),
+  ),
+  (
+    "value.rs",
+    "unclosed",
+    "input I { a: T = const { 1",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::ConstBlock, "}"),
+  ),
+  (
+    "value.rs",
+    "unclosed",
+    "input I { a: T = const { (1",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::ParenValue, ")"),
+  ),
   (
     "directive.rs",
     "unclosed",
@@ -4446,7 +4522,7 @@ fn every_report_and_build_site_has_a_measured_answer() {
   };
   assert_eq!(
     (total("report"), total("unclosed")),
-    (68, 18),
+    (71, 20),
     "the two families' populations"
   );
 
@@ -4518,7 +4594,7 @@ fn every_report_and_build_site_has_a_measured_answer() {
 }
 
 /// How many of [`SITES`]' probes project.
-const PROJECTING_SITES: usize = 23;
+const PROJECTING_SITES: usize = 26;
 
 /// Image-less tokens a site can leave out whose probe is **not** a witness.
 ///
@@ -4996,7 +5072,7 @@ fn every_walk_is_a_transcription() {
     1,
     "the cursor's trivia skip, and nothing else"
   );
-  assert_eq!(count("Cursor::new("), 76, "the walks, one cursor each");
+  assert_eq!(count("Cursor::new("), 79, "the walks, one cursor each");
 }
 
 #[test]

@@ -122,12 +122,23 @@ const RENAMED_IMAGES: &[(&str, &str, &str)] = &[
 
 /// Node kinds whose name is not, literally, a name GraphQLx's own sources use.
 ///
-/// **The derivation produced none, and that is the finding, not an accident.** Every node kind in
-/// the space is spelled exactly as some `graphqlx/ast/**` declaration, some shared carrier that
-/// module binds, or some `graphqlx/syntactic/**` public production. The list stays here — rather
-/// than the filter being deleted as dead code — because it is the door a future kind would have to
-/// come through, and having to write the reason down is the point.
-const KINDS_WITH_NO_NAMED_SOURCE: &[(&str, &str)] = &[];
+/// **The derivation produced none until the block, and the two it has now are the block's.** Every
+/// other node kind in the space is spelled exactly as some `graphqlx/ast/**` declaration, some
+/// shared carrier that module binds, or some `graphqlx/syntactic/**` public production. Having to
+/// write the reason down is the point of the door.
+const KINDS_WITH_NO_NAMED_SOURCE: &[(&str, &str)] = &[
+  (
+    "ConstBlock",
+    "the AST's `ConstBlock` and the `const_block` production, which the census reads as `Block`: \
+     it strips the `Const` of a constant twin, and a block has no twin to be the constant one of",
+  ),
+  (
+    "Expression",
+    "the one node every expression a block holds is, a lone operand's too; the AST has no image \
+     of it, since an expression of one operand is that operand, and the production is \
+     `block_expression`",
+  ),
+];
 
 /// GraphQLx sources that deliberately have no kind of their own, each with the reason.
 ///
@@ -236,6 +247,20 @@ const SOURCES_WITH_NO_KIND: &[(&str, &str)] = &[
   (
     "SchemaDirectives",
     "the `schema_directives` production; it builds a Directives node, in a schema position",
+  ),
+  // ---- a block's own productions: the node each builds has a name of its own ----
+  (
+    "Block",
+    "the AST's `ConstBlock` and the `const_block` production with the `Const` stripped; the node \
+     is ConstBlock, which `KINDS_WITH_NO_NAMED_SOURCE` holds for the same reason",
+  ),
+  (
+    "BlockExpression",
+    "the `block_expression` production; it builds an Expression node",
+  ),
+  (
+    "BlockOperand",
+    "the `block_operand` production; a choice over the operands, and each arm is its own node",
   ),
   // ---- one token is not a region: the parent already says what it is ----
   (
@@ -371,6 +396,22 @@ const SOURCES_WITH_NO_KIND: &[(&str, &str)] = &[
   (
     "TypedValueComponents",
     "`TypedValue`'s decomposition, the struct its `into_components` returns; not a production",
+  ),
+  (
+    "BlockComponents",
+    "`ConstBlock`'s decomposition, read with its `Const` stripped; not a production",
+  ),
+  (
+    "ParenValueComponents",
+    "`ParenValue`'s decomposition, the struct its `into_components` returns; not a production",
+  ),
+  (
+    "BytesValueComponents",
+    "`BytesValue`'s decomposition, the struct its `into_components` returns; not a production",
+  ),
+  (
+    "IdValueComponents",
+    "`IdValue`'s decomposition, the struct its `into_components` returns; not a production",
   ),
 ];
 

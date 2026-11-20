@@ -67,7 +67,10 @@
 //!   `circular-non-null-input-field` too;
 //! - a name before an object, in a list of a schema position: `[RED {a: 1}]` is two elements in
 //!   GraphQL and one typed object in GraphQLx, which the analyzer reports as an item of a kind it
-//!   does not know yet.
+//!   does not know yet;
+//! - `const` before an object, in a list of a schema position: `[const {a: 1}]` is two elements in
+//!   GraphQL and, in GraphQLx, a block that holds one value and then a `:`, which the parser
+//!   refuses.
 //!
 //! An integer too long to be a finite `Float` (`[Z12]`) is no divergence: both dialects refuse it.
 #![cfg(all(feature = "std", feature = "analysis", feature = "validator"))]

@@ -365,10 +365,15 @@ impl<S, Span> Nestable for InputValue<S, Span> {
 ///
 /// # Which forms a position may hold
 ///
-/// One enum serves an executable document's constant positions and a schema position, and the
-/// productions decide which variants each may produce: no [`TypedObject`](Self::TypedObject) or
-/// [`Typed`](Self::Typed) is produced in an executable document, where a variable's default and its
-/// directives read the constant grammar alone.
+/// One enum serves an executable document's constant positions, a schema position and a
+/// `const { … }` block, and the productions decide which variants each may produce:
+///
+/// - no [`TypedObject`](Self::TypedObject), [`Typed`](Self::Typed) or [`Block`](Self::Block) is
+///   produced in an executable document, where a variable's default and its directives read the
+///   constant grammar alone;
+/// - [`Paren`](Self::Paren), [`Bytes`](Self::Bytes) and [`Id`](Self::Id) stand only under a
+///   [`Block`](Self::Block), whose grammar alone reads them. An operator, when one is read, will
+///   stand only there too.
 ///
 /// # The typed forms stand behind a pointer
 ///
@@ -409,6 +414,14 @@ pub enum ConstInputValue<S, Span = SimpleSpan> {
   TypedObject(Box<TypedObjectValue<S, Span>>),
   /// A typed value, `Url("x")` — a schema position's form alone.
   Typed(Nest<Box<TypedValue<S, Span>>>),
+  /// A `const { … }` block — a schema position's form, and a block's.
+  Block(ConstBlock<S, Span>),
+  /// A parenthesis, `(1)` — under a block alone.
+  Paren(ParenValue<S, Span>),
+  /// A bytes value, `b"…"` — under a block alone.
+  Bytes(BytesValue<S, Span>),
+  /// An id value, `i"…"` — under a block alone.
+  Id(IdValue<S, Span>),
 }
 
 impl<S, Span> AsSpan<Span> for ConstInputValue<S, Span> {
@@ -428,6 +441,10 @@ impl<S, Span> AsSpan<Span> for ConstInputValue<S, Span> {
       Self::Char(value) => value.as_span(),
       Self::TypedObject(value) => value.as_span(),
       Self::Typed(value) => value.as_span(),
+      Self::Block(value) => value.as_span(),
+      Self::Paren(value) => value.as_span(),
+      Self::Bytes(value) => value.as_span(),
+      Self::Id(value) => value.as_span(),
     }
   }
 }
@@ -451,6 +468,10 @@ impl<S, Span> IntoSpan<Span> for ConstInputValue<S, Span> {
       // `into_sole` rather than a deref, as `Type`'s pointer arm reads its span: the span is owned
       // and carries no `Copy` bound, so the pointee has to come back out.
       Self::Typed(value) => value.into_sole().into_span(),
+      Self::Block(value) => value.into_span(),
+      Self::Paren(value) => value.into_span(),
+      Self::Bytes(value) => value.into_span(),
+      Self::Id(value) => value.into_span(),
     }
   }
 }
@@ -494,12 +515,19 @@ impl<S, Span> Nestable for ConstInputValue<S, Span> {
       | Self::Int(_)
       | Self::Enum(_)
       | Self::Null(_)
-      | Self::Char(_) => {}
+      | Self::Char(_)
+      | Self::Bytes(_)
+      | Self::Id(_) => {}
       Self::List(list) => worklist.adopt(list.into_values().into_vec()),
       Self::Set(set) => worklist.adopt(set.into_values().into_vec()),
       // A map entry's KEY is an input value too, and it nests exactly as the value does — the one
       // place in either dialect where a single child slot yields two subtrees.
       Self::Map(map) => worklist.adopt_entries(map.into_entries().into_vec()),
+      // The value comes out of its pointer and is handed over, so a chain of blocks or of
+      // parentheses runs through the worklist's register rather than through a release inside
+      // this one.
+      Self::Block(block) => worklist.push(block.into_value()),
+      Self::Paren(paren) => worklist.push(paren.into_value()),
       Self::Object(object) => worklist.adopt_fields(object.into_fields().into_vec()),
       // The type path is dropped in place, by the rank edge asserted above; the fields are handed
       // over as an object's are.

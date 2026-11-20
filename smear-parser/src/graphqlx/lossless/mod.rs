@@ -258,8 +258,15 @@ crate::lossless::lossless_error_impls! {
 /// `=>` — are ten of the seventeen images that widened the kind space. No production expects the
 /// other seven, `/`, `%`, `<<`, `>>`, a separating `,`, a character literal and a prefixed string,
 /// so they have no row.
+///
+/// A report through a head set answers [`Expectation::Unspecified`], whatever the set, but for one
+/// set read by its contents: inside a `const { … }` block, what may follow an operand, which
+/// answers [`Expectation::OperatorOrSeparator`] as the syntactic layer's refusal there does.
 fn expectation_of(expected: Option<Expected<'_, LosslessTokenKind>>) -> Expectation {
   match expected {
+    Some(Expected::OneOf(set)) if set.as_slice() == recover::OPERATOR_OR_SEPARATOR_HEADS => {
+      Expectation::OperatorOrSeparator
+    }
     Some(Expected::One(kind)) => match kind {
       LosslessTokenKind::Identifier => Expectation::Name,
       LosslessTokenKind::Int => Expectation::InputValue,

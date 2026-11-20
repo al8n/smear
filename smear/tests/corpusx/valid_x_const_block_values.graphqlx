@@ -1,0 +1,15 @@
+input Blocks {
+  one: Int = const { 1 }
+  red: Color = const { RED }
+  rooted: Ref = const { ^::b::C }
+  text: String = const { "s" }
+  letter: char = const { 'a' }
+  none: Int = const { null }
+  apart: Int = const
+  # the brace is on the next line
+  { 1 }
+}
+
+type Query {
+  page(size: Int = const { 1 }): Int @limit(max: const { 1 })
+}

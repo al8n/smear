@@ -289,6 +289,45 @@ pub(crate) const ANGLE_CLOSER_HEADS: &[Kind] = &[Kind::RAngle];
 /// neither.
 pub(crate) const TYPED_FORM_HEADS: &[Kind] = &[Kind::LBrace, Kind::LParen];
 
+/// The `}` a `const { … }` block closes with: what its body reports as expected where something
+/// ended the expression without being the block's own, a `,` among them.
+pub(crate) const BRACE_CLOSER_HEADS: &[Kind] = &[Kind::RBrace];
+
+/// What may begin an operand inside a `const { … }` block: the scalars' tokens, a prefixed string
+/// and a `char` literal, a name, a root's sigil, and the `(` of a parenthesis. A number carries no
+/// sign there, so `-` is no head; and no variable is, as in a constant position.
+pub(crate) const BLOCK_OPERAND_HEADS: &[Kind] = &[
+  Kind::Int,
+  Kind::Float,
+  Kind::InlineString,
+  Kind::BlockString,
+  Kind::Char,
+  Kind::PrefixedString,
+  Kind::Identifier,
+  Kind::Tilde,
+  Kind::DotDot,
+  Kind::Caret,
+  Kind::LParen,
+];
+
+/// What may follow an operand inside a `const { … }` block and go on with the expression: one of
+/// the ten operators, or a `,`. A report through this set renders as
+/// [`OperatorOrSeparator`](crate::graphqlx::error::Expectation::OperatorOrSeparator), which no other
+/// set of this module has the contents of.
+pub(crate) const OPERATOR_OR_SEPARATOR_HEADS: &[Kind] = &[
+  Kind::Asterisk,
+  Kind::Slash,
+  Kind::Percent,
+  Kind::Plus,
+  Kind::Minus,
+  Kind::Shl,
+  Kind::Shr,
+  Kind::Ampersand,
+  Kind::Caret,
+  Kind::Pipe,
+  Kind::Separator,
+];
+
 /// Whether `kind` can begin a value.
 ///
 /// [`VALUE_HEADS`] as a predicate. The two are kept in step by
@@ -395,7 +434,9 @@ pub(crate) use crate::lossless::recover::opener_span;
 ///
 /// # What this dialect adds to GraphQL's set, and what it deliberately does not
 ///
-/// `Tilde`, `DotDot`, `Caret`, `Char` and `RAngle` are in; `PathSeparator`, `LAngle`, `FatArrow`,
+/// `Tilde`, `DotDot`, `Caret`, `Char` and `RAngle` are in, and so are a block's `Separator` and
+/// prefixed string, which only a lexer in a block's mode makes, so no skip outside a block changes
+/// for them; `PathSeparator`, `LAngle`, `FatArrow`,
 /// `Asterisk`, `Plus` and `Minus` are out. A root's sigil starts a rooted path, which is a value and
 /// a type head, so a skip that ran past one would fold a whole rooted name into the junk before it.
 /// A `char` literal starts a value, as a number does. A `>` closes a generic list — the same
@@ -424,6 +465,8 @@ fn is_sync_point(kind: Kind) -> bool {
       | Kind::RBrace
       | Kind::RParen
       | Kind::RAngle
+      | Kind::Separator
+      | Kind::PrefixedString
   )
 }
 

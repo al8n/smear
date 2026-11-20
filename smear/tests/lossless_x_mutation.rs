@@ -93,7 +93,7 @@ const fn is_trivia(kind: K) -> bool {
 /// instrument: its [`STRICT_DELETIONS`] census would name any image-less position the derivation
 /// missed. A token with an image is never lenient: an alias after its `as` and
 /// `(WherePredicate, TypePath)` are al8n/smear#58 round five's two findings, not rows.
-const LENIENT: [(K, K, &str); 23] = [
+const LENIENT: [(K, K, &str); 25] = [
   // The unclosed-delimiter family — `recover.rs`'s `unclosed_{object,parens}`, which report and
   // build no hole. `the_unclosed_brace_class_projects_although_the_parser_rejects_it` pins the
   // value.
@@ -133,6 +133,10 @@ const LENIENT: [(K, K, &str); 23] = [
   // object's site, and a typed value's `)` is tested as a list's closer is.
   (K::TypedObjectValue, K::RBrace, "}"),
   (K::TypedValue, K::RParen, ")"),
+  // A block's `}`, missing at the end of input, and a parenthesis's `)`, tested as a list's closer
+  // is, in front of the `}` of the block around it too.
+  (K::ConstBlock, K::RBrace, "}"),
+  (K::ParenValue, K::RParen, ")"),
 ];
 
 fn raw(kind: K) -> rowan::SyntaxKind {
@@ -603,7 +607,7 @@ const OPEN: &[(&str, usize)] = &[];
 
 /// The `(entry, door)` pairs the law runs over: every hole-free parse of every corpus entry under
 /// each of the three doors that builds that door's container.
-const PAIRS: usize = 373;
+const PAIRS: usize = 382;
 
 /// Of [`PAIRS`], the ones whose unmutated tree already lacks a lenient token — every mutation of
 /// them is compared against a restored text.
@@ -616,32 +620,32 @@ const TRIED: &[((&str, &str), usize)] = &[
   (("executable", "retext"), 1942),
   (("executable", "swap"), 890),
   (("executable", "transplant"), 16_747),
-  (("mixed", "delete"), 4848),
-  (("mixed", "duplicate"), 4848),
-  (("mixed", "retext"), 6291),
-  (("mixed", "swap"), 2489),
-  (("mixed", "transplant"), 55_901),
-  (("type-system", "delete"), 3171),
-  (("type-system", "duplicate"), 3171),
-  (("type-system", "retext"), 4412),
-  (("type-system", "swap"), 1592),
-  (("type-system", "transplant"), 35_311),
+  (("mixed", "delete"), 5346),
+  (("mixed", "duplicate"), 5346),
+  (("mixed", "retext"), 6811),
+  (("mixed", "swap"), 2752),
+  (("mixed", "transplant"), 65_028),
+  (("type-system", "delete"), 3578),
+  (("type-system", "duplicate"), 3578),
+  (("type-system", "retext"), 4817),
+  (("type-system", "swap"), 1808),
+  (("type-system", "transplant"), 42_527),
 ];
 
 /// Mutations tried in total.
-const TRIED_TOTAL: usize = 144_947;
+const TRIED_TOTAL: usize = 164_504;
 
 /// Skeleton-unfaithful: the no-panic obligation only.
-const UNFAITHFUL: usize = 128_591;
+const UNFAITHFUL: usize = 146_002;
 
 /// Skeleton-faithful, nothing lenient missing, and the projection equal to the parse.
-const EQUAL: usize = 12_185;
+const EQUAL: usize = 13_835;
 
 /// Skeleton-faithful, nothing lenient missing, and both refusing.
-const BOTH_REFUSE: usize = 3551;
+const BOTH_REFUSE: usize = 4032;
 
 /// Skeleton-faithful with a lenient token missing, and the projection equal to the restored parse.
-const LENIENT_EQUAL: usize = 486;
+const LENIENT_EQUAL: usize = 501;
 
 /// Skeleton-faithful with a lenient token missing, and both refusing the restored text.
 const LENIENT_BOTH_REFUSE: usize = 134;
@@ -665,17 +669,19 @@ const LENIENT_BOTH_REFUSE: usize = 134;
 /// is reached the tenth's way, by the entries that end on a module, and by every faithful mutation
 /// of the one entry whose module never closes. Of the last two, a typed object's `}` has none,
 /// since its fields read on into what follows as an object's do, and a typed value's `)` is
-/// reached by a closer deleted in front of the `}` of an object around it.
-const LENIENT_HITS: [usize; 23] = [
-  99, 100, 18, 6, 6, 94, 15, 12, 0, 9, 0, 66, 2, 41, 0, 0, 0, 0, 0, 0, 64, 0, 2,
+/// reached by a closer deleted in front of the `}` of an object around it. Of the block's two, its
+/// `}` has none, since the block's body takes the next `}` as its own, and a parenthesis's `)` is
+/// reached by the three of `valid_x_const_block_nested` that stand in front of a block's `}`.
+const LENIENT_HITS: [usize; 25] = [
+  100, 102, 24, 6, 6, 96, 15, 12, 0, 9, 0, 66, 2, 41, 0, 0, 0, 0, 0, 0, 64, 0, 2, 0, 6,
 ];
 
 /// How many restorations each row contributed to [`LENIENT_BOTH_REFUSE`] — restored texts the
 /// parser still rejects for another reason, and the projection refuses too. A row with none in
 /// either list is a position no one-child mutation of this corpus reaches, and its witness is its
 /// report-and-build probe alone.
-const LENIENT_REFUSED_HITS: [usize; 23] = [
-  8, 29, 6, 6, 4, 10, 2, 4, 2, 15, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 43, 0, 0,
+const LENIENT_REFUSED_HITS: [usize; 25] = [
+  8, 29, 6, 6, 4, 10, 2, 4, 2, 15, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 43, 0, 0, 0, 0,
 ];
 
 /// Every faithful **deletion of a token** the parser and the projection both refuse, as
@@ -717,8 +723,8 @@ struct Tally {
   both_refuse: usize,
   lenient_equal: usize,
   lenient_both_refuse: usize,
-  lenient_hits: [usize; 23],
-  lenient_refused_hits: [usize; 23],
+  lenient_hits: [usize; 25],
+  lenient_refused_hits: [usize; 25],
   strict_deletions: BTreeMap<String, usize>,
   violations: Vec<String>,
 }

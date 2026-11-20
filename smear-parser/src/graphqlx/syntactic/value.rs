@@ -16,6 +16,11 @@
 //! `[RED {a: 1}]` is a list of one element. An executable document reads neither form, and there
 //! the same texts are a path and then an object.
 //!
+//! A schema position reads a `const { … }` block too, when `const` is followed by `{`. Its
+//! production is the one that switches the lexer into the block's mode, at the `{`, and back, at
+//! the `}`; inside, a block holds one expression, whose operand may be a parenthesis, a prefixed
+//! string `b"…"` or `i"…"`, or a block inside the block, which switches nothing.
+//!
 //! See the [GraphQL Input Values specification](https://spec.graphql.org/draft/#sec-Input-Values).
 
 use std::boxed::Box;
@@ -29,21 +34,24 @@ use tokora::{
   utils::{DowncastRef, IntoComponents, typenum::U1},
 };
 
-use smear_lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
+use smear_lexer::graphqlx::{ContextualKeyword, StrPrefix, syntactic::SyntacticTokenKind};
 
 use super::{
   GraphqlxError, GraphqlxInput, GraphqlxLexer, GraphqlxSlice, GraphqlxToken, keyword_of,
   leading_path_separator, path, path_after_first, unexpected_here,
 };
 use crate::{
-  combinator::{ParseCtx, bang, colon, dollar, fat_arrow, try_equal},
+  combinator::{
+    ParseCtx, bang, colon, dollar, fat_arrow, lbrace, lparen, try_equal, try_rbrace, try_rparen,
+  },
   graphqlx::{
     GraphQLx,
     ast::{
-      BooleanValue, CharValue, ConstInputValue, ConstList, ConstMap, ConstMapEntry, ConstObject,
-      ConstObjectField, ConstSet, DefaultInputValue, EnumValue, FloatValue, InlineStringValue,
-      InputValue, IntValue, List, Map, MapEntry, Nest, NullValue, Object, ObjectField, Set,
-      StringValue, TypePath, TypedObjectValue, TypedValue, VariableValue,
+      BooleanValue, BytesValue, CharValue, ConstBlock, ConstInputValue, ConstList, ConstMap,
+      ConstMapEntry, ConstObject, ConstObjectField, ConstSet, DefaultInputValue, EnumValue,
+      FloatValue, IdValue, InlineStringValue, InputValue, IntValue, List, Map, MapEntry, Nest,
+      NullValue, Object, ObjectField, ParenValue, Set, StringValue, TypePath, TypedObjectValue,
+      TypedValue, VariableValue,
     },
     error::{Expectation, GraphqlxError as DialectGraphqlxError},
   },
@@ -1220,6 +1228,18 @@ value_parser!(
               .map(ConstInputValue::Enum)
           }
         }
+        // A schema position's block: `const` before `{`. Anywhere else, and before anything else,
+        // `const` is a name.
+        (GraphqlxToken::<'inp, Src>::Identifier(source), Some(ContextualKeyword::Const))
+          if SCHEMA =>
+        {
+          if matches!(super::peek_kind(inp)?, Some(SyntacticTokenKind::LBrace)) {
+            const_block_after_keyword(span.start(), inp).map(ConstInputValue::Block)
+          } else {
+            enum_after_first(span.start(), super::ast::Name::new(span, source), inp)
+              .map(ConstInputValue::Enum)
+          }
+        }
         (GraphqlxToken::<'inp, Src>::Identifier(source), _) => {
           enum_after_first(span.start(), super::ast::Name::new(span, source), inp)
             .map(ConstInputValue::Enum)
@@ -1375,6 +1395,291 @@ where
     ),
   }
 }
+
+/// A schema position's `const { … }` block, its `const` consumed and its `{` staged: the one place
+/// the parser switches the lexer into the block's mode, and back.
+///
+/// Seven steps, written out so that no wrapper reads across a switch: the `{` the caller's read
+/// staged is taken with nothing read behind it; the lexer enters the block; the expression is read,
+/// every token of it lexed in the mode; the `}` is taken; the lexer leaves the block; and the span
+/// runs from the `const` to the `}`. On an error the parse may go on from, the lexer leaves the
+/// block before the error is returned, so nothing after it is lexed in the mode. On a scanner's
+/// stop it writes no state: the state the stop latched stays as it is.
+///
+/// Never inlined, and not cold, so a schema value that is no block carries none of this frame.
+#[inline(never)]
+fn const_block_after_keyword<'inp, Src, Ctx>(
+  start: usize,
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<ConstBlock<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  lbrace(inp)?;
+  inp.state_mut().enter_const_block();
+  match block_inside(inp) {
+    Ok((value, end)) => {
+      inp.state_mut().leave_const_block();
+      Ok(ConstBlock::new(SimpleSpan::new(start, end), value))
+    }
+    Err(error) => {
+      if !inp.at_scanner_stop() {
+        inp.state_mut().leave_const_block();
+      }
+      Err(error)
+    }
+  }
+}
+
+/// A block's expression and its `}`, inside the block: the value, and where the `}` ends.
+#[inline(always)]
+fn block_inside<'inp, Src, Ctx>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<(ConstInputValue<GraphqlxSlice<'inp, Src>>, usize), GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  let value = block_expression(inp)?;
+  match try_rbrace(inp)? {
+    ParseAttempt::Accept(close) => Ok((value, close.span().end())),
+    ParseAttempt::Decline => unexpected_here(inp, Expectation::RBrace),
+  }
+}
+
+/// A block inside a block, its `const` consumed and its `{` staged. The lexer is in the mode
+/// already, so this switches nothing: it reads the `{`, the expression and the `}`, as a
+/// parenthesis would.
+#[inline(never)]
+fn nested_block_after_keyword<'inp, Src, Ctx>(
+  start: usize,
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<ConstBlock<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  lbrace(inp)?;
+  let (value, end) = block_inside(inp)?;
+  Ok(ConstBlock::new(SimpleSpan::new(start, end), value))
+}
+
+value_parser!(
+  /// Parses a committed `const { … }` block in a schema position, switching the lexer into the
+  /// block's mode at its `{` and back at its `}`.
+  ///
+  /// **Called outside a block alone.** Inside one it would leave the mode at its own `}` while the
+  /// block around it still ran; a block inside a block is [`block_operand`]'s.
+  pub const_block,
+  inp,
+  ConstBlock<GraphqlxSlice<'inp, Src>>,
+  [complex],
+  {
+    match inp.next_or_stop()? {
+      Some(Spanned { span, data: token })
+        if keyword_of(&token) == Some(ContextualKeyword::Const) =>
+      {
+        if !matches!(super::peek_kind(inp)?, Some(SyntacticTokenKind::LBrace)) {
+          return unexpected_here(inp, Expectation::LBrace);
+        }
+        const_block_after_keyword(span.start(), inp)
+      }
+      Some(Spanned { span, data: token }) => {
+        unexpected_after_consumed::<Src, Ctx, _>(token, span, Expectation::Keyword("const"))
+      }
+      None => unexpected_here(inp, Expectation::Keyword("const")),
+    }
+  }
+);
+
+value_parser!(
+  /// Parses the expression a `const { … }` block holds, or a parenthesis inside one: an operand,
+  /// and then what ends it.
+  ///
+  /// A `,`, a closer, a `=>` or the end of input ends the expression. Anything else is refused at
+  /// the token found, against an operator or a `,`: no operator is read yet, so a second operand
+  /// written beside the first is refused there too.
+  ///
+  /// **Called inside a block alone:** outside one the lexer hands it another token stream.
+  pub block_expression,
+  inp,
+  ConstInputValue<GraphqlxSlice<'inp, Src>>,
+  [complex],
+  {
+    let operand = block_operand(inp)?;
+    match super::peek_kind(inp)? {
+      None
+      | Some(
+        SyntacticTokenKind::Separator
+        | SyntacticTokenKind::RBrace
+        | SyntacticTokenKind::RBracket
+        | SyntacticTokenKind::RParen
+        | SyntacticTokenKind::FatArrow,
+      ) => Ok(operand),
+      Some(_) => unexpected_here(inp, Expectation::OperatorOrSeparator),
+    }
+  }
+);
+
+value_parser!(
+  /// Parses one operand inside a `const { … }` block: a number, which carries no sign there; a
+  /// string; a prefixed string, `b"…"` bytes and `i"…"` an id; a `char` literal; `true`, `false`
+  /// or `null`; a block, when `const` is followed by `{`; a path, from a name or a root's sigil;
+  /// or a parenthesis.
+  ///
+  /// A head that begins none of them is refused at the token found, against a constant value.
+  ///
+  /// **Called inside a block alone:** outside one the lexer hands it another token stream.
+  pub block_operand,
+  inp,
+  ConstInputValue<GraphqlxSlice<'inp, Src>>,
+  [complex],
+  {
+    match super::peek_kind(inp)? {
+      Some(SyntacticTokenKind::Int) => int_value(inp).map(ConstInputValue::Int),
+      Some(SyntacticTokenKind::Float) => float_value(inp).map(ConstInputValue::Float),
+      Some(SyntacticTokenKind::InlineString | SyntacticTokenKind::BlockString) => {
+        string_value(inp).map(ConstInputValue::String)
+      }
+      Some(SyntacticTokenKind::Char) => char_value(inp).map(ConstInputValue::Char),
+      Some(SyntacticTokenKind::PrefixedString) => prefixed_string_value(inp),
+      Some(SyntacticTokenKind::Identifier) => block_name(inp),
+      Some(
+        SyntacticTokenKind::Tilde | SyntacticTokenKind::DotDot | SyntacticTokenKind::Caret,
+      ) => path(inp).map(|path| ConstInputValue::Enum(EnumValue::new(*path.span(), path))),
+      Some(SyntacticTokenKind::LParen) => paren_value(inp).map(ConstInputValue::Paren),
+      Some(SyntacticTokenKind::PathSeparator) => leading_path_separator(inp),
+      _ => unexpected_here(inp, Expectation::ConstInputValue),
+    }
+  }
+);
+
+value_parser!(
+  /// A name at an operand's head inside a block: `true`, `false` and `null`; a block inside the
+  /// block, when `const` is followed by `{`; and otherwise a path.
+  block_name,
+  inp,
+  ConstInputValue<GraphqlxSlice<'inp, Src>>,
+  [complex],
+  {
+    match inp.next_or_stop()? {
+      Some(Spanned { span, data: token }) => {
+        let keyword = keyword_of(&token);
+        match (token, keyword) {
+          (GraphqlxToken::<'inp, Src>::Identifier(_), Some(ContextualKeyword::True)) => {
+            Ok(ConstInputValue::Boolean(BooleanValue::new(span, true)))
+          }
+          (GraphqlxToken::<'inp, Src>::Identifier(_), Some(ContextualKeyword::False)) => {
+            Ok(ConstInputValue::Boolean(BooleanValue::new(span, false)))
+          }
+          (GraphqlxToken::<'inp, Src>::Identifier(source), Some(ContextualKeyword::Null)) => {
+            Ok(ConstInputValue::Null(NullValue::new(span, source)))
+          }
+          (GraphqlxToken::<'inp, Src>::Identifier(source), Some(ContextualKeyword::Const)) => {
+            if matches!(super::peek_kind(inp)?, Some(SyntacticTokenKind::LBrace)) {
+              nested_block_after_keyword(span.start(), inp).map(ConstInputValue::Block)
+            } else {
+              enum_after_first(span.start(), super::ast::Name::new(span, source), inp)
+                .map(ConstInputValue::Enum)
+            }
+          }
+          (GraphqlxToken::<'inp, Src>::Identifier(source), _) => {
+            enum_after_first(span.start(), super::ast::Name::new(span, source), inp)
+              .map(ConstInputValue::Enum)
+          }
+          (token, _) => {
+            unexpected_after_consumed::<Src, Ctx, _>(token, span, Expectation::ConstInputValue)
+          }
+        }
+      }
+      None => unexpected_here(inp, Expectation::ConstInputValue),
+    }
+  }
+);
+
+value_parser!(
+  /// A prefixed string inside a block: `b"…"` is bytes and `i"…"` an id, by the literal's prefix.
+  prefixed_string_value,
+  inp,
+  ConstInputValue<GraphqlxSlice<'inp, Src>>,
+  [complex],
+  {
+    match inp.next_or_stop()? {
+      Some(Spanned {
+        span,
+        data: GraphqlxToken::<'inp, Src>::LitPrefixedStr(literal),
+      }) => match literal.prefix() {
+        StrPrefix::Bytes => Ok(ConstInputValue::Bytes(BytesValue::new(span, literal))),
+        StrPrefix::Id => Ok(ConstInputValue::Id(IdValue::new(span, literal))),
+        // The lexer makes no other prefix: every other letter before a string is refused as a
+        // reserved one before a token is made.
+        _ => unexpected_after_consumed::<Src, Ctx, _>(
+          GraphqlxToken::<'inp, Src>::LitPrefixedStr(literal),
+          span,
+          Expectation::ConstInputValue,
+        ),
+      },
+      Some(Spanned { span, data: token }) => {
+        unexpected_after_consumed::<Src, Ctx, _>(token, span, Expectation::ConstInputValue)
+      }
+      None => unexpected_here(inp, Expectation::ConstInputValue),
+    }
+  }
+);
+
+value_parser!(
+  /// A parenthesis inside a block: `(`, one expression, and `)`. A separator is not its own, so
+  /// `(1,)` is refused at the comma, against the `)`.
+  paren_value,
+  inp,
+  ParenValue<GraphqlxSlice<'inp, Src>>,
+  [complex],
+  {
+    let open = lparen(inp)?;
+    let value = block_expression(inp)?;
+    match try_rparen(inp)? {
+      ParseAttempt::Accept(close) => Ok(ParenValue::new(
+        SimpleSpan::new(open.span().start(), close.span().end()),
+        value,
+      )),
+      ParseAttempt::Decline => unexpected_here(inp, Expectation::RParen),
+    }
+  }
+);
 
 /// Parses a committed GraphQLx value in a schema position: a constant position of a type-system
 /// definition or extension, which is a member's default and an argument of each directive such a
@@ -1799,6 +2104,14 @@ graphqlx_value_api!(
   /// See [`const_value`] and the [GraphQL Input Values specification](https://spec.graphql.org/draft/#sec-Input-Values).
   ConstInputValue<S>,
   const_value,
+  [complex]
+);
+graphqlx_value_api!(
+  /// Parses a committed `const { … }` block in a schema position, outside any block.
+  ///
+  /// See [`const_block`].
+  ConstBlock<S>,
+  const_block,
   [complex]
 );
 graphqlx_value_api!(

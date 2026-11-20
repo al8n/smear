@@ -66,6 +66,7 @@ fn every_expectation_renders_as_the_object_of_expected() {
       "a type extension",
     ),
     (Expectation::Unspecified, ""),
+    (Expectation::OperatorOrSeparator, "an operator or `,`"),
   ] {
     assert_eq!(expectation.to_string(), text, "{expectation:?}");
   }

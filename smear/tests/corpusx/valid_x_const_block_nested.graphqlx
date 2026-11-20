@@ -1,0 +1,6 @@
+input Nested {
+  paren: Int = const { (1) }
+  twice: Int = const { ((1)) }
+  inner: Int = const { const { 2 } }
+  both: Int = const { (const { 1 }) }
+}

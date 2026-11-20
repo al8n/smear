@@ -1,0 +1,123 @@
+Root@0..145
+  Document@0..145
+    InputObjectTypeDefinition@0..144
+      Name@0..5 "input"
+      Space@5..6 " "
+      DefinitionName@6..14
+        Name@6..13 "InAList"
+        Space@13..14 " "
+      InputFieldsDefinition@14..144
+        LBrace@14..15 "{"
+        Newline@15..16 "\n"
+        Space@16..17 " "
+        Space@17..18 " "
+        InputValueDefinition@18..54
+          Name@18..23 "sizes"
+          Colon@23..24 ":"
+          Space@24..25 " "
+          DefinitionTypePath@25..31
+            Path@25..31
+              Name@25..30 "Sizes"
+              Space@30..31 " "
+          DefaultValue@31..51
+            Equal@31..32 "="
+            Space@32..33 " "
+            ListValue@33..51
+              LBracket@33..34 "["
+              EnumValue@34..38
+                Path@34..38
+                  Name@34..36 "KB"
+                  Comma@36..37 ","
+                  Space@37..38 " "
+              ConstBlock@38..50
+                Name@38..43 "const"
+                Space@43..44 " "
+                LBrace@44..45 "{"
+                Space@45..46 " "
+                Expression@46..49
+                  EnumValue@46..49
+                    Path@46..49
+                      Name@46..48 "KB"
+                      Space@48..49 " "
+                RBrace@49..50 "}"
+              RBracket@50..51 "]"
+          Newline@51..52 "\n"
+          Space@52..53 " "
+          Space@53..54 " "
+        InputValueDefinition@54..92
+          Name@54..61 "numbers"
+          Colon@61..62 ":"
+          Space@62..63 " "
+          DefinitionTypePath@63..71
+            Path@63..71
+              Name@63..70 "Numbers"
+              Space@70..71 " "
+          DefaultValue@71..89
+            Equal@71..72 "="
+            Space@72..73 " "
+            ListValue@73..89
+              LBracket@73..74 "["
+              ConstBlock@74..85
+                Name@74..79 "const"
+                Space@79..80 " "
+                LBrace@80..81 "{"
+                Space@81..82 " "
+                Expression@82..84
+                  IntValue@82..83
+                    Int@82..83 "1"
+                  Space@83..84 " "
+                RBrace@84..85 "}"
+              Comma@85..86 ","
+              Space@86..87 " "
+              IntValue@87..88
+                Int@87..88 "2"
+              RBracket@88..89 "]"
+          Newline@89..90 "\n"
+          Space@90..91 " "
+          Space@91..92 " "
+        InputValueDefinition@92..143
+          Name@92..97 "table"
+          Colon@97..98 ":"
+          Space@98..99 " "
+          DefinitionTypePath@99..105
+            Path@99..105
+              Name@99..104 "Table"
+              Space@104..105 " "
+          DefaultValue@105..142
+            Equal@105..106 "="
+            Space@106..107 " "
+            MapValue@107..142
+              Name@107..110 "map"
+              Bang@110..111 "!"
+              LBrace@111..112 "{"
+              Space@112..113 " "
+              MapEntry@113..131
+                StringValue@113..116
+                  InlineString@113..116 "\"a\""
+                Space@116..117 " "
+                FatArrow@117..119 "=>"
+                Space@119..120 " "
+                ConstBlock@120..131
+                  Name@120..125 "const"
+                  Space@125..126 " "
+                  LBrace@126..127 "{"
+                  Space@127..128 " "
+                  Expression@128..130
+                    IntValue@128..129
+                      Int@128..129 "1"
+                    Space@129..130 " "
+                  RBrace@130..131 "}"
+              Space@131..132 " "
+              MapEntry@132..140
+                StringValue@132..135
+                  InlineString@132..135 "\"b\""
+                Space@135..136 " "
+                FatArrow@136..138 "=>"
+                Space@138..139 " "
+                IntValue@139..140
+                  Int@139..140 "2"
+              Space@140..141 " "
+              RBrace@141..142 "}"
+          Newline@142..143 "\n"
+        RBrace@143..144 "}"
+    Newline@144..145 "\n"

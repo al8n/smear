@@ -9,7 +9,7 @@
 //! `Value[Const]` is **threaded** through a private `Constness` argument rather than duplicated
 //! into a second set of productions.
 //!
-//! # The six places GraphQLx's value grammar is not GraphQL's
+//! # The seven places GraphQLx's value grammar is not GraphQL's
 //!
 //! **1. An enum value is a whole path.** `graphqlx/syntactic/value.rs`'s `enum_after_first` builds
 //! `EnumValue::new(span, path)`, so `^::ns::Colour` and `Colour` are both enum values and the node
@@ -44,6 +44,15 @@
 //! token decides, whatever trivia stands before it, so `[RED {a: 1}]` is one typed object there.
 //! An executable document reads neither, and there the same texts are a path and an object.
 //!
+//! **7. A schema position reads a `const { … }` block,** when `const` is followed by `{`. Its
+//! production moves the lexer into the block's mode at the `{` and back at the `}`, so a comma
+//! between the braces is a [`Separator`](crate::graphqlx::kinds::SyntaxKind::Separator) and a
+//! number carries no sign. It holds one
+//! [`Expression`](crate::graphqlx::kinds::SyntaxKind::Expression), a lone operand's too, whose
+//! leading trivia is its caller's and whose trailing trivia is its own. Inside it stand a
+//! parenthesis, the prefixed strings `b"…"` and `i"…"`, and a block inside the block, which
+//! switches nothing.
+//!
 //! What did **not** widen: an `ObjectField`'s key is still a plain `Name` (`object_field` in
 //! `graphqlx/syntactic/value.rs`, `name then_ignore(colon) then(value)`). Only the value side
 //! moved.
@@ -53,8 +62,11 @@
 //! The rejection is a diagnostic, not a refusal to parse, exactly as in GraphQL: every byte is
 //! kept, `tree.text() == source` still holds, and the node a diagnostic wants to point at is there.
 
-use smear_lexer::graphqlx::lossless::LosslessTokenKind as Kind;
-use tokora::ParseInput as _;
+use smear_lexer::graphqlx::{
+  StrPrefix,
+  lossless::{LosslessToken, LosslessTokenKind as Kind},
+};
+use tokora::{ParseInput as _, error::MaybeTerminal as _};
 
 use crate::graphqlx::kinds::SyntaxKind as K;
 
@@ -67,8 +79,9 @@ use super::coverage::{node, node_at};
 use super::{
   GraphqlxLosslessError, GraphqlxLosslessInput, Keyword, recover,
   recover::{
-    CONST_VALUE_HEADS, LIST_CLOSER_HEADS, OBJECT_FIELD_HEADS, PARENS_CLOSER_HEADS,
-    TYPED_FORM_HEADS, VALUE_HEADS, closes_enclosing_block, is_closer, opener_span, starts_value,
+    BLOCK_OPERAND_HEADS, BRACE_CLOSER_HEADS, CONST_VALUE_HEADS, LIST_CLOSER_HEADS,
+    OBJECT_FIELD_HEADS, OPERATOR_OR_SEPARATOR_HEADS, PARENS_CLOSER_HEADS, TYPED_FORM_HEADS,
+    VALUE_HEADS, closes_enclosing_block, is_closer, opener_span, starts_value,
   },
   trivia::{eat_if, expect, peek_as, peek_kind},
   ty::{path, path_root, path_tail, type_generics},
@@ -122,6 +135,17 @@ pub(crate) enum Collection {
   Set,
   /// `map!{ MapEntry* }`.
   Map,
+}
+
+/// The contextual keyword at a schema value's head that opens something when the next token is
+/// its own: `set` and `map` before `!`, and `const` before `{`. Before anything else each is a
+/// path's first segment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Opener {
+  /// `set` or `map`, and the collection each opens.
+  Collection(Collection),
+  /// `const`, which opens a block.
+  Block,
 }
 
 use crate::lossless::{lossless_drivers, lossless_production};
@@ -415,8 +439,8 @@ lossless_production! {
   /// `set`/`map` as a collection constructor or as an ordinary path segment, and in a schema
   /// position every path at a value's head, which may be the type of a typed form.
   ///
-  /// `collection` names the keyword at the head, when the head is `set` or `map`; with none, the
-  /// head is a name or a root's sigil, which the path production reads.
+  /// `opener` names the keyword at the head, when the head is `set`, `map` or `const`; with none,
+  /// the head is a name or a root's sigil, which the path production reads.
   ///
   /// # Why this needs a retro-wrap and not a two-token peek
   ///
@@ -447,7 +471,7 @@ lossless_production! {
   fn collection_or_enum<'inp, Src, Ctx>(
     inp,
     konst: Constness,
-    collection: Option<Collection>,
+    opener: Option<Opener>,
   ) {
     // Before the head: the enclosing node is still the innermost one open, so the leading trivia
     // the peek in `value` already crossed sits outside whatever this opens.
@@ -455,13 +479,21 @@ lossless_production! {
     let typed = inp.cst_mark();
     let inner = inp.cst_mark();
 
-    match collection {
-      Some(collection) => {
+    match opener {
+      Some(opener) => {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Bang) {
-          return collection_body::<Src, Ctx>(inp, outer, konst, collection);
+        match (opener, peek_kind::<Src, Ctx>(inp)?) {
+          (Opener::Collection(collection), Some(Kind::Bang)) => {
+            return collection_body::<Src, Ctx>(inp, outer, konst, collection);
+          }
+          // The block's mark is the one before `const`, so the keyword and the trivia the peek
+          // just crossed are the block's own first children.
+          (Opener::Block, Some(Kind::LBrace)) => {
+            return block_braces::<Src, Ctx>(inp, outer, true);
+          }
+          _ => {}
         }
-        // A path whose first segment happens to spell `set` or `map`. It may continue —
+        // A path whose first segment happens to spell `set`, `map` or `const`. It may continue —
         // `set::Thing` is one path of two segments — and `path_tail` is `path`'s loop with the
         // first name already consumed.
         node_at(
@@ -591,6 +623,206 @@ lossless_production! {
     .parse_input(inp)
   }
 
+  /// `{ Expression }` after a block's `const`, retro-wrapped from the mark minted before the
+  /// keyword so the keyword is the block's first child.
+  ///
+  /// With `switch`, this is the one production that moves the lexer into a block's mode and back:
+  /// a schema position's block. Seven steps, written out so that no read crosses a switch. The
+  /// caller's peek found the `{` and crossed the trivia after `const`, which is inside the node.
+  /// The `{` is taken by `expect`, with nothing cached behind it; the lexer enters the block; the
+  /// expression's first peek is the first lex in the mode, so the trivia after the `{` is lexed in
+  /// it; the body runs to its `}`; the lexer leaves the block, so the trivia after the `}` is the
+  /// first thing lexed out of the mode; and the node is the mark's. An error the parse may go on
+  /// from leaves the block before it is returned. A terminal stop writes no state, so the stop
+  /// stays one.
+  ///
+  /// Without `switch` it is a block inside a block, whose lexer is in the mode already: it reads
+  /// the same tokens and touches no state.
+  fn block_braces<'inp, Src, Ctx>(inp, mark: tokora::cst::EventMark, switch: bool) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
+    node_at(
+      mark,
+      K::ConstBlock.raw(),
+      |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
+        expect::<Src, Ctx>(inp, Kind::LBrace)?;
+        let open = opener_span(inp.span().end());
+        if switch {
+          inp.state_mut().enter_const_block();
+        }
+        let body = block_body::<Src, Ctx>(inp, open);
+        if switch {
+          let stopped = match &body {
+            Ok(()) => false,
+            Err(error) => error.is_terminal() || inp.at_scanner_stop(),
+          };
+          if !stopped {
+            inp.state_mut().leave_const_block();
+          }
+        }
+        body
+      },
+    )
+    .parse_input(inp)
+  }
+
+  /// A block's inside, from the expression to its `}`: an object value's loop around the one
+  /// expression. A `}` ends it; the end of input leaves it unclosed at the `{`; and anything else,
+  /// what ended the expression without being the block's, is reported against the `}` and
+  /// skipped, so every turn returns or consumes.
+  #[inline(always)]
+  fn block_body<'inp, Src, Ctx>(inp, open: tokora::SimpleSpan) {
+    block_expression::<Src, Ctx>(inp)?;
+    loop {
+      if eat_if::<Src, Ctx>(inp, Kind::RBrace)? {
+        return Ok(());
+      }
+      match peek_kind::<Src, Ctx>(inp)? {
+        None => return recover::unclosed_object::<Src, Ctx>(inp, open),
+        Some(_) => recover::unexpected::<Src, Ctx>(inp, BRACE_CLOSER_HEADS)?,
+      }
+    }
+  }
+
+  /// The expression a block, a parenthesis or a block's member holds: one
+  /// [`Expression`](K::Expression) node around it, always, a lone operand's too.
+  ///
+  /// Where its trivia lands is the rule, and it is the substrate's own: a committed token lands in
+  /// the innermost node open at its commit. The leading trivia is crossed by a peek made before the
+  /// node opens, so it is the caller's. The trailing trivia is crossed by the peek made inside the
+  /// node after the operand, the read that finds whether the expression goes on, so it is the
+  /// expression's. What ends the expression is judged after the node has closed: a `,`, a closer,
+  /// a `=>` or the end of input ends it, and anything else is reported once, against an operator
+  /// or a `,`, and skipped into an `Error` that stands beside the node, in its caller's.
+  fn block_expression<'inp, Src, Ctx>(inp) {
+    peek_kind::<Src, Ctx>(inp)?;
+    node(
+      K::Expression.raw(),
+      |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
+        block_operand::<Src, Ctx>(inp)?;
+        peek_kind::<Src, Ctx>(inp)?;
+        Ok(())
+      },
+    )
+    .parse_input(inp)?;
+    match peek_kind::<Src, Ctx>(inp)? {
+      None
+      | Some(
+        Kind::Separator | Kind::RBrace | Kind::RBracket | Kind::RParen | Kind::FatArrow,
+      ) => Ok(()),
+      Some(_) => recover::unexpected::<Src, Ctx>(inp, OPERATOR_OR_SEPARATOR_HEADS),
+    }
+  }
+
+  /// One operand inside a block, read wherever it stands and reported through
+  /// [`BLOCK_OPERAND_HEADS`] where none begins.
+  ///
+  /// A head that begins no operand is skipped into an `Error`, inside the expression. A closer or
+  /// the end of input is reported and left, as a required value's is, and nothing is built there:
+  /// the expression is then empty. A `$` is reported and still built, as in a constant position.
+  fn block_operand<'inp, Src, Ctx>(inp) {
+    match peek_kind::<Src, Ctx>(inp)? {
+      Some(Kind::Dollar) => {
+        recover::report_unexpected::<Src, Ctx>(inp, BLOCK_OPERAND_HEADS)?;
+        variable::<Src, Ctx>(inp)
+      }
+      Some(Kind::Int) => int_value::<Src, Ctx>(inp),
+      Some(Kind::Float) => float_value::<Src, Ctx>(inp),
+      Some(Kind::InlineString | Kind::BlockString) => string_value::<Src, Ctx>(inp),
+      Some(Kind::Char) => char_value::<Src, Ctx>(inp),
+      Some(Kind::PrefixedString) => prefixed_string_value::<Src, Ctx>(inp),
+      Some(Kind::LParen) => paren_value::<Src, Ctx>(inp),
+      Some(Kind::Tilde | Kind::DotDot | Kind::Caret) => enum_value::<Src, Ctx>(inp),
+      Some(Kind::Identifier) => block_name::<Src, Ctx>(inp),
+      head if head.is_none_or(is_closer) => {
+        recover::report_unexpected::<Src, Ctx>(inp, BLOCK_OPERAND_HEADS)
+      }
+      Some(_) => recover::unexpected::<Src, Ctx>(inp, BLOCK_OPERAND_HEADS),
+    }
+  }
+
+  /// A name at an operand's head inside a block: `true`, `false`, `null`, a block inside the
+  /// block when `const` is followed by `{`, and otherwise a path.
+  fn block_name<'inp, Src, Ctx>(inp) {
+    match peek_as::<Src, Ctx, Keyword>(inp)? {
+      Some(Keyword::True | Keyword::False) => boolean_value::<Src, Ctx>(inp),
+      Some(Keyword::Null) => null_value::<Src, Ctx>(inp),
+      Some(Keyword::Const) => {
+        // Two marks before the keyword, so either answer can open its node over it.
+        let outer = inp.cst_mark();
+        let inner = inp.cst_mark();
+        expect::<Src, Ctx>(inp, Kind::Identifier)?;
+        if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
+          return block_braces::<Src, Ctx>(inp, outer, false);
+        }
+        node_at(
+          inner,
+          K::Path.raw(),
+          |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| path_tail::<Src, Ctx>(inp),
+        )
+        .parse_input(inp)?;
+        node_at(
+          outer,
+          K::EnumValue.raw(),
+          |_: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| -> Result<(), GraphqlxLosslessError<'inp, Src, Ctx>> { Ok(()) },
+        )
+        .parse_input(inp)
+      }
+      _ => enum_value::<Src, Ctx>(inp),
+    }
+  }
+
+  /// `b"…"` or `i"…"`: one token, whose node is [`BytesValue`](K::BytesValue) or
+  /// [`IdValue`](K::IdValue) by the literal's prefix.
+  fn prefixed_string_value<'inp, Src, Ctx>(inp) {
+    let prefix = inp.peek_head_map(|token| match token.data {
+      LosslessToken::LitPrefixedStr(literal) => Some(literal.prefix()),
+      _ => None,
+    })?;
+    let kind = match prefix.flatten() {
+      Some(StrPrefix::Id) => K::IdValue,
+      // The lexer makes `b` and `i` alone; every other letter before a string is refused.
+      _ => K::BytesValue,
+    };
+    node(
+      kind.raw(),
+      |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
+        expect::<Src, Ctx>(inp, Kind::PrefixedString)
+      },
+    )
+    .parse_input(inp)
+  }
+
+  /// `( Expression )` inside a block: one expression, and its closer tested as a list's is. A
+  /// separator is not its own, so `(1,)` is one report, at the comma, against the `)`.
+  fn paren_value<'inp, Src, Ctx>(inp) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
+    node(
+      K::ParenValue.raw(),
+      |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
+        expect::<Src, Ctx>(inp, Kind::LParen)?;
+        let open = opener_span(inp.span().end());
+        let open_at: usize = inp.state().brace_depth();
+        block_expression::<Src, Ctx>(inp)?;
+        loop {
+          if eat_if::<Src, Ctx>(inp, Kind::RParen)? {
+            return Ok(());
+          }
+          match peek_kind::<Src, Ctx>(inp)? {
+            None => return recover::unclosed_parens::<Src, Ctx>(inp, open),
+            Some(Kind::RBrace) if closes_enclosing_block(open_at, inp.state().brace_depth()) => {
+              return recover::report_unexpected::<Src, Ctx>(inp, PARENS_CLOSER_HEADS);
+            }
+            // `unexpected` reports and consumes, so every turn returns or consumes.
+            Some(_) => recover::unexpected::<Src, Ctx>(inp, PARENS_CLOSER_HEADS)?,
+          }
+        }
+      },
+    )
+    .parse_input(inp)
+  }
+
   /// `= Value[Const]`, in the flavour `konst` names.
   ///
   /// A default is constant in both positions the grammar puts it in, and the two read different
@@ -655,11 +887,16 @@ lossless_production! {
         Some(Keyword::True | Keyword::False) => boolean_value::<Src, Ctx>(inp),
         Some(Keyword::Null) => null_value::<Src, Ctx>(inp),
         Some(Keyword::Set) => {
-          collection_or_enum::<Src, Ctx>(inp, konst, Some(Collection::Set))
+          collection_or_enum::<Src, Ctx>(inp, konst, Some(Opener::Collection(Collection::Set)))
         }
         Some(Keyword::Map) => {
-          collection_or_enum::<Src, Ctx>(inp, konst, Some(Collection::Map))
+          collection_or_enum::<Src, Ctx>(inp, konst, Some(Opener::Collection(Collection::Map)))
         }
+        // A schema position's block, before `{`; everywhere else `const` is a name.
+        Some(Keyword::Const) => match konst {
+          Constness::Schema => collection_or_enum::<Src, Ctx>(inp, konst, Some(Opener::Block)),
+          Constness::Const | Constness::NonConst => enum_value::<Src, Ctx>(inp),
+        },
         // Every other spelling — including the SDL keywords and the directive-location spellings
         // `ContextualKeyword` also carries — is a perfectly good first path segment, and in a
         // schema position the type a typed form may name.

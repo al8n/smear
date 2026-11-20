@@ -142,6 +142,12 @@ pub enum Expectation {
   /// end of input names. It renders as nothing, so a message drops its "expected …" clause rather
   /// than naming a guess.
   Unspecified,
+  /// An operator or a `,`: what may follow an operand inside a `const { … }` block, where a `,`,
+  /// a closer, a `=>` or the end of input ends the expression and an operator continues it.
+  ///
+  /// Raised at a token that does neither, a second operand written beside the first among them, so
+  /// the message names what is missing between the two.
+  OperatorOrSeparator,
 }
 
 /// What a message says was expected, as the object of "expected …": punctuation and keywords in
@@ -198,6 +204,7 @@ impl core::fmt::Display for Expectation {
       Self::Keyword(keyword) => write!(f, "`{keyword}`"),
       Self::Production(production) => f.write_str(production),
       Self::Unspecified => Ok(()),
+      Self::OperatorOrSeparator => f.write_str("an operator or `,`"),
     }
   }
 }

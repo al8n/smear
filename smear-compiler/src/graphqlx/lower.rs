@@ -1864,6 +1864,16 @@ impl Lowering<'_, '_, '_> {
           self.unknown(source, span);
           RawKind::Refused
         }
+        // A block is the same: one refused node, and nothing of it entered. Lowering never enters
+        // a block, so the three forms only a block holds reach this match through no parse; their
+        // arms are the match's.
+        ConstInputValue::Block(_)
+        | ConstInputValue::Paren(_)
+        | ConstInputValue::Bytes(_)
+        | ConstInputValue::Id(_) => {
+          self.unknown(source, span);
+          RawKind::Refused
+        }
         ConstInputValue::List(_) => RawKind::List,
         ConstInputValue::Set(_) => RawKind::Set,
         ConstInputValue::Map(_) => RawKind::Map,
@@ -1916,7 +1926,11 @@ impl Lowering<'_, '_, '_> {
         | ConstInputValue::Null(_)
         | ConstInputValue::Char(_)
         | ConstInputValue::TypedObject(_)
-        | ConstInputValue::Typed(_) => {}
+        | ConstInputValue::Typed(_)
+        | ConstInputValue::Block(_)
+        | ConstInputValue::Paren(_)
+        | ConstInputValue::Bytes(_)
+        | ConstInputValue::Id(_) => {}
       }
     }
     if let Some(count) = charged {
@@ -2791,7 +2805,11 @@ fn held<S>(value: &ConstInputValue<S>, index: usize) -> Option<&ConstInputValue<
     | ConstInputValue::Null(_)
     | ConstInputValue::Char(_)
     | ConstInputValue::TypedObject(_)
-    | ConstInputValue::Typed(_) => None,
+    | ConstInputValue::Typed(_)
+    | ConstInputValue::Block(_)
+    | ConstInputValue::Paren(_)
+    | ConstInputValue::Bytes(_)
+    | ConstInputValue::Id(_) => None,
   }
 }
 

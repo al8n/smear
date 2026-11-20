@@ -30,6 +30,33 @@ All notable changes to Smear are documented in this file.
 - `smear-compiler`: a GraphQLx typed object and typed value are each reported as
   `smear::graphqlx::unknown-item`, once for a file, at the form, and lowered as one refused node
   whatever they hold, until the analyzer gives them their meaning.
+- `smear-parser`!: a GraphQLx schema position reads a `const { … }` block when `const` is
+  followed by `{`, whatever trivia stands between; elsewhere, and before anything else, `const` is
+  a name. A block holds one value, and inside it a value may be a parenthesis, `(1)`, a bytes
+  value, `b"\x89PNG"`, an id value, `i"7"`, or a block, which switches nothing.
+  - **The AST.** `graphqlx::ast::ConstBlock` and `ParenValue`, each its span and the one value it
+    holds, in place behind a `Nest`, and `BytesValue` and `IdValue`, each its span and its
+    literal, with their `…Components`; and the variants `ConstInputValue::Block`, `Paren`,
+    `Bytes` and `Id`. Only a block holds the last three. The enum keeps its size.
+  - **The productions.** `const_block`, `block_expression` and `block_operand`, and
+    `schema_value` and the schema family read a block. `const_value` and its family are
+    unchanged.
+  - **What the parser writes of a lexer's state.** The block's production moves the lexer into
+    the block's mode at its `{` and back at its `}`, in both layers, and nothing else writes the
+    state: a comma between the braces is a separator, and a number there carries no sign. An error
+    the parse goes on from leaves the mode first; a terminal stop leaves it as the stop found it.
+    The syntactic layer's productions name its lexer's state, `SyntacticState`, in their bounds.
+  - **The tree.** `SyntaxKind` gains the nodes `ConstBlock`, `ParenValue`, `BytesValue`, `IdValue`
+    and `Expression` after `TypedValue`, which moves the raw value of every later kind by five,
+    and the lossless layer's typed wrappers of the same names. Every expression is one
+    `Expression` node, a lone operand's too: the trivia before it is its parent's and the trivia
+    after it is its own. Each wrapper that holds a value gains `const_blocks` or `const_block`, as
+    does `TypedValue`.
+  - **`Expectation::OperatorOrSeparator`,** "an operator or `,`", what an operand of a block is
+    refused against when something it cannot be followed by follows it.
+- `smear-compiler`: a GraphQLx `const { … }` block is reported as
+  `smear::graphqlx::unknown-item`, once for a file, at the block, and lowered as one refused node
+  whatever it holds, until the analyzer gives it its meaning.
 - `smear-parser`: a GraphQLx schema position, a constant position of a type-system definition or
   extension, reads its values through productions of its own: `schema_value`,
   `schema_default_value` and `try_schema_default_value`, `schema_argument`, `schema_arguments`,

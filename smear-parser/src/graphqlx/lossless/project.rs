@@ -23,8 +23,8 @@
 //! The contract, the error vocabulary, the span rule, the `(tree, source)` verification and the
 //! green traversal are [the substrate](crate::lossless::project)'s, and the entry shapes are the
 //! naming symmetry its header states. **Everything below that is this dialect's**: sixteen of
-//! GraphQLx's seventy-nine wrappers are structurally identical to a GraphQL one, thirty-seven
-//! share a name with a different shape, and twenty-six have no GraphQL image at all. Three of those
+//! GraphQLx's eighty-four wrappers are structurally identical to a GraphQL one, thirty-seven
+//! share a name with a different shape, and thirty-one have no GraphQL image at all. Three of those
 //! differences are *mapping* divergences rather than renamings, and each one changes what a walk
 //! has to do rather than what it has to call something:
 //!
@@ -120,10 +120,10 @@
 //! GraphQLx's lossless productions **report and continue**: a violation goes on the diagnostic
 //! channel and the node is built anyway, so `Parse::has_errors()` sees it and the *shape* does not.
 //! Every one of those shapes reaches this projection looking well-formed, and each needs an
-//! answer. The population is every call that reports without building a hole — **68**
-//! `recover::report_unexpected::<…>` sites and **18** `recover::unclosed_{list,object,parens,angle}::<…>`
+//! answer. The population is every call that reports without building a hole — **71**
+//! `recover::report_unexpected::<…>` sites and **20** `recover::unclosed_{list,object,parens,angle}::<…>`
 //! sites across `graphqlx/lossless/*.rs`, the counts `grep -c` gives for those spellings — and
-//! **all 86 are mapped** in the table below, one probe each: a text that reaches the site with a
+//! **all 91 are mapped** in the table below, one probe each: a text that reaches the site with a
 //! hole-free tree, and what this projection answers for it. The table is executable:
 //! `every_report_and_build_site_has_a_measured_answer` holds the same rows, asserts their count
 //! per file and family against the source's own spelling of each call, and measures every answer.
@@ -143,7 +143,7 @@
 //! without the token — and the cell derives the missing-token table below from exactly that and
 //! asserts the two are the same set.
 //!
-//! **Twenty-three project; sixty-three refuse.** The twenty-three are the lenient rows a site can leave
+//! **Twenty-six project; sixty-five refuse.** The twenty-six are the lenient rows a site can leave
 //! with a well-formed value. The others refuse either the shape the site built, or — for the
 //! unclosed sites whose definition the parser cannot finish at end of input — the rubble the
 //! document is left holding, or, for the one row above, the hole.
@@ -234,6 +234,11 @@
 //! | `value.rs` | report | `input I { a: T = Box<i32> }` | a constituent with an image | `MissingChild(TypedObjectValue)` |
 //! | `value.rs` | unclosed | `input I { a: T = U(1` | `)` of `TypedValue` — **no image** | **projects** |
 //! | `value.rs` | report | `input I { a: T = U(1 }` | `)` of `TypedValue` — **no image** | **projects** |
+//! | `value.rs` | report | `input I { a: T = const { $v } }` | nothing — a present token is refused | `UnexpectedChild(Expression, VariableValue)` |
+//! | `value.rs` | report | `input I { a: T = const { } }` | a constituent with an image | `MissingChild(Expression)` |
+//! | `value.rs` | report | `input I { a: T = const { (1 } }` | `)` of `ParenValue` — **no image** | **projects** |
+//! | `value.rs` | unclosed | `input I { a: T = const { 1` | `}` of `ConstBlock` — **no image** | **projects** |
+//! | `value.rs` | unclosed | `input I { a: T = const { (1` | `)` of `ParenValue` — **no image** | **projects** |
 //! | `directive.rs` | unclosed | `{ f(a: 1` | `)` of `Arguments` — **no image** | **projects** |
 //! | `directive.rs` | report | `{ f(a: 1 }` | `)` of `Arguments` — **no image** | **projects** |
 //! | `ty.rs` | unclosed | `type T { f: A<B` | `>` of `TypeGenerics` — **no image** | **projects** |
@@ -300,6 +305,8 @@
 //! | [`MapValue`](SyntaxKind::MapValue) | `}` | `value.rs` unclosed — `{ f(a: map!{1 => 2` |
 //! | [`TypedObjectValue`](SyntaxKind::TypedObjectValue) | `}` | `value.rs` unclosed — `input I { a: T = P { x: 1` |
 //! | [`TypedValue`](SyntaxKind::TypedValue) | `)` | `value.rs` unclosed — `input I { a: T = U(1` |
+//! | [`ConstBlock`](SyntaxKind::ConstBlock) | `}` | `value.rs` unclosed — `input I { a: T = const { 1` |
+//! | [`ParenValue`](SyntaxKind::ParenValue) | `)` | `value.rs` unclosed — `input I { a: T = const { (1` |
 //! | [`VariablesDefinition`](SyntaxKind::VariablesDefinition) | `)` | `executable.rs` unclosed — `query Q($a: Int`; refuses either way, the operation being lost |
 //! | [`ArgumentsDefinition`](SyntaxKind::ArgumentsDefinition) | `)` | `definition.rs` unclosed — `type T { f(a: Int`; refuses either way, the definition being lost |
 //! | [`ExecutableDefinitionTypeGenerics`](SyntaxKind::ExecutableDefinitionTypeGenerics) | `>` | `generic.rs` unclosed — `fragment <T`; refuses either way, the fragment being lost |
@@ -308,7 +315,7 @@
 //! lenient iff its token has no AST image and the lossless parser builds a hole-free tree holding
 //! the node without it; the report-and-build census above enumerates every place the parser leaves
 //! a token out without a hole, and the pairs its image-less rows leave out — each witnessed by the
-//! tree of at least one probe — are these twenty-three, which the cell asserts. A pair can have two
+//! tree of at least one probe — are these twenty-five, which the cell asserts. A pair can have two
 //! sites: a `(`, `[` or `<` list leaves its closer out at the end of input, and again at the `}`
 //! of a block around it. Two of the pairs are witnessed only as **orphans**: at end of input the
 //! operation or the fragment around the list cannot be finished, so the root keeps the list as a
@@ -640,37 +647,38 @@ use tokora::SimpleSpan;
 use smear_lexer::{
   LitStr,
   graphqlx::{
-    ContextualKeyword, LitChar, LitFloat, LitInt, identifier, keyword::contextual_keyword,
+    ContextualKeyword, LitChar, LitFloat, LitInt, LitPrefixedStr, StrPrefix, identifier,
+    keyword::contextual_keyword,
   },
 };
 
 use crate::{
   graphqlx::{
     ast::{
-      Alias, Argument, Arguments, ArgumentsDefinition, BooleanValue, CharValue, ConstArgument,
-      ConstArguments, ConstDirective, ConstDirectives, ConstInputValue, ConstList, ConstMap,
-      ConstMapEntry, ConstObject, ConstObjectField, ConstSet, DefaultInputValue, DefinitionName,
-      DefinitionTypeGenerics, DefinitionTypeParam, DefinitionTypePath, Described,
-      DescribedVariableDefinition, Directive, DirectiveExtension, DirectiveLocations, Directives,
-      Document, DocumentItem, EnumTypeDefinition, EnumTypeExtension, EnumTypeExtensionData,
-      EnumValue, EnumValuesDefinition, ExecutableDefinition, ExecutableDefinitionHeader,
-      ExecutableDefinitionName, ExecutableDefinitionTypeGenerics, ExecutableDocument,
-      ExtensionDirectives, ExtensionFields, ExtensionMembers, ExtensionName, ExtensionOperations,
-      ExtensionTypeGenerics, ExtensionTypeParam, ExtensionValues, Field, FieldsDefinition,
-      FloatValue, FragmentSpread, ImplementInterfaces, InlineFragment, InlineStringValue,
-      InputFieldsDefinition, InputObjectTypeDefinition, InputObjectTypeExtension,
-      InputObjectTypeExtensionData, InputValue, IntValue, InterfaceTypeDefinition,
-      InterfaceTypeExtension, List, Map, MapEntry, ModDefinition, Name, NamedOperationDefinition,
-      Nest, Nested, NullValue, Object, ObjectField, ObjectTypeDefinition, ObjectTypeExtension,
-      OperationDefinition, OperationType, ParentRoot, Path, PathRoot, RootOperationTypeDefinition,
-      RootOperationTypesDefinition, ScalarTypeDefinition, ScalarTypeExtension,
-      ScalarTypeExtensionData, SchemaDefinition, SchemaExtension, Selection, SelectionSet, Set,
-      SourcePrefix, StringValue, Type, TypeCondition, TypeDefinition, TypeExtension, TypeGenerics,
-      TypePath, TypeSystemDefinition, TypeSystemDocument, TypeSystemExtension, TypeSystemItem,
-      TypedObjectValue, TypedValue, UnionMemberTypes, UnionTypeDefinition, UnionTypeExtension,
-      UnionTypeExtensionData, UseDefinition, UseOrExecutableDefinition, UsePrefix, UseTree,
-      UseTreeKind, VariableDefinition, VariableValue, VariablesDefinition, WhereClause,
-      WherePredicate,
+      Alias, Argument, Arguments, ArgumentsDefinition, BooleanValue, BytesValue, CharValue,
+      ConstArgument, ConstArguments, ConstBlock, ConstDirective, ConstDirectives, ConstInputValue,
+      ConstList, ConstMap, ConstMapEntry, ConstObject, ConstObjectField, ConstSet,
+      DefaultInputValue, DefinitionName, DefinitionTypeGenerics, DefinitionTypeParam,
+      DefinitionTypePath, Described, DescribedVariableDefinition, Directive, DirectiveExtension,
+      DirectiveLocations, Directives, Document, DocumentItem, EnumTypeDefinition,
+      EnumTypeExtension, EnumTypeExtensionData, EnumValue, EnumValuesDefinition,
+      ExecutableDefinition, ExecutableDefinitionHeader, ExecutableDefinitionName,
+      ExecutableDefinitionTypeGenerics, ExecutableDocument, ExtensionDirectives, ExtensionFields,
+      ExtensionMembers, ExtensionName, ExtensionOperations, ExtensionTypeGenerics,
+      ExtensionTypeParam, ExtensionValues, Field, FieldsDefinition, FloatValue, FragmentSpread,
+      IdValue, ImplementInterfaces, InlineFragment, InlineStringValue, InputFieldsDefinition,
+      InputObjectTypeDefinition, InputObjectTypeExtension, InputObjectTypeExtensionData,
+      InputValue, IntValue, InterfaceTypeDefinition, InterfaceTypeExtension, List, Map, MapEntry,
+      ModDefinition, Name, NamedOperationDefinition, Nest, Nested, NullValue, Object, ObjectField,
+      ObjectTypeDefinition, ObjectTypeExtension, OperationDefinition, OperationType, ParenValue,
+      ParentRoot, Path, PathRoot, RootOperationTypeDefinition, RootOperationTypesDefinition,
+      ScalarTypeDefinition, ScalarTypeExtension, ScalarTypeExtensionData, SchemaDefinition,
+      SchemaExtension, Selection, SelectionSet, Set, SourcePrefix, StringValue, Type,
+      TypeCondition, TypeDefinition, TypeExtension, TypeGenerics, TypePath, TypeSystemDefinition,
+      TypeSystemDocument, TypeSystemExtension, TypeSystemItem, TypedObjectValue, TypedValue,
+      UnionMemberTypes, UnionTypeDefinition, UnionTypeExtension, UnionTypeExtensionData,
+      UseDefinition, UseOrExecutableDefinition, UsePrefix, UseTree, UseTreeKind,
+      VariableDefinition, VariableValue, VariablesDefinition, WhereClause, WherePredicate,
     },
     kinds::{GraphQLxLang, SyntaxKind},
     lossless::Parse,
@@ -1786,6 +1794,17 @@ fn char_lit(text: &str, span: SimpleSpan) -> Out<LitChar<&str>> {
   LitChar::try_from(text).map_err(|_| {
     ProjectError::new(
       ProjectErrorKind::MalformedToken(K::Char),
+      span.start()..span.end(),
+    )
+  })
+}
+
+/// A prefixed string's literal, read again through the lexer's door from a state inside a block,
+/// the only place one is lexed.
+fn prefixed_lit(text: &str, span: SimpleSpan) -> Out<LitPrefixedStr<&str>> {
+  LitPrefixedStr::try_from(text).map_err(|_| {
+    ProjectError::new(
+      ProjectErrorKind::MalformedToken(K::PrefixedString),
       span.start()..span.end(),
     )
   })
@@ -3637,11 +3656,12 @@ where
 // values
 // ---------------------------------------------------------------------------------------------
 
-/// The fourteen value node kinds — GraphQL's nine plus [`SetValue`](SyntaxKind::SetValue),
+/// The fifteen value node kinds — GraphQL's nine plus [`SetValue`](SyntaxKind::SetValue),
 /// [`MapValue`](SyntaxKind::MapValue) and [`CharValue`](SyntaxKind::CharValue), and a schema
-/// position's [`TypedObjectValue`](SyntaxKind::TypedObjectValue) and
-/// [`TypedValue`](SyntaxKind::TypedValue), which every other grammar refuses where it meets one.
-const VALUE_KINDS: [SyntaxKind; 14] = [
+/// position's [`TypedObjectValue`](SyntaxKind::TypedObjectValue),
+/// [`TypedValue`](SyntaxKind::TypedValue) and [`ConstBlock`](SyntaxKind::ConstBlock), which every
+/// other grammar refuses where it meets one.
+const VALUE_KINDS: [SyntaxKind; 15] = [
   K::VariableValue,
   K::IntValue,
   K::FloatValue,
@@ -3656,7 +3676,36 @@ const VALUE_KINDS: [SyntaxKind; 14] = [
   K::CharValue,
   K::TypedObjectValue,
   K::TypedValue,
+  K::ConstBlock,
 ];
+
+/// The operand kinds an [`Expression`](SyntaxKind::Expression) may hold while no operator is read:
+/// a block's own grammar, in which a parenthesis, bytes and an id stand and nowhere else. A
+/// variable is built there and refused here, as in a constant position.
+const BLOCK_OPERAND_KINDS: [SyntaxKind; 12] = [
+  K::VariableValue,
+  K::IntValue,
+  K::FloatValue,
+  K::StringValue,
+  K::BytesValue,
+  K::IdValue,
+  K::CharValue,
+  K::BooleanValue,
+  K::NullValue,
+  K::EnumValue,
+  K::ParenValue,
+  K::ConstBlock,
+];
+
+/// The one operand an [`Expression`](SyntaxKind::Expression) holds: an expression of one operand
+/// projects to that operand. An empty one is [`MissingChild`](ProjectErrorKind::MissingChild), and
+/// anything beside the operand, an operator's token among them, is refused where it stands.
+fn expression_operand(node: Node<'_>) -> Out<Node<'_>> {
+  let mut cursor = Cursor::new(node);
+  let operand = cursor.one_of(&BLOCK_OPERAND_KINDS, "an operand")?;
+  cursor.end()?;
+  Ok(operand)
+}
 
 /// A leaf value's slice, its **token's** span and the node's extent.
 ///
@@ -3835,9 +3884,10 @@ trait ValueGrammar<'src> {
   fn field(span: SimpleSpan, name: Name<&'src str>, value: Self::Value) -> Self::Field;
   fn entry(span: SimpleSpan, key: Self::Value, value: Self::Value) -> Self::Entry;
 
-  /// Whether this grammar reads the typed forms, `Point { x: 1 }` and `Url("x")`: a schema
-  /// position's alone. Elsewhere a typed form's node is refused where the walk meets it.
-  const TYPED_FORMS: bool;
+  /// Whether this grammar reads a schema position's own forms: the typed forms, `Point { x: 1 }`
+  /// and `Url("x")`, and a `const { … }` block with what only a block holds. Elsewhere such a
+  /// node is refused where the walk meets it.
+  const SCHEMA_FORMS: bool;
 
   /// A typed object. `None` in a grammar that reads no typed form, which the walk never asks: it
   /// refuses the node before it reads it.
@@ -3849,6 +3899,18 @@ trait ValueGrammar<'src> {
 
   /// A typed value, on the terms of [`typed_object`](Self::typed_object).
   fn typed(span: SimpleSpan, ty: TypePath<&'src str>, value: Self::Value) -> Option<Self::Value>;
+
+  /// A `const { … }` block, on the terms of [`typed_object`](Self::typed_object).
+  fn block(span: SimpleSpan, value: Self::Value) -> Option<Self::Value>;
+
+  /// A parenthesis inside a block, on the terms of [`typed_object`](Self::typed_object).
+  fn paren(span: SimpleSpan, value: Self::Value) -> Option<Self::Value>;
+
+  /// A bytes value inside a block, on the terms of [`typed_object`](Self::typed_object).
+  fn bytes(value: BytesValue<&'src str>) -> Option<Self::Value>;
+
+  /// An id value inside a block, on the terms of [`typed_object`](Self::typed_object).
+  fn id(value: IdValue<&'src str>) -> Option<Self::Value>;
 }
 
 /// A value position that admits a variable — an argument, a collection member, or an object field
@@ -3917,7 +3979,7 @@ impl<'src> ValueGrammar<'src> for Executable {
     MapEntry::new(span, key, value)
   }
 
-  const TYPED_FORMS: bool = false;
+  const SCHEMA_FORMS: bool = false;
 
   fn typed_object(
     _: SimpleSpan,
@@ -3928,6 +3990,22 @@ impl<'src> ValueGrammar<'src> for Executable {
   }
 
   fn typed(_: SimpleSpan, _: TypePath<&'src str>, _: Self::Value) -> Option<Self::Value> {
+    None
+  }
+
+  fn block(_: SimpleSpan, _: Self::Value) -> Option<Self::Value> {
+    None
+  }
+
+  fn paren(_: SimpleSpan, _: Self::Value) -> Option<Self::Value> {
+    None
+  }
+
+  fn bytes(_: BytesValue<&'src str>) -> Option<Self::Value> {
+    None
+  }
+
+  fn id(_: IdValue<&'src str>) -> Option<Self::Value> {
     None
   }
 }
@@ -4000,7 +4078,7 @@ impl<'src> ValueGrammar<'src> for Constant {
     ConstMapEntry::new(span, key, value)
   }
 
-  const TYPED_FORMS: bool = false;
+  const SCHEMA_FORMS: bool = false;
 
   fn typed_object(
     _: SimpleSpan,
@@ -4011,6 +4089,22 @@ impl<'src> ValueGrammar<'src> for Constant {
   }
 
   fn typed(_: SimpleSpan, _: TypePath<&'src str>, _: Self::Value) -> Option<Self::Value> {
+    None
+  }
+
+  fn block(_: SimpleSpan, _: Self::Value) -> Option<Self::Value> {
+    None
+  }
+
+  fn paren(_: SimpleSpan, _: Self::Value) -> Option<Self::Value> {
+    None
+  }
+
+  fn bytes(_: BytesValue<&'src str>) -> Option<Self::Value> {
+    None
+  }
+
+  fn id(_: IdValue<&'src str>) -> Option<Self::Value> {
     None
   }
 }
@@ -4087,7 +4181,7 @@ impl<'src> ValueGrammar<'src> for Schema {
     <Constant as ValueGrammar<'src>>::entry(span, key, value)
   }
 
-  const TYPED_FORMS: bool = true;
+  const SCHEMA_FORMS: bool = true;
 
   fn typed_object(
     span: SimpleSpan,
@@ -4103,6 +4197,22 @@ impl<'src> ValueGrammar<'src> for Schema {
     Some(ConstInputValue::Typed(Nest::new(TypedValue::new(
       span, ty, value,
     ))))
+  }
+
+  fn block(span: SimpleSpan, value: Self::Value) -> Option<Self::Value> {
+    Some(ConstInputValue::Block(ConstBlock::new(span, value)))
+  }
+
+  fn paren(span: SimpleSpan, value: Self::Value) -> Option<Self::Value> {
+    Some(ConstInputValue::Paren(ParenValue::new(span, value)))
+  }
+
+  fn bytes(value: BytesValue<&'src str>) -> Option<Self::Value> {
+    Some(ConstInputValue::Bytes(value))
+  }
+
+  fn id(value: IdValue<&'src str>) -> Option<Self::Value> {
+    Some(ConstInputValue::Id(value))
   }
 }
 
@@ -4194,6 +4304,10 @@ enum Built<'g, 'src, G: ValueGrammar<'src>> {
   TypedObject(BuiltTypedObject<'g, 'src, G>),
   /// A `TypedValue`'s type path, while its one value is built below.
   Typed(TypePath<&'src str>),
+  /// A `ConstBlock`, while the operand its expression holds is built below.
+  Block,
+  /// A `ParenValue`, while the operand its expression holds is built below.
+  Paren,
 }
 
 /// A `TypedObjectValue`'s accumulator: [`Built::TypedObject`]'s payload.
@@ -4401,7 +4515,7 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
         return Ok((G::enumeration(value), extent));
       }
       // A schema position's forms. Under any other grammar the node falls to the refusal below.
-      K::TypedObjectValue if G::TYPED_FORMS => {
+      K::TypedObjectValue if G::SCHEMA_FORMS => {
         // `TypePath { ObjectField* }` — the type path read whole, then a field list as an
         // object's is, each field's value one descent.
         let mut cursor = Cursor::new(node);
@@ -4430,7 +4544,7 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
           }
         }
       }
-      K::TypedValue if G::TYPED_FORMS => {
+      K::TypedValue if G::SCHEMA_FORMS => {
         // `TypePath ( Value )` — the type path read whole, then the one value, one descent.
         let mut cursor = Cursor::new(node);
         let ty_node = cursor.node(K::TypePath, "the type a typed value names")?;
@@ -4443,6 +4557,57 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
         });
         parent = node;
         node = first;
+      }
+      K::ConstBlock if G::SCHEMA_FORMS => {
+        // `const { Expression }` — the keyword and the brace, and then the operand the one
+        // expression holds, one descent. The expression has no image: it projects to its operand.
+        let mut cursor = Cursor::new(node);
+        cursor.keyword(ContextualKeyword::Const, "the `const` a block opens with")?;
+        cursor.token(K::LBrace, "the `{` after a block's `const`")?;
+        let expression = cursor.node(K::Expression, "the expression a block holds")?;
+        let operand = expression_operand(expression)?;
+        frames.push(ValueFrame {
+          cursor,
+          built: Built::Block,
+        });
+        parent = expression;
+        node = operand;
+      }
+      K::ParenValue if G::SCHEMA_FORMS => {
+        // `( Expression )` — the bracket, and then the operand the one expression holds.
+        let mut cursor = Cursor::new(node);
+        cursor.token(K::LParen, "the `(` a parenthesis opens with")?;
+        let expression = cursor.node(K::Expression, "the expression a parenthesis holds")?;
+        let operand = expression_operand(expression)?;
+        frames.push(ValueFrame {
+          cursor,
+          built: Built::Paren,
+        });
+        parent = expression;
+        node = operand;
+      }
+      K::BytesValue | K::IdValue if G::SCHEMA_FORMS => {
+        let LeafText {
+          text,
+          span,
+          range: extent,
+        } = leaf(node, source, K::PrefixedString, "a prefixed string")?;
+        let literal = prefixed_lit(text, span)?;
+        // The node's kind and the literal's prefix say the same thing, or the tree holds a
+        // literal its production never put under that node.
+        let built = match (node.kind(), literal.prefix()) {
+          (K::BytesValue, StrPrefix::Bytes) => G::bytes(BytesValue::new(span, literal)),
+          (K::IdValue, StrPrefix::Id) => G::id(IdValue::new(span, literal)),
+          _ => {
+            return Err(ProjectError::new(
+              ProjectErrorKind::MalformedToken(K::PrefixedString),
+              to_range(node.text_range()),
+            ));
+          }
+        };
+        return built
+          .map(|value| (value, extent))
+          .ok_or_else(|| unexpected(parent, node.kind(), node.text_range()));
       }
       K::ListValue | K::SetValue | K::ObjectValue | K::MapValue => {
         // `[ Value* ]`, `set!{ Value* }`, `{ ObjectField* }`, `map!{ MapEntry* }` — the opener
@@ -4516,13 +4681,13 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
 }
 
 /// The closer of a container value whose members have run out: `]` for a list, `)` for a typed
-/// value, `}` for the other four — **lenient**, because `unclosed_list`, `unclosed_parens` and
-/// `unclosed_object` build each of the six hole-free without it and the closer has no AST image —
-/// and then nothing left over.
+/// value and a parenthesis, `}` for the other five — **lenient**, because `unclosed_list`,
+/// `unclosed_parens` and `unclosed_object` build each of the eight hole-free without it and the
+/// closer has no AST image — and then nothing left over.
 fn close_container(cursor: &mut Cursor<'_>) -> Out<TextRange> {
   match cursor.node.kind() {
     K::ListValue => cursor.opt_token(K::RBracket),
-    K::TypedValue => cursor.opt_token(K::RParen),
+    K::TypedValue | K::ParenValue => cursor.opt_token(K::RParen),
     _ => cursor.opt_token(K::RBrace),
   };
   cursor.finish("a token")
@@ -4618,6 +4783,21 @@ fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
           ResumedValue::Done((built, range))
         }
       }
+    }
+    // A block's or a parenthesis's operand came back, and the closer is all that is left.
+    Built::Block => {
+      cursor.extent.cover(piece);
+      let range = close_container(&mut cursor)?;
+      let built =
+        G::block(to_span(range), value).ok_or_else(|| unexpected(node, K::ConstBlock, range))?;
+      ResumedValue::Done((built, range))
+    }
+    Built::Paren => {
+      cursor.extent.cover(piece);
+      let range = close_container(&mut cursor)?;
+      let built =
+        G::paren(to_span(range), value).ok_or_else(|| unexpected(node, K::ParenValue, range))?;
+      ResumedValue::Done((built, range))
     }
     // The one value came back, and the `)` is all that is left.
     Built::Typed(ty) => {

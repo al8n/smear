@@ -14,9 +14,12 @@
 //! `tests/lossless_x_trivia_atoms.rs` pins that by behaviour, form by form, rather than by this
 //! sentence.
 //!
-//! **The comma is trivia, not punctuation**, here as in GraphQL. It is not a separator any
-//! production may require or count — and GraphQLx's generic lists, `where` clauses and `use`
-//! groups are all comma-*tolerant* rather than comma-separated for exactly that reason.
+//! **The comma is trivia, not punctuation**, here as in GraphQL, everywhere but between the braces
+//! of a `const { … }` block. It is not a separator any production may require or count outside a
+//! block — and GraphQLx's generic lists, `where` clauses and `use` groups are all comma-*tolerant*
+//! rather than comma-separated for exactly that reason. Inside a block the lexer, which the block's
+//! production has switched into the block's mode, makes a comma the token `Separator` while no `<`
+//! is open, and the block's own grammar reads it.
 //!
 //! # The kind vocabulary here is the lexer's, not the tree's
 //!

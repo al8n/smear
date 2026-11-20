@@ -42,6 +42,9 @@
 //! [`SetValue`](SyntaxKind::SetValue)/[`MapValue`](SyntaxKind::MapValue)/
 //! [`MapEntry`](SyntaxKind::MapEntry), [`CharValue`](SyntaxKind::CharValue),
 //! [`TypedObjectValue`](SyntaxKind::TypedObjectValue), [`TypedValue`](SyntaxKind::TypedValue),
+//! [`ConstBlock`](SyntaxKind::ConstBlock), [`ParenValue`](SyntaxKind::ParenValue),
+//! [`BytesValue`](SyntaxKind::BytesValue), [`IdValue`](SyntaxKind::IdValue),
+//! [`Expression`](SyntaxKind::Expression),
 //! [`Path`](SyntaxKind::Path), [`TypePath`](SyntaxKind::TypePath) and
 //! [`TypeGenerics`](SyntaxKind::TypeGenerics).
 //!
@@ -75,7 +78,7 @@ use crate::lossless::KindSpace;
 ///
 /// # Layout
 ///
-/// The discriminants are the default `0..124` and [`ALL`](Self::ALL) is in declaration order, so
+/// The discriminants are the default `0..129` and [`ALL`](Self::ALL) is in declaration order, so
 /// [`raw`](Self::raw) is an index and [`from_raw`](Self::from_raw) is a bounds check. Four blocks,
 /// in this order:
 ///
@@ -83,8 +86,8 @@ use crate::lossless::KindSpace;
 /// |---|---|
 /// | `0..36` | the thirty-six non-trivia images, in `LosslessTokenKind`'s declaration order |
 /// | `36..42` | the six trivia images, in the same order, with the line terminators folded |
-/// | `42..121` | the seventy-nine node kinds |
-/// | `121..124` | [`Error`](Self::Error), [`Gap`](Self::Gap), [`Root`](Self::Root) |
+/// | `42..126` | the eighty-four node kinds |
+/// | `126..129` | [`Error`](Self::Error), [`Gap`](Self::Gap), [`Root`](Self::Root) |
 ///
 /// **Nothing may be appended after [`Root`](Self::Root)** — the shared runner is parameterised over
 /// the last three positions, and the seventeen images GraphQL lacks therefore live *inside* the image
@@ -228,6 +231,17 @@ pub enum SyntaxKind {
   TypedObjectValue,
   /// `TypePath ( Value )`, a typed value — GraphQLx only, in a schema position.
   TypedValue,
+  /// `const { Expression }`, a block — GraphQLx only, in a schema position and inside a block.
+  ConstBlock,
+  /// `( Expression )`, a parenthesis — GraphQLx only, inside a block.
+  ParenValue,
+  /// `b"…"`, a bytes value — GraphQLx only, inside a block.
+  BytesValue,
+  /// `i"…"`, an id value — GraphQLx only, inside a block.
+  IdValue,
+  /// The expression a block, a parenthesis or a block's member holds — GraphQLx only, inside a
+  /// block. One node around every expression, a lone operand's too.
+  Expression,
 
   // ---- type references, paths, arguments, directives ----
   /// `PathRoot? Name (:: Name)*`, the root being `~ ::`, `^ ::` or `.. ::` repeated, kept as the
@@ -452,7 +466,7 @@ impl SyntaxKind {
     Self::Tab,
     Self::Newline,
     Self::Comment,
-    // values (42..59)
+    // values (42..64)
     Self::IntValue,
     Self::FloatValue,
     Self::StringValue,
@@ -470,7 +484,12 @@ impl SyntaxKind {
     Self::CharValue,
     Self::TypedObjectValue,
     Self::TypedValue,
-    // types, paths, arguments, directives (59..68)
+    Self::ConstBlock,
+    Self::ParenValue,
+    Self::BytesValue,
+    Self::IdValue,
+    Self::Expression,
+    // types, paths, arguments, directives (64..73)
     Self::Path,
     Self::TypeGenerics,
     Self::DefinitionTypePath,
@@ -480,7 +499,7 @@ impl SyntaxKind {
     Self::Arguments,
     Self::Directive,
     Self::Directives,
-    // selections and executable definitions (68..78)
+    // selections and executable definitions (73..83)
     Self::Alias,
     Self::Field,
     Self::FragmentSpread,
@@ -491,7 +510,7 @@ impl SyntaxKind {
     Self::VariablesDefinition,
     Self::OperationDefinition,
     Self::FragmentDefinition,
-    // SDL definitions (78..98)
+    // SDL definitions (83..103)
     Self::SchemaDefinition,
     Self::RootOperationTypesDefinition,
     Self::RootOperationTypeDefinition,
@@ -512,7 +531,7 @@ impl SyntaxKind {
     Self::EnumValuesDefinition,
     Self::EnumValueDefinition,
     Self::DirectiveLocations,
-    // SDL extensions (98..106)
+    // SDL extensions (103..111)
     Self::SchemaExtension,
     Self::ScalarTypeExtension,
     Self::ObjectTypeExtension,
@@ -521,12 +540,12 @@ impl SyntaxKind {
     Self::EnumTypeExtension,
     Self::InputObjectTypeExtension,
     Self::DirectiveExtension,
-    // `use` items (106..108)
+    // `use` items (111..113)
     Self::UseDefinition,
     Self::UseTree,
-    // inline modules (108..109)
+    // inline modules (113..114)
     Self::ModDefinition,
-    // generics (109..118)
+    // generics (114..123)
     Self::DefinitionTypeParam,
     Self::DefinitionTypeGenerics,
     Self::ExtensionTypeGenerics,
@@ -536,11 +555,11 @@ impl SyntaxKind {
     Self::ExecutableDefinitionName,
     Self::WherePredicate,
     Self::WhereClause,
-    // documents (118..121)
+    // documents (123..126)
     Self::Document,
     Self::ExecutableDocument,
     Self::TypeSystemDocument,
-    // bookkeeping (121..124)
+    // bookkeeping (126..129)
     Self::Error,
     Self::Gap,
     Self::Root,
