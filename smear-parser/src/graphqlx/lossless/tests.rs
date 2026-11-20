@@ -85,6 +85,56 @@ fn a_rewind_across_a_block_restores_the_lexer_outside_the_block() {
   );
 }
 
+/// The same rewind across a block that holds a typed form, whose type arguments close with `>>`
+/// and hold a comma, and whose fields a separator divides: lexed again outside the block's mode,
+/// the separator is a comma, and trivia.
+#[test]
+fn a_rewind_across_a_typed_form_in_a_block_restores_the_lexer_outside_the_block() {
+  const SRC: &str = "const { Pair<A, Box<u8>> { x: 1, y: 2 } }";
+  let (before, after, kinds) = hold(SRC, LexerState::default(), |inp| {
+    let before = inp.state();
+    let declined = inp.attempt(|inp| {
+      let _ = value::<str, _>(inp, Constness::Schema);
+      None::<()>
+    });
+    assert!(declined.is_none());
+    let after = inp.state();
+    let mut kinds: Vec<TokenKind> = Vec::new();
+    while let Ok(Some(token)) = inp.next() {
+      if !token.data().is_trivia() {
+        kinds.push(token.data().kind());
+      }
+    }
+    (before, after, kinds)
+  });
+  assert_eq!(after, before);
+  assert!(!after.in_const_block());
+  assert_eq!(
+    kinds,
+    [
+      TokenKind::Identifier,
+      TokenKind::LBrace,
+      TokenKind::Identifier,
+      TokenKind::LAngle,
+      TokenKind::Identifier,
+      TokenKind::Identifier,
+      TokenKind::LAngle,
+      TokenKind::Identifier,
+      TokenKind::RAngle,
+      TokenKind::RAngle,
+      TokenKind::LBrace,
+      TokenKind::Identifier,
+      TokenKind::Colon,
+      TokenKind::Int,
+      TokenKind::Identifier,
+      TokenKind::Colon,
+      TokenKind::Int,
+      TokenKind::RBrace,
+      TokenKind::RBrace,
+    ]
+  );
+}
+
 /// A stop inside a block leaves the lexer in the block: the production writes no state over a
 /// terminal error or a scanner's stop, so the stop stays one. Each of the parse's two ceilings is a
 /// cell: the brackets a state may hold open, and the items the input's budget allows.

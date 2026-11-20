@@ -562,6 +562,63 @@ fn a_rewind_across_a_block_restores_the_lexer_outside_the_block() {
   assert!(!after.in_const_block());
 }
 
+/// The same rewind across a block that holds a typed form, whose type arguments close with `>>`
+/// and hold a comma, and whose fields a separator divides: lexed again outside the block's mode,
+/// the separator is trivia.
+#[test]
+fn a_rewind_across_a_typed_form_in_a_block_restores_the_lexer_outside_the_block() {
+  use smear_lexer::graphqlx::syntactic::SyntacticTokenKind as T;
+
+  let (read, before, after) = drive_str(
+    |inp| {
+      let before = inp.state();
+      let mut read = None;
+      let declined = inp.attempt(|inp| {
+        read = ast::ConstInputValue::graphqlx_schema(inp).ok();
+        None::<()>
+      });
+      assert!(declined.is_none());
+      let after = inp.state();
+      for kind in [
+        T::Identifier,
+        T::LBrace,
+        T::Identifier,
+        T::LAngle,
+        T::Identifier,
+        T::Identifier,
+        T::LAngle,
+        T::Identifier,
+        T::RAngle,
+        T::RAngle,
+        T::LBrace,
+        T::Identifier,
+        T::Colon,
+        T::Int,
+        T::Identifier,
+        T::Colon,
+        T::Int,
+        T::RBrace,
+        T::RBrace,
+      ] {
+        assert_eq!(inp.next()?.map(|token| token.data().kind()), Some(kind));
+      }
+      assert!(inp.next()?.is_none());
+      Ok::<_, GraphqlxErrors<&str>>((read, before, after))
+    },
+    "const { Pair<A, Box<u8>> { x: 1, y: 2 } }",
+  )
+  .expect("the rewound source lexes outside a block");
+  let Some(ast::ConstInputValue::Block(block)) = &read else {
+    panic!("the attempt read the whole block: {read:?}")
+  };
+  assert!(matches!(
+    block.value(),
+    ast::ConstInputValue::TypedObject(_)
+  ));
+  assert_eq!(after, before);
+  assert!(!after.in_const_block());
+}
+
 /// A scanner's stop inside a block leaves the lexer in the block. The production writes no state
 /// over the stop, so the stop stays one: it is still latched where the production stopped, and a
 /// read there is refused.

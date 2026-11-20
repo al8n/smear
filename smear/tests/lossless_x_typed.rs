@@ -3,7 +3,7 @@
 //! Two halves. The **shaped** half, first, is one test per grammar area, each walking a real tree
 //! through the wrappers rather than through
 //! [`SyntaxNode`](smear::parser::graphqlx::lossless::SyntaxNode). The **totality** half, from
-//! [`the_probe_table_is_exactly_the_shipped_inventory`] on, sweeps all 84 wrappers and all 378
+//! [`the_probe_table_is_exactly_the_shipped_inventory`] on, sweeps all 84 wrappers and all 389
 //! getters over the shared corpus and answers five questions the shaped half cannot: whether the
 //! probe table still matches what the crate ships, whether every getter ever *projected* anything,
 //! whether every getter's name states the kind it projects, whether each node kind casts to exactly
@@ -1025,27 +1025,27 @@ wrapper_table! {
     many variable_values, many int_values, many float_values, many string_values,
     many boolean_values, many null_values, many enum_values, many list_values, many set_values,
     many map_values, many object_values, many char_values, many typed_object_values,
-    many typed_values, many const_blocks,
+    many typed_values, many const_blocks, many expressions,
   }
   SetValue {
     many variable_values, many int_values, many float_values, many string_values,
     many boolean_values, many null_values, many enum_values, many list_values, many set_values,
     many map_values, many object_values, many char_values, many typed_object_values,
-    many typed_values, many const_blocks,
+    many typed_values, many const_blocks, many expressions,
   }
   MapValue { many map_entries }
   MapEntry {
     many variable_values, many int_values, many float_values, many string_values,
     many boolean_values, many null_values, many enum_values, many list_values, many set_values,
     many map_values, many object_values, many char_values, many typed_object_values,
-    many typed_values, many const_blocks,
+    many typed_values, many const_blocks, many expressions,
   }
   ObjectValue { many object_fields }
   ObjectField {
     tok name, opt variable_value, opt int_value, opt float_value, opt string_value,
     opt boolean_value, opt null_value, opt enum_value, opt list_value, opt set_value,
     opt map_value, opt object_value, opt char_value, opt typed_object_value, opt typed_value,
-    opt const_block,
+    opt const_block, opt expression,
   }
   DefaultValue {
     opt variable_value, opt int_value, opt float_value, opt string_value, opt boolean_value,
@@ -1058,7 +1058,7 @@ wrapper_table! {
     opt type_path, opt variable_value, opt int_value, opt float_value, opt string_value,
     opt boolean_value, opt null_value, opt enum_value, opt list_value, opt set_value,
     opt map_value, opt object_value, opt char_value, opt typed_object_value, opt typed_value,
-    opt const_block,
+    opt const_block, opt expression,
   }
   ConstBlock { opt expression }
   ParenValue { opt expression }
@@ -1067,7 +1067,8 @@ wrapper_table! {
   Expression {
     many variable_values, many int_values, many float_values, many string_values,
     many bytes_values, many id_values, many char_values, many boolean_values, many null_values,
-    many enum_values, many paren_values, many const_blocks,
+    many enum_values, many paren_values, many const_blocks, many list_values, many set_values,
+    many map_values, many object_values, many typed_object_values, many typed_values,
   }
   Path { toks names, toks separators, tok tilde_token, tok caret_token, toks dot_dot_tokens }
   TypeGenerics { many definition_type_paths, many list_types }
@@ -1362,12 +1363,13 @@ fn corpus() -> Vec<(String, String)> {
 
 /// Sources this gate adds on top of the corpus, and what each one is for.
 ///
-/// The corpus reaches **every one of the 84 wrappers** on its own and calls all 378 getters, but 81
+/// The corpus reaches **every one of the 84 wrappers** on its own and calls all 389 getters, but 92
 /// of those getters had nothing to project from it: a getter is only exercised by a document that
 /// writes the shape it reaches for, and no corpus entry writes a float inside a set, a map on both
 /// halves of a map entry, a description on a scalar, a `where` on an extension, a directive
 /// definition's own directives, most kinds of item inside a module, or a block that holds a float,
-/// a boolean or a variable, or stands in a set, an object or a typed value. These eight are that
+/// a boolean, a variable, a list, a set, a map, an object or a typed form, or stands in a set, an
+/// object or a typed value. These eight are that
 /// complement and nothing else — they were written against the measured list in
 /// [`CORPUS_CANNOT_PROJECT`], which is what keeps them honest, and
 /// [`every_added_source_earns_its_place`] leaves each of them out in turn to check it is still the
@@ -1379,7 +1381,7 @@ fn corpus() -> Vec<(String, String)> {
 const FIXTURES: &[(&str, &str)] = &[
   // Every value kind in every value position the grammar has: a variable's default, a list's
   // members, a set's members, both halves of a map entry, and an object's fields. The corpus writes
-  // integers, strings and objects freely and almost nothing else, so 30 of the 81 gaps below are
+  // integers, strings and objects freely and almost nothing else, so 30 of the 92 gaps below are
   // here.
   (
     "every_value_kind_in_every_value_position",
@@ -1441,14 +1443,17 @@ const FIXTURES: &[(&str, &str)] = &[
      m: T = set!{ P { x: 1 } U(1) } n: T = map!{ P { x: 1 } => U(1) } \
      }",
   ),
-  // A block that holds a float and a boolean, and a block in a set, in an object's field and in a
-  // typed value: the corpus's blocks hold the other operands, and stand only in a default, a
-  // list, a map entry and a directive's argument.
+  // A block that holds a float, a boolean, and each of the six forms whose members are expressions
+  // there, and a block in a set, in an object's field and in a typed value: the corpus's blocks
+  // hold the other operands, and stand only in a default, a list, a map entry and a directive's
+  // argument.
   (
     "a_block_in_every_position_and_every_operand_the_corpus_leaves_out",
     "input I { \
      a: T = const { 1.5 } b: T = const { true } c: T = set!{ const { 1 } } \
      d: T = { x: const { 1 } } e: T = W(const { 1 }) \
+     f: T = const { [1, 2] } g: T = const { set!{ 1 } } h: T = const { map!{ 1 => 2 } } \
+     i: T = const { { x: 1 } } j: T = const { P { x: 1 } } k: T = const { U(1) } \
      }",
   ),
   // Every item kind a module's body holds and the corpus never puts in one — four type
@@ -1749,7 +1754,7 @@ fn listed<T: core::fmt::Debug>(items: impl IntoIterator<Item = T>) -> String {
 
 /// Getters whose name is not the plain snake of the kind they project, with that projection pinned.
 ///
-/// Twenty-one of 378, in two classes.
+/// Twenty-one of 389, in two classes.
 ///
 /// **Role-named, twenty.** Each names a position the grammar has and the kind space does not.
 /// Fifteen are `description`: divergence 12 removed GraphQL's `Description` node, so a description
@@ -1764,7 +1769,7 @@ fn listed<T: core::fmt::Debug>(items: impl IntoIterator<Item = T>) -> String {
 /// **Receiver-elided, one.** `Path::separators` projects `K::PathSeparator` and drops the word the
 /// receiver already says; `Path::path_separators` would stutter. It is here rather than in a rule
 /// because a rule that let any getter drop its wrapper's name as a prefix would be a rule invented
-/// for one getter, and it would weaken the check for the other 377.
+/// for one getter, and it would weaken the check for the other 388.
 ///
 /// Every entry carries its projection, so a getter re-aimed at another kind reds here rather than
 /// slipping through as a pinned exception.
@@ -1821,12 +1826,12 @@ fn the_probe_table_is_exactly_the_shipped_inventory() {
   // every comparison below vacuous, so the counts are pinned before they are used.
   assert_eq!(
     shipped.len(),
-    378,
-    "the wrapper sources should declare 378 getters"
+    389,
+    "the wrapper sources should declare 389 getters"
   );
   let shipped_wrappers: BTreeSet<&str> = shipped.iter().map(|g| g.wrapper.as_str()).collect();
   assert_eq!(shipped_wrappers.len(), 84, "…over 84 wrappers");
-  assert_eq!(DECLARED.len(), 378, "the table declares 378 getters");
+  assert_eq!(DECLARED.len(), 389, "the table declares 389 getters");
   assert_eq!(TABLE_WRAPPERS.len(), 84, "…over 84 wrappers");
 
   let table: BTreeSet<(&str, &str, &str)> = DECLARED.iter().copied().collect();
@@ -1859,7 +1864,7 @@ fn every_getter_is_named_for_what_it_projects() {
   // The defect this catches is the one no other gate can see: a getter aimed at a **plausible
   // neighbour** — `interface_type_definitions: many ObjectTypeDefinition` — which compiles,
   // navigates, answers `Some`, round-trips and keeps every byte. Only the name disagrees with the
-  // kind, so the name is what has to be checked, for all 378 rather than for the handful a fixture
+  // kind, so the name is what has to be checked, for all 389 rather than for the handful a fixture
   // happens to count.
   let mut pinned: BTreeSet<(String, String, String, String)> = NAME_EXCEPTIONS
     .iter()
@@ -2043,7 +2048,7 @@ fn every_getter_is_called_and_projects_something() {
      from a getter pointed at a kind that cannot occur:{}",
     listed(reg.unanswered())
   );
-  assert_eq!(reg.getters.len(), 378);
+  assert_eq!(reg.getters.len(), 389);
 }
 
 #[test]
@@ -2103,16 +2108,17 @@ fn each_node_kind_casts_to_exactly_the_wrapper_that_names_it() {
 /// write a set of floats would make one fixture redundant, and nothing would say so —
 /// [`every_added_source_earns_its_place`] is the other half of that guard.
 ///
-/// Note what is *not* here. The corpus reaches all 84 wrappers and calls all 378 getters on its
+/// Note what is *not* here. The corpus reaches all 84 wrappers and calls all 389 getters on its
 /// own; every entry below is a getter with a node to run on and nothing in it to find, which is a
 /// statement about what GraphQLx the corpus writes rather than about what the typed layer can
 /// reach.
 ///
-/// 53 of the 81 are a value kind in a value position (the corpus writes integers, strings and
+/// 64 of the 92 are a value kind in a value position (the corpus writes integers, strings and
 /// objects and little else, so `set`, `map`, floats, booleans, `null`, enums and variables are
 /// missing from most positions, and a typed value holds only a string there, and a set and a map
-/// entry no typed form, and a block no float, boolean or variable, and no set, object field or
-/// typed value a block), and 2 are a list type where the corpus only ever writes a path
+/// entry no typed form, and a block no float, boolean, variable, list, set, map, object or typed
+/// form, and no set, object field or typed value a block, and so no list, set, map entry, object
+/// field or typed value an expression), and 2 are a list type where the corpus only ever writes a path
 /// type — a generic parameter's default and an argument's type. 7 are a description on a
 /// definition the corpus never describes. 6 are clauses no corpus entry writes on the definition
 /// that carries them: a directive definition's own directives, an interface's and an operation's
@@ -2130,6 +2136,12 @@ const CORPUS_CANNOT_PROJECT: &[(&str, &str)] = &[
   ("EnumTypeDefinition", "description"),
   ("Expression", "boolean_values"),
   ("Expression", "float_values"),
+  ("Expression", "list_values"),
+  ("Expression", "map_values"),
+  ("Expression", "object_values"),
+  ("Expression", "set_values"),
+  ("Expression", "typed_object_values"),
+  ("Expression", "typed_values"),
   ("Expression", "variable_values"),
   ("InputObjectTypeDefinition", "description"),
   ("InputObjectTypeExtension", "where_clause"),
@@ -2139,12 +2151,14 @@ const CORPUS_CANNOT_PROJECT: &[(&str, &str)] = &[
   ("InterfaceTypeExtension", "implement_interfaces"),
   ("InterfaceTypeExtension", "where_clause"),
   ("ListValue", "boolean_values"),
+  ("ListValue", "expressions"),
   ("ListValue", "float_values"),
   ("ListValue", "map_values"),
   ("ListValue", "null_values"),
   ("ListValue", "set_values"),
   ("ListValue", "variable_values"),
   ("MapEntry", "boolean_values"),
+  ("MapEntry", "expressions"),
   ("MapEntry", "float_values"),
   ("MapEntry", "map_values"),
   ("MapEntry", "null_values"),
@@ -2166,6 +2180,7 @@ const CORPUS_CANNOT_PROJECT: &[(&str, &str)] = &[
   ("ObjectField", "boolean_value"),
   ("ObjectField", "const_block"),
   ("ObjectField", "enum_value"),
+  ("ObjectField", "expression"),
   ("ObjectField", "float_value"),
   ("ObjectField", "list_value"),
   ("ObjectField", "map_value"),
@@ -2177,6 +2192,7 @@ const CORPUS_CANNOT_PROJECT: &[(&str, &str)] = &[
   ("SchemaDefinition", "description"),
   ("SetValue", "boolean_values"),
   ("SetValue", "const_blocks"),
+  ("SetValue", "expressions"),
   ("SetValue", "float_values"),
   ("SetValue", "list_values"),
   ("SetValue", "map_values"),
@@ -2190,6 +2206,7 @@ const CORPUS_CANNOT_PROJECT: &[(&str, &str)] = &[
   ("TypedValue", "char_value"),
   ("TypedValue", "const_block"),
   ("TypedValue", "enum_value"),
+  ("TypedValue", "expression"),
   ("TypedValue", "float_value"),
   ("TypedValue", "int_value"),
   ("TypedValue", "list_value"),
@@ -2410,7 +2427,7 @@ fn every_recovery_fixture_really_is_malformed() {
 
 /// The getters no tree this gate sweeps ever separates from a kind-blind rival, and why.
 ///
-/// 53 of 378. Every other getter is **measured** to answer differently, at least once, from a
+/// 53 of 389. Every other getter is **measured** to answer differently, at least once, from a
 /// getter of the same arity that ignored kinds entirely — the property that makes this sweep's
 /// fixtures worth anything: over `"{ a }"` a `cast::child` is indistinguishable from "take the
 /// first child", and a suite built out of fixtures like that reports full coverage of a layer it
@@ -2435,7 +2452,7 @@ fn every_recovery_fixture_really_is_malformed() {
 /// # The finding: this census is **larger** than the GraphQL twin's, and the design predicted the
 /// opposite
 ///
-/// GraphQL pins 24 of 210, 11.4%. This pins 53 of 378, 14.0% — more, absolutely and
+/// GraphQL pins 24 of 210, 11.4%. This pins 53 of 389, 13.6% — more, absolutely and
 /// proportionally. The design expected fewer, on the reasoning that divergences 1, 2, 10 and 11
 /// replace single-token positions with paths and generics lists, so nodes that held exactly one
 /// child over there hold structure here. **That reasoning has the direction backwards**, and the
@@ -2534,7 +2551,7 @@ fn every_getter_but_these_answers_differently_from_a_kind_blind_rival() {
   );
   assert_eq!(
     DECLARED.len() - undiscriminated.len(),
-    325,
-    "325 of the 378 getters are proved to beat a kind-blind rival"
+    336,
+    "336 of the 389 getters are proved to beat a kind-blind rival"
   );
 }

@@ -290,12 +290,15 @@ pub(crate) const ANGLE_CLOSER_HEADS: &[Kind] = &[Kind::RAngle];
 pub(crate) const TYPED_FORM_HEADS: &[Kind] = &[Kind::LBrace, Kind::LParen];
 
 /// The `}` a `const { … }` block closes with: what its body reports as expected where something
-/// ended the expression without being the block's own, a `,` among them.
+/// ended the expression without being the block's own, a `,` among them. A set, a map, an object
+/// and a typed object inside a block report the same where something ended a member without being
+/// their own.
 pub(crate) const BRACE_CLOSER_HEADS: &[Kind] = &[Kind::RBrace];
 
 /// What may begin an operand inside a `const { … }` block: the scalars' tokens, a prefixed string
-/// and a `char` literal, a name, a root's sigil, and the `(` of a parenthesis. A number carries no
-/// sign there, so `-` is no head; and no variable is, as in a constant position.
+/// and a `char` literal, a name, a root's sigil, the `(` of a parenthesis, the `[` of a list and
+/// the `{` of an object. A number carries no sign there, so `-` is no head; and no variable is, as
+/// in a constant position.
 pub(crate) const BLOCK_OPERAND_HEADS: &[Kind] = &[
   Kind::Int,
   Kind::Float,
@@ -308,6 +311,8 @@ pub(crate) const BLOCK_OPERAND_HEADS: &[Kind] = &[
   Kind::DotDot,
   Kind::Caret,
   Kind::LParen,
+  Kind::LBracket,
+  Kind::LBrace,
 ];
 
 /// What may follow an operand inside a `const { … }` block and go on with the expression: one of

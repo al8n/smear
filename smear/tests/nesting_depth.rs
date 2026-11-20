@@ -2482,7 +2482,7 @@ type GreenRow = (&'static str, fn(usize) -> String, usize);
 /// A typed value is one green level a bracket, as a list is: the value it holds is its child. A
 /// typed object is two, as an object is, since a field stands between it and the next one; it
 /// holds its fields directly, so it costs no `ObjectValue` level on top. Both stay under
-/// `GREEN_LEVELS_PER_BRACKET`, which is three.
+/// `GREEN_LEVELS_PER_BRACKET`, which is four.
 #[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
 #[test]
 fn a_typed_form_adds_the_green_levels_its_rows_record() {

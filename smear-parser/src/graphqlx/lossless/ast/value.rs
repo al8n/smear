@@ -11,7 +11,10 @@
 //! position's [`TypedObjectValue`], [`TypedValue`] and [`ConstBlock`]. A position that reads no
 //! schema form never holds one, so those getters answer `None` there. Inside a block an
 //! [`Expression`] holds the operand, and its getters are the block's own: a parenthesis, bytes and
-//! an id stand there and nowhere else.
+//! an id stand there and nowhere else. A member of a list, of a set, of a map entry, of an object
+//! field and of a typed value inside a block is an expression too, so each of those has an
+//! `expressions` or an `expression` getter beside its fifteen, which answers there while the
+//! fifteen answer nothing.
 //!
 //! That is complete and it is checkable — every getter is a kind test with a decline to assert —
 //! but it does lose one thing a union would keep: **document order across kinds**. [`ListValue`]
@@ -162,6 +165,8 @@ ast_node!(
     typed_values: many TypedValue,
     /// Every block in the list.
     const_blocks: many ConstBlock,
+    /// Every element of a list inside a block, each the expression that holds it.
+    expressions: many Expression,
   }
 );
 
@@ -204,6 +209,8 @@ ast_node!(
     typed_values: many TypedValue,
     /// Every block in the set.
     const_blocks: many ConstBlock,
+    /// Every element of a set inside a block, each the expression that holds it.
+    expressions: many Expression,
   }
 );
 
@@ -252,6 +259,8 @@ ast_node!(
     typed_values: many TypedValue,
     /// Every half of the entry that is a block.
     const_blocks: many ConstBlock,
+    /// Both halves of an entry inside a block, each the expression that holds it.
+    expressions: many Expression,
   }
 );
 
@@ -304,6 +313,8 @@ ast_node!(
     typed_value: opt TypedValue,
     /// The field's value, when it is a block.
     const_block: opt ConstBlock,
+    /// The expression that holds the field's value, inside a block.
+    expression: opt Expression,
   }
 );
 
@@ -414,6 +425,8 @@ ast_node!(
     typed_value: opt TypedValue,
     /// The value, when it is a block.
     const_block: opt ConstBlock,
+    /// The expression that holds the value, inside a block.
+    expression: opt Expression,
   }
 );
 
@@ -488,5 +501,17 @@ ast_node!(
     paren_values: many ParenValue,
     /// Every operand that is a block inside the block.
     const_blocks: many ConstBlock,
+    /// Every operand that is a list.
+    list_values: many ListValue,
+    /// Every operand that is a set.
+    set_values: many SetValue,
+    /// Every operand that is a map.
+    map_values: many MapValue,
+    /// Every operand that is an object.
+    object_values: many ObjectValue,
+    /// Every operand that is a typed object.
+    typed_object_values: many TypedObjectValue,
+    /// Every operand that is a typed value.
+    typed_values: many TypedValue,
   }
 );

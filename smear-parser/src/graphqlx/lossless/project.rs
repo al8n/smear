@@ -120,10 +120,10 @@
 //! GraphQLx's lossless productions **report and continue**: a violation goes on the diagnostic
 //! channel and the node is built anyway, so `Parse::has_errors()` sees it and the *shape* does not.
 //! Every one of those shapes reaches this projection looking well-formed, and each needs an
-//! answer. The population is every call that reports without building a hole — **71**
-//! `recover::report_unexpected::<…>` sites and **20** `recover::unclosed_{list,object,parens,angle}::<…>`
+//! answer. The population is every call that reports without building a hole — **72**
+//! `recover::report_unexpected::<…>` sites and **22** `recover::unclosed_{list,object,parens,angle}::<…>`
 //! sites across `graphqlx/lossless/*.rs`, the counts `grep -c` gives for those spellings — and
-//! **all 91 are mapped** in the table below, one probe each: a text that reaches the site with a
+//! **all 94 are mapped** in the table below, one probe each: a text that reaches the site with a
 //! hole-free tree, and what this projection answers for it. The table is executable:
 //! `every_report_and_build_site_has_a_measured_answer` holds the same rows, asserts their count
 //! per file and family against the source's own spelling of each call, and measures every answer.
@@ -143,7 +143,7 @@
 //! without the token — and the cell derives the missing-token table below from exactly that and
 //! asserts the two are the same set.
 //!
-//! **Twenty-six project; sixty-five refuse.** The twenty-six are the lenient rows a site can leave
+//! **Twenty-nine project; sixty-five refuse.** The twenty-nine are the lenient rows a site can leave
 //! with a well-formed value. The others refuse either the shape the site built, or — for the
 //! unclosed sites whose definition the parser cannot finish at end of input — the rubble the
 //! document is left holding, or, for the one row above, the hole.
@@ -239,6 +239,9 @@
 //! | `value.rs` | report | `input I { a: T = const { (1 } }` | `)` of `ParenValue` — **no image** | **projects** |
 //! | `value.rs` | unclosed | `input I { a: T = const { 1` | `}` of `ConstBlock` — **no image** | **projects** |
 //! | `value.rs` | unclosed | `input I { a: T = const { (1` | `)` of `ParenValue` — **no image** | **projects** |
+//! | `value.rs` | report | `input I { a: T = const { [1 } }` | `]` of `ListValue` — **no image** | **projects** |
+//! | `value.rs` | unclosed | `input I { a: T = const { [1` | `]` of `ListValue` — **no image** | **projects** |
+//! | `value.rs` | unclosed | `input I { a: T = const { {b: 1` | `}` of `ObjectValue` — **no image** | **projects** |
 //! | `directive.rs` | unclosed | `{ f(a: 1` | `)` of `Arguments` — **no image** | **projects** |
 //! | `directive.rs` | report | `{ f(a: 1 }` | `)` of `Arguments` — **no image** | **projects** |
 //! | `ty.rs` | unclosed | `type T { f: A<B` | `>` of `TypeGenerics` — **no image** | **projects** |
@@ -3680,9 +3683,10 @@ const VALUE_KINDS: [SyntaxKind; 15] = [
 ];
 
 /// The operand kinds an [`Expression`](SyntaxKind::Expression) may hold while no operator is read:
-/// a block's own grammar, in which a parenthesis, bytes and an id stand and nowhere else. A
-/// variable is built there and refused here, as in a constant position.
-const BLOCK_OPERAND_KINDS: [SyntaxKind; 12] = [
+/// a block's own grammar, in which a parenthesis, bytes and an id stand and nowhere else, and whose
+/// lists, sets, maps, objects and typed forms hold expressions. A variable is built there and
+/// refused here, as in a constant position.
+const BLOCK_OPERAND_KINDS: [SyntaxKind; 18] = [
   K::VariableValue,
   K::IntValue,
   K::FloatValue,
@@ -3695,7 +3699,31 @@ const BLOCK_OPERAND_KINDS: [SyntaxKind; 12] = [
   K::EnumValue,
   K::ParenValue,
   K::ConstBlock,
+  K::ListValue,
+  K::SetValue,
+  K::MapValue,
+  K::ObjectValue,
+  K::TypedObjectValue,
+  K::TypedValue,
 ];
+
+/// The kinds a member of a container may be: a value, and inside a `const { … }` block the
+/// [`Expression`](SyntaxKind::Expression) that holds one.
+const fn member_kinds(in_block: bool) -> &'static [SyntaxKind] {
+  if in_block {
+    &[K::Expression]
+  } else {
+    &VALUE_KINDS
+  }
+}
+
+/// Whether the walk may read another member of a container after one: always outside a block, and
+/// inside one only past the `,` that separates two, which this consumes. A trailing `,` is the
+/// container's own, and a member written with no `,` before it is left for the container's end to
+/// refuse where it stands.
+fn past_separator(cursor: &mut Cursor<'_>, in_block: bool) -> bool {
+  !in_block || cursor.opt_token(K::Separator).is_some()
+}
 
 /// The one operand an [`Expression`](SyntaxKind::Expression) holds: an expression of one operand
 /// projects to that operand. An empty one is [`MissingChild`](ProjectErrorKind::MissingChild), and
@@ -4288,6 +4316,10 @@ struct ValueFrame<'g, 'src, G: ValueGrammar<'src>> {
   cursor: Cursor<'g>,
   /// What has been folded so far, and which container this is.
   built: Built<'g, 'src, G>,
+  /// Whether what this container holds stands inside a `const { … }` block: a block's and a
+  /// parenthesis's operand, and every member of a container inside one, each an
+  /// [`Expression`](SyntaxKind::Expression), with a `,` between two members.
+  in_block: bool,
 }
 
 /// A container's accumulator.
@@ -4370,21 +4402,26 @@ struct NextValue<'g> {
 fn next_field<'g, 'src>(
   cursor: &mut Cursor<'g>,
   source: &'src str,
+  in_block: bool,
 ) -> Out<Option<OpenField<'g, 'src>>> {
   match cursor.opt_node(K::ObjectField) {
-    Some(child) => open_object_field(child, source).map(Some),
+    Some(child) => open_object_field(child, source, in_block).map(Some),
     None => Ok(None),
   }
 }
 
-/// An `ObjectField` read as far as its value.
-fn open_object_field<'g, 'src>(node: Node<'g>, source: &'src str) -> Out<OpenField<'g, 'src>> {
+/// An `ObjectField` read as far as its value, which inside a block is the expression that holds it.
+fn open_object_field<'g, 'src>(
+  node: Node<'g>,
+  source: &'src str,
+  in_block: bool,
+) -> Out<OpenField<'g, 'src>> {
   // `Name : Value` — the value is the last constituent, so everything else is read before the
   // descent and only the fold travels.
   let mut cursor = Cursor::new(node);
   let name = cursor.name_token(source, "a field name")?;
   cursor.token(K::Colon, "the `:` before a field's value")?;
-  let pending = cursor.one_of(&VALUE_KINDS, "a value")?;
+  let pending = cursor.one_of(member_kinds(in_block), "a value")?;
   cursor.end()?;
   Ok(OpenField {
     node,
@@ -4414,23 +4451,28 @@ fn close_field<'src, G: ValueGrammar<'src>>(
 /// The next entry of a map value, with the tokens passed on the way folded in.
 fn next_entry<'g, 'src, G: ValueGrammar<'src>>(
   cursor: &mut Cursor<'g>,
+  in_block: bool,
 ) -> Out<Option<OpenEntry<'g, 'src, G>>> {
   match cursor.opt_node(K::MapEntry) {
-    Some(child) => open_map_entry(child).map(Some),
+    Some(child) => open_map_entry(child, in_block).map(Some),
     None => Ok(None),
   }
 }
 
-/// A `MapEntry` read as far as its key, with the value half recorded for afterwards.
+/// A `MapEntry` read as far as its key, with the value half recorded for afterwards. Inside a
+/// block each half is the expression that holds it.
 ///
 /// **Positional, and forced to be**: both halves are full values with nothing between them but the
 /// `=>`, so an entry's key is its first node child and its value is the one after.
-fn open_map_entry<'g, 'src, G: ValueGrammar<'src>>(node: Node<'g>) -> Out<OpenEntry<'g, 'src, G>> {
+fn open_map_entry<'g, 'src, G: ValueGrammar<'src>>(
+  node: Node<'g>,
+  in_block: bool,
+) -> Out<OpenEntry<'g, 'src, G>> {
   // `Value => Value`
   let mut cursor = Cursor::new(node);
-  let key = cursor.one_of(&VALUE_KINDS, "a key")?;
+  let key = cursor.one_of(member_kinds(in_block), "a key")?;
   cursor.token(K::FatArrow, "the `=>` between a key and a value")?;
-  let value = cursor.one_of(&VALUE_KINDS, "a value")?;
+  let value = cursor.one_of(member_kinds(in_block), "a value")?;
   cursor.end()?;
   Ok(OpenEntry::Key(OpenKey {
     node,
@@ -4457,6 +4499,9 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
   source: &'src str,
 ) -> Out<(G::Value, TextRange)> {
   let (mut parent, mut node) = (parent, node);
+  // Whether `node` stands inside a `const { … }` block: the frame it was reached from says so, and
+  // a block or a parenthesis says so of everything below it.
+  let mut in_block = frames.last().is_some_and(|frame| frame.in_block);
   loop {
     match node.kind() {
       K::VariableValue => return G::variable(parent, node, source),
@@ -4522,7 +4567,7 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
         let ty_node = cursor.node(K::TypePath, "the type a typed object names")?;
         let ty = cursor.keep(type_path(ty_node, source)?);
         cursor.token(K::LBrace, "the `{` a typed object opens with")?;
-        match next_field(&mut cursor, source)? {
+        match next_field(&mut cursor, source, in_block)? {
           Some(open) => {
             let (owner, first) = (open.node, open.pending);
             frames.push(ValueFrame {
@@ -4532,6 +4577,7 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
                 fields: Vec::new(),
                 open,
               }),
+              in_block,
             });
             parent = owner;
             node = first;
@@ -4550,10 +4596,11 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
         let ty_node = cursor.node(K::TypePath, "the type a typed value names")?;
         let ty = cursor.keep(type_path(ty_node, source)?);
         cursor.token(K::LParen, "the `(` a typed value opens with")?;
-        let first = cursor.one_of(&VALUE_KINDS, "the value a typed value holds")?;
+        let first = cursor.one_of(member_kinds(in_block), "the value a typed value holds")?;
         frames.push(ValueFrame {
           cursor,
           built: Built::Typed(ty),
+          in_block,
         });
         parent = node;
         node = first;
@@ -4569,11 +4616,15 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
         frames.push(ValueFrame {
           cursor,
           built: Built::Block,
+          in_block: true,
         });
+        in_block = true;
         parent = expression;
         node = operand;
       }
-      K::ParenValue if G::SCHEMA_FORMS => {
+      // A parenthesis stands inside a block alone, and so do bytes and an id: anywhere else each
+      // falls to the refusal below.
+      K::ParenValue if in_block => {
         // `( Expression )` — the bracket, and then the operand the one expression holds.
         let mut cursor = Cursor::new(node);
         cursor.token(K::LParen, "the `(` a parenthesis opens with")?;
@@ -4582,11 +4633,19 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
         frames.push(ValueFrame {
           cursor,
           built: Built::Paren,
+          in_block: true,
         });
         parent = expression;
         node = operand;
       }
-      K::BytesValue | K::IdValue if G::SCHEMA_FORMS => {
+      // A member of a container inside a block: the one operand its expression holds, as a
+      // block's own expression projects. An expression anywhere else falls to the refusal below.
+      K::Expression if in_block => {
+        let operand = expression_operand(node)?;
+        parent = node;
+        node = operand;
+      }
+      K::BytesValue | K::IdValue if in_block => {
         let LeafText {
           text,
           span,
@@ -4633,9 +4692,9 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
         }
         let opened = match node.kind() {
           K::ListValue | K::SetValue => cursor
-            .opt_one_of(&VALUE_KINDS)
+            .opt_one_of(member_kinds(in_block))
             .map(|first| (node, first, Built::Values(Vec::new()))),
-          K::ObjectValue => next_field(&mut cursor, source)?.map(|open| {
+          K::ObjectValue => next_field(&mut cursor, source, in_block)?.map(|open| {
             (
               open.node,
               open.pending,
@@ -4645,7 +4704,7 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
               }),
             )
           }),
-          _ => next_entry::<G>(&mut cursor)?.map(|open| {
+          _ => next_entry::<G>(&mut cursor, in_block)?.map(|open| {
             (
               open.node(),
               open.pending(),
@@ -4658,7 +4717,11 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
         };
         match opened {
           Some((owner, first, built)) => {
-            frames.push(ValueFrame { cursor, built });
+            frames.push(ValueFrame {
+              cursor,
+              built,
+              in_block,
+            });
             parent = owner;
             node = first;
           }
@@ -4702,17 +4765,27 @@ fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
   piece: TextRange,
   source: &'src str,
 ) -> Out<ResumedValue<'g, 'src, G>> {
-  let ValueFrame { mut cursor, built } = frame;
+  let ValueFrame {
+    mut cursor,
+    built,
+    in_block,
+  } = frame;
   let node = cursor.node;
   Ok(match built {
     Built::Values(mut values) => {
       cursor.extent.cover(piece);
       values.push(value);
-      match cursor.opt_one_of(&VALUE_KINDS) {
+      let next = if past_separator(&mut cursor, in_block) {
+        cursor.opt_one_of(member_kinds(in_block))
+      } else {
+        None
+      };
+      match next {
         Some(next) => {
           frames.push(ValueFrame {
             cursor,
             built: Built::Values(values),
+            in_block,
           });
           ResumedValue::Descend(NextValue {
             dispatch: node,
@@ -4734,12 +4807,18 @@ fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
       let (field, range) = close_field::<G>(open, value, piece)?;
       cursor.extent.cover(range);
       fields.push(field);
-      match next_field(&mut cursor, source)? {
+      let next = if past_separator(&mut cursor, in_block) {
+        next_field(&mut cursor, source, in_block)?
+      } else {
+        None
+      };
+      match next {
         Some(next) => {
           let (parent, pending) = (next.node, next.pending);
           frames.push(ValueFrame {
             cursor,
             built: Built::Object(BuiltObject { fields, open: next }),
+            in_block,
           });
           ResumedValue::Descend(NextValue {
             dispatch: parent,
@@ -4760,7 +4839,12 @@ fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
       let (field, range) = close_field::<G>(open, value, piece)?;
       cursor.extent.cover(range);
       fields.push(field);
-      match next_field(&mut cursor, source)? {
+      let next = if past_separator(&mut cursor, in_block) {
+        next_field(&mut cursor, source, in_block)?
+      } else {
+        None
+      };
+      match next {
         Some(next) => {
           let (parent, pending) = (next.node, next.pending);
           frames.push(ValueFrame {
@@ -4770,6 +4854,7 @@ fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
               fields,
               open: next,
             }),
+            in_block,
           });
           ResumedValue::Descend(NextValue {
             dispatch: parent,
@@ -4828,6 +4913,7 @@ fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
                 value: value_node,
               }),
             }),
+            in_block,
           });
           ResumedValue::Descend(NextValue {
             dispatch: entry,
@@ -4845,7 +4931,12 @@ fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
         let range = inner.range(entry, "a token")?;
         entries.push(G::entry(to_span(range), key, value));
         cursor.extent.cover(range);
-        match next_entry::<G>(&mut cursor)? {
+        let next = if past_separator(&mut cursor, in_block) {
+          next_entry::<G>(&mut cursor, in_block)?
+        } else {
+          None
+        };
+        match next {
           Some(next) => {
             let (parent, pending) = (next.node(), next.pending());
             frames.push(ValueFrame {
@@ -4854,6 +4945,7 @@ fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
                 entries,
                 open: next,
               }),
+              in_block,
             });
             ResumedValue::Descend(NextValue {
               dispatch: parent,

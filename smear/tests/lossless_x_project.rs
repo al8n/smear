@@ -4275,6 +4275,32 @@ const SITES: &[Site] = &[
     "Ok",
     Absent::Token(K::ParenValue, ")"),
   ),
+  // A block's list and object: the list's `]` missing in front of the block's `}` and at the end
+  // of input, and the object's `}` missing there.
+  (
+    "value.rs",
+    "report",
+    "input I { a: T = const { [1 } }",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::ListValue, "]"),
+  ),
+  (
+    "value.rs",
+    "unclosed",
+    "input I { a: T = const { [1",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::ListValue, "]"),
+  ),
+  (
+    "value.rs",
+    "unclosed",
+    "input I { a: T = const { {b: 1",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::ObjectValue, "}"),
+  ),
   (
     "directive.rs",
     "unclosed",
@@ -4522,7 +4548,7 @@ fn every_report_and_build_site_has_a_measured_answer() {
   };
   assert_eq!(
     (total("report"), total("unclosed")),
-    (71, 20),
+    (72, 22),
     "the two families' populations"
   );
 
@@ -4594,7 +4620,7 @@ fn every_report_and_build_site_has_a_measured_answer() {
 }
 
 /// How many of [`SITES`]' probes project.
-const PROJECTING_SITES: usize = 26;
+const PROJECTING_SITES: usize = 29;
 
 /// Image-less tokens a site can leave out whose probe is **not** a witness.
 ///

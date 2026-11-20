@@ -57,6 +57,13 @@ All notable changes to Smear are documented in this file.
 - `smear-compiler`: a GraphQLx `const { … }` block is reported as
   `smear::graphqlx::unknown-item`, once for a file, at the block, and lowered as one refused node
   whatever it holds, until the analyzer gives it its meaning.
+- `smear-parser`: inside a GraphQLx `const { … }` block a value may be a list, a set, a map, an
+  object, a typed object or a typed value. Each member is an expression, a `,` separates two and
+  one trailing `,` is allowed, and a path there decides a typed form as a schema position's does.
+  - **The tree.** Each member is an `Expression` node and each separator a `Separator` token, so
+    the lossless layer's `ListValue`, `SetValue` and `MapEntry` gain `expressions`, `ObjectField`
+    and `TypedValue` gain `expression`, and `Expression` gains a getter for each of the six forms.
+  - **The atoms.** `smear_parser::combinator` gains `comma` and `try_comma`.
 - `smear-parser`: a GraphQLx schema position, a constant position of a type-system definition or
   extension, reads its values through productions of its own: `schema_value`,
   `schema_default_value` and `try_schema_default_value`, `schema_argument`, `schema_arguments`,
