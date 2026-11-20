@@ -526,6 +526,42 @@ mod lossless {
     );
   }
 
+  // ── The block a schema position offers ─────────────────────────────────────────────────────
+
+  /// What each layer says first about `text`, read as a type-system document, as
+  /// `code at start..end: message`, and how many errors the lossless layer lends.
+  fn said(text: &str) -> (String, String, usize) {
+    let mut lossless: Vec<Lent<'_>> = Vec::new();
+    let _ = Lossless::new()
+      .type_system_document(text, &mut lossless)
+      .expect("a short text is short enough for a tree");
+    let mut syntactic: Vec<GraphqlxError<&str>> = Vec::new();
+    let _ = Syntactic::new().type_system_document(text, &mut syntactic);
+    let line = |seen: Option<Seen>| match seen {
+      Some(seen) => format!(
+        "{} at {}..{}: {}",
+        seen.code, seen.start, seen.end, seen.message
+      ),
+      None => String::from("nothing"),
+    };
+    (
+      line(first(&lossless)),
+      line(first(&syntactic)),
+      lossless.len(),
+    )
+  }
+
+  /// An operator at a schema map's key is refused against the block, by both layers alike, and the
+  /// lossless layer reads the entry on, its `=>` and its value with it.
+  #[test]
+  fn an_operator_at_a_maps_key_offers_the_block_in_both_layers() {
+    let (ours, theirs, lent) = said("input I { a: T = map!{ -KEY => 1 } b: Int }");
+    assert_eq!(ours, theirs);
+    assert!(ours.contains("at 23..24"), "{ours}");
+    assert!(ours.contains("`const { … }` block"), "{ours}");
+    assert_eq!(lent, 1, "one report, at the `-`");
+  }
+
   // ── The message bound ──────────────────────────────────────────────────────────────────────
 
   /// The most bytes a syntax error's message holds.

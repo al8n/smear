@@ -447,14 +447,16 @@ lossless_production! {
               // from doing the same, which is the same trade `object_value` makes.
               Collection::Map => map_entry::<Src, Ctx>(inp, konst)?,
             },
-            // A set's member in a schema position: an operator's token or a `(` begins an
-            // expression, which `value` offers a block for, and its run consumes.
+            // A member in a schema position: an operator's token or a `(` begins an expression,
+            // which `value` offers a block for, and its run consumes. A map's member is an entry
+            // whose key the expression is, so the entry keeps its `=>` and its value.
             Some(head)
-              if collection == Collection::Set
-                && konst == Constness::Schema
-                && (is_operator(head) || head == Kind::LParen) =>
+              if konst == Constness::Schema && (is_operator(head) || head == Kind::LParen) =>
             {
-              value::<Src, Ctx>(inp, konst)?
+              match collection {
+                Collection::Set => value::<Src, Ctx>(inp, konst)?,
+                Collection::Map => map_entry::<Src, Ctx>(inp, konst)?,
+              }
             }
             Some(_) => recover::unexpected::<Src, Ctx>(inp, VALUE_HEADS)?,
           }
