@@ -103,7 +103,8 @@ use crate::graphqlx::{
 use super::Silence;
 
 /// Reports each use of what needs more than the tier the package that writes it declares: a
-/// type occurrence, `@heap`, and an extern's tier.
+/// type occurrence, `@heap`, an extern's tier, and, when it judges metadata, an application of
+/// another package's directive.
 ///
 /// It reads an occurrence and its type in the `type_expr` hook; an application in the
 /// `application` hook; and a scalar's externs, each with its application and its tier, in the
@@ -125,16 +126,16 @@ use super::Silence;
 /// is bounded whatever their lengths.
 #[derive(Default)]
 pub(super) struct TierViolation {
-  /// Whether it says nothing at an occurrence.
+  /// Whether it says nothing at an occurrence or an application.
   silence: Silence,
   /// `core`'s `@heap`, `@extern`, and `@extern`'s `tier`, found when the walk begins.
   keys: Option<Keys>,
   /// The externs of the scalar the walk is in, each its application and its tier, sorted by the
   /// application.
   externs: Vec<(ApplicationId, Tier)>,
-  /// For each definition an occurrence asked about, for each of its type parameters, the greatest
-  /// tier the defaults from that one to the last need of their own, and the first default that
-  /// needs it.
+  /// For each definition an occurrence asked about, or, when it judges metadata, an application of
+  /// another package's directive, for each of its type parameters, the greatest tier the defaults
+  /// from that one to the last need of their own, and the first default that needs it.
   defaults: BTreeMap<DefId, Vec<(Tier, Option<TypeExprId>)>>,
   /// Whether compile-time metadata is judged too, as `Options::judged_metadata` says:
   /// configuration, which `begin` leaves alone.
@@ -412,8 +413,9 @@ impl Visitor for TierViolation {
 
 impl TierViolation {
   /// The greatest tier the defaults of `def`'s type parameters from the one at `written` on need
-  /// of their own, and the first default that needs it: what an occurrence that writes `written`
-  /// type arguments fills. Read once for each definition, from its last parameter back, and kept.
+  /// of their own, and the first default that needs it: what an occurrence, or an application of
+  /// a directive, that writes `written` type arguments fills. Read once for each definition, from
+  /// its last parameter back, and kept.
   fn filled(&mut self, model: &Model, def: DefId, written: usize) -> (Tier, Option<TypeExprId>) {
     let defaults = self.defaults.entry(def).or_insert_with(|| {
       let params: Vec<Option<TypeExprId>> = model

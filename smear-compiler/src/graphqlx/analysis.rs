@@ -303,7 +303,8 @@ impl Analysis {
 ///   resolved as a type where it is written, that names a definition of any kind. Any other scalar
 ///   takes any literal, kept as written, and so does a type that still names a type parameter or
 ///   can take no value, with nothing said. A prefix, or a type value's path, that names nothing is the
-///   resolver's to report. A value
+///   resolver's to report, and one path read both ways that fails at one place for one reason is
+///   reported once. A value
 ///   that does not fit is reported where it is written, with GraphQL's
 ///   `invalid-default-value` or `invalid-directive-argument-value`, but for a number out of the
 ///   range of any width but the 32-bit signed one, or of `f32`, which is `width-overflow`, and

@@ -82,6 +82,15 @@
 //! `undefined-type` for one segment with no root, whoever asks first; the value is then
 //! unresolved, and nothing more is said.
 //!
+//! One path can be read both ways, as the default of a generic input object instantiated with an
+//! enum and with `TypeRef` is: a prefix, and a whole path. The path keeps where and why the first
+//! of its two readings to fail failed, and the other reading's failure at that place for that
+//! reason, whatever it wanted there, is not reported again: `Missing::RED` read both ways is one
+//! `unresolved-path`, at `Missing`, which the prefix wants as a type and the whole path as a
+//! module. A path past `Limits::max_path_segments` both ways is one `resource-limit` too, over the
+//! segments the first reading read, its place in the key being its first segment. A failure at
+//! another place, or for another reason, is reported as any other.
+//!
 //! An object literal against an input object is read once and kept, by the literal and the input
 //! object: a field whose name is the name of one of the input object's fields, the first of that
 //! name, sets that field; the fields it sets are sorted by the field, one written twice kept twice
@@ -430,7 +439,7 @@ use super::{
   builtin::{ALLOC, CORE, DIRECTIVE, TYPE},
   code::{DiagnosticKind, schema},
   declare::Declarations,
-  diagnostic::{Diagnostic, Excerpt, Message, Reporter},
+  diagnostic::{DefName, Diagnostic, Excerpt, Message, Reporter},
   id::{
     ApplicationId, DefId, MemberId, PoolRange, SourceId, Sym, TyId, TypeExprId, ValueId, dense,
   },
@@ -609,7 +618,7 @@ pub(crate) fn coerce(
     recorded: Vec::new(),
     checked: BTreeMap::new(),
     written: BTreeSet::new(),
-    owned: BTreeSet::new(),
+    owned_counts: BTreeSet::new(),
     beneath: BTreeMap::new(),
     claimed: BTreeSet::new(),
     paid: 0,
@@ -1649,7 +1658,7 @@ struct Coercion<'c, 'p, 'x> {
   /// them, and each count beneath the default an application reports. The check of a derived
   /// instantiation passes over a row whose value, counted against the type it takes there, is one
   /// of them.
-  owned: BTreeSet<CountKey>,
+  owned_counts: BTreeSet<CountKey>,
   /// Each judged count that does not fit because a count it reads does not, with each such count:
   /// what a report that owns the first owns too.
   beneath: BTreeMap<CountKey, Vec<CountKey>>,
@@ -2078,12 +2087,13 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// How a report at a use of an instantiation of `def` begins: a type instantiated there, or a
   /// directive applied there.
   fn used(&self, def: DefId) -> String {
-    let name = Excerpt(self.builder.def_name(def));
-    if self.builder.def_kind(def) == Some(DefKind::Directive) {
-      format!("`@{name}` is applied here")
+    let named = DefName::of(self.builder, def);
+    let verb = if named.is_directive() {
+      "applied"
     } else {
-      format!("`{name}` is instantiated here")
-    }
+      "instantiated"
+    };
+    format!("`{named}` is {verb} here")
   }
 
   /// Reports, at `at`, a use of an instantiation of `def`, the row recorded at `row` that the
@@ -2178,25 +2188,25 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// Reports, at `at`, a use of an instantiation of `def`, that `stop` kept what `def` holds from
   /// being checked under its arguments.
   fn report_unchecked(&mut self, at: Location, def: DefId, stop: Stop) {
-    let (sigil, verb) = if self.builder.def_kind(def) == Some(DefKind::Directive) {
-      ("@", "applied")
+    let named = DefName::of(self.builder, def);
+    let verb = if named.is_directive() {
+      "applied"
     } else {
-      ("", "instantiated")
+      "instantiated"
     };
-    let name = Excerpt(self.builder.def_name(def));
     let message = match stop {
       Stop::Steps => Message {
         text: format!(
-          "the values `{sigil}{name}` holds could not be checked under the type arguments it is \
-           {verb} with here within `Limits::max_value_steps`, {}, the steps the analysis may take \
-           to complete values",
+          "the values `{named}` holds could not be checked under the type arguments it is {verb} \
+           with here within `Limits::max_value_steps`, {}, the steps the analysis may take to \
+           complete values",
           self.values.max()
         ),
         help: Cow::Borrowed(
           "raise the limit with `Limits::with_max_value_steps`, or instantiate fewer types",
         ),
       },
-      Stop::Built(_) => self.stopped(stop, &format!("a value `{sigil}{name}` holds takes")),
+      Stop::Built(_) => self.stopped(stop, &format!("a value `{named}` holds takes")),
     };
     self.limit(at, stop, message);
   }
@@ -2872,7 +2882,7 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// own, which this report does not own.
   fn claim_beneath(&mut self, key: CountKey) {
     // Claimed beneath already, by this report's default or by a claim of the default itself.
-    if self.owned.contains(&key) || !self.claimed.insert(key) {
+    if self.owned_counts.contains(&key) || !self.claimed.insert(key) {
       return;
     }
     let count = self.beneath.get(&key).map_or(0, Vec::len);
@@ -2895,7 +2905,7 @@ impl<'p> Coercion<'_, 'p, '_> {
   fn claim(&mut self, key: CountKey) {
     let mut stack: Vec<CountKey> = vec![key];
     while let Some(key) = stack.pop() {
-      if !self.owned.insert(key) {
+      if !self.owned_counts.insert(key) {
         continue;
       }
       if let Some(below) = self.beneath.get(&key) {
@@ -5238,7 +5248,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     if let Some(resolved) = path.prefix {
       return resolved;
     }
-    let resolved = self.resolve_type(path, tree, false);
+    let resolved = self.resolve_type(row, path, tree, false);
     if let Some(kept) = self.raw.paths.get_mut(row as usize) {
       kept.prefix = Some(resolved);
     }
@@ -5251,19 +5261,20 @@ impl<'p> Coercion<'_, 'p, '_> {
     if let Some(resolved) = path.named {
       return resolved;
     }
-    let resolved = self.resolve_type(path, tree, true);
+    let resolved = self.resolve_type(row, path, tree, true);
     if let Some(kept) = self.raw.paths.get_mut(row as usize) {
       kept.named = Some(resolved);
     }
     resolved
   }
 
-  /// What `path`, of `tree`, names as a type, the whole of it when `whole` and its segments but
-  /// the last otherwise: resolved in the module and the source of `tree`, with the one generic
-  /// parameter in scope that the path's first segment names, if it names one. The resolver
-  /// reports what does not resolve, at the path where it is written, with GraphQL's
-  /// `undefined-type` for a whole path of one segment and no root.
-  fn resolve_type(&mut self, path: RawPath, tree: RawTree, whole: bool) -> Resolved {
+  /// What `path`, the path at `row` of `tree`, names as a type, the whole of it when `whole` and
+  /// its segments but the last otherwise: resolved in the module and the source of `tree`, with
+  /// the one generic parameter in scope that the path's first segment names, if it names one. The
+  /// resolver reports what does not resolve, at the path where it is written, with GraphQL's
+  /// `undefined-type` for a whole path of one segment and no root, but for a failure the path's
+  /// other reading met already at the same place for the same reason, which that reading reported.
+  fn resolve_type(&mut self, row: u32, path: RawPath, tree: RawTree, whole: bool) -> Resolved {
     let builder: &ModelBuilder = &*self.builder;
     let all = self.raw.path_segments(path);
     let written = if whole {
@@ -5300,9 +5311,23 @@ impl<'p> Coercion<'_, 'p, '_> {
       },
       params,
     };
-    self
-      .scopes
-      .resolve_segments(builder, self.reporter, &request, path.root, &segments)
+    let mut failed = self
+      .raw
+      .paths
+      .get(row as usize)
+      .and_then(|kept: &RawPath| kept.failed);
+    let resolved = self.scopes.resolve_reading(
+      builder,
+      self.reporter,
+      &request,
+      path.root,
+      &segments,
+      &mut failed,
+    );
+    if let Some(kept) = self.raw.paths.get_mut(row as usize) {
+      kept.failed = failed;
+    }
+    resolved
   }
 
   /// Makes `id` the type value that `node`, the path at `row` of `tree`, names: its whole path

@@ -581,7 +581,10 @@ impl Limits {
   /// that were, as [`max_value_steps`](Self::max_value_steps) says of one it cannot pay for. A copy
   /// is charged its values before its first is made, all of them or none, as that bound charges its
   /// steps: an application whose next copy cannot be paid for is `resource-limit` at its path,
-  /// once, and is filled no further, and an object literal likewise, at the literal.
+  /// once, and is filled no further, the argument that copy was for and each it leaves out after it
+  /// absent, and a later required one it leaves out not reported. An object literal is starved
+  /// likewise, at the literal, but its required fields, asked for before its defaults, are
+  /// reported.
   ///
   /// So it holds every literal a value writes, the value's own included, the lists, and the copies.
   /// The model holds at most this many values plus the built-in library's own, plus one unresolved

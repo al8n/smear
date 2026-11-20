@@ -564,6 +564,76 @@ struct Failure<'p> {
   single: bool,
 }
 
+/// Where a reading of a written path failed, and why, whatever the reading wanted there: what
+/// [`Scopes::resolve_reading`] keeps of a path read two ways, so that a failure both readings meet
+/// is said once.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Failed {
+  /// Where the failure is: the segment, or the root, that does not resolve; for a path too long,
+  /// its first segment, which both readings share, though each reports over the segments it reads.
+  at: Location,
+  /// Why.
+  reason: Reason,
+}
+
+/// [`Why`]'s kind, without what it carries: why a path does not resolve, whatever was wanted where
+/// it does not. Each variant is the [`Why`] of its name.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Reason {
+  NotInScope,
+  NothingInScope,
+  NotIn,
+  NotDeclared,
+  WrongKind,
+  ParamNotModule,
+  ParamAsModule,
+  AboveRoot,
+  UnknownPackage,
+  Unavailable,
+  Ambiguous,
+  TooLong,
+  TooDeep,
+  PackageGlob,
+  Url,
+  Flat,
+  NotRelative,
+  Outside,
+  NoDirectory,
+  File,
+  Unnamed,
+  Unknown,
+}
+
+impl Why<'_> {
+  /// Its kind, without what it carries.
+  const fn reason(&self) -> Reason {
+    match self {
+      Self::NotInScope(_) => Reason::NotInScope,
+      Self::NothingInScope(_) => Reason::NothingInScope,
+      Self::NotIn(_) => Reason::NotIn,
+      Self::NotDeclared(_) => Reason::NotDeclared,
+      Self::WrongKind(_) => Reason::WrongKind,
+      Self::ParamNotModule => Reason::ParamNotModule,
+      Self::ParamAsModule => Reason::ParamAsModule,
+      Self::AboveRoot => Reason::AboveRoot,
+      Self::UnknownPackage => Reason::UnknownPackage,
+      Self::Unavailable(_) => Reason::Unavailable,
+      Self::Ambiguous(_) => Reason::Ambiguous,
+      Self::TooLong(_) => Reason::TooLong,
+      Self::TooDeep(_) => Reason::TooDeep,
+      Self::PackageGlob => Reason::PackageGlob,
+      Self::Url => Reason::Url,
+      Self::Flat => Reason::Flat,
+      Self::NotRelative => Reason::NotRelative,
+      Self::Outside => Reason::Outside,
+      Self::NoDirectory => Reason::NoDirectory,
+      Self::File(_) => Reason::File,
+      Self::Unnamed => Reason::Unnamed,
+      Self::Unknown => Reason::Unknown,
+    }
+  }
+}
+
 /// The scopes of every module of `declarations`, whose packages are `packages`, in id order and
 /// numbered by `sources`, with each package's resolved `dependencies`: every module's declarations
 /// and child modules, and every `use` item resolved, reporting what does not resolve and what
@@ -750,17 +820,50 @@ impl Scopes<'_> {
     root: Root,
     segments: &[Segment<'_>],
   ) -> Resolved {
+    self.resolve_reading(names, reporter, request, root, segments, &mut None)
+  }
+
+  /// Resolves the path `root` and `segments` spell, as [`resolve`](Self::resolve) does, as one of
+  /// two readings of one written path: `failed` is where and why the other reading failed, if it
+  /// did. A failure at that place for that reason was the other reading's to report, and is not
+  /// reported again; any other failure is reported, and kept in `failed` when it holds none.
+  pub(crate) fn resolve_reading(
+    &self,
+    names: &ModelBuilder,
+    reporter: &mut Reporter,
+    request: &Request<'_>,
+    root: Root,
+    segments: &[Segment<'_>],
+    failed: &mut Option<Failed>,
+  ) -> Resolved {
     match self.walk(names, request, root, segments) {
       Ok(resolved) => resolved,
       Err(failure) => {
-        self.report(
-          names,
-          reporter,
-          request.module,
-          request.position,
-          request.params,
-          &failure,
-        );
+        // A path too long is reported over the segments its reading reads, a prefix's span ending
+        // a segment before the whole path's: one path, so one place, its first segment.
+        let at = match failure.why {
+          Why::TooLong(_) => segments
+            .first()
+            .map_or(failure.at, |first: &Segment<'_>| first.at),
+          _ => failure.at,
+        };
+        let this = Failed {
+          at,
+          reason: failure.why.reason(),
+        };
+        if *failed != Some(this) {
+          self.report(
+            names,
+            reporter,
+            request.module,
+            request.position,
+            request.params,
+            &failure,
+          );
+          if failed.is_none() {
+            *failed = Some(this);
+          }
+        }
         Resolved::Unresolved
       }
     }

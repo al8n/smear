@@ -1361,6 +1361,74 @@ fn a_defaults_prefix_is_reported_once_whoever_asks_first() {
   }
 }
 
+/// One path read both ways, a generic input object's default at an instantiation with an enum,
+/// where it is a value's prefix, and at one with `TypeRef`, where it is a type, reports a failure
+/// both readings meet once, whichever reads it first: `Missing`, which the prefix wants as a type
+/// and the whole path as a module, names nothing. The control's readings fail at two places, `m`,
+/// a module where the prefix wants a type, and `RED`, which `m` does not declare, and each is
+/// reported. A path whose prefix alone is past `Limits::max_path_segments` is one `resource-limit`,
+/// over the segments the first reading read, though each reading spans its own. Refuses a report
+/// for each reading. What the rules say of `TypeRef` as a type argument is no question of this
+/// test's.
+#[test]
+fn a_path_read_both_ways_reports_a_failure_both_meet_once() {
+  const UNRESOLVED: &str = "smear::graphqlx::unresolved-path";
+  let generic = "input In<T> {\n  v: T = Missing::RED\n}\nenum Color {\n  RED\n}\n";
+  for query in [
+    "type Query {\n  a(i: In<Color>): Int\n  b(i: In<TypeRef>): Int\n}\n",
+    "type Query {\n  b(i: In<TypeRef>): Int\n  a(i: In<Color>): Int\n}\n",
+  ] {
+    let text = format!("{query}{generic}");
+    let analysis = analyze_text(&text, &Limits::new());
+    let schema = schema_file(&analysis);
+    let unresolved: Vec<(&str, Location)> = found(&analysis)
+      .into_iter()
+      .filter(|row: &(&str, Location)| row.0 == UNRESOLVED)
+      .collect();
+    assert_eq!(unresolved, [(UNRESOLVED, at(schema, &text, "Missing", 0))]);
+  }
+
+  let text = "type Query {\n  a(i: In<Color>): Int\n  b(i: In<TypeRef>): Int\n}\n\
+              input In<T> {\n  v: T = m::RED\n}\nenum Color {\n  RED\n}\n\
+              mod m {\n  enum Hue {\n    BLUE\n  }\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  let unresolved: Vec<(&str, Location)> = found(&analysis)
+    .into_iter()
+    .filter(|row: &(&str, Location)| row.0 == UNRESOLVED)
+    .collect();
+  assert_eq!(
+    unresolved,
+    [
+      (UNRESOLVED, after(schema, text, "T = ", "m")),
+      (UNRESOLVED, after(schema, text, "m::", "RED")),
+    ]
+  );
+
+  // Past two segments the prefix `a::b::c` is too long, and so is the whole path: one report,
+  // over `a::b::c` when the prefix reads first, and over the whole path when the whole path does.
+  let long = "input In<T> {\n  v: T = a::b::c::RED\n}\nenum Color {\n  RED\n}\n";
+  for (query, spanned) in [
+    (
+      "type Query {\n  a(i: In<Color>): Int\n  b(i: In<TypeRef>): Int\n}\n",
+      "a::b::c",
+    ),
+    (
+      "type Query {\n  b(i: In<TypeRef>): Int\n  a(i: In<Color>): Int\n}\n",
+      "a::b::c::RED",
+    ),
+  ] {
+    let text = format!("{query}{long}");
+    let analysis = analyze_text(&text, &Limits::new().with_max_path_segments(2));
+    let schema = schema_file(&analysis);
+    let limits: Vec<(&str, Location)> = found(&analysis)
+      .into_iter()
+      .filter(|row: &(&str, Location)| row.0 == LIMIT)
+      .collect();
+    assert_eq!(limits, [(LIMIT, at(schema, &text, spanned, 0))]);
+  }
+}
+
 #[test]
 fn a_later_argument_of_a_name_already_taken_is_not_asked_for() {
   // `@twice` resolves and says nothing of its later `a`, though it is required; `@once`, beside

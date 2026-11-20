@@ -24,7 +24,7 @@ use tokora::{SimpleSpan, diagnostic::Location};
 use super::{
   id::{ApplicationId, MemberId, ModuleId, Sym, dense},
   model::{PathRoot, Run, Segments},
-  resolve::{Resolved, Root},
+  resolve::{Failed, Resolved, Root},
   types::Counter,
 };
 
@@ -108,6 +108,9 @@ pub(crate) struct RawPath {
   pub(crate) prefix: Option<Resolved>,
   /// What the whole path names as a type, once coercion has asked: a `TypeRef` value's.
   pub(crate) named: Option<Resolved>,
+  /// Where and why the first of those two readings to fail failed: the other reports a failure
+  /// at that place for that reason no second time.
+  pub(crate) failed: Option<Failed>,
 }
 
 /// One field an object writes: its name, and where the name is written. The object's i-th child
@@ -206,6 +209,7 @@ impl<'p> RawValues<'p> {
       kept: None,
       prefix: None,
       named: None,
+      failed: None,
     });
     row
   }

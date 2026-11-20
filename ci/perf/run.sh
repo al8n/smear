@@ -224,11 +224,11 @@ set -euo pipefail
 
 # ── THE INSTRUMENT, AS CARGO KNOWS IT ───────────────────────────────────────────────────────
 #
-# Two bench targets of one package, built with the feature their `required-features` names. The
+# Two bench targets of one package, built with the features their `required-features` names. The
 # merge-base must declare both, at the same paths; every file they read is derived from their
 # sources (see the header), so nothing in this script names one.
 perf_package=smear
-perf_features=validator
+perf_features=graphqlx,validator
 perf_targets=(peak_alloc wall_clock)
 
 # ── THE BUILD PROFILE, PINNED FOR BOTH SIDES ────────────────────────────────────────────────
@@ -469,10 +469,10 @@ resolve_locks() {
 # binaries whose allocation of a panic message would differ for a reason nothing here changed. Both
 # map to the same name.
 #
-# `--features validator` and both `--bench` names are spelled out. Naming a target is LOUD when its
-# `required-features` are unmet (`exit 101, "requires the features: ..."`) where a filter that
-# matches nothing warns and exits 0; `smear/Cargo.toml`'s bench header carries the four measured
-# cases.
+# `--features graphqlx,validator` and both `--bench` names are spelled out. Naming a target is LOUD
+# when its `required-features` are unmet (`exit 101, "requires the features: ..."`) where a filter
+# that matches nothing warns and exits 0; `smear/Cargo.toml`'s bench header carries the four
+# measured cases.
 build_side() {
   local dir="$PERF_WORK/$1"
   ( cd "$dir" \
