@@ -692,25 +692,27 @@ required-features = ["rowan_0_17", "std", "validator"]
 # header carries that argument. `harness = false` with a hand-written `main` is the whole of what
 # either needs, and it keeps the counting allocator's process to itself.
 #
-# `required-features = ["validator"]` for the reason the block above gives at length: naming a
-# target is LOUD when its features are unmet (`exit 101, "requires the features: ..."`), and both
-# are reached BY NAME for exactly that — by `ci/perf/run.sh`, which `.github/workflows/perf.yml`
-# runs, in a single `cargo build --bench peak_alloc --bench wall_clock`. One bound worth stating
-# with it: that job is `continue-on-error`, so while these gates are advisory a rename would be a
-# red nobody has to act on rather than a red that blocks. Promoting the allocation gate — the
-# criterion is in `perf.yml`'s header — closes that too.
+# `required-features = ["graphqlx", "validator"]`: `validator`, which brings `graphql` and the
+# parser, for the schema, validate and parse rows, and `graphqlx`, which `validator` does not
+# imply, for any row over the second dialect. They are required for the reason the block above
+# gives at length: naming a target is LOUD when its features are unmet (`exit 101, "requires the
+# features: ..."`), and both targets are reached BY NAME for exactly that — by `ci/perf/run.sh`,
+# which `.github/workflows/perf.yml` runs, in a single `cargo build --bench peak_alloc --bench
+# wall_clock`. One bound worth stating with it: that job is `continue-on-error`, so while these
+# gates are advisory a rename would be a red nobody has to act on rather than a red that blocks.
+# Promoting the allocation gate — the criterion is in `perf.yml`'s header — closes that too.
 
 [[bench]]
 name = "peak_alloc"
 path = "benches/solo/peak_alloc.rs"
 harness = false
-required-features = ["validator"]
+required-features = ["graphqlx", "validator"]
 
 [[bench]]
 name = "wall_clock"
 path = "benches/solo/wall_clock.rs"
 harness = false
-required-features = ["validator"]
+required-features = ["graphqlx", "validator"]
 
 # The two gates over the apollo harness. They are `[[test]]` targets living in `benches/` because
 # they share `support/` with the two benches above and cargo resolves `mod support;` against the
