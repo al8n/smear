@@ -38,10 +38,58 @@
 //! So the lossless grammar's longest match at a `-`, its charge and its errors
 //! are the ones these rules make.
 
-use crate::graphqlx::{
-  LitFloat, LitInt,
-  syntactic::{SyntacticToken, SyntacticTokenKind},
+use tokora::state::{RecursionLimitExceeded, State};
+
+use crate::{
+  graphqlx::{
+    LitFloat, LitInt,
+    syntactic::{SyntacticToken, SyntacticTokenKind},
+  },
+  limits::SyntacticLimits,
 };
+
+/// The number sub-lexer's state: the limits the syntactic lexer lends it, and whether the number
+/// is inside a `const { … }` block.
+///
+/// The block is a flag, never the lexer's word: the lexer folds back only the limits, so nothing
+/// the sub-lexer answers can write the count of open `<`. Inside a block an incomplete number's
+/// refusal ends before a brace or an angle bracket, as the lossless grammar's does there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct NumberState {
+  limits: SyntacticLimits,
+  in_block: bool,
+}
+
+impl NumberState {
+  /// The state a delegated number starts from: the lexer's `limits`, inside a block when
+  /// `in_block`.
+  #[inline(always)]
+  pub(crate) const fn new(limits: SyntacticLimits, in_block: bool) -> Self {
+    Self { limits, in_block }
+  }
+
+  /// The limits, as the sub-lexer left them.
+  #[inline(always)]
+  pub(crate) const fn limits(&self) -> SyntacticLimits {
+    self.limits
+  }
+
+  /// Whether the number is inside a `const { … }` block.
+  #[inline(always)]
+  pub(crate) const fn in_block(&self) -> bool {
+    self.in_block
+  }
+}
+
+impl State for NumberState {
+  type Error = RecursionLimitExceeded;
+
+  /// The limits' own check.
+  #[inline(always)]
+  fn check(&self) -> Result<(), Self::Error> {
+    self.limits.check()
+  }
+}
 
 /// A classification-only focused numeric token. It only identifies a valid
 /// radix literal / float or bare `Minus` operator; every numeric anomaly is
@@ -252,7 +300,7 @@ macro_rules! number_token_impl {
       #[derive(Logos, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
       #[logos(
         crate = tokora::logos,
-        extras = crate::limits::SyntacticLimits,
+        extras = crate::graphqlx::syntactic::number::NumberState,
         skip r"[ \t,\r\n\u{FEFF}]+|#[^\n\r]*?",
         utf8 = $utf8,
         error(TokenErrors, handlers::$handlers::default_error)

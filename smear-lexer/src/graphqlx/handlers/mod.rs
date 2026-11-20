@@ -6,18 +6,18 @@ use tokora::{
 };
 
 use crate::{
-  graphqlx::lossless::LosslessState,
+  graphqlx::{lossless::LosslessState, syntactic::number::NumberState},
   handlers::{self, ValidateNumberChar, handle_number_suffix},
   hints::{FloatHint, HexFloatHint},
 };
 
 use super::error;
 
-/// Whether a number's refusal must end before a brace or an angle bracket, as it must inside a
-/// `const { … }` block, where a brace clears the count of open `<` and an angle bracket moves it: a
-/// refusal that took one would leave the count wrong for every token after it. The lossless state
-/// knows its mode and answers it. The limits the syntactic lexer lends its number sub-lexer answer
-/// no: that lexer cuts the source it lends before the brace instead.
+/// Whether an incomplete number's refusal must end before a brace or an angle bracket, as it must
+/// inside a `const { … }` block, where a brace clears the count of open `<` and an angle bracket
+/// moves it: a refusal that took one would leave the count wrong for the tokens after it. The
+/// lossless state answers by its mode. The number sub-lexer's state answers by the flag the
+/// syntactic lexer lends it, which is never the block's word.
 pub(crate) trait BraceStop {
   /// Whether the refusal ends before a brace or an angle bracket.
   fn stops_before_a_brace(&self) -> bool;
@@ -30,44 +30,46 @@ impl BraceStop for LosslessState {
   }
 }
 
-impl BraceStop for crate::limits::SyntacticLimits {
+impl BraceStop for NumberState {
   #[inline(always)]
   fn stops_before_a_brace(&self) -> bool {
-    false
+    self.in_block()
   }
 }
 
-/// Where a number's refusal must end inside a block: at the first byte of `bytes` past the run of
-/// digits, letters, `.`, `_`, `+` and `-` that a number and its suffix are spelled with, when that
-/// byte is `{`, `}`, `<` or `>`; otherwise `None`. A refusal takes bytes of that run, or the one
-/// character after its number, so a brace or an angle bracket it could take is always where the
-/// run ends. `bytes` begins at the number, as the syntactic lexer passes it, or right after the lexeme
-/// a rule matched, as a handler passes it: the run ends at the same byte.
-pub(crate) fn brace_stop(bytes: &[u8]) -> Option<usize> {
-  let at = bytes.iter().position(|byte: &u8| {
-    !matches!(byte, b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'.' | b'_' | b'+' | b'-')
-  })?;
-  matches!(bytes.get(at), Some(b'{' | b'}' | b'<' | b'>')).then_some(at)
+/// One unit of a source, a `char` of a text source or a `u8` of a byte source.
+pub(super) trait SourceUnit {
+  /// Whether the unit is `{`, `}`, `<` or `>`.
+  fn is_brace_or_angle(&self) -> bool;
 }
 
-/// `rest`, what follows a number, cut where [`brace_stop`] finds a brace or an angle bracket when
-/// `stop`; otherwise whole.
+impl SourceUnit for char {
+  #[inline(always)]
+  fn is_brace_or_angle(&self) -> bool {
+    matches!(self, '{' | '}' | '<' | '>')
+  }
+}
+
+impl SourceUnit for u8 {
+  #[inline(always)]
+  fn is_brace_or_angle(&self) -> bool {
+    matches!(self, b'{' | b'}' | b'<' | b'>')
+  }
+}
+
+/// What ends an incomplete number's refusal before the unit right after the number, as the end of
+/// input does: a unit `ignored` holds for, and when `stop` holds, a brace or an angle bracket.
+///
+/// The shared `lit_float_suffix_error` asks it of that one unit, before anything else, and of no
+/// other. The refusal takes either that unit or a run of letters, digits and `.` that begins at it,
+/// so a brace or an angle bracket can only be taken as that unit, and where `stop` holds it is not.
+/// It reads that one unit and nothing past it.
 #[inline(always)]
-pub(super) fn before_a_brace(stop: bool, rest: &[u8]) -> &[u8] {
-  if stop && let Some(at) = brace_stop(rest) {
-    return rest.get(..at).unwrap_or(rest);
-  }
-  rest
-}
-
-/// [`before_a_brace`] over a text source. The cut is before an ASCII byte, so it never splits a
-/// character.
-#[inline(always)]
-pub(super) fn before_a_brace_str(stop: bool, rest: &str) -> &str {
-  if stop && let Some(at) = brace_stop(rest.as_bytes()) {
-    return rest.get(..at).unwrap_or(rest);
-  }
-  rest
+pub(super) fn ends_before<Char: SourceUnit>(
+  stop: bool,
+  ignored: impl FnOnce(&Char) -> bool,
+) -> impl FnOnce(&Char) -> bool {
+  move |unit: &Char| ignored(unit) || (stop && unit.is_brace_or_angle())
 }
 
 pub(super) mod slice;

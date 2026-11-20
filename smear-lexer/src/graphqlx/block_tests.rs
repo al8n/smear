@@ -471,7 +471,8 @@ macro_rules! steps {
 /// Inside a block a number's refusal ends before a brace or an angle bracket, which is then lexed
 /// as itself, alike in both lexers: in `{<1.}>>` the `}` is `RBrace` and clears the count, so the
 /// `>>` after it is `Shr`. An incomplete fraction or exponent, decimal or hexadecimal, ends there,
-/// and a refused suffix already did. Outside a block the refusal still takes the brace.
+/// and a refused suffix and a refused run after a fraction already did. Outside a block the
+/// refusal still takes the brace.
 #[test]
 fn a_refused_number_ends_before_a_blocks_brace() {
   for src in [
@@ -481,6 +482,7 @@ fn a_refused_number_ends_before_a_blocks_brace() {
     "{<0x1.}>>",
     "{<0x1p}>>",
     "{<1u08}>>",
+    "{<1.a}>>",
     "{<1.>>",
     "{<1.{}>>",
   ] {

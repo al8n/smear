@@ -103,16 +103,16 @@ where
   S::Slice<'a>: AsRef<[u8]>,
 {
   let remainder = lexer.remainder();
-  // Inside a block the refusal ends before a brace or an angle bracket, as at the end of input.
-  let remainder_slice =
-    super::before_a_brace(lexer.extras.stops_before_a_brace(), remainder.as_ref());
+  let remainder_slice = remainder.as_ref();
   let remainder_len = remainder_slice.len();
   let iter = remainder_slice.iter().copied();
+  // Inside a block the refusal ends before a brace or an angle bracket, as at the end of input.
+  let ends = super::ends_before(lexer.extras.stops_before_a_brace(), |b: &u8| {
+    is_ignored_byte(remainder_slice, b)
+  });
   Err(LexerError::float(
     lexer.span().into(),
-    super::fractional_error(lexer, remainder_len, iter, |ch| {
-      is_ignored_byte(remainder_slice, ch)
-    }),
+    super::fractional_error(lexer, remainder_len, iter, ends),
   ))
 }
 
@@ -126,16 +126,16 @@ where
   S::Slice<'a>: AsRef<[u8]>,
 {
   let remainder = lexer.remainder();
-  // Inside a block the refusal ends before a brace or an angle bracket, as at the end of input.
-  let remainder_slice =
-    super::before_a_brace(lexer.extras.stops_before_a_brace(), remainder.as_ref());
+  let remainder_slice = remainder.as_ref();
   let remainder_len = remainder_slice.len();
   let iter = remainder_slice.iter().copied();
+  // Inside a block the refusal ends before a brace or an angle bracket, as at the end of input.
+  let ends = super::ends_before(lexer.extras.stops_before_a_brace(), |b: &u8| {
+    is_ignored_byte(remainder_slice, b)
+  });
   Err(LexerError::hex_float(
     lexer.span().into(),
-    super::hex_fractional_error(lexer, remainder_len, iter, |ch| {
-      is_ignored_byte(remainder_slice, ch)
-    }),
+    super::hex_fractional_error(lexer, remainder_len, iter, ends),
   ))
 }
 
@@ -147,11 +147,13 @@ where
   S::Slice<'a>: AsRef<[u8]>,
 {
   let remainder = lexer.remainder();
-  // Inside a block the refusal ends before a brace or an angle bracket, as at the end of input.
-  let remainder_slice =
-    super::before_a_brace(lexer.extras.stops_before_a_brace(), remainder.as_ref());
+  let remainder_slice = remainder.as_ref();
   let remainder_len = remainder_slice.len();
   let iter = remainder_slice.iter().copied();
+  // Inside a block the refusal ends before a brace or an angle bracket, as at the end of input.
+  let ends = super::ends_before(lexer.extras.stops_before_a_brace(), |b: &u8| {
+    is_ignored_byte(remainder_slice, b)
+  });
 
   let slice = lexer.slice();
   let slice_bytes = slice.as_ref();
@@ -163,7 +165,7 @@ where
       lexer,
       remainder_len,
       iter,
-      |b| is_ignored_byte(remainder_slice, b),
+      ends,
       || match slice_bytes.iter().last().copied() {
         Some(b'e' | b'E') => FloatHint::Exponent(ExponentHint::SignOrDigit),
         Some(b'+' | b'-') => FloatHint::Exponent(ExponentHint::Digit),
@@ -193,11 +195,13 @@ where
   S::Slice<'a>: AsRef<[u8]>,
 {
   let remainder = lexer.remainder();
-  // Inside a block the refusal ends before a brace or an angle bracket, as at the end of input.
-  let remainder_slice =
-    super::before_a_brace(lexer.extras.stops_before_a_brace(), remainder.as_ref());
+  let remainder_slice = remainder.as_ref();
   let remainder_len = remainder_slice.len();
   let iter = remainder_slice.iter().copied();
+  // Inside a block the refusal ends before a brace or an angle bracket, as at the end of input.
+  let ends = super::ends_before(lexer.extras.stops_before_a_brace(), |b: &u8| {
+    is_ignored_byte(remainder_slice, b)
+  });
 
   let slice = lexer.slice();
   let slice_bytes = slice.as_ref();
@@ -209,7 +213,7 @@ where
       lexer,
       remainder_len,
       iter,
-      |b| is_ignored_byte(remainder_slice, b),
+      ends,
       || match slice_bytes.last().copied() {
         Some(b'p' | b'P') => HexFloatHint::Exponent(HexExponentHint::SignOrDigit),
         Some(b'+' | b'-' | b'_') => HexFloatHint::Exponent(HexExponentHint::Digit),

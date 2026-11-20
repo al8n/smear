@@ -14,22 +14,24 @@ use tokora::{
   lexer::{FromLogos, LogosLexer},
 };
 
-use crate::limits::SyntacticLimits;
-
 pub(crate) type LogosSourceOf<'inp, T> =
   <<T as FromLogos<'inp>>::Logos as tokora::logos::Logos<'inp>>::Source;
 
+/// The state a Logos lexer over `T` runs under, as its `Lexer` impl names it: its grammar's
+/// `Extras`.
+pub(crate) type LogosStateOf<'inp, T> = <LogosLexer<'inp, T> as Lexer<'inp>>::State;
+
 /// What delegating one token to a Logos lexer lexed: [`Delegated::Token`]'s payload.
 ///
-/// What the caller folds back into its own state on a token: the post-lex recursion state is
-/// propagated, which [`LexFailure`] deliberately does not carry.
-pub(crate) struct LexedToken<T> {
+/// What the caller folds back into its own state on a token: the delegated lexer's state after it,
+/// the recursion state among it, which [`LexFailure`] deliberately does not carry.
+pub(crate) struct LexedToken<T, St> {
   /// The token the Logos lexer produced.
   pub(crate) token: T,
   /// The absolute offset the token ends at.
   pub(crate) end: usize,
-  /// The recursion state after the token.
-  pub(crate) state: SyntacticLimits,
+  /// The delegated lexer's state after the token.
+  pub(crate) state: St,
 }
 
 /// What delegating one token to a Logos lexer refused: [`Delegated::Error`]'s payload.
@@ -56,9 +58,9 @@ pub(crate) struct LexFailure<'inp, T: Token<'inp>> {
 /// itself needs. `delegate_to_logos` — the sole constructor — still requires
 /// `T: FromLogos<'inp>` to build the `LogosLexer`, so every actual caller
 /// satisfies this bound already.
-pub(crate) enum Delegated<'inp, T: Token<'inp>> {
+pub(crate) enum Delegated<'inp, T: Token<'inp>, St> {
   /// The Logos lexer produced a token.
-  Token(LexedToken<T>),
+  Token(LexedToken<T, St>),
   /// The Logos lexer refused.
   Error(LexFailure<'inp, T>),
 }
@@ -73,17 +75,21 @@ pub(crate) enum Delegated<'inp, T: Token<'inp>> {
 /// lexer holds by construction: nothing here constructs an error itself. The
 /// caller supplies the token type `T` (its own `SyntacticToken`) and folds the
 /// returned [`Delegated`] outcome back into its cursor/span/state.
+///
+/// `state` is the delegated grammar's own: GraphQL lends its number grammar the limits, and
+/// GraphQLx lends its own the limits with one flag more.
 #[inline(always)]
 pub(crate) fn delegate_to_logos<'inp, T>(
   scan_primitive: &'inp LogosSourceOf<'inp, T>,
   cursor: usize,
-  state: SyntacticLimits,
-) -> Option<Delegated<'inp, T>>
+  state: LogosStateOf<'inp, T>,
+) -> Option<Delegated<'inp, T, LogosStateOf<'inp, T>>>
 where
   T: FromLogos<'inp>,
-  LogosLexer<'inp, T>: Lexer<'inp, State = SyntacticLimits, Source = LogosSourceOf<'inp, T>, Token = T, Offset = usize>,
+  LogosLexer<'inp, T>: Lexer<'inp, Source = LogosSourceOf<'inp, T>, Token = T, Offset = usize>,
+  LogosStateOf<'inp, T>: Copy,
 {
-  let mut logos = LogosLexer::with_state(scan_primitive, state);
+  let mut logos = <LogosLexer<'inp, T> as Lexer<'inp>>::with_state(scan_primitive, state);
   logos.bump(&cursor);
   match logos.lex()? {
     Ok(token) => {
