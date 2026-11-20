@@ -6,12 +6,71 @@ use tokora::{
 };
 
 use crate::{
+  graphqlx::{lossless::LosslessState, syntactic::number::NumberState},
   handlers::{self, ValidateNumberChar, handle_number_suffix},
   hints::{FloatHint, HexFloatHint},
-  limits::LosslessLimits,
 };
 
 use super::error;
+
+/// Whether an incomplete number's refusal must end before a brace or an angle bracket, as it must
+/// inside a `const { … }` block, where a brace clears the count of open `<` and an angle bracket
+/// moves it: a refusal that took one would leave the count wrong for the tokens after it. The
+/// lossless state answers by its mode. The number sub-lexer's state answers by the flag the
+/// syntactic lexer lends it, which is never the block's word.
+pub(crate) trait BraceStop {
+  /// Whether the refusal ends before a brace or an angle bracket.
+  fn stops_before_a_brace(&self) -> bool;
+}
+
+impl BraceStop for LosslessState {
+  #[inline(always)]
+  fn stops_before_a_brace(&self) -> bool {
+    self.in_const_block()
+  }
+}
+
+impl BraceStop for NumberState {
+  #[inline(always)]
+  fn stops_before_a_brace(&self) -> bool {
+    self.in_block()
+  }
+}
+
+/// One unit of a source, a `char` of a text source or a `u8` of a byte source.
+pub(super) trait SourceUnit {
+  /// Whether the unit is `{`, `}`, `<` or `>`.
+  fn is_brace_or_angle(&self) -> bool;
+}
+
+impl SourceUnit for char {
+  #[inline(always)]
+  fn is_brace_or_angle(&self) -> bool {
+    matches!(self, '{' | '}' | '<' | '>')
+  }
+}
+
+impl SourceUnit for u8 {
+  #[inline(always)]
+  fn is_brace_or_angle(&self) -> bool {
+    matches!(self, b'{' | b'}' | b'<' | b'>')
+  }
+}
+
+/// What ends an incomplete number's refusal before the unit right after the number, as the end of
+/// input does: a unit `ignored` holds for, and when `stop` holds, a brace or an angle bracket.
+///
+/// The shared `lit_float_suffix_error` asks it of that one unit, before anything else, and of no
+/// other. The refusal takes either that unit or a run of letters, digits and `.` that begins at it,
+/// so a brace or an angle bracket can only be taken as that unit, and where `stop` holds it is not.
+/// It reads that one unit and nothing past it.
+#[inline(always)]
+pub(super) fn ends_before<Char: SourceUnit>(
+  stop: bool,
+  ignored: impl FnOnce(&Char) -> bool,
+) -> impl FnOnce(&Char) -> bool {
+  move |unit: &Char| ignored(unit) || (stop && unit.is_brace_or_angle())
+}
 
 pub(super) mod slice;
 pub(super) mod str;
@@ -21,18 +80,21 @@ pub(super) fn increase_recursion_depth_and_token<'a, C, T>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<(), error::LexerError<C, LimitExceeded>>
 where
-  T: Logos<'a, Extras = LosslessLimits>,
+  T: Logos<'a, Extras = LosslessState>,
 {
   handlers::increase_recursion_depth_and_token(lexer)
 }
 
+/// The `{` rule's callback: an opening brace's hook, after the brace's clear of the block's count
+/// of open `<`, which outside a block is the identity.
 #[inline(always)]
 pub(super) fn open_brace<'a, C, T>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<(), error::LexerError<C, LimitExceeded>>
 where
-  T: Logos<'a, Extras = LosslessLimits>,
+  T: Logos<'a, Extras = LosslessState>,
 {
+  lexer.extras.clear_angles();
   handlers::open_brace(lexer)
 }
 
@@ -42,7 +104,7 @@ pub(super) fn tt_hook_and_then<'a, C, T, O>(
   f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, error::LexerError<C, LimitExceeded>>,
 ) -> Result<O, error::LexerError<C, LimitExceeded>>
 where
-  T: Logos<'a, Extras = LosslessLimits>,
+  T: Logos<'a, Extras = LosslessState>,
 {
   handlers::tt_hook_and_then(lexer, f)
 }
@@ -54,7 +116,7 @@ pub(super) fn tt_hook_and_then_into_errors<'a, C, T, O>(
   f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, error::LexerErrors<C, LimitExceeded>>,
 ) -> Result<O, error::LexerErrors<C, LimitExceeded>>
 where
-  T: Logos<'a, Extras = LosslessLimits>,
+  T: Logos<'a, Extras = LosslessState>,
 {
   handlers::tt_hook_and_then_into_errors(lexer, f)
 }
@@ -65,7 +127,7 @@ pub(super) fn tt_hook_map<'a, C, T, O>(
   f: impl FnOnce(&mut Lexer<'a, T>) -> O,
 ) -> Result<O, error::LexerError<C, LimitExceeded>>
 where
-  T: Logos<'a, Extras = LosslessLimits>,
+  T: Logos<'a, Extras = LosslessState>,
 {
   handlers::tt_hook_map(lexer, f)
 }
@@ -75,7 +137,7 @@ pub(super) fn tt_hook<'a, C, T>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<(), error::LexerError<C, LimitExceeded>>
 where
-  T: Logos<'a, Extras = LosslessLimits>,
+  T: Logos<'a, Extras = LosslessState>,
 {
   handlers::tt_hook(lexer)
 }
@@ -422,4 +484,66 @@ impl ValidateNumberChar<GraphQLxBinaryNumber> for u8 {
   fn is_following_invalid_char(&self) -> bool {
     matches!(*self, b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'.')
   }
+}
+
+/// Which suffix a typed number rule matched.
+#[derive(Clone, Copy)]
+pub(super) enum Suffix {
+  /// `i` or `u`, and a width.
+  Int,
+  /// `f32` or `f64`.
+  Float,
+}
+
+/// Where a typed number's suffix is refused: the offset of its letter in the rule's match, and
+/// how many bytes past the match the refused run takes.
+pub(super) struct SuffixRefusal {
+  pub(super) letter: usize,
+  pub(super) past: usize,
+}
+
+/// Whether the suffix a typed number rule matched stands; and when it does not, where the refused
+/// run begins and how far past the match it reaches.
+///
+/// A suffix stands when the byte after it is none of a letter, a digit, `.` and `_`, and, for an
+/// integer's, when its width fits a `u32`. Otherwise the number is refused as a letter after it is
+/// today, by [`handle_number_suffix`]'s rule: over the run that begins at the suffix's letter and
+/// takes letters, digits and `.`. `slice` is the rule's match, and `remainder` what follows it.
+pub(super) fn suffix_refusal(
+  slice: &[u8],
+  remainder: &[u8],
+  suffix: Suffix,
+) -> Option<SuffixRefusal> {
+  // The rule's pattern ends in the suffix, so its letter is the last `i` or `u` of an integer's
+  // match, before the width's digits, and the last `f` of a float's.
+  let letter = match suffix {
+    Suffix::Int => slice
+      .iter()
+      .rposition(|byte: &u8| matches!(byte, b'i' | b'u'))?,
+    Suffix::Float => slice.iter().rposition(|byte: &u8| *byte == b'f')?,
+  };
+  let fits = match suffix {
+    Suffix::Int => slice
+      .get(letter.saturating_add(1)..)
+      .unwrap_or_default()
+      .iter()
+      .try_fold(0u32, |width: u32, digit: &u8| {
+        width
+          .checked_mul(10)?
+          .checked_add(u32::from(digit.wrapping_sub(b'0')))
+      })
+      .is_some(),
+    Suffix::Float => true,
+  };
+  let touched = remainder
+    .first()
+    .is_some_and(|byte: &u8| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_'));
+  if fits && !touched {
+    return None;
+  }
+  let past = remainder
+    .iter()
+    .take_while(|byte: &&u8| byte.is_ascii_alphanumeric() || **byte == b'.')
+    .count();
+  Some(SuffixRefusal { letter, past })
 }

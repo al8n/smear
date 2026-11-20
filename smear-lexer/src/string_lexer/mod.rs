@@ -274,6 +274,10 @@ macro_rules! impl_source_ordering {
 }
 
 mod block;
+#[cfg(feature = "graphqlx")]
+pub(crate) mod byte_str;
+#[cfg(feature = "graphqlx")]
+pub(crate) mod char_literal;
 mod escape;
 mod inline;
 mod value;

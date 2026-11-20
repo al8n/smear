@@ -1,18 +1,22 @@
 use crate::{
-  graphqlx::error::{BinaryError, HexError, OctalError},
+  graphqlx::{
+    LitChar, LitPrefixedStr,
+    error::{BinaryError, HexError, OctalError},
+    lossless::LosslessState,
+  },
   handlers::{self, is_ignored_byte},
   hints::{BinaryHint, ExponentHint, FloatHint, HexExponentHint, HexFloatHint, HexHint, OctalHint},
-  limits::LosslessLimits,
   utf8::IllFormedUtf8,
 };
 use tokora::{
   SimpleSpan,
   error::UnexpectedEnd,
   logos::{Lexer, Logos, Source},
+  state::LimitExceeded,
   utils::Lexeme,
 };
 
-use super::error;
+use super::{BraceStop, error};
 
 type LexerError<Extras> = error::LexerError<u8, Extras>;
 type LexerErrors<Extras> = error::LexerErrors<u8, Extras>;
@@ -39,7 +43,7 @@ pub(crate) fn cst_default_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> error::LexerErrors<u8, Extras>
 where
-  T: Logos<'a, Source = S, Extras = LosslessLimits>,
+  T: Logos<'a, Source = S, Extras = LosslessState>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
 {
@@ -94,7 +98,7 @@ pub(crate) fn handle_fractional_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>
 where
-  T: Logos<'a, Source = S>,
+  T: Logos<'a, Source = S, Extras: BraceStop>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
 {
@@ -102,11 +106,13 @@ where
   let remainder_slice = remainder.as_ref();
   let remainder_len = remainder_slice.len();
   let iter = remainder_slice.iter().copied();
+  // Inside a block the refusal ends before a brace or an angle bracket, as at the end of input.
+  let ends = super::ends_before(lexer.extras.stops_before_a_brace(), |b: &u8| {
+    is_ignored_byte(remainder_slice, b)
+  });
   Err(LexerError::float(
     lexer.span().into(),
-    super::fractional_error(lexer, remainder_len, iter, |ch| {
-      is_ignored_byte(remainder_slice, ch)
-    }),
+    super::fractional_error(lexer, remainder_len, iter, ends),
   ))
 }
 
@@ -115,7 +121,7 @@ pub(crate) fn handle_hex_fractional_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>
 where
-  T: Logos<'a, Source = S>,
+  T: Logos<'a, Source = S, Extras: BraceStop>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
 {
@@ -123,18 +129,20 @@ where
   let remainder_slice = remainder.as_ref();
   let remainder_len = remainder_slice.len();
   let iter = remainder_slice.iter().copied();
+  // Inside a block the refusal ends before a brace or an angle bracket, as at the end of input.
+  let ends = super::ends_before(lexer.extras.stops_before_a_brace(), |b: &u8| {
+    is_ignored_byte(remainder_slice, b)
+  });
   Err(LexerError::hex_float(
     lexer.span().into(),
-    super::hex_fractional_error(lexer, remainder_len, iter, |ch| {
-      is_ignored_byte(remainder_slice, ch)
-    }),
+    super::hex_fractional_error(lexer, remainder_len, iter, ends),
   ))
 }
 
 #[inline]
 fn exponent_error<'a, S, T, Extras>(lexer: &mut Lexer<'a, T>) -> LexerError<Extras>
 where
-  T: Logos<'a, Source = S>,
+  T: Logos<'a, Source = S, Extras: BraceStop>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
 {
@@ -142,6 +150,10 @@ where
   let remainder_slice = remainder.as_ref();
   let remainder_len = remainder_slice.len();
   let iter = remainder_slice.iter().copied();
+  // Inside a block the refusal ends before a brace or an angle bracket, as at the end of input.
+  let ends = super::ends_before(lexer.extras.stops_before_a_brace(), |b: &u8| {
+    is_ignored_byte(remainder_slice, b)
+  });
 
   let slice = lexer.slice();
   let slice_bytes = slice.as_ref();
@@ -153,7 +165,7 @@ where
       lexer,
       remainder_len,
       iter,
-      |b| is_ignored_byte(remainder_slice, b),
+      ends,
       || match slice_bytes.iter().last().copied() {
         Some(b'e' | b'E') => FloatHint::Exponent(ExponentHint::SignOrDigit),
         Some(b'+' | b'-') => FloatHint::Exponent(ExponentHint::Digit),
@@ -168,7 +180,7 @@ pub(crate) fn handle_exponent_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>
 where
-  T: Logos<'a, Source = S>,
+  T: Logos<'a, Source = S, Extras: BraceStop>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
 {
@@ -178,7 +190,7 @@ where
 #[inline]
 fn hex_exponent_error<'a, S, T, Extras>(lexer: &mut Lexer<'a, T>) -> LexerError<Extras>
 where
-  T: Logos<'a, Source = S>,
+  T: Logos<'a, Source = S, Extras: BraceStop>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
 {
@@ -186,6 +198,10 @@ where
   let remainder_slice = remainder.as_ref();
   let remainder_len = remainder_slice.len();
   let iter = remainder_slice.iter().copied();
+  // Inside a block the refusal ends before a brace or an angle bracket, as at the end of input.
+  let ends = super::ends_before(lexer.extras.stops_before_a_brace(), |b: &u8| {
+    is_ignored_byte(remainder_slice, b)
+  });
 
   let slice = lexer.slice();
   let slice_bytes = slice.as_ref();
@@ -197,7 +213,7 @@ where
       lexer,
       remainder_len,
       iter,
-      |b| is_ignored_byte(remainder_slice, b),
+      ends,
       || match slice_bytes.last().copied() {
         Some(b'p' | b'P') => HexFloatHint::Exponent(HexExponentHint::SignOrDigit),
         Some(b'+' | b'-' | b'_') => HexFloatHint::Exponent(HexExponentHint::Digit),
@@ -212,7 +228,7 @@ pub(crate) fn handle_hex_exponent_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<S::Slice<'a>, LexerError<Extras>>
 where
-  T: Logos<'a, Source = S>,
+  T: Logos<'a, Source = S, Extras: BraceStop>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<[u8]>,
 {
@@ -471,4 +487,196 @@ where
       Err(errs)
     }
   }
+}
+
+/// The valid hexadecimal float's check of what follows its exponent, over a byte source.
+///
+/// The exponent is decimal, so a letter after it is no digit of it: `0x1p1f` is refused at the
+/// `f`, where the class of hexadecimal digits would let `0x1p1` stand and `f` begin a name.
+pub(crate) fn handle_valid_hex_float_suffix<'a, S, T, E, Extras>(
+  lexer: &mut Lexer<'a, T>,
+  unexpected_suffix: impl FnOnce(Lexeme<u8>) -> E,
+) -> Result<S::Slice<'a>, LexerError<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<[u8]>,
+  E: Into<LexerErrorData<Extras>>,
+{
+  let remainder = lexer.remainder();
+  let remainder_len = remainder.as_ref().len();
+  super::handle_hex_float_suffix(
+    lexer,
+    remainder_len,
+    remainder.as_ref().iter().copied(),
+    unexpected_suffix,
+  )
+  .map_err(|e| LexerError::new(lexer.span(), e.into()))
+}
+
+/// A number with an integer suffix over a byte source, as the rule matched it; or, when the
+/// suffix does not stand, the number refused as a letter after it is.
+pub(crate) fn handle_int_suffix<'a, S, T, E, Extras>(
+  lexer: &mut Lexer<'a, T>,
+  unexpected_suffix: impl FnOnce(Lexeme<u8>) -> E,
+) -> Result<S::Slice<'a>, LexerError<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<[u8]>,
+  E: Into<LexerErrorData<Extras>>,
+{
+  typed_suffix(lexer, super::Suffix::Int, unexpected_suffix)
+}
+
+/// A number with a float suffix over a byte source, as the rule matched it; or, when the suffix
+/// does not stand, the number refused as a letter after it is.
+pub(crate) fn handle_float_suffix<'a, S, T, E, Extras>(
+  lexer: &mut Lexer<'a, T>,
+  unexpected_suffix: impl FnOnce(Lexeme<u8>) -> E,
+) -> Result<S::Slice<'a>, LexerError<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<[u8]>,
+  E: Into<LexerErrorData<Extras>>,
+{
+  typed_suffix(lexer, super::Suffix::Float, unexpected_suffix)
+}
+
+/// The two suffix handlers' one body: the match as it stands, or the refused run bumped over and
+/// reported as `unexpected_suffix` reports a letter after the number.
+fn typed_suffix<'a, S, T, E, Extras>(
+  lexer: &mut Lexer<'a, T>,
+  suffix: super::Suffix,
+  unexpected_suffix: impl FnOnce(Lexeme<u8>) -> E,
+) -> Result<S::Slice<'a>, LexerError<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<[u8]>,
+  E: Into<LexerErrorData<Extras>>,
+{
+  let slice = lexer.slice();
+  let remainder = lexer.remainder();
+  match super::suffix_refusal(slice.as_ref(), remainder.as_ref(), suffix) {
+    None => Ok(slice),
+    Some(super::SuffixRefusal { letter, past }) => {
+      let at = lexer.span().start.saturating_add(letter);
+      lexer.bump(past);
+      let lexeme = Lexeme::Range(SimpleSpan::new(at, lexer.span().end));
+      Err(LexerError::new(
+        lexer.span(),
+        unexpected_suffix(lexeme).into(),
+      ))
+    }
+  }
+}
+
+/// The lossless `'` rule's callback over a byte source: the `char` literal the `'` opens, read to
+/// its end by the reader both of the dialect's lexers share, and bumped over. Its body is held to
+/// UTF-8, as a string's is.
+#[inline]
+pub(crate) fn char_literal<'a, S, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<LitChar<S::Slice<'a>>, LexerErrors<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<[u8]>,
+{
+  use crate::string_lexer::char_literal::{CharBody, CharLiteral};
+
+  let start = lexer.span().start;
+  let rest = lexer.remainder();
+  let bytes: &[u8] = rest.as_ref();
+  let CharLiteral { len, read } = <u8 as CharBody>::read_char_literal(bytes, start);
+  // The rule took the opening `'`, which `len` counts.
+  lexer.bump(len - 1);
+  match read {
+    Ok(value) => Ok(LitChar::new(lexer.slice(), value)),
+    Err(refusal) => Err(error::char_refusal(refusal, lexer.span().into())),
+  }
+}
+
+/// The lossless name rule's callback inside a `const { … }` block, when a quote touches the name,
+/// over a byte source: one lexeme over the name and the literal after it. `b` or `i` before a
+/// string makes a prefixed string; any other name before a string, and any name before a `char`
+/// literal, is the reserved prefix's refusal, whose record holds the literal's own errors after its
+/// own. The literal is read first, so the lexeme's one charge is checked at its whole extent. Kept
+/// out of line: the name rule is the grammar's commonest, and this is the block's alone.
+#[allow(clippy::result_large_err)]
+#[inline(never)]
+pub(crate) fn prefixed<'a, S, T>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<LitPrefixedStr<S::Slice<'a>>, LexerErrors<LimitExceeded>>
+where
+  T: Logos<'a, Source = S, Extras = LosslessState>,
+  S: ?Sized + Source + 'a,
+  S::Slice<'a>: AsRef<[u8]>,
+{
+  use crate::{
+    LitBlockStr, LitInlineStr, SealedWrapper,
+    error::StringErrors,
+    graphqlx::{StrPrefix, error::TouchedLiteral},
+    string_lexer::{
+      byte_str::{ByteStr, ByteStrBody},
+      char_literal::{CharBody, CharLiteral},
+    },
+  };
+  use tokora::lexer::Lexable;
+
+  let quote = lexer.span().end;
+  let name = lexer.slice();
+  let prefix = match AsRef::<[u8]>::as_ref(&name) {
+    b"b" => Some(StrPrefix::Bytes),
+    b"i" => Some(StrPrefix::Id),
+    _ => None,
+  };
+  let rest = lexer.remainder();
+  let after: &[u8] = AsRef::<[u8]>::as_ref(&rest);
+  let char_literal = after.first() == Some(&b'\'');
+  let block = !char_literal && after.starts_with(b"\"\"\"");
+  let body: &[u8] = after.get(1..).unwrap_or_default();
+
+  // The literal, read to its end, and its refusal when it is refused.
+  let refused = if char_literal {
+    let CharLiteral { len, read } = <u8 as CharBody>::read_char_literal(body, quote);
+    lexer.bump(len);
+    read.err().map(TouchedLiteral::Char)
+  } else if prefix == Some(StrPrefix::Bytes) && !block {
+    let ByteStr { len, read } = <u8 as ByteStrBody>::read_byte_str(body, quote);
+    lexer.bump(len);
+    read.err().map(TouchedLiteral::String)
+  } else if block {
+    lexer.bump(3);
+    <LitBlockStr<S::Slice<'a>> as Lexable<_, StringErrors<u8>>>::lex(
+      SealedWrapper::<Lexer<'a, T>>::from_mut(lexer),
+    )
+    .err()
+    .map(TouchedLiteral::String)
+  } else {
+    lexer.bump(1);
+    <LitInlineStr<S::Slice<'a>> as Lexable<_, StringErrors<u8>>>::lex(
+      SealedWrapper::<Lexer<'a, T>>::from_mut(lexer),
+    )
+    .err()
+    .map(TouchedLiteral::String)
+  };
+  let end = lexer.span().end;
+
+  super::tt_hook_and_then_into_errors(lexer, |lexer: &mut Lexer<'a, T>| {
+    match (prefix, char_literal, refused) {
+      (Some(prefix), false, None) => match lexer.source().slice(quote..end) {
+        Some(slice) => Ok(LitPrefixedStr::new(prefix, block, slice)),
+        // Not reached: both ends are positions this lexer stood on. Refused all the same.
+        None => Err(error::prefixed_refusal(lexer.span().into(), true, None)),
+      },
+      (prefix, char_literal, refused) => Err(error::prefixed_refusal(
+        lexer.span().into(),
+        prefix.is_none() || char_literal,
+        refused,
+      )),
+    }
+  })
 }

@@ -1,0 +1,6 @@
+OK  0..3  LitInt(Decimal("1u8"))
+OK  4..10  LitInt(Decimal("-3i256"))
+OK  11..19  LitInt(Hex("0xFF_u32"))
+OK  20..28  LitInt(Binary("0b1010u8"))
+OK  29..36  LitInt(Octal("0o17i16"))
+OK  37..40  LitInt(Decimal("0u0"))

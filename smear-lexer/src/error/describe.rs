@@ -73,6 +73,7 @@ pub(crate) fn string_error<Char>(
     StringError::IncompleteEscape(_) => {
       f.write_str("incomplete escape sequence, nothing follows the `\\`")
     }
+    StringError::InvalidByteEscape(_) => f.write_str(SyntaxErrorKind::InvalidByteEscape.message()),
     StringError::Unopened(_) => f.write_str(SyntaxErrorKind::UnopenedString.message()),
     StringError::Unterminated(end) => f.write_str(match end.hint() {
       LitStrDelimiterHint::Quote => "unterminated string, expected a closing `\"`",

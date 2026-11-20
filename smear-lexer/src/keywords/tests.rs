@@ -1,9 +1,9 @@
 //! The cross-dialect keyword-prefix pin.
 //!
 //! `graphqlx::ContextualKeyword` is `graphql::ContextualKeyword`'s 39 variants **verbatim, in
-//! order**, plus six (`Use`, `Mod`, `As`, `Where`, `Set`, `Map`). Measured by diffing the two
-//! enum bodies: exactly one hunk, six pure additions at the tail, nothing changed and nothing
-//! reordered.
+//! order**, plus seven (`Use`, `Mod`, `As`, `Where`, `Set`, `Map`, `Const`). Measured by diffing
+//! the two enum bodies: exactly one hunk, seven pure additions at the tail, nothing changed and
+//! nothing reordered.
 //!
 //! # Why this is a unit-test module and not `tests/keyword_prefix.rs`
 //!
@@ -109,7 +109,7 @@ const SHARED: &[(&str, G, X)] = &[
   ),
 ];
 
-/// The six GraphQLx adds, and the fact that it adds exactly six.
+/// The seven GraphQLx adds, and the fact that it adds exactly seven.
 const EXTRA: &[(&str, X)] = &[
   ("use", X::Use),
   ("mod", X::Mod),
@@ -117,6 +117,7 @@ const EXTRA: &[(&str, X)] = &[
   ("where", X::Where),
   ("set", X::Set),
   ("map", X::Map),
+  ("const", X::Const),
 ];
 
 /// Every shared spelling exists in both dialects and spells the same word.
@@ -166,7 +167,7 @@ fn the_shared_list_is_both_dialects_declaration_order() {
 /// GraphQLx adds exactly six spellings, at the tail, and graphql has none of them.
 #[test]
 fn graphqlx_adds_exactly_six_keywords_at_the_tail() {
-  assert_eq!(EXTRA.len(), 6);
+  assert_eq!(EXTRA.len(), 7);
   let shared: std::collections::BTreeSet<&str> = SHARED.iter().map(|(w, _, _)| *w).collect();
   let graphqlx = crate::graphqlx::keyword::KEYWORDS;
 

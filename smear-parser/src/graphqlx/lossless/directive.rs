@@ -24,8 +24,8 @@
 //! front of whatever follows it. `Arguments` is not in that class: it is delimited, so `()` is a
 //! real, written-down empty list and gets its node. Both rulings are GraphQL's twin's, and
 //! GraphQLx's `syntactic/` sibling agrees with each — its `arguments` has no `at_least(1)`
-//! (`argument/mod.rs:175-181`) and its `directives` returns a zero-width empty collection without
-//! consuming (`directive/mod.rs:267-273`).
+//! (`argument/mod.rs`'s `arguments`) and its `directives` returns a zero-width empty collection
+//! without consuming (`directive/mod.rs:267-273`).
 //!
 //! # An undelimited repetition ends with its trailing trivia inside it
 //!
@@ -47,10 +47,13 @@ use super::coverage::node;
 
 use super::{
   GraphqlxLosslessInput, recover,
-  recover::{ARGUMENT_HEADS, PARENS_CLOSER_HEADS, closes_enclosing_block, opener_span},
-  trivia::{eat_if, expect, peek_kind},
+  recover::{
+    ARGUMENT_HEADS, PARENS_CLOSER_HEADS, closes_enclosing_block, continues_an_expression,
+    is_number, opener_span,
+  },
+  trivia::{eat_if, expect, peek_kind, peek_signed_number},
   ty::type_path,
-  value::{Constness, required_value},
+  value::{Constness, expression_run, required_value},
 };
 
 use crate::lossless::{lossless_drivers, lossless_production};
@@ -104,6 +107,15 @@ lossless_production! {
               return recover::report_unexpected::<Src, Ctx>(inp, PARENS_CLOSER_HEADS);
             }
             Some(Kind::Identifier) => argument::<Src, Ctx>(inp, konst)?,
+            // At a schema position's member position, what goes on with an expression offers a
+            // block, and the run consumes.
+            Some(head)
+              if konst == Constness::Schema
+                && (continues_an_expression(head)
+                  || (is_number(head) && peek_signed_number::<Src, Ctx>(inp)?)) =>
+            {
+              expression_run::<Src, Ctx>(inp, true, false)?
+            }
             Some(_) => recover::unexpected::<Src, Ctx>(inp, ARGUMENT_HEADS)?,
           }
         }
@@ -139,12 +151,14 @@ lossless_production! {
   /// than looping, since a malformed directive is not something to resynchronise past here — the
   /// caller decides that.
   ///
-  /// # `konst` is the caller's, and the two flavours are not interchangeable
+  /// # `konst` is the caller's, and the three flavours are not interchangeable
   ///
-  /// The split is **not** "SDL versus executable": a `VariableDefinition`'s directives are const
-  /// too, in the middle of an executable document (`graphqlx/syntactic/executable/mod.rs:316`
-  /// calls `const_directives` where its operation and fragment definitions call plain
-  /// `directives`). Each call site names its own flavour and `syntactic/` is the reference for
+  /// A type-system definition's or extension's directives are a schema position's
+  /// ([`Schema`](Constness::Schema)), as `syntactic/`'s `schema_directives` reads them. A
+  /// `VariableDefinition`'s directives are const too, in the middle of an executable document,
+  /// and [`Const`](Constness::Const): `graphqlx/syntactic/executable/mod.rs` calls
+  /// `const_directives` for them where its operation and fragment definitions call plain
+  /// `directives`. Each call site names its own flavour and `syntactic/` is the reference for
   /// every one of them.
   fn directives<'inp, Src, Ctx>(inp, konst: Constness) {
     // The head peek happens OUTSIDE the node, so the trivia it crosses lands in the enclosing node

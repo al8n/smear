@@ -1231,10 +1231,11 @@ pub trait Nestable: Sized + Sealed {
   /// **The trees form a DAG and this is its topological rank.** A leaf is rank 0 by definition —
   /// it has no `Nestable` impl at all, which is what "leaf" means. The **value**, **type** and
   /// GraphQLx **use** trees are rank 1: none of them can hold a node of another, and none can hold
-  /// a selection.
+  /// a selection. GraphQLx's **constant value** tree is the one value tree that is not: a typed
+  /// form, `Point { x: 1 }` or `Url("x")`, holds the type path it names, so that tree is rank 2.
   /// The **selection** tree is rank 2, because a selection holds arguments and directives whose
   /// payloads are values, and in GraphQLx a type condition whose payload is a type. GraphQLx's
-  /// **module item** tree is rank 2 as well: an item holds definitions whose payloads are values
+  /// **module item** tree is rank 3: an item holds definitions whose payloads are constant values
   /// and types, and `use` items whose payloads are use trees, and no selection.
   ///
   /// A carrier that merely wraps a node — an object field, a map entry, the uninhabited
@@ -1308,15 +1309,17 @@ pub trait Nestable: Sized + Sealed {
   /// Selection ──→ Value ──→ Leaf
   ///     └───────→ Type  ──→ Leaf
   ///             UseTree ──→ Leaf
-  /// ModItem ──→ Value, Type, UseTree
+  /// ConstValue ──→ Type
+  /// ModItem ──→ ConstValue, Type, UseTree
   /// ```
   ///
   /// A selection holds arguments and directives whose payloads are values, and in GraphQLx a type
-  /// condition whose payload is a type; it drops all of them in place. Value and type are
-  /// siblings — neither holds a node of the other — a use tree holds names, paths and strings and
-  /// no node of another tree, and a leaf holds nothing at all. A module item drops its
-  /// definitions' values and types and its `use` items' trees in place, and is a sibling of a
-  /// selection: neither holds the other.
+  /// condition whose payload is a type; it drops all of them in place. A value that admits a
+  /// variable and a type are siblings — neither holds a node of the other — a use tree holds
+  /// names, paths and strings and no node of another tree, and a leaf holds nothing at all.
+  /// GraphQLx's constant value is the one value that holds a type: a typed form drops the type
+  /// path it names in place. A module item drops its definitions' constant values and types and
+  /// its `use` items' trees in place, and is a sibling of a selection: neither holds the other.
   ///
   /// **The reverse edges cannot be written, and that is a fact about the payload bounds rather
   /// than a convention.** A value's or a type's payload parameters are bounded [`Leaf`], and a

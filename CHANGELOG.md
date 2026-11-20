@@ -4,6 +4,160 @@ All notable changes to Smear are documented in this file.
 
 ## [Unreleased]
 
+- `smear-parser`!: a GraphQLx schema position reads the typed forms: a path followed by `{` is a
+  typed object, `Point { x: 1 }`, and a path followed by `(` is a typed value, `Url("x")`, each
+  with type arguments between when `<` follows the path, as in `Box<i32> {}`. The next significant
+  token decides, whatever trivia stands before it. An executable document reads neither.
+  - **The AST.** `graphqlx::ast::TypedObjectValue`, its span, its `TypePath` and its fields, and
+    `TypedValue`, its span, its `TypePath` and the one value it ascribes, with their
+    `…Components`; and the variants `ConstInputValue::TypedObject`, behind a `Box`, and
+    `ConstInputValue::Typed`, behind a `Nest`, which holds the value in place in its node so a
+    typed value costs one allocation. The enum stays 96 bytes on a 64-bit target.
+  - **The ranks.** A typed form drops its type path in place, so `ConstInputValue`'s
+    `Nestable::RANK` is 2, above the type tree's, and `TypeSystemItem`'s is 3.
+  - **The productions.** `schema_value`, the schema family's arguments, directives and defaults,
+    and the lists, sets, maps and objects a schema value holds, read the typed forms.
+    `const_value` and its family are unchanged. Type arguments that open neither bracket are
+    refused at the token found.
+  - **The tree.** `SyntaxKind` gains the nodes `TypedObjectValue` and `TypedValue` after
+    `CharValue`, which moves the raw value of every later kind by two, and the lossless layer's
+    typed wrappers of the same names. Each wrapper that holds a value gains a getter for each:
+    `typed_object_values` and `typed_values` on `ListValue`, `SetValue` and `MapEntry`, and
+    `typed_object_value` and `typed_value` on `ObjectField`, `DefaultValue` and `Argument`. A
+    typed object holds its fields directly, and no `ObjectValue`.
+  - **The one reading of GraphQL that changes.** In a list of a schema position, a name followed
+    by an object is one typed object: `[RED {a: 1}]` is one element, where GraphQL reads two.
+- `smear-compiler`: a GraphQLx typed object and typed value are each reported as
+  `smear::graphqlx::unknown-item`, once for a file, at the form, and lowered as one refused node
+  whatever they hold, until the analyzer gives them their meaning.
+- `smear-parser`!: a GraphQLx schema position reads a `const { … }` block when `const` is
+  followed by `{`, whatever trivia stands between; elsewhere, and before anything else, `const` is
+  a name. A block holds one value, and inside it a value may be a parenthesis, `(1)`, a bytes
+  value, `b"\x89PNG"`, an id value, `i"7"`, or a block, which switches nothing.
+  - **The AST.** `graphqlx::ast::ConstBlock` and `ParenValue`, each its span and the one value it
+    holds, in place behind a `Nest`, and `BytesValue` and `IdValue`, each its span and its
+    literal, with their `…Components`; and the variants `ConstInputValue::Block`, `Paren`,
+    `Bytes` and `Id`. Only a block holds the last three. The enum keeps its size.
+  - **The productions.** `const_block`, `block_expression` and `block_operand`, and
+    `schema_value` and the schema family read a block. `const_value` and its family are
+    unchanged.
+  - **What the parser writes of a lexer's state.** The block's production moves the lexer into
+    the block's mode at its `{` and back at its `}`, in both layers, and nothing else writes the
+    state: a comma between the braces is a separator, and a number there carries no sign. An error
+    the parse goes on from leaves the mode first; a terminal stop leaves it as the stop found it.
+    The syntactic layer's productions name its lexer's state, `SyntacticState`, in their bounds.
+  - **The tree.** `SyntaxKind` gains the nodes `ConstBlock`, `ParenValue`, `BytesValue`, `IdValue`
+    and `Expression` after `TypedValue`, which moves the raw value of every later kind by five,
+    and the lossless layer's typed wrappers of the same names. Every expression is one
+    `Expression` node, a lone operand's too: the trivia before it is its parent's and the trivia
+    after it is its own. Each wrapper that holds a value gains `const_blocks` or `const_block`, as
+    does `TypedValue`.
+  - **`Expectation::OperatorOrSeparator`,** "an operator or `,`", what an operand of a block is
+    refused against when something it cannot be followed by follows it.
+- `smear-compiler`: a GraphQLx `const { … }` block is reported as
+  `smear::graphqlx::unknown-item`, once for a file, at the block, and lowered as one refused node
+  whatever it holds, until the analyzer gives it its meaning.
+- `smear-parser`: inside a GraphQLx `const { … }` block a value may be a list, a set, a map, an
+  object, a typed object or a typed value. Each member is an expression, a `,` separates two and
+  one trailing `,` is allowed, and a path there decides a typed form as a schema position's does.
+  - **The tree.** Each member is an `Expression` node and each separator a `Separator` token, so
+    the lossless layer's `ListValue`, `SetValue` and `MapEntry` gain `expressions`, `ObjectField`
+    and `TypedValue` gain `expression`, and `Expression` gains a getter for each of the six forms.
+  - **The atoms.** `smear_parser::combinator` gains `comma` and `try_comma`.
+- `smear-parser`: a GraphQLx schema position offers a `const { … }` block where its value would be
+  an expression, in both layers: at an operator's token or a `(` at a value's head, and after a
+  value where no second value may follow at an operator's token, a `>`, a `^`, a `(` or a number
+  written with its `-`, as in `HOUR-1`. Each is refused at that token against
+  `Expectation::ConstBlock`, "a `const { … }` block around the expression". The
+  lossless layer reports once and reads the rest of the expression on, its tokens into an `Error`
+  and its values as values, in the node the refusal stands in. An executable document is as it was.
+- `smear-parser`: a GraphQLx schema position, a constant position of a type-system definition or
+  extension, reads its values through productions of its own: `schema_value`,
+  `schema_default_value` and `try_schema_default_value`, `schema_argument`, `schema_arguments`,
+  `schema_directive` and `schema_directives`, each reachable as `graphqlx_schema` on the node it
+  builds, and `try_graphqlx_schema` on `DefaultInputValue`. A member's default and every directive
+  of a type-system definition or extension read them, and each reads what its constant twin reads.
+  An executable document's constant positions, a variable's default and its directives, read the
+  constant family as they did.
+- `smear-parser`!: a GraphQLx `char` literal is a value in every value grammar, executable and
+  constant alike.
+  - **The AST.** `graphqlx::ast::CharValue`, its span and the lexer's `LitChar`, with
+    `CharValueComponents`, and the variants `InputValue::Char` and `ConstInputValue::Char`. Neither
+    enum grows: each stays 96 bytes on a 64-bit target.
+  - **The productions.** `graphqlx::syntactic::value::char_value` and `CharValue::graphqlx`, and
+    `value` and `const_value` read a `char` where they read a scalar, a list's member among them.
+  - **The tree.** `SyntaxKind` gains the node `CharValue` after `DefaultValue`, which moves the raw
+    value of every later kind by one, and the lossless layer's typed wrapper `CharValue`. Each
+    wrapper that holds a value gains a `char` getter: `char_values` on `ListValue`, `SetValue` and
+    `MapEntry`, and `char_value` on `ObjectField`, `DefaultValue` and `Argument`. The projection
+    reads the literal again through `LitChar`'s `TryFrom<&str>` door.
+- `smear-compiler`: a GraphQLx `char` literal is reported as `smear::graphqlx::unknown-item`, once
+  for a file, at the literal, until the analyzer gives a `char` its meaning.
+- `smear-lexer`: `graphqlx::int_in_block` and `graphqlx::float_in_block`, the scanner's reading of
+  a slice as one whole numeric literal inside a `const { … }` block, where it reads no sign into a
+  number. The lossless projection re-reads a block's numeric leaves through them.
+- `smear-lexer`: outside a `const { … }` block too, the syntactic GraphQLx lexer reads a `.` that
+  begins a fraction whose first digit is not the next byte, `._5` and `.ap1`, as one number with no
+  integer part, refused as one, as the lossless lexer's longest match does. It used to refuse the
+  `.` alone and lex the rest apart.
+- `smear-lexer`!: each GraphQLx lexer has a `const { … }` block's lexing mode, held in its state.
+  - **The state.** `SyntacticState` and `LosslessState` gain one word, and `in_const_block`,
+    `open_angles`, `enter_const_block` and `leave_const_block`. A lexer never enters or leaves a
+    block by what it reads: its parser does, and no parser does yet. Outside a block both lexers
+    lex as they did.
+  - **What a block lexes otherwise.** A comma is the token `Separator` while no `<` is open, `-`
+    is always `Minus` and no number carries a sign, `>>` is the token `Shr` where no `<` is open,
+    and a brace clears the count of open `<`. A name touching a quote is one token: `b` or `i`
+    before a string is a `LitPrefixedStr`, whose `literal()` reads the string, and any other name
+    before a string, or any name before a `char` literal, is refused as a reserved prefix. In
+    `b"…"` a `\x` and two hexadecimal digits is one byte.
+  - **Tokens.** `Shr`, `Separator` and `LitPrefixedStr`, with their kinds, `StrPrefix`,
+    `smear_lexer::punctuator::Shr`, and `PunctuatorToken`'s `shr` and `comma`. `LitPrefixedStr<&str>`
+    has a `TryFrom<&str>` door, which reads from a state inside a block.
+  - **Refusals.** `LexerErrorData::ReservedPrefix` and `StringError::InvalidByteEscape`, with the
+    kinds `ReservedPrefix`, `smear::syntax::reserved-prefix`, and `InvalidByteEscape`,
+    `smear::syntax::invalid-byte-escape`.
+- `smear-parser`!: GraphQLx's `SyntaxKind` gains the images `Shr`, `Separator` and
+  `PrefixedString` after `Char`, which moves the raw value of every later kind by three.
+- `smear-lexer`!: GraphQLx's two lexers make the tokens the dialect has outside a `const` block
+  and in one.
+  - **Punctuators.** `/`, `%` and `<<` are the tokens `Slash`, `Percent` and `Shl`, with their
+    kinds. `<<` is one token wherever it is written, and steps no bracket tally. `>` stays one
+    token, and `>>` two. `SyntacticToken`'s `PunctuatorToken` impl answers `slash`, `percent`
+    and `shl`, and `smear_lexer::punctuator` gains `Slash`, `Percent` and `Shl`.
+  - **Typed numbers.** A number with a suffix is one token: `1u8`, `0xFF_u32` and `1.5f32`, and
+    `1f32`, a float. A suffix stands only when no letter, digit, `.` or `_` touches it, and an
+    integer's width fits a `u32`. Otherwise the number is refused as a letter after it is. A
+    hexadecimal float's exponent is decimal, so `0x1p1f` is refused at the `f`. `LitInt` and
+    `LitFloat` gain `suffix` and `suffix_len`, which answer `IntSuffix` and `FloatSuffix`.
+  - **Character literals.** `'a'` is the token `LitChar`, kind `Char`. Its body is read by an
+    inline string's rules, with one more escape, `\'`, so a fault in it is refused with the error
+    a string gets for it. `LitChar` answers its slice and its character, and `LitChar<&str>` has
+    the `TryFrom<&str>` door its numbers have.
+  - **Refusals.** `LexerErrorData` gains `EmptyChar`, `LongChar` and `UnterminatedChar`. Their
+    kinds are new: `InvalidChar`, `smear::syntax::invalid-char`, and `UnterminatedChar`,
+    `smear::syntax::unterminated-char`. A literal refused for its body and for itself reports
+    both, its body's faults first.
+  - **`const`.** `ContextualKeyword` gains `Const` and `smear_lexer::keywords` gains `Const`. The
+    lexers answer it as a name, as every contextual keyword.
+- `smear-parser`!: GraphQLx's `SyntaxKind` gains the images `Slash`, `Percent`, `Shl` and `Char`
+  after `BlockString`, which moves the raw value of every later kind by four. A new token stands
+  where no production expects one, and is refused as any unexpected token is.
+- `smear-compiler`: a GraphQLx number with a suffix is reported as `smear::graphqlx::unknown-item`,
+  once for a file, at the number, until the analyzer gives a suffix its meaning.
+- `smear-lexer` and `smear-parser`!: each GraphQLx lexer has a state type of its own.
+  `graphqlx::syntactic::SyntacticState` is the syntactic lexer's `Lexer::State`, and
+  `graphqlx::lossless::LosslessState` is the lossless lexer's and its grammar's Logos `Extras`,
+  where both were the limits types. Each holds its limits and nothing more, reads them back
+  through `limits()`, and answers `Default` with the limits' default. `LosslessState` answers the
+  eight reads of `LosslessLimits` with their signatures, and `smear-parser`'s
+  `graphqlx::lossless::LexerState` is it.
+  - **Building one by hand.** A caller who hands a GraphQLx lexer or parser a state, through
+    `with_state`, `parse_with_state` or `parse_str_with_state`, builds it from the limits with
+    `new` or `From`: `SyntacticState::new(SyntacticLimits::with_max_nesting_depth(32))`.
+  - **What does not change.** `SyntacticLimits` and `LosslessLimits` are as they were, and each
+    is still the state of GraphQL's lexers. Every door takes the parameter it took: the layers
+    their limits, and each lossless `*_with_limits` door a `LosslessLimits`.
 - `smear-compiler`! and `smear`: `smear-schema`, `smear-semantics` and `smear-analysis` are folded
   into `smear-compiler`, and the set is five crates from this release. Under `smear` no path and no
   feature changes: `smear::diagnostic`, `smear::validator`, `smear::validator::schema` and

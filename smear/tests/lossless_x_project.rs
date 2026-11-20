@@ -250,6 +250,39 @@ fn boundaries(src: &str) -> Vec<usize> {
   out
 }
 
+/// `src` with `pad` at `marks`: at every one, but that **a comma is no padding inside a block** —
+/// between an outermost `const { … }` block's braces the lexer reads it as a separator.
+fn pad_at(src: &str, marks: &[usize], pad: &str) -> String {
+  if pad != "," {
+    return inject(src, marks, pad);
+  }
+  let blocks: Vec<(usize, usize)> = parse_document(src)
+    .syntax()
+    .descendants()
+    .filter(|node| {
+      node.kind() == K::ConstBlock
+        && !node
+          .ancestors()
+          .skip(1)
+          .any(|ancestor| ancestor.kind() == K::ConstBlock)
+    })
+    .map(|node| {
+      let range = node.text_range();
+      (usize::from(range.start()), usize::from(range.end()))
+    })
+    .collect();
+  let kept: Vec<usize> = marks
+    .iter()
+    .copied()
+    .filter(|&mark| {
+      !blocks
+        .iter()
+        .any(|&(start, end)| start < mark && mark < end)
+    })
+    .collect();
+  inject(src, &kept, pad)
+}
+
 /// Every node type named in a `Debug` rendering, as `tests/support/span_extent.rs` reads them.
 fn owners(dump: &str) -> BTreeSet<String> {
   extent::owners(&extent::spans_of(dump))
@@ -293,7 +326,7 @@ fn the_projection_equals_the_parse_over_the_shared_corpus() {
     for (form, source) in std::iter::once(("compact", src.clone())).chain(
       ALPHABET
         .iter()
-        .map(|(form, pad)| (*form, inject(src, &marks, pad))),
+        .map(|(form, pad)| (*form, pad_at(src, &marks, pad))),
     ) {
       let expected = oracle(&source).unwrap_or_else(|e| {
         panic!("{name} ({form}): the syntactic parser rejects a valid corpus entry: {e:?}")
@@ -362,7 +395,7 @@ fn the_executable_projection_equals_the_parse_over_the_shared_corpus() {
     for (form, source) in std::iter::once(("compact", src.clone())).chain(
       ALPHABET
         .iter()
-        .map(|(form, pad)| (*form, inject(src, &marks, pad))),
+        .map(|(form, pad)| (*form, pad_at(src, &marks, pad))),
     ) {
       let expected = executable_oracle(&source).unwrap_or_else(|e| {
         panic!("{name} ({form}): the syntactic parser rejects an executable corpus entry: {e:?}")
@@ -433,7 +466,7 @@ fn the_type_system_projection_equals_the_parse_over_the_shared_corpus() {
     for (form, source) in std::iter::once(("compact", src.clone())).chain(
       ALPHABET
         .iter()
-        .map(|(form, pad)| (*form, inject(src, &marks, pad))),
+        .map(|(form, pad)| (*form, pad_at(src, &marks, pad))),
     ) {
       let expected = type_system_oracle(&source).unwrap_or_else(|e| {
         panic!("{name} ({form}): the syntactic parser rejects a type-system corpus entry: {e:?}")
@@ -1436,25 +1469,25 @@ fn a_gap_token_is_a_hole_the_scan_sees() {
   for (what, src, parent, at) in [
     (
       "beside a complete definition",
-      "type T { f: Int } %",
+      "type T { f: Int } ?",
       K::Document,
       18..19,
     ),
     (
       "inside a fields block",
-      "type T { % f: Int }",
+      "type T { ? f: Int }",
       K::FieldsDefinition,
       9..10,
     ),
     (
       "inside an argument list",
-      "type T @d(a: 1 %) { f: Int }",
+      "type T @d(a: 1 ?) { f: Int }",
       K::Arguments,
       15..16,
     ),
     (
       "inside a list value",
-      "type T @d(a: [1 %]) { f: Int }",
+      "type T @d(a: [1 ?]) { f: Int }",
       K::ListValue,
       16..17,
     ),
@@ -1488,8 +1521,8 @@ fn a_gap_token_is_a_hole_the_scan_sees() {
 
   // A gap the parser leaves beside the *document node* is a child of `Root`, which is the shape
   // smear #57 produces and the reason the scan starts at the root rather than at the document.
-  let parse = parse_executable_document("%");
-  let refusal = project_executable_document(&parse, "%")
+  let parse = parse_executable_document("?");
+  let refusal = project_executable_document(&parse, "?")
     .map(|_| ())
     .expect_err("a gap under the root is still a hole");
   assert_eq!(
@@ -2416,8 +2449,8 @@ fn the_recovering_projector_refuses_a_pair_it_is_not_a_projection_of() {
 #[test]
 fn a_gap_beside_the_document_node_is_counted() {
   for (what, src, projected, skipped) in [
-    ("a gap beside an empty document node", "%", 0, 1),
-    ("a gap inside the document node", "{ a } %", 1, 1),
+    ("a gap beside an empty document node", "?", 0, 1),
+    ("a gap inside the document node", "{ a } ?", 1, 1),
     ("no document node at all", "{ a }\nquery Bad(", 1, 3),
     ("only trivia", "# nothing\n", 0, 0),
     ("nothing at all", "", 0, 0),
@@ -2440,8 +2473,8 @@ fn a_gap_beside_the_document_node_is_counted() {
 
   // The SDL door is the same walk with a different root kind, so it is the same defect and the
   // same repair; a gate that proved it of one root would be proving it of half the code.
-  let parse = parse_type_system_document("%");
-  let (ast, recovery) = project_type_system_document_recovered(&parse, "%")
+  let parse = parse_type_system_document("?");
+  let (ast, recovery) = project_type_system_document_recovered(&parse, "?")
     .expect("a parse projects against its own text");
   assert_eq!(ast.definitions().len(), 0);
   assert_eq!(recovery, Recovery::new(0, 1));
@@ -2685,7 +2718,7 @@ fn a_stray_token_a_shape_does_not_spell_refuses() {
 
 #[test]
 fn a_name_token_spelled_as_a_number_refuses() {
-  // The leaf table's fourth row. The range comes from a token the *tree* labelled `Name`, so the
+  // The leaf table's `Name` row. The range comes from a token the *tree* labelled `Name`, so the
   // bytes under it are whatever the caller wrote; `Name("1")` is a value no source produces, and
   // `smear_lexer::graphqlx::identifier` — the shipped scanner, whole-slice — is what says so.
   let text = "scalar 1";
@@ -2729,13 +2762,219 @@ fn a_null_value_over_another_identifier_refuses() {
 
 #[test]
 fn a_string_leaf_without_its_quotes_refuses() {
-  // The leaf table's third row, measured rather than assumed: `LitStr::try_from` is the string
+  // The leaf table's string row, measured rather than assumed: `LitStr::try_from` is the string
   // sub-lexer, and an image with no quotes is not a string literal to it.
   let (node, text) = scalar_with_literal(K::StringValue, K::InlineString, "abc");
   assert_eq!(
     refuse_tree(node, &text),
     ProjectErrorKind::MalformedToken(K::InlineString),
     "the decoder refuses a malformed image rather than trusting the node's label"
+  );
+}
+
+#[test]
+fn a_char_leaf_that_spells_two_characters_refuses() {
+  // The leaf table's `Char` row: `LitChar::try_from` is the shipped scanner, whole-slice, and a
+  // literal of two characters is no `char` literal to it, whatever kind the tree labels it.
+  let (node, text) = scalar_with_literal(K::CharValue, K::Char, "'ab'");
+  assert_eq!(
+    refuse_tree(node, &text),
+    ProjectErrorKind::MalformedToken(K::Char),
+    "a char literal is re-cooked through the lexer's own door"
+  );
+
+  // A literal the scanner reads projects to the parse, its escape applied.
+  let src = "scalar S @d(n: '\\n')";
+  assert_eq!(
+    project(&parse_document(src), src).expect("a char argument projects"),
+    oracle(src).expect("and the parser agrees")
+  );
+}
+
+#[test]
+fn a_typed_form_named_what_the_value_head_reads_otherwise_refuses() {
+  // The tree of `Point {}` with its type spelled `const`: both parsers read those bytes as an
+  // empty block, so a typed object named `const` is no value either builds.
+  let typed_object = |ty: &str| {
+    let text = std::format!("scalar S@d(n:{ty}{{}})");
+    let mut tree = Tree::new();
+    tree.open(K::Document);
+    tree.open(K::ScalarTypeDefinition);
+    tree.token(K::Name, "scalar").token(K::Space, " ");
+    tree.open(K::DefinitionName).token(K::Name, "S").close();
+    tree.one_argument("n", |tree| {
+      tree.open(K::TypedObjectValue);
+      tree.open(K::TypePath).path(ty).close();
+      tree.token(K::LBrace, "{").token(K::RBrace, "}");
+      tree.close();
+    });
+    tree.close();
+    tree.close();
+    (tree.finish(), text)
+  };
+  let (tree, text) = typed_object("const");
+  assert_eq!(
+    refuse_tree(tree, &text),
+    ProjectErrorKind::SemanticRule("a bare `const` before `{` opens a block, not a typed object")
+  );
+  let (tree, text) = typed_object("true");
+  assert_eq!(
+    refuse_tree(tree, &text),
+    ProjectErrorKind::SemanticRule(
+      "a typed form's type may not begin with `true`, `false` or `null`"
+    )
+  );
+  // The control: a type the value head reads as a path is a typed object.
+  let (tree, text) = typed_object("Point");
+  assert!(
+    DocumentNode::cast_node(tree)
+      .expect("the synthetic root is a Document")
+      .to_ast(&text)
+      .is_ok(),
+    "{text}"
+  );
+}
+
+#[test]
+fn a_signed_number_inside_a_block_refuses() {
+  // Inside a block the scanner reads no sign into a number, so neither parser builds a block whose
+  // operand is `-1`; a tree that puts one there is refused at the leaf.
+  let block = |node: K, token: K, literal: &str| {
+    let text = std::format!("scalar S@d(n:const{{{literal}}})");
+    let mut tree = Tree::new();
+    tree.open(K::Document);
+    tree.open(K::ScalarTypeDefinition);
+    tree.token(K::Name, "scalar").token(K::Space, " ");
+    tree.open(K::DefinitionName).token(K::Name, "S").close();
+    tree.one_argument("n", |tree| {
+      tree.open(K::ConstBlock);
+      tree.token(K::Name, "const").token(K::LBrace, "{");
+      tree.open(K::Expression);
+      tree.open(node).token(token, literal).close();
+      tree.close();
+      tree.token(K::RBrace, "}");
+      tree.close();
+    });
+    tree.close();
+    tree.close();
+    (tree.finish(), text)
+  };
+  let (tree, text) = block(K::IntValue, K::Int, "-1");
+  assert_eq!(
+    refuse_tree(tree, &text),
+    ProjectErrorKind::MalformedToken(K::Int)
+  );
+  let (tree, text) = block(K::FloatValue, K::Float, "-1.5");
+  assert_eq!(
+    refuse_tree(tree, &text),
+    ProjectErrorKind::MalformedToken(K::Float)
+  );
+  // The control: an unsigned operand is the block's, and outside a block a signed one projects.
+  let (tree, text) = block(K::IntValue, K::Int, "1");
+  assert!(
+    DocumentNode::cast_node(tree)
+      .expect("the synthetic root is a Document")
+      .to_ast(&text)
+      .is_ok(),
+    "{text}"
+  );
+  let (tree, text) = scalar_with_literal(K::IntValue, K::Int, "-1");
+  assert!(
+    DocumentNode::cast_node(tree)
+      .expect("the synthetic root is a Document")
+      .to_ast(&text)
+      .is_ok(),
+    "{text}"
+  );
+}
+
+#[test]
+fn a_path_and_an_object_after_it_are_one_typed_object_outside_a_block() {
+  // A caller can split `RED {x: 1}` into two members of a schema list, or into an entry's value
+  // and the next entry's key. Outside a block the `,` is trivia and an object right after a path
+  // makes it a typed object's type, so both parsers build one typed object and neither shape.
+  let in_argument = |text: &str, value: &dyn Fn(&mut Tree)| {
+    let mut tree = Tree::new();
+    tree.open(K::Document);
+    tree.open(K::ScalarTypeDefinition);
+    tree.token(K::Name, "scalar").token(K::Space, " ");
+    tree.open(K::DefinitionName).token(K::Name, "S").close();
+    tree.one_argument("n", |tree| value(tree));
+    tree.close();
+    tree.close();
+    (tree.finish(), text.to_string())
+  };
+  let object = |tree: &mut Tree| {
+    tree.open(K::ObjectValue).token(K::LBrace, "{");
+    tree
+      .open(K::ObjectField)
+      .token(K::Name, "x")
+      .token(K::Colon, ":");
+    tree.open(K::IntValue).token(K::Int, "1").close();
+    tree.close();
+    tree.token(K::RBrace, "}").close();
+  };
+  let path = |tree: &mut Tree| {
+    tree.open(K::EnumValue).path("RED").close();
+  };
+  let one = |tree: &mut Tree| {
+    tree.open(K::IntValue).token(K::Int, "1").close();
+  };
+
+  let (tree, text) = in_argument("scalar S@d(n:[RED,{x:1}])", &|tree: &mut Tree| {
+    tree.open(K::ListValue).token(K::LBracket, "[");
+    path(tree);
+    tree.token(K::Comma, ",");
+    object(tree);
+    tree.token(K::RBracket, "]").close();
+  });
+  assert!(
+    matches!(
+      refuse_tree(tree, &text),
+      ProjectErrorKind::UnexpectedChild(_)
+    ),
+    "{text}"
+  );
+  let (tree, text) = in_argument("scalar S@d(n:map!{1=>RED,{x:1}=>1})", &|tree: &mut Tree| {
+    tree.open(K::MapValue);
+    tree
+      .token(K::Name, "map")
+      .token(K::Bang, "!")
+      .token(K::LBrace, "{");
+    tree.open(K::MapEntry);
+    one(tree);
+    tree.token(K::FatArrow, "=>");
+    path(tree);
+    tree.close();
+    tree.token(K::Comma, ",");
+    tree.open(K::MapEntry);
+    object(tree);
+    tree.token(K::FatArrow, "=>");
+    one(tree);
+    tree.close();
+    tree.token(K::RBrace, "}").close();
+  });
+  assert!(
+    matches!(
+      refuse_tree(tree, &text),
+      ProjectErrorKind::UnexpectedChild(_)
+    ),
+    "{text}"
+  );
+  // The control: a path and a member that is no object are two members.
+  let (tree, text) = in_argument("scalar S@d(n:[RED,1])", &|tree: &mut Tree| {
+    tree.open(K::ListValue).token(K::LBracket, "[");
+    path(tree);
+    tree.token(K::Comma, ",");
+    one(tree);
+    tree.token(K::RBracket, "]").close();
+  });
+  assert!(
+    DocumentNode::cast_node(tree)
+      .expect("the synthetic root is a Document")
+      .to_ast(&text)
+      .is_ok(),
+    "{text}"
   );
 }
 
@@ -4153,6 +4392,120 @@ const SITES: &[Site] = &[
     "Ok",
     Absent::Token(K::SetValue, "}"),
   ),
+  // A schema position's typed forms: type arguments that open neither bracket, and a typed value
+  // whose `)` is missing at the end of input and in front of the `}` of the definition around it.
+  // A typed object's body is an object's, so its unclosed `}` is the object's site, in `SHARED`.
+  (
+    "value.rs",
+    "report",
+    "input I { a: T = Box<i32> }",
+    Root::Mixed,
+    "MissingChild TypedObjectValue",
+    Absent::Imaged,
+  ),
+  (
+    "value.rs",
+    "unclosed",
+    "input I { a: T = U(1",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::TypedValue, ")"),
+  ),
+  (
+    "value.rs",
+    "report",
+    "input I { a: T = U(1 }",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::TypedValue, ")"),
+  ),
+  // A block's: a `$` reported and still built, an expression with no operand, and a
+  // parenthesis's `)` missing in front of the block's `}` and at the end of input, and the
+  // block's own `}` missing there.
+  (
+    "value.rs",
+    "report",
+    "input I { a: T = const { $v } }",
+    Root::Mixed,
+    "UnexpectedChild Expression VariableValue",
+    Absent::Not,
+  ),
+  (
+    "value.rs",
+    "report",
+    "input I { a: T = const { } }",
+    Root::Mixed,
+    "MissingChild Expression",
+    Absent::Imaged,
+  ),
+  (
+    "value.rs",
+    "report",
+    "input I { a: T = const {",
+    Root::Mixed,
+    "MissingChild Expression",
+    Absent::Imaged,
+  ),
+  (
+    "value.rs",
+    "report",
+    "input I { a: T = const { (1 } }",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::ParenValue, ")"),
+  ),
+  (
+    "value.rs",
+    "unclosed",
+    "input I { a: T = const { 1",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::ConstBlock, "}"),
+  ),
+  (
+    "value.rs",
+    "unclosed",
+    "input I { a: T = const { (1",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::ParenValue, ")"),
+  ),
+  // A block's list and object: the list's `]` missing in front of the block's `}` and at the end
+  // of input, and the object's `}` missing there.
+  (
+    "value.rs",
+    "report",
+    "input I { a: T = const { [1 } }",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::ListValue, "]"),
+  ),
+  (
+    "value.rs",
+    "unclosed",
+    "input I { a: T = const { [1",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::ListValue, "]"),
+  ),
+  (
+    "value.rs",
+    "unclosed",
+    "input I { a: T = const { {b: 1",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::ObjectValue, "}"),
+  ),
+  // An expression outside a block: the block is offered at its first token, and the run keeps the
+  // operator as an `Error`, so the probe leaves a hole.
+  (
+    "value.rs",
+    "report",
+    "input I { a: u32 = HOUR - 1 }",
+    Root::Mixed,
+    "hole",
+    Absent::Not,
+  ),
   (
     "directive.rs",
     "unclosed",
@@ -4211,9 +4564,10 @@ const SITES: &[Site] = &[
   ),
 ];
 
-/// The second node kind two shared sites build: `angle_name_list` serves both bare-name generic
-/// lists, and `collection_body` both keyword containers. One probe per kind, so the derivation
-/// below sees every `(node, token)` a site can leave.
+/// The second node kind three shared sites build: `angle_name_list` serves both bare-name generic
+/// lists, `collection_body` both keyword containers, and `object_fields` an object's body and a
+/// typed object's. One probe per kind, so the derivation below sees every `(node, token)` a site
+/// can leave.
 const SHARED: &[(&str, &str, Absent)] = &[
   (
     "generic.rs",
@@ -4224,6 +4578,11 @@ const SHARED: &[(&str, &str, Absent)] = &[
     "value.rs",
     "{ f(a: map!{1 => 2",
     Absent::Token(K::MapValue, "}"),
+  ),
+  (
+    "value.rs",
+    "input I { a: T = P { x: 1",
+    Absent::Token(K::TypedObjectValue, "}"),
   ),
 ];
 
@@ -4394,7 +4753,7 @@ fn every_report_and_build_site_has_a_measured_answer() {
   };
   assert_eq!(
     (total("report"), total("unclosed")),
-    (66, 17),
+    (74, 22),
     "the two families' populations"
   );
 
@@ -4466,7 +4825,7 @@ fn every_report_and_build_site_has_a_measured_answer() {
 }
 
 /// How many of [`SITES`]' probes project.
-const PROJECTING_SITES: usize = 21;
+const PROJECTING_SITES: usize = 29;
 
 /// Image-less tokens a site can leave out whose probe is **not** a witness.
 ///
@@ -4944,7 +5303,7 @@ fn every_walk_is_a_transcription() {
     1,
     "the cursor's trivia skip, and nothing else"
   );
-  assert_eq!(count("Cursor::new("), 74, "the walks, one cursor each");
+  assert_eq!(count("Cursor::new("), 79, "the walks, one cursor each");
 }
 
 #[test]

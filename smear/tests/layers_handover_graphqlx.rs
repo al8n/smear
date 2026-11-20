@@ -526,6 +526,189 @@ mod lossless {
     );
   }
 
+  // ── The block a schema position offers ─────────────────────────────────────────────────────
+
+  /// What each layer says first about `text`, read as a type-system document, as
+  /// `code at start..end: message`, and how many errors the lossless layer lends.
+  fn said(text: &str) -> (String, String, usize) {
+    let mut lossless: Vec<Lent<'_>> = Vec::new();
+    let _ = Lossless::new()
+      .type_system_document(text, &mut lossless)
+      .expect("a short text is short enough for a tree");
+    let mut syntactic: Vec<GraphqlxError<&str>> = Vec::new();
+    let _ = Syntactic::new().type_system_document(text, &mut syntactic);
+    let line = |seen: Option<Seen>| match seen {
+      Some(seen) => format!(
+        "{} at {}..{}: {}",
+        seen.code, seen.start, seen.end, seen.message
+      ),
+      None => String::from("nothing"),
+    };
+    (
+      line(first(&lossless)),
+      line(first(&syntactic)),
+      lossless.len(),
+    )
+  }
+
+  /// An operator at a schema map's key is refused against the block, by both layers alike, and the
+  /// lossless layer reads the entry on, its `=>` and its value with it.
+  #[test]
+  fn an_operator_at_a_maps_key_offers_the_block_in_both_layers() {
+    let (ours, theirs, lent) = said("input I { a: T = map!{ -KEY => 1 } b: Int }");
+    assert_eq!(ours, theirs);
+    assert!(ours.contains("at 23..24"), "{ours}");
+    assert!(ours.contains("`const { … }` block"), "{ours}");
+    assert_eq!(lent, 1, "one report, at the `-`");
+  }
+
+  /// After a value where no second value may follow, a number written with its `-` and a `(` are
+  /// refused against the block by both layers alike; where a second value may follow, each stays
+  /// a value.
+  #[test]
+  fn a_signed_number_or_a_parenthesis_after_one_value_offers_the_block_in_both_layers() {
+    for (text, at) in [
+      ("input I { a: u32 = HOUR-1 }", "at 23..25"),
+      ("input I { a: u32 = 1 (2) }", "at 21..22"),
+    ] {
+      let (ours, theirs, lent) = said(text);
+      assert_eq!(ours, theirs, "{text}");
+      assert!(ours.contains(at), "{text}: {ours}");
+      assert!(ours.contains("`const { … }` block"), "{text}: {ours}");
+      assert_eq!(lent, 1, "{text}: one report");
+    }
+    for text in [
+      "input I { a: [Int] = [1 -2] }",
+      "input I { a: M = map!{ 1 => 2 -3 => 4 } }",
+    ] {
+      let nothing = String::from("nothing");
+      assert_eq!(said(text), (nothing.clone(), nothing, 0), "{text}");
+    }
+  }
+
+  /// A `::` at a block operand's head begins no operand, and both layers refuse it as they refuse
+  /// every head that begins none: one code, at one token.
+  #[test]
+  fn a_leading_separator_in_a_block_is_one_code_in_both_layers() {
+    let (ours, theirs, _) = said("input I { a: T = const { ::X } }");
+    let code_and_span = |line: &str| line.split(": ").next().unwrap_or_default().to_string();
+    assert_eq!(code_and_span(&ours), code_and_span(&theirs));
+    assert_eq!(
+      code_and_span(&ours),
+      "smear::syntax::unexpected-token at 25..27"
+    );
+  }
+
+  /// Every error each layer lends for `text`, read as a type-system document, each as
+  /// `code at start..end`: the lossless layer's, and the syntactic layer's.
+  fn lent(text: &str) -> (Vec<String>, Vec<String>) {
+    fn shown_all<E: Diagnose>(errors: &[E]) -> Vec<String> {
+      errors
+        .iter()
+        .map(|error| {
+          let span = error.primary().span();
+          format!(
+            "{} at {}..{}",
+            error.code().as_str(),
+            span.map_or(0, |span| span.start()),
+            span.map_or(0, |span| span.end())
+          )
+        })
+        .collect()
+    }
+    let mut lossless: Vec<Lent<'_>> = Vec::new();
+    let _ = Lossless::new()
+      .type_system_document(text, &mut lossless)
+      .expect("a short text is short enough for a tree");
+    let mut syntactic: Vec<GraphqlxError<&str>> = Vec::new();
+    let _ = Syntactic::new().type_system_document(text, &mut syntactic);
+    (shown_all(&lossless), shown_all(&syntactic))
+  }
+
+  /// A block, a parenthesis, a list and a typed form left unfinished at the end of input: the
+  /// syntactic layer's one error is the lossless layer's at the same place. After an operand the
+  /// opener is unclosed; a part missing at the end is refused where the input ends.
+  #[test]
+  fn an_unfinished_block_is_one_error_in_both_layers() {
+    for (text, expected) in [
+      (
+        "input I { a: T = const { 1",
+        "smear::syntax::unclosed-delimiter at 23..24",
+      ),
+      (
+        "input I { a: T = const { (1",
+        "smear::syntax::unclosed-delimiter at 25..26",
+      ),
+      (
+        "input I { a: T = const { [1",
+        "smear::syntax::unclosed-delimiter at 25..26",
+      ),
+      (
+        "input I { a: T = const { # pending",
+        "smear::syntax::unexpected-end-of-input at 34..34",
+      ),
+      (
+        "input I { a: T = const { Box<i32> # c",
+        "smear::syntax::unexpected-end-of-input at 37..37",
+      ),
+    ] {
+      let (lossless, syntactic) = lent(text);
+      assert_eq!(syntactic, [expected], "{text}");
+      assert!(
+        lossless.iter().any(|seen| seen == expected),
+        "{text}: {lossless:?}"
+      );
+    }
+  }
+
+  /// Type arguments that hold no type, at a typed form's entry out of a block and in one: one code
+  /// and one span in both layers, the unexpected token at the `>`.
+  #[test]
+  fn empty_type_arguments_of_a_typed_form_are_one_error_in_both_layers() {
+    for (text, expected) in [
+      (
+        "input I { a: T = Box<>(1) }",
+        "smear::syntax::unexpected-token at 21..22",
+      ),
+      (
+        "input I { a: T = const { Box<>(1) } }",
+        "smear::syntax::unexpected-token at 29..30",
+      ),
+    ] {
+      let (ours, theirs, _) = said(text);
+      let code_and_span = |line: &str| line.split(": ").next().unwrap_or_default().to_string();
+      assert_eq!(code_and_span(&ours), expected, "{text}");
+      assert_eq!(code_and_span(&theirs), expected, "{text}");
+    }
+  }
+
+  /// A block object field's `:`, a block map entry's `=>` and a typed value's value, each missing at
+  /// the end of input behind trivia: both layers refuse it where the input ends.
+  #[test]
+  fn a_part_missing_at_the_end_is_refused_where_the_input_ends_in_both_layers() {
+    for (text, expected) in [
+      (
+        "input I { a: T = const { {a # c",
+        "smear::syntax::unexpected-end-of-input at 31..31",
+      ),
+      (
+        "input I { a: T = const { map!{ 1 # c",
+        "smear::syntax::unexpected-end-of-input at 36..36",
+      ),
+      (
+        "input I { a: T = Url( # c",
+        "smear::syntax::unexpected-end-of-input at 25..25",
+      ),
+    ] {
+      let (lossless, syntactic) = lent(text);
+      assert_eq!(syntactic, [expected], "{text}");
+      assert!(
+        lossless.iter().any(|seen| seen == expected),
+        "{text}: {lossless:?}"
+      );
+    }
+  }
+
   // ── The message bound ──────────────────────────────────────────────────────────────────────
 
   /// The most bytes a syntax error's message holds.

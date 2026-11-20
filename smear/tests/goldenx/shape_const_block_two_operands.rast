@@ -1,0 +1,38 @@
+Root@0..35
+  Document@0..35
+    InputObjectTypeDefinition@0..34
+      Name@0..5 "input"
+      Space@5..6 " "
+      DefinitionName@6..8
+        Name@6..7 "I"
+        Space@7..8 " "
+      InputFieldsDefinition@8..34
+        LBrace@8..9 "{"
+        Space@9..10 " "
+        InputValueDefinition@10..33
+          Name@10..11 "a"
+          Colon@11..12 ":"
+          Space@12..13 " "
+          DefinitionTypePath@13..17
+            Path@13..17
+              Name@13..16 "Int"
+              Space@16..17 " "
+          DefaultValue@17..32
+            Equal@17..18 "="
+            Space@18..19 " "
+            ConstBlock@19..32
+              Name@19..24 "const"
+              Space@24..25 " "
+              LBrace@25..26 "{"
+              Space@26..27 " "
+              Expression@27..29
+                IntValue@27..28
+                  Int@27..28 "1"
+                Space@28..29 " "
+              Error@29..30
+                Int@29..30 "2"
+              Space@30..31 " "
+              RBrace@31..32 "}"
+          Space@32..33 " "
+        RBrace@33..34 "}"
+    Newline@34..35 "\n"

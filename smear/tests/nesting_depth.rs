@@ -1732,6 +1732,7 @@ fn the_child_parsed(output: &std::process::Output, depth: usize, chain: &str) ->
 fn a_use_group_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
   use smear::{
     lexer::{
+      graphqlx::syntactic::SyntacticState,
       limits::{LosslessLimits, SyntacticLimits},
       tokora::{Parse as _, Parser},
     },
@@ -1751,7 +1752,7 @@ fn a_use_group_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
     Parser::with_parser::<GraphqlxLexer<'_, str>, Document<&str>, GraphqlxErrors<&str>, _, GraphQLx>(
       document,
     )
-    .parse_str_with_state(src, limits)
+    .parse_str_with_state(src, SyntacticState::new(limits))
     .is_ok()
   }
 
@@ -2286,6 +2287,7 @@ fn a_flat_mod_body_costs_no_depth() {
 fn a_mod_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
   use smear::{
     lexer::{
+      graphqlx::syntactic::SyntacticState,
       limits::{LosslessLimits, SyntacticLimits},
       tokora::{Parse as _, Parser},
     },
@@ -2305,7 +2307,7 @@ fn a_mod_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
     Parser::with_parser::<GraphqlxLexer<'_, str>, Document<&str>, GraphqlxErrors<&str>, _, GraphQLx>(
       document,
     )
-    .parse_str_with_state(src, limits)
+    .parse_str_with_state(src, SyntacticState::new(limits))
     .is_ok()
   }
 
@@ -2343,6 +2345,189 @@ fn a_mod_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
   );
 }
 
+/// `input I { a: T = U(U(… 1 …)) }`: `depth` typed values, one `(` each, inside the one `{` of the
+/// input object whose member they default — `depth + 1` simultaneously open brackets.
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
+fn typed_values(depth: usize) -> String {
+  let mut src = String::with_capacity(depth * 3 + 24);
+  src.push_str("input I { a: T = ");
+  for _ in 0..depth {
+    src.push_str("U(");
+  }
+  src.push('1');
+  for _ in 0..depth {
+    src.push(')');
+  }
+  src.push_str(" }");
+  src
+}
+
+/// `input I { a: T = P { k: P { k: … 1 … } } }`: `depth` typed objects, each the value of a field of
+/// the one before it, one `{` each, inside the input object's own — `depth + 1` simultaneously open
+/// brackets.
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
+fn typed_objects(depth: usize) -> String {
+  let mut src = String::with_capacity(depth * 9 + 24);
+  src.push_str("input I { a: T = ");
+  for _ in 0..depth {
+    src.push_str("P { k: ");
+  }
+  src.push('1');
+  for _ in 0..depth {
+    src.push_str(" }");
+  }
+  src.push_str(" }");
+  src
+}
+
+/// The deep cell both typed forms share: `chain` at the default ceiling and one bracket past it is
+/// refused in both layers, and at twice the ceiling it parses in both, the syntactic parse in a
+/// child process as the module chain's does. `chain(depth)` opens `depth + 1` brackets, so the
+/// chain at twice the ceiling is `chain(TWICE - 1)`.
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
+fn a_typed_chain_at_twice_the_ceiling_returns(cell: &str, chain: fn(usize) -> String, what: &str) {
+  use smear::{
+    lexer::{
+      graphqlx::syntactic::SyntacticState,
+      limits::{LosslessLimits, SyntacticLimits},
+      tokora::{Parse as _, Parser},
+    },
+    parser::graphqlx::{
+      GraphQLx,
+      ast::Document,
+      error::GraphqlxErrors,
+      lossless::{parse_document, parse_document_with_limits},
+      syntactic::{GraphqlxLexer, document},
+    },
+  };
+
+  const TWICE: usize = MAX_NESTING_DEPTH * 2;
+
+  fn syntactic(src: &str, limits: SyntacticLimits) -> bool {
+    Parser::with_parser::<GraphqlxLexer<'_, str>, Document<&str>, GraphqlxErrors<&str>, _, GraphQLx>(
+      document,
+    )
+    .parse_str_with_state(src, SyntacticState::new(limits))
+    .is_ok()
+  }
+
+  // THE CHILD: the cell re-executed by `run_child`, after the parent's guard has passed.
+  if std::env::var_os(CHILD).is_some() {
+    let parsed = syntactic(
+      &chain(TWICE - 1),
+      SyntacticLimits::with_max_nesting_depth(TWICE),
+    );
+    std::process::exit(if parsed { PARSED } else { REFUSED });
+  }
+
+  // THE GUARD, AND IT MUST STAY FIRST: the chain at the ceiling opens one bracket past it.
+  let over = chain(MAX_NESTING_DEPTH);
+  assert!(
+    !syntactic(&over, SyntacticLimits::default()),
+    "the syntactic ceiling must hold at its default before anything deeper is parsed"
+  );
+  assert!(
+    parse_document(&over).has_errors(),
+    "the lossless ceiling must hold at its default before anything deeper is parsed"
+  );
+
+  let src = chain(TWICE - 1);
+  let parse = parse_document_with_limits(&src, LosslessLimits::with_max_nesting_depth(TWICE));
+  assert!(
+    parse.diagnostics().is_empty(),
+    "{TWICE} open brackets of {what} must parse in the lossless layer under a ceiling of {TWICE}"
+  );
+  assert!(
+    the_child_parsed(&run_child(cell), TWICE, what),
+    "{TWICE} open brackets of {what} must parse in the syntactic layer under a ceiling of {TWICE}"
+  );
+}
+
+/// A chain of typed values at **twice** the default ceiling returns on the default test thread, in
+/// both layers — the lower bound `smear-lexer/src/limits.rs` records for the cycle, which is a
+/// schema position's own and passes through the typed form's out-of-line tail at every level.
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
+#[test]
+fn a_typed_value_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
+  a_typed_chain_at_twice_the_ceiling_returns(
+    "a_typed_value_chain_at_twice_the_ceiling_returns_on_the_default_thread",
+    typed_values,
+    "nested typed values",
+  );
+}
+
+/// A chain of typed objects, each a field's value in the one before it, at **twice** the default
+/// ceiling returns on the default test thread, in both layers — the lower bound
+/// `smear-lexer/src/limits.rs` records for the cycle.
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
+#[test]
+fn a_typed_object_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
+  a_typed_chain_at_twice_the_ceiling_returns(
+    "a_typed_object_chain_at_twice_the_ceiling_returns_on_the_default_thread",
+    typed_objects,
+    "nested typed objects",
+  );
+}
+
+/// One row of [`a_typed_form_adds_the_green_levels_its_rows_record`]: the chain's name, how a
+/// chain of a given depth is written, and the green levels its deepest clean parse measures.
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
+type GreenRow = (&'static str, fn(usize) -> String, usize);
+
+/// The green levels a typed form adds for each of its brackets, at a ceiling of `HARD_MAX`: the
+/// rows of `WORST_DOOR_GREEN_TREE`'s table in `smear-parser/src/lossless/project.rs` for the two
+/// shapes. For each, the deepest chain that parses clean — `HARD_MAX` open brackets, the input
+/// object's `{` among them, while one more is refused — and its tree's depth against its brackets.
+///
+/// A typed value is one green level a bracket, as a list is: the value it holds is its child. A
+/// typed object is two, as an object is, since a field stands between it and the next one; it
+/// holds its fields directly, so it costs no `ObjectValue` level on top. Both stay under
+/// `GREEN_LEVELS_PER_BRACKET`, which is four.
+#[cfg(all(feature = "rowan_0_17", feature = "std", feature = "graphqlx"))]
+#[test]
+fn a_typed_form_adds_the_green_levels_its_rows_record() {
+  use smear::{
+    lexer::limits::{HARD_MAX, LosslessLimits},
+    parser::graphqlx::lossless::parse_document_with_limits,
+  };
+
+  /// The green tree's depth in nodes, the root counted, as the projection's walks count it.
+  fn depth_of(node: &rowan::GreenNodeData) -> usize {
+    1 + node
+      .children()
+      .filter_map(|child| child.into_node().map(depth_of))
+      .max()
+      .unwrap_or(0)
+  }
+
+  let limits = || LosslessLimits::with_max_nesting_depth(HARD_MAX);
+  let rows: [GreenRow; 2] = [
+    ("typed values", typed_values, 263),
+    ("typed objects", typed_objects, 517),
+  ];
+  for (what, chain, levels) in rows {
+    let src = chain(HARD_MAX - 1);
+    let parse = parse_document_with_limits(&src, limits());
+    assert!(
+      parse.diagnostics().is_empty(),
+      "{what}: {HARD_MAX} open brackets must parse clean at a ceiling of {HARD_MAX}"
+    );
+    assert!(
+      parse_document_with_limits(&chain(HARD_MAX), limits()).has_errors(),
+      "{what}: one bracket more must be refused, or the chain above is not the deepest"
+    );
+    let depth = depth_of(parse.green());
+    assert_eq!(
+      depth, levels,
+      "{what}: the green levels of the deepest clean chain moved"
+    );
+    assert!(
+      depth <= 3 * HARD_MAX,
+      "{what}: {depth} green levels over {HARD_MAX} brackets is more than three a bracket"
+    );
+  }
+}
+
 /// A nesting refusal is **one** diagnostic, at every recursive cycle in both dialects — smear
 /// issue #169.
 ///
@@ -2377,8 +2562,8 @@ fn a_mod_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
 /// One shape per recursive cycle in each dialect's productions, enumerated by taking the strongly
 /// connected components of the lossless call graph over the productions that descend: GraphQL has
 /// three (`selection_set`; `list_value` ↔ `object_value`; `list_type`), GraphQLx has the same
-/// three widened (`collection_body` joins the value cycle, `type_generics` joins the type cycle)
-/// and two of its own, a `use` tree's `group` ↔ `use_tree` and a module's `mod_body` ↔
+/// three widened (`collection_body`, `typed_object_body` and `typed_value_body` join the value
+/// cycle, `type_generics` joins the type cycle) and two of its own, a `use` tree's `group` ↔ `use_tree` and a module's `mod_body` ↔
 /// `type_system_item`. The remaining descending
 /// productions — every member block, both argument lists, the variables definition, GraphQLx's
 /// `angle_name_list` — are in no cycle and cannot reach the ceiling on their own.
@@ -2463,6 +2648,16 @@ fn a_refusal_is_one_diagnostic_at_every_cycle() {
     ),
     ("use_group", nest("a::{", "}", DEPTH, "use ", "")),
     ("mod_body", nest("mod a { ", "}", DEPTH, "", "")),
+    // A schema position's own cycles: a typed value in a typed value, and a typed object as the
+    // value of a typed object's field.
+    (
+      "typed_value_body",
+      nest("U(", ")", DEPTH, "input I { a: T = ", " }"),
+    ),
+    (
+      "typed_object_body",
+      nest("P { k: ", "}", DEPTH, "input I { a: T = ", " }"),
+    ),
   ];
 
   let mut cells = 0usize;
@@ -2509,8 +2704,8 @@ fn a_refusal_is_one_diagnostic_at_every_cycle() {
   }
 
   // A filtered run that selects nothing exits `ok`, and so does a loop whose `continue` swallowed
-  // every cell. 12 dialect-cycle pairs (4 shared x 2 dialects, plus 4 GraphQLx-only) x 4 tails.
-  assert_eq!(cells, 12 * TAILS.len(), "the cell set collapsed");
+  // every cell. 14 dialect-cycle pairs (4 shared x 2 dialects, plus 6 GraphQLx-only) x 4 tails.
+  assert_eq!(cells, 14 * TAILS.len(), "the cell set collapsed");
 }
 
 /// A refusal ends the document at **every** document root, not only the mixed one — smear issue

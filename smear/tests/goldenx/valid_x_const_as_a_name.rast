@@ -1,0 +1,146 @@
+Root@0..152
+  Document@0..152
+    ObjectTypeDefinition@0..34
+      Name@0..4 "type"
+      Space@4..5 " "
+      DefinitionName@5..11
+        Name@5..10 "const"
+        Space@10..11 " "
+      FieldsDefinition@11..34
+        LBrace@11..12 "{"
+        Newline@12..13 "\n"
+        Space@13..14 " "
+        Space@14..15 " "
+        FieldDefinition@15..24
+          Name@15..16 "a"
+          Colon@16..17 ":"
+          Space@17..18 " "
+          DefinitionTypePath@18..24
+            Path@18..24
+              Name@18..21 "Int"
+              Newline@21..22 "\n"
+              Space@22..23 " "
+              Space@23..24 " "
+        FieldDefinition@24..33
+          Name@24..25 "b"
+          Colon@25..26 ":"
+          Space@26..27 " "
+          DefinitionTypePath@27..33
+            Path@27..33
+              Name@27..32 "const"
+              Newline@32..33 "\n"
+        RBrace@33..34 "}"
+    Newline@34..35 "\n"
+    Newline@35..36 "\n"
+    InputObjectTypeDefinition@36..133
+      Name@36..41 "input"
+      Space@41..42 " "
+      DefinitionName@42..48
+        Name@42..47 "Modes"
+        Space@47..48 " "
+      InputFieldsDefinition@48..133
+        LBrace@48..49 "{"
+        Newline@49..50 "\n"
+        Space@50..51 " "
+        Space@51..52 " "
+        InputValueDefinition@52..70
+          Name@52..53 "m"
+          Colon@53..54 ":"
+          Space@54..55 " "
+          DefinitionTypePath@55..60
+            Path@55..60
+              Name@55..59 "Mode"
+              Space@59..60 " "
+          DefaultValue@60..70
+            Equal@60..61 "="
+            Space@61..62 " "
+            EnumValue@62..70
+              Path@62..70
+                Name@62..67 "const"
+                Newline@67..68 "\n"
+                Space@68..69 " "
+                Space@69..70 " "
+        InputValueDefinition@70..79
+          Name@70..71 "n"
+          Colon@71..72 ":"
+          Space@72..73 " "
+          DefinitionTypePath@73..79
+            Path@73..79
+              Name@73..76 "Int"
+              Newline@76..77 "\n"
+              Space@77..78 " "
+              Space@78..79 " "
+        InputValueDefinition@79..107
+          Name@79..80 "o"
+          Colon@80..81 ":"
+          Space@81..82 " "
+          DefinitionTypePath@82..87
+            Path@82..87
+              Name@82..86 "Mode"
+              Space@86..87 " "
+          DefaultValue@87..104
+            Equal@87..88 "="
+            Space@88..89 " "
+            ConstBlock@89..104
+              Name@89..94 "const"
+              Space@94..95 " "
+              LBrace@95..96 "{"
+              Space@96..97 " "
+              Expression@97..103
+                EnumValue@97..103
+                  Path@97..103
+                    Name@97..102 "const"
+                    Space@102..103 " "
+              RBrace@103..104 "}"
+          Newline@104..105 "\n"
+          Space@105..106 " "
+          Space@106..107 " "
+        InputValueDefinition@107..132
+          Name@107..108 "t"
+          Colon@108..109 ":"
+          Space@109..110 " "
+          DefinitionTypePath@110..112
+            Path@110..112
+              Name@110..111 "T"
+              Space@111..112 " "
+          DefaultValue@112..131
+            Equal@112..113 "="
+            Space@113..114 " "
+            TypedObjectValue@114..131
+              TypePath@114..123
+                Path@114..123
+                  Tilde@114..115 "~"
+                  PathSeparator@115..117 "::"
+                  Name@117..122 "const"
+                  Space@122..123 " "
+              LBrace@123..124 "{"
+              Space@124..125 " "
+              ObjectField@125..129
+                Name@125..126 "a"
+                Colon@126..127 ":"
+                Space@127..128 " "
+                IntValue@128..129
+                  Int@128..129 "1"
+              Space@129..130 " "
+              RBrace@130..131 "}"
+          Newline@131..132 "\n"
+        RBrace@132..133 "}"
+    Newline@133..134 "\n"
+    Newline@134..135 "\n"
+    OperationDefinition@135..151
+      SelectionSet@135..151
+        LBrace@135..136 "{"
+        Space@136..137 " "
+        Field@137..149
+          Name@137..142 "const"
+          Space@142..143 " "
+          SelectionSet@143..149
+            LBrace@143..144 "{"
+            Space@144..145 " "
+            Field@145..148
+              Name@145..147 "id"
+              Space@147..148 " "
+            RBrace@148..149 "}"
+        Space@149..150 " "
+        RBrace@150..151 "}"
+    Newline@151..152 "\n"

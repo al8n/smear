@@ -5,7 +5,10 @@
 //! (when enabled), so the AST aliases and parser entry points cannot
 //! accidentally become tied to one source representation.
 
-use smear_lexer::graphqlx::{LitFloat, LitInt, syntactic::SyntacticTokenKind};
+use smear_lexer::graphqlx::{
+  LitFloat, LitInt,
+  syntactic::{SyntacticState, SyntacticTokenKind},
+};
 use tokora::{
   FatalContext, Parse, ParseAttempt, Parser, SimpleSpan, span::AsSpan, utils::Equivalent,
 };
@@ -42,6 +45,21 @@ fn drive_str<'inp, O>(
     f,
   )
   .parse_str(input)
+}
+
+/// Drives `f` over a `str` source under `Fatal<GraphqlxErrors<&str>>`, its lexer started in
+/// `state`.
+fn drive_str_with_state<'inp, O>(
+  f: impl for<'c> FnMut(
+    &mut GraphqlxInput<'inp, 'c, str, StrCtx<'inp>>,
+  ) -> Result<O, GraphqlxErrors<&'inp str>>,
+  input: &'inp str,
+  state: SyntacticState,
+) -> Result<O, GraphqlxErrors<&'inp str>> {
+  Parser::with_parser::<'inp, GraphqlxLexer<'inp, str>, O, GraphqlxErrors<&'inp str>, _, GraphQLx>(
+    f,
+  )
+  .parse_str_with_state(input, state)
 }
 
 /// Drives `f` over a `[u8]` source under `Fatal<GraphqlxErrors<&[u8]>>`.
@@ -356,6 +374,277 @@ fn graphqlx_radix_literals_and_enum_paths_preserve_their_heads() {
   accept_all!(ast::InputValue::graphqlx, "set", check_enum);
   accept_all!(ast::InputValue::graphqlx, "map", check_enum);
   accept_all!(ast::InputValue::graphqlx, "set::Member", check_enum);
+}
+
+#[test]
+fn a_char_literal_is_a_value_in_every_value_grammar() {
+  fn check_char<S: AsRef<[u8]>>(value: ast::CharValue<S>) {
+    assert_eq!(value.value().value(), '\'');
+    assert_eq!(value.span(), &SimpleSpan::new(0, 4));
+  }
+  accept_all!(ast::CharValue::graphqlx, "'\\''", check_char);
+
+  // A list's member test goes on at a `char`, so the two are two elements.
+  fn check_list<S: AsRef<[u8]>>(value: ast::InputValue<S>) {
+    let list = match value {
+      ast::InputValue::List(list) => list,
+      _ => panic!("expected a list"),
+    };
+    assert_eq!(list.values().len(), 2);
+    assert!(matches!(
+      &list.values()[1],
+      ast::InputValue::Char(value) if value.value().value() == '\n'
+    ));
+  }
+  accept_all!(ast::InputValue::graphqlx, "['a' '\\n']", check_list);
+
+  fn check_const<S: AsRef<[u8]>>(value: ast::ConstInputValue<S>) {
+    let set = match value {
+      ast::ConstInputValue::Set(set) => set,
+      _ => panic!("expected a set"),
+    };
+    assert!(matches!(
+      &set.values()[0],
+      ast::ConstInputValue::Char(value) if value.value().value() == '"'
+    ));
+  }
+  accept_all!(ast::ConstInputValue::graphqlx, "set!{ '\"' }", check_const);
+
+  assert_unexpected(
+    |inp| ast::CharValue::graphqlx(inp).map(|_| ()),
+    "\"a\"",
+    Expectation::Production("a character"),
+    Some(SyntacticTokenKind::InlineString),
+  );
+}
+
+#[test]
+fn a_schema_position_reads_what_a_constant_one_reads() {
+  for src in [
+    "[1, 'c', {a: ^::b::C}]",
+    "set!{ X }",
+    "map!{ 1 => true }",
+    "null",
+  ] {
+    assert_eq!(
+      drive_str(ast::ConstInputValue::graphqlx_schema, src).expect(src),
+      drive_str(ast::ConstInputValue::graphqlx, src).expect(src),
+      "{src}"
+    );
+  }
+  assert!(drive_str(ast::ConstInputValue::graphqlx_schema, "$x").is_err());
+
+  assert_eq!(
+    drive_str(ast::DefaultInputValue::graphqlx_schema, "= [1]").expect("a default"),
+    drive_str(ast::DefaultInputValue::graphqlx, "= [1]").expect("a default"),
+  );
+  let (declined, leftover) = drive_str(
+    |inp| {
+      let attempt = ast::DefaultInputValue::try_graphqlx_schema(inp)?;
+      let leftover = inp.next()?.map(|token| token.data().kind());
+      Ok::<_, GraphqlxErrors<&str>>((attempt == ParseAttempt::Decline, leftover))
+    },
+    "@d",
+  )
+  .expect("an absent default declines");
+  assert!(declined);
+  assert_eq!(leftover, Some(SyntacticTokenKind::At));
+
+  assert_eq!(
+    drive_str(ast::ConstArgument::graphqlx_schema, "x: 'c'").expect("an argument"),
+    drive_str(ast::ConstArgument::graphqlx, "x: 'c'").expect("an argument"),
+  );
+  assert_eq!(
+    drive_str(ast::ConstArguments::graphqlx_schema, "(x: 1, y: [2])").expect("arguments"),
+    drive_str(ast::ConstArguments::graphqlx, "(x: 1, y: [2])").expect("arguments"),
+  );
+  assert_eq!(
+    drive_str(ast::ConstDirective::graphqlx_schema, "@a(x: 1)").expect("a directive"),
+    drive_str(ast::ConstDirective::graphqlx, "@a(x: 1)").expect("a directive"),
+  );
+  assert_eq!(
+    drive_str(ast::ConstDirectives::graphqlx_schema, "@a(x: 1) @b").expect("directives"),
+    drive_str(ast::ConstDirectives::graphqlx, "@a(x: 1) @b").expect("directives"),
+  );
+}
+
+#[test]
+fn a_schema_position_reads_the_typed_forms_and_a_constant_one_does_not() {
+  let object = drive_str(ast::ConstInputValue::graphqlx_schema, "P { x: 1 }").expect("an object");
+  let ast::ConstInputValue::TypedObject(object) = &object else {
+    panic!("a path before `{{` is a typed object: {object:?}")
+  };
+  assert_eq!(object.fields().len(), 1);
+  assert!(object.ty().type_generics().is_none());
+  assert_eq!(*object.span(), SimpleSpan::new(0, 10));
+  assert_eq!(*object.ty().span(), SimpleSpan::new(0, 1));
+
+  let generic = drive_str(ast::ConstInputValue::graphqlx_schema, "Box<i32> {}").expect("an object");
+  let ast::ConstInputValue::TypedObject(generic) = &generic else {
+    panic!("type arguments and then `{{` are a typed object: {generic:?}")
+  };
+  assert!(generic.fields().is_empty());
+  assert_eq!(*generic.ty().span(), SimpleSpan::new(0, 8));
+  assert_eq!(*generic.span(), SimpleSpan::new(0, 11));
+
+  let value = drive_str(ast::ConstInputValue::graphqlx_schema, "Url(\"x\")").expect("a value");
+  let ast::ConstInputValue::Typed(value) = &value else {
+    panic!("a path before `(` is a typed value: {value:?}")
+  };
+  assert!(matches!(value.value(), ast::ConstInputValue::String(_)));
+  assert_eq!(*value.span(), SimpleSpan::new(0, 8));
+
+  // The corner: a name and then an object are one typed object in a schema position's list, and
+  // two elements in an executable document's.
+  let schema = drive_str(ast::ConstInputValue::graphqlx_schema, "[RED {a: 1}]").expect("a list");
+  let ast::ConstInputValue::List(schema) = &schema else {
+    panic!("a list: {schema:?}")
+  };
+  assert_eq!(schema.values().len(), 1);
+  assert!(matches!(
+    schema.values()[0],
+    ast::ConstInputValue::TypedObject(_)
+  ));
+  let constant = drive_str(ast::ConstInputValue::graphqlx, "[RED {a: 1}]").expect("a list");
+  let ast::ConstInputValue::List(constant) = &constant else {
+    panic!("a list: {constant:?}")
+  };
+  assert_eq!(constant.values().len(), 2);
+  assert!(matches!(
+    constant.values()[0],
+    ast::ConstInputValue::Enum(_)
+  ));
+
+  // `set` with no `!` is a path, so it names a typed object's type here.
+  assert!(matches!(
+    drive_str(ast::ConstInputValue::graphqlx_schema, "set { a: 1 }").expect("an object"),
+    ast::ConstInputValue::TypedObject(_)
+  ));
+  // Type arguments that open neither bracket are refused.
+  assert!(drive_str(ast::ConstInputValue::graphqlx_schema, "Box<i32> 1").is_err());
+}
+
+/// A rewind across a block restores the lexer to its state before the block, so what is read after
+/// the rewind is lexed outside the block's mode: the prefixed string the block held is a name and a
+/// string again.
+#[test]
+fn a_rewind_across_a_block_restores_the_lexer_outside_the_block() {
+  let (read, before, after) = drive_str(
+    |inp| {
+      let before = inp.state();
+      let mut read = None;
+      let declined = inp.attempt(|inp| {
+        read = ast::ConstInputValue::graphqlx_schema(inp).ok();
+        None::<()>
+      });
+      assert!(declined.is_none());
+      let after = inp.state();
+      for kind in [
+        SyntacticTokenKind::Identifier,
+        SyntacticTokenKind::LBrace,
+        SyntacticTokenKind::Identifier,
+        SyntacticTokenKind::InlineString,
+        SyntacticTokenKind::RBrace,
+      ] {
+        assert_eq!(inp.next()?.map(|token| token.data().kind()), Some(kind));
+      }
+      assert!(inp.next()?.is_none());
+      Ok::<_, GraphqlxErrors<&str>>((read, before, after))
+    },
+    "const { b\"x\" }",
+  )
+  .expect("the rewound source lexes outside a block");
+  let Some(ast::ConstInputValue::Block(block)) = &read else {
+    panic!("the attempt read the whole block: {read:?}")
+  };
+  assert!(matches!(block.value(), ast::ConstInputValue::Bytes(_)));
+  assert_eq!(after, before);
+  assert!(!after.in_const_block());
+}
+
+/// The same rewind across a block that holds a typed form, whose type arguments close with `>>`
+/// and hold a comma, and whose fields a separator divides: lexed again outside the block's mode,
+/// the separator is trivia.
+#[test]
+fn a_rewind_across_a_typed_form_in_a_block_restores_the_lexer_outside_the_block() {
+  use smear_lexer::graphqlx::syntactic::SyntacticTokenKind as T;
+
+  let (read, before, after) = drive_str(
+    |inp| {
+      let before = inp.state();
+      let mut read = None;
+      let declined = inp.attempt(|inp| {
+        read = ast::ConstInputValue::graphqlx_schema(inp).ok();
+        None::<()>
+      });
+      assert!(declined.is_none());
+      let after = inp.state();
+      for kind in [
+        T::Identifier,
+        T::LBrace,
+        T::Identifier,
+        T::LAngle,
+        T::Identifier,
+        T::Identifier,
+        T::LAngle,
+        T::Identifier,
+        T::RAngle,
+        T::RAngle,
+        T::LBrace,
+        T::Identifier,
+        T::Colon,
+        T::Int,
+        T::Identifier,
+        T::Colon,
+        T::Int,
+        T::RBrace,
+        T::RBrace,
+      ] {
+        assert_eq!(inp.next()?.map(|token| token.data().kind()), Some(kind));
+      }
+      assert!(inp.next()?.is_none());
+      Ok::<_, GraphqlxErrors<&str>>((read, before, after))
+    },
+    "const { Pair<A, Box<u8>> { x: 1, y: 2 } }",
+  )
+  .expect("the rewound source lexes outside a block");
+  let Some(ast::ConstInputValue::Block(block)) = &read else {
+    panic!("the attempt read the whole block: {read:?}")
+  };
+  assert!(matches!(
+    block.value(),
+    ast::ConstInputValue::TypedObject(_)
+  ));
+  assert_eq!(after, before);
+  assert!(!after.in_const_block());
+}
+
+/// A scanner's stop inside a block leaves the lexer in the block. The production writes no state
+/// over the stop, so the stop stays one: it is still latched where the production stopped, and a
+/// read there is refused.
+#[test]
+fn a_scanner_stop_inside_a_block_leaves_the_lexer_in_the_block() {
+  use smear_lexer::limits::SyntacticLimits;
+
+  // The block's `{` opens the first bracket and each `(` one more, so a ceiling of three refuses
+  // the third `(`, inside the block.
+  let (stopped, in_block, refused) = drive_str_with_state(
+    |inp| {
+      let read = ast::ConstInputValue::graphqlx_schema(inp);
+      assert!(read.is_err(), "the third `(` is past the ceiling: {read:?}");
+      Ok::<_, GraphqlxErrors<&str>>((
+        inp.at_scanner_stop(),
+        inp.state().in_const_block(),
+        inp.next_or_stop().is_err(),
+      ))
+    },
+    "const { ((((1)))) }",
+    SyntacticState::new(SyntacticLimits::with_max_nesting_depth(3)),
+  )
+  .expect("the cell reads on past the error it caught");
+  assert!(stopped, "the stop is latched where the production stopped");
+  assert!(in_block, "the production wrote no state over the stop");
+  assert!(refused, "a read at the latched stop is refused");
 }
 
 #[test]

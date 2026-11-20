@@ -14,7 +14,9 @@
 //! A GraphQLx `use` tree owns itself the same way, through its group's trees, and so does a
 //! GraphQLx module, through its items; both were built on the repair from the start: a group holds
 //! its trees, and a module its items, in the same `Nested` container a selection set holds its
-//! selections in.
+//! selections in. A GraphQLx typed form owns a constant value too: a typed object through its
+//! fields, in a `Nested`, and a typed value through the one value it holds in place, behind the
+//! `Nest` its variant stands in.
 //!
 //! None needs a parse. `Type: From<ListType<Self>>`, every selection carrier's `new`,
 //! `UseTree::new` and `ModDefinition::new` are public, so **the chain is built with a loop and no
@@ -63,8 +65,8 @@
 //! dialect's `ast` module does not exist. A `#![cfg(all(feature = "graphql", feature =
 //! "graphqlx"))]` header would satisfy both of those rows — by compiling a test binary holding
 //! **zero** tests, which exits 0 and pins nothing. So the file's own gate stays at `parser` and
-//! each fixture carries the dialect it actually names: seven run under `graphql` alone, four under
-//! `graphqlx` alone, and twelve with both. The twelfth is `a_deep_graphqlx_list_type_is_released`,
+//! each fixture carries the dialect it actually names: seven run under `graphql` alone, six under
+//! `graphqlx` alone, and fourteen with both. The twelfth is `a_deep_graphqlx_list_type_is_released`,
 //! which is the one fixture that genuinely needs the pair — and it is not linked here, because a
 //! single-dialect row is a build in which that item does not exist. Its own documentation says
 //! why it needs both.
@@ -288,6 +290,60 @@ fn a_deep_mod_definition_is_released() {
       );
     }
     release(x::TypeSystemItem::Mod(module));
+  });
+}
+
+/// A typed path for the two typed-form fixtures below.
+#[cfg(feature = "graphqlx")]
+fn typed_path(name: &'static str) -> x::TypePath<&'static str> {
+  x::TypePath::new(
+    span(),
+    x::Path::new(
+      span(),
+      x::PathRoot::Relative,
+      Vec::from([x::Name::new(span(), name)]),
+    ),
+    None,
+  )
+}
+
+/// A typed value holds the value it ascribes, which may be a typed value, and every constructor on
+/// the way is public, so a caller nests one however deep with a loop and no parser in sight. The
+/// value stands in place in its node, and the variant's own `Nest` is what releases it.
+#[cfg(feature = "graphqlx")]
+#[test]
+fn a_deep_typed_value_is_released() {
+  on_a_small_stack(|| {
+    let mut value: x::ConstInputValue<&str> =
+      x::ConstInputValue::List(x::ConstList::new(span(), x::Nested::empty()));
+    for _ in 0..DEPTH {
+      value = x::ConstInputValue::Typed(x::Nest::new(x::TypedValue::new(
+        span(),
+        typed_path("U"),
+        value,
+      )));
+    }
+    release(value);
+  });
+}
+
+/// A typed object's field may hold a typed object, and every constructor on the way is public, so
+/// a caller nests one however deep with a loop and no parser in sight.
+#[cfg(feature = "graphqlx")]
+#[test]
+fn a_deep_typed_object_is_released() {
+  on_a_small_stack(|| {
+    let mut value: x::ConstInputValue<&str> =
+      x::ConstInputValue::List(x::ConstList::new(span(), x::Nested::empty()));
+    for _ in 0..DEPTH {
+      let field = x::ConstObjectField::new(span(), x::Name::new(span(), "k"), value);
+      value = x::ConstInputValue::TypedObject(Box::new(x::TypedObjectValue::new(
+        span(),
+        typed_path("P"),
+        Vec::from([field]).into(),
+      )));
+    }
+    release(value);
   });
 }
 

@@ -1,0 +1,7 @@
+input Masks {
+  mask: u32 = 0xFF
+  narrow: N = 1u8
+  joined: N = 1_u8
+  one: Bytes = [1u8]
+  two: Bytes = [1 u8]
+}

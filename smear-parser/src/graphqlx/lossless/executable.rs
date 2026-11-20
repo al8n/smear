@@ -159,7 +159,7 @@ lossless_production! {
         // Dispatched on a peek rather than attempted, so the `=` is consumed *inside* the
         // `DefaultValue` node and an absent default opens nothing.
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Equal) {
-          default_value::<Src, Ctx>(inp)?;
+          default_value::<Src, Ctx>(inp, Constness::Const)?;
         }
         directives::<Src, Ctx>(inp, Constness::Const)
       },

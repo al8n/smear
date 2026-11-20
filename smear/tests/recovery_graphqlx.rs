@@ -870,8 +870,8 @@ mod lossless {
     for (what, text, own) in [
       (
         "angles in an argument list",
-        "mod m { scalar A @d(<<< } mod n { >>>) scalar B }",
-        "mod m { scalar A @d(<<< }",
+        "mod m { scalar A @d(< < < } mod n { >>>) scalar B }",
+        "mod m { scalar A @d(< < < }",
       ),
       (
         "brackets behind a parenthesis",
@@ -880,13 +880,13 @@ mod lossless {
       ),
       (
         "a definition's generic list",
-        "mod m { type T<<< } mod n { >>> scalar B }",
-        "mod m { type T<<< }",
+        "mod m { type T< < < } mod n { >>> scalar B }",
+        "mod m { type T< < < }",
       ),
       (
         "a type's generic list",
-        "mod m { type T { f: Box<<< } } mod n { >>> scalar B }",
-        "mod m { type T { f: Box<<< } }",
+        "mod m { type T { f: Box< < < } } mod n { >>> scalar B }",
+        "mod m { type T { f: Box< < < } }",
       ),
       (
         "a field's argument list",
@@ -1464,6 +1464,138 @@ mod lossless {
         .unwrap_or_else(|why| panic!("{text} at the {root} root: {why}"));
       assert_eq!(held.read, 1, "at the {root} root");
     }
+  }
+
+  // ── An expression outside a block ──────────────────────────────────────────────────────────
+
+  /// A `(` where the run reads an operand is one value, to its own `)`: the map entry keeps its
+  /// `=>`, and the field after the map stays a field.
+  #[test]
+  fn a_parenthesis_a_run_reads_as_an_operand_leaves_the_arrow_to_its_entry() {
+    let answer = read("input I { a: T = map!{ 1 + (2) => 3 } b: Int }");
+    assert_eq!(answer.reports, 1, "one report, at the `+`");
+    let entry = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::MapEntry)
+      .expect("the map's entry");
+    assert!(
+      entry
+        .children_with_tokens()
+        .any(|element| element.kind() == K::FatArrow),
+      "the entry keeps its `=>`"
+    );
+    let members: Vec<String> = answer
+      .tree
+      .descendants()
+      .filter(|node: &SyntaxNode| node.kind() == K::InputValueDefinition)
+      .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
+      .collect();
+    assert_eq!(members.len(), 2, "{members:?}");
+    assert_eq!(members[1], "b: Int", "`b` stays a field of `I`");
+  }
+
+  /// A schema map's key that begins with `(` is read to its own `)`, so the entry keeps its `=>`
+  /// and its value, and the field after the map stays a field.
+  #[test]
+  fn a_key_that_begins_with_a_parenthesis_leaves_the_arrow_to_its_entry() {
+    let answer = read("input I { a: T = map!{ (2) => 3 } b: Int }");
+    assert_eq!(answer.reports, 1, "one report, at the `(`");
+    let entry = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::MapEntry)
+      .expect("the map's entry");
+    assert!(
+      entry
+        .children_with_tokens()
+        .any(|element| element.kind() == K::FatArrow),
+      "the entry keeps its `=>`"
+    );
+    assert_eq!(
+      kinds(&entry).last(),
+      Some(&K::IntValue),
+      "the entry keeps its value"
+    );
+    let members = answer
+      .tree
+      .descendants()
+      .filter(|node: &SyntaxNode| node.kind() == K::InputValueDefinition)
+      .count();
+    assert_eq!(members, 2, "`b` stays a field of `I`");
+  }
+
+  /// A skip inside a block stops at the block's `}`, with its `(` still open, so nothing after the
+  /// `}` is lexed in the block's mode and then again outside it: under a produce-event budget of
+  /// one event for each lexeme, and one more, the text reads to its end.
+  #[test]
+  fn a_skip_inside_a_block_reads_nothing_past_the_blocks_brace() {
+    let text = "input I { a: T = [const { 1 (2 } -2] }";
+    let limits = LosslessLimits::default().with_max_produce_events(lexemes(text) + 1);
+    let answer = read_with(&Lossless::with_limits(limits), text);
+    assert_eq!(answer.reports, 1, "one report, at the `(`");
+    let list = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::ListValue)
+      .expect("the list");
+    assert_eq!(kinds(&list), [K::ConstBlock, K::IntValue]);
+    let last = list.children().last().expect("the list's second element");
+    assert_eq!(
+      last.text().to_string(),
+      "-2",
+      "lexed once, outside the block"
+    );
+  }
+
+  /// A missing operand inside a block leaves the delimiter its production reads next: a map entry
+  /// its `=>`, and the member loop its `,`. So the entries after it are read, and the definition
+  /// goes on.
+  #[test]
+  fn a_missing_operand_in_a_block_leaves_the_delimiter_its_production_owns() {
+    for text in [
+      "input I { a: T = const { map!{ => 1, 2 => 3 } } b: Int }",
+      "input I { a: T = const { map!{ 1 => , 2 => 3 } } b: Int }",
+    ] {
+      let answer = read(text);
+      assert_eq!(
+        answer.reports, 1,
+        "{text}: one report, at the missing operand"
+      );
+      let entries = answer
+        .tree
+        .descendants()
+        .filter(|node: &SyntaxNode| node.kind() == K::MapEntry)
+        .count();
+      assert_eq!(entries, 2, "{text}");
+      let members = answer
+        .tree
+        .descendants()
+        .filter(|node: &SyntaxNode| node.kind() == K::InputValueDefinition)
+        .count();
+      assert_eq!(members, 2, "{text}: `b` stays a field of `I`");
+    }
+  }
+
+  /// A skip inside a block stops in front of a `=>`, which only a map entry reads: junk after an
+  /// entry's key leaves the entry its arrow, and the entries after it are read.
+  #[test]
+  fn a_skip_inside_a_block_leaves_a_map_entry_its_arrow() {
+    let text = "input I { a: T = const { map!{ 1 + => 3, 4 => 5 } } b: Int }";
+    let answer = read(text);
+    assert_eq!(answer.reports, 1, "one report, at the `+`");
+    let entries = answer
+      .tree
+      .descendants()
+      .filter(|node: &SyntaxNode| node.kind() == K::MapEntry)
+      .count();
+    assert_eq!(entries, 2);
+    let members = answer
+      .tree
+      .descendants()
+      .filter(|node: &SyntaxNode| node.kind() == K::InputValueDefinition)
+      .count();
+    assert_eq!(members, 2, "`b` stays a field of `I`");
   }
 
   // ── Through the analyzer ───────────────────────────────────────────────────────────────────

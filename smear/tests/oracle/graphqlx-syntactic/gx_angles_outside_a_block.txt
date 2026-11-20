@@ -1,0 +1,16 @@
+OK  0..1  LitInt(Decimal("1"))
+OK  2..4  Shl
+OK  5..6  LitInt(Decimal("2"))
+OK  7..8  RAngle
+OK  8..9  RAngle
+OK  10..11  LitInt(Decimal("3"))
+OK  12..16  Identifier("Page")
+OK  16..17  LAngle
+OK  17..21  Identifier("Edge")
+OK  21..22  LAngle
+OK  22..26  Identifier("User")
+OK  26..27  RAngle
+OK  27..28  RAngle
+OK  29..32  Identifier("Box")
+OK  32..33  LAngle
+OK  34..35  LAngle

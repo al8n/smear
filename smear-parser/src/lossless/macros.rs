@@ -4,8 +4,8 @@
 //!
 //! Each of these would be a function, a trait or an `impl` if it could be. None of them can:
 //!
-//! - `lossless_production!` declares a **signature**, not a value — six where-predicates carrying
-//!   fifteen trait bounds, spelled over seven of the eight names a dialect owes it. A generic
+//! - `lossless_production!` declares a **signature**, not a value — seven where-predicates carrying
+//!   sixteen trait bounds, spelled over seven of the eight names a dialect owes it. A generic
 //!   function cannot stand in for a signature its caller writes bodies against.
 //! - `lossless_drivers!` declares a module of `fn(&str) -> Parse` entry points whose closure
 //!   parameter types must be **spelled out**: a closure's parameter is not inferred through a
@@ -70,13 +70,14 @@
 ///
 /// # Why the bundle is one block, and why it is here rather than per dialect
 ///
-/// The bundle is **six where-predicates carrying fifteen trait bounds**, and not one of them is
-/// optional once a production both opens a node and goes through the atom set — which is every
-/// production in either suite. Written out per function it is ~150 lines of boilerplate across
-/// `value.rs` alone, and the failure mode of drifting copies is a compile error a hundred lines
-/// from its cause. Written out per *dialect* it is the same six predicates twice, and the failure
-/// mode is worse: the two copies drift and the second dialect's productions accept a bound the
-/// first rejects.
+/// The bundle is **seven where-predicates carrying sixteen trait bounds**. Six of them are
+/// needed by every production that both opens a node and goes through the atom set — which is
+/// every production in either suite. The second one written is one dialect's need, and the other
+/// dialect carries it because the bundle is one block. Written out per function it is ~150 lines
+/// of boilerplate across `value.rs` alone, and the failure mode of drifting copies is a compile
+/// error a hundred lines from its cause. Written out per *dialect* it is the same seven predicates
+/// twice, and the failure mode is worse: the two copies drift and the second dialect's productions
+/// accept a bound the first rejects.
 ///
 /// # The predicates, and what each bound buys
 ///
@@ -88,6 +89,10 @@
 /// - **`Src: Source<usize> + ?Sized`** — the source stays the caller's representation rather than
 ///   this crate's, and the `?Sized` relaxation is what lets `str` itself be the `Src` every
 ///   driver passes. Two entries, and only `Source<usize>` is a trait bound.
+/// - **`<Src::Slice<'inp> as Slice<'inp>>::Char: IsAsciiChar`** — a token's first character can
+///   be compared with an ASCII one. GraphQLx reads a number's sign through it, after a value where
+///   no second value may follow, as in `HOUR-1`; every source a lossless parse reads has `char` or
+///   `u8` characters, which satisfy it.
 /// - **`Token<'inp, Src>: Token<'inp, Kind = TokenKind> + FromLogos<'inp> + Clone +
 ///   DowncastRef<Keyword>`** — four bounds.
 ///   - `Token<'inp, Kind = TokenKind>` — a dialect's lossless `Token` impl is macro-generated
@@ -131,7 +136,7 @@
 ///
 /// # The predicate that used to be here and is not
 ///
-/// A seventh predicate, `<Lexer as Lexer<'inp>>::State: Clone`, rode along documented as
+/// A further predicate, `<Lexer as Lexer<'inp>>::State: Clone`, rode along documented as
 /// *"`InputRef::sync_balanced` lives in an impl block that requires it; nothing else in this suite
 /// does"*. The first half is true (`tokora/src/input/input_ref/sync_balanced.rs:153-157`) and the
 /// conclusion does not follow: `Lexer::State: State` and `trait State: Debug + Clone`
@@ -164,6 +169,8 @@ macro_rules! lossless_production {
     ) -> ::core::result::Result<(), $crate::$dm::$dl::Error<$lt, $src, $ctx>>
     where
       $src: ::tokora::Source<usize> + ?Sized,
+      <<$src as ::tokora::Source<usize>>::Slice<$lt> as ::tokora::Slice<$lt>>::Char:
+        ::tokora::utils::IsAsciiChar,
       $crate::$dm::$dl::Token<$lt, $src>: ::tokora::Token<
           $lt,
           Kind = $crate::$dm::$dl::TokenKind,

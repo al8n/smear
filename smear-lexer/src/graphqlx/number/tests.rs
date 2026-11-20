@@ -178,3 +178,196 @@ fn a_spelling_that_is_not_one_whole_identifier_refuses() {
     );
   }
 }
+
+/// A typed literal answers its suffix, read off its own bytes, and how many bytes the suffix
+/// takes: the one `_` directly before its letter included. A literal with none answers `None` and
+/// 0, and so does one built over bytes that end in no suffix.
+#[test]
+fn a_typed_literal_answers_its_suffix() {
+  use super::FloatSuffix;
+
+  for (text, signed, width, len) in [
+    ("1u8", false, 8u32, 2usize),
+    ("-3i256", true, 256, 4),
+    ("0xFF_u32", false, 32, 4),
+    ("0b1010u8", false, 8, 2),
+    ("0o17i16", true, 16, 3),
+    ("0u0", false, 0, 2),
+  ] {
+    let lit = LitInt::try_from(text).unwrap_or_else(|e| panic!("{text:?} does not lex: {e:?}"));
+    let suffix = lit
+      .suffix()
+      .unwrap_or_else(|| panic!("{text:?} answers no suffix"));
+    assert_eq!(
+      (suffix.is_signed(), suffix.width(), lit.suffix_len()),
+      (signed, width, len),
+      "{text:?}"
+    );
+  }
+
+  for (text, suffix, len) in [
+    ("1.5f32", FloatSuffix::F32, 3usize),
+    ("1f64", FloatSuffix::F64, 3),
+    ("1e3_f32", FloatSuffix::F32, 4),
+    ("0x1p3f32", FloatSuffix::F32, 3),
+  ] {
+    let lit = LitFloat::try_from(text).unwrap_or_else(|e| panic!("{text:?} does not lex: {e:?}"));
+    assert_eq!(
+      (lit.suffix(), lit.suffix_len()),
+      (Some(suffix), len),
+      "{text:?}"
+    );
+  }
+
+  let hex_digits = LitInt::Hex("0x1f32");
+  assert!(hex_digits.suffix().is_none() && hex_digits.suffix_len() == 0);
+  let plain = LitFloat::Decimal("1.5");
+  assert!(plain.suffix().is_none() && plain.suffix_len() == 0);
+  let built = LitInt::Decimal(&b"zz"[..]);
+  assert!(built.suffix().is_none() && built.suffix_len() == 0);
+}
+
+/// The `char` literal's door reads back what the scanner reads, and refuses a slice that is not
+/// one whole literal: a prefix of one, trivia around it, two of them, a refused literal, and a
+/// token of another kind.
+#[test]
+fn the_char_door_reads_one_whole_literal() {
+  use super::LitChar;
+
+  for (text, value) in [
+    ("'a'", 'a'),
+    ("'\\n'", '\n'),
+    ("'\\u{1F600}'", '\u{1F600}'),
+    ("'\\''", '\''),
+    ("'\"'", '"'),
+  ] {
+    let lit = LitChar::try_from(text).unwrap_or_else(|e| panic!("{text:?} does not lex: {e:?}"));
+    assert_eq!((*lit.source_ref(), lit.value()), (text, value), "{text:?}");
+  }
+
+  for text in ["'a", "'", " 'a'", "'a' ", "'a''b'", "''", "'ab'", "a", "1"] {
+    assert!(
+      LitChar::try_from(text).is_err(),
+      "{text:?} is not one whole `char` literal"
+    );
+  }
+}
+
+/// The refusal that `lexer`'s first item is, or `None` when that item is a token or there is none.
+fn first_refusal<'a, L>(mut lexer: L) -> Option<<L::Token as tokora::Token<'a>>::Error>
+where
+  L: tokora::Lexer<'a>,
+{
+  lexer.lex()?.err()
+}
+
+/// A `char` literal's body is read by an inline string's rules. Each malformed escape here is
+/// refused in a `char` literal with the errors the same body gets in a string, at the same offsets,
+/// since both literals open with one quote; it is one unit, so the literal has no fault of its own.
+/// Both lexers, over text and over bytes.
+#[test]
+fn a_char_body_is_refused_as_a_string_body_is() {
+  use std::format;
+  use tokora::Lexer as _;
+
+  use super::{lossless::LosslessLexer, syntactic::SyntacticLexer};
+
+  for body in [
+    r"\u",
+    r"\u12",
+    r"\u12zz",
+    r"\uD800",
+    r"\uDC00",
+    r"\u{}",
+    r"\u{zz}",
+    r"\u{12",
+    r"\u{1234567}",
+    r"\u{110000}",
+    r"\u{D800}",
+    r"\q",
+  ] {
+    let (string, character) = (format!("\"{body}\""), format!("'{body}'"));
+    let refused = first_refusal(SyntacticLexer::<str>::new(&string));
+    assert!(refused.is_some(), "{string:?} is refused");
+    assert_eq!(
+      first_refusal(SyntacticLexer::<str>::new(&character)),
+      refused,
+      "{character:?}"
+    );
+    assert_eq!(
+      first_refusal(SyntacticLexer::<[u8]>::new(character.as_bytes())),
+      first_refusal(SyntacticLexer::<[u8]>::new(string.as_bytes())),
+      "{character:?} as bytes"
+    );
+    assert_eq!(
+      first_refusal(LosslessLexer::<&str>::new(&character)),
+      first_refusal(LosslessLexer::<&str>::new(&string)),
+      "{character:?}, lossless"
+    );
+    assert_eq!(
+      first_refusal(LosslessLexer::<&[u8]>::new(character.as_bytes())),
+      first_refusal(LosslessLexer::<&[u8]>::new(string.as_bytes())),
+      "{character:?} as bytes, lossless"
+    );
+  }
+}
+
+/// A raw control character gets a string's verdict in a `char` literal. Every C0 character, DEL and
+/// every C1 character stands in a string but a line terminator, which ends the string before it,
+/// and exactly the same ones stand in a `char` literal as its character, over text and over bytes.
+#[test]
+fn a_raw_control_character_gets_a_strings_verdict() {
+  use std::format;
+  use tokora::Lexer as _;
+
+  use super::syntactic::{SyntacticLexer, SyntacticToken};
+
+  for ch in ('\0'..='\u{1f}').chain('\u{7f}'..='\u{9f}') {
+    let string = format!("\"{ch}\"");
+    let accepted = SyntacticLexer::<str>::new(&string)
+      .lex()
+      .is_some_and(|item| item.is_ok());
+    assert_eq!(accepted, !matches!(ch, '\n' | '\r'), "{ch:?} in a string");
+
+    let character = format!("'{ch}'");
+    let text = SyntacticLexer::<str>::new(&character).lex();
+    let bytes = SyntacticLexer::<[u8]>::new(character.as_bytes()).lex();
+    match (text, bytes) {
+      (Some(Ok(SyntacticToken::LitChar(text))), Some(Ok(SyntacticToken::LitChar(bytes)))) => {
+        assert!(accepted, "{ch:?} stands in a `char` literal alone");
+        assert_eq!((text.value(), bytes.value()), (ch, ch), "{ch:?}");
+      }
+      (Some(Err(_)), Some(Err(_))) => assert!(!accepted, "{ch:?} is refused in a `char` alone"),
+      other => panic!("{ch:?}: {other:?}"),
+    }
+  }
+}
+
+/// A `char` literal refused for its body and for itself reports both, each over the whole
+/// literal: the body's faults first, as a string reports them, and then its own, as a string
+/// reports last that its line ended it.
+#[test]
+fn a_char_refused_for_its_body_and_itself_reports_both() {
+  use tokora::Lexer as _;
+
+  use super::{error::LexerErrorData, syntactic::SyntacticLexer};
+
+  for (text, faults, fault) in [
+    ("'\\q", 1, LexerErrorData::UnterminatedChar),
+    ("'\\q\\z'", 2, LexerErrorData::LongChar),
+  ] {
+    let errors = first_refusal(SyntacticLexer::<str>::new(text))
+      .unwrap_or_else(|| panic!("{text:?} is refused"));
+    let [body, own] = errors.as_slice() else {
+      panic!("{text:?}: {errors:?}");
+    };
+    assert!(
+      matches!(body.data(), LexerErrorData::String(found) if found.len() == faults
+        && found.iter().all(|error| error.is_unexpected_escaped_character())),
+      "{text:?}: {body:?}"
+    );
+    assert_eq!(own.data(), &fault, "{text:?}");
+    let whole = tokora::SimpleSpan::new(0, text.len());
+    assert_eq!((body.span(), own.span()), (whole, whole), "{text:?}");
+  }
+}

@@ -29,10 +29,12 @@
 //! tokora's type.
 //!
 //! So these two newtypes are the decision: they are what [`Lexer::State`](tokora::Lexer::State)
-//! resolves to for smear's four lexers, and their `Default` is [`MAX_NESTING_DEPTH`]. Every
-//! existing call site — `parse_str`, `Lexer::new`, each `parse_lossless` — picks the ceiling up
-//! without being edited, and a caller who wants a different one hands a different value to
-//! `with_state` / `parse_*_with_state` / a lossless `*_with_limits` entry point.
+//! resolves to for GraphQL's two lexers, each GraphQLx lexer's state holds one, and their
+//! `Default` is [`MAX_NESTING_DEPTH`]. Every existing call site — `parse_str`, `Lexer::new`, each
+//! `parse_lossless` — picks the ceiling up without being edited. A caller who wants a different
+//! one hands a different value to `with_state` / `parse_*_with_state`, inside the state
+//! (`SyntacticState`, `LosslessState`) where the lexer is GraphQLx's, or to a lossless
+//! `*_with_limits` entry point.
 //!
 //! # What this counter is **not**, and the correction that says so
 //!
@@ -133,21 +135,28 @@ use tokora::state::{
 /// | GraphQLx lossless, `use` groups `a::{ … }`, `str` | **256 or deeper** — a lower bound |
 /// | GraphQLx syntactic, modules `mod a { … }`, `str` | **48 or deeper** — a lower bound |
 /// | GraphQLx lossless, modules `mod a { … }`, `str` | **256 or deeper** — a lower bound |
+/// | GraphQLx syntactic, typed values `U(U( … ))`, `str` | **48 or deeper** — a lower bound |
+/// | GraphQLx lossless, typed values `U(U( … ))`, `str` | **256 or deeper** — a lower bound |
+/// | GraphQLx syntactic, typed objects `P { k: P { k: … } }`, `str` | **48 or deeper** — a lower bound |
+/// | GraphQLx lossless, typed objects `P { k: P { k: … } }`, `str` | **256 or deeper** — a lower bound |
 ///
-/// **The two `use`-group rows and the two module rows are not bisections.** A `use` item's group
-/// and a module's body are recursive positions the dialect gained after the rest of the table was
-/// measured, and their rows were never bisected. Each is the deepest chain a cell in
-/// `smear/tests/nesting_depth.rs` runs on the 2 MiB thread libtest hands every test, so none can
-/// stand in for the boundary:
+/// **The two `use`-group rows, the two module rows and the four typed-form rows are not
+/// bisections.** A `use` item's group, a module's body and a schema position's typed forms are
+/// recursive positions the dialect gained after the rest of the table was measured, and their rows
+/// were never bisected. Each is the deepest chain a cell in `smear/tests/nesting_depth.rs` runs on
+/// the 2 MiB thread libtest hands every test, so none can stand in for the boundary:
 ///
-/// - the syntactic rows are `a_use_group_chain_at_twice_the_ceiling_returns_on_the_default_thread`
-///   and `a_mod_chain_at_twice_the_ceiling_returns_on_the_default_thread`, which each parse a chain
-///   of 48 levels — twice this ceiling, raised for that cell only — in both layers and assert that it
-///   returns. CI running those cells is what proves 48, and they hold this number's margin only at
-///   48 / 24 = 2.0x, the least the cells can show;
-/// - the lossless rows are the `use_group` and `mod_body` cells of
-///   `a_refusal_is_one_diagnostic_at_every_cycle`, whose 300 levels, under a ceiling raised past
-///   [`HARD_MAX`], descend [`HARD_MAX`] levels before the parse refuses the next one, and return.
+/// - the syntactic rows are `a_use_group_chain_at_twice_the_ceiling_returns_on_the_default_thread`,
+///   `a_mod_chain_at_twice_the_ceiling_returns_on_the_default_thread`,
+///   `a_typed_value_chain_at_twice_the_ceiling_returns_on_the_default_thread` and
+///   `a_typed_object_chain_at_twice_the_ceiling_returns_on_the_default_thread`, which each parse a
+///   chain of 48 levels — twice this ceiling, raised for that cell only — in both layers and assert
+///   that it returns. CI running those cells is what proves 48, and they hold this number's margin
+///   only at 48 / 24 = 2.0x, the least the cells can show;
+/// - the lossless rows are the `use_group`, `mod_body`, `typed_value_body` and
+///   `typed_object_body` cells of `a_refusal_is_one_diagnostic_at_every_cycle`, whose 300 levels,
+///   under a ceiling raised past [`HARD_MAX`], descend [`HARD_MAX`] levels before the parse refuses
+///   the next one, and return.
 ///
 /// The two recovery-bypass rows are the shape that walked past the first fix, and they are why the
 /// count moved to the parse. They cost about the same per level as the row above them — a `field`
@@ -299,11 +308,13 @@ const _: () = assert!(
 /// | list values `[ … ]` | 1303 | 1299 |
 /// | `use` groups `a::{ … }` | — | **256 or deeper**, a lower bound |
 /// | modules `mod a { … }` | — | **256 or deeper**, a lower bound |
+/// | typed values `U(U( … ))` | — | **256 or deeper**, a lower bound |
+/// | typed objects `P { k: P { k: … } }` | — | **256 or deeper**, a lower bound |
 ///
-/// **The `use`-group and module rows are the lower bounds [`MAX_NESTING_DEPTH`]'s table records,
-/// not bisections.** The deepest chain any cell runs stops at this wall, so the wall's 1.9x margin
-/// is not re-proved for either cycle: 256 keeps it only if a cycle returns at 487 levels or deeper,
-/// which nothing in this tree shows.
+/// **The `use`-group, module and typed-form rows are the lower bounds [`MAX_NESTING_DEPTH`]'s table
+/// records, not bisections.** The deepest chain any cell runs stops at this wall, so the wall's
+/// 1.9x margin is not re-proved for any of these cycles: 256 keeps it only if a cycle returns at
+/// 487 levels or deeper, which nothing in this tree shows.
 ///
 /// **The shape list is the suite's own, not a guess.** It is the strongly-connected components of
 /// each dialect's lossless call graph — the enumeration `smear/tests/nesting_depth.rs`'s
@@ -455,11 +466,10 @@ const DEFAULT_MAX_DIAGNOSTICS: usize = 1 << 15;
 /// The budget a **syntactic** lex runs under: nesting depth, and nothing else.
 ///
 /// This is [`Lexer::State`](tokora::Lexer::State) for
-/// [`graphql::syntactic::SyntacticLexer`](crate::graphql::syntactic::SyntacticLexer) and its
-/// GraphQLx twin, so [`Default`] is what `Parser::with_parser(…).parse_str(src)` seeds a parse
-/// with — which is the whole reason the type exists rather than a bare
-/// [`RecursionLimiter`]. See the module
-/// header.
+/// [`graphql::syntactic::SyntacticLexer`](crate::graphql::syntactic::SyntacticLexer), and its
+/// GraphQLx twin's state, `SyntacticState`, holds one. So [`Default`] is what
+/// `Parser::with_parser(…).parse_str(src)` seeds a parse with — which is the whole reason the
+/// type exists rather than a bare [`RecursionLimiter`]. See the module header.
 ///
 /// ```
 /// use smear_lexer::limits::{MAX_NESTING_DEPTH, SyntacticLimits};
@@ -568,9 +578,10 @@ impl State for SyntacticLimits {
 /// produce-event ceiling, and the ceiling on the diagnostics a parse keeps.
 ///
 /// This is [`Lexer::State`](tokora::Lexer::State) for
-/// [`graphql::lossless::LosslessLexer`](crate::graphql::lossless::LosslessLexer) and its GraphQLx
-/// twin — the Logos `Extras` those token grammars declare — so [`Default`] is what every
-/// `parse_lossless` call seeds a parse with. See the module header.
+/// [`graphql::lossless::LosslessLexer`](crate::graphql::lossless::LosslessLexer), the Logos
+/// `Extras` its token grammar declares, and its GraphQLx twin's state, `LosslessState`, holds
+/// one. So [`Default`] is what every `parse_lossless` call seeds a parse with. See the module
+/// header.
 ///
 /// The **token** half is left at tokora's unlimited default and is not part of issue #61's
 /// decision: a token count is bounded by the input length, so unlike nesting depth it cannot

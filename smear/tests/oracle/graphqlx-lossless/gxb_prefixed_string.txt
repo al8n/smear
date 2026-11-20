@@ -1,0 +1,11 @@
+OK  0..5  LitPrefixedStr(LitPrefixedStr { prefix: Bytes, block: false, source: "\"ab\"" })
+OK  5..6  Newline
+OK  6..10  LitPrefixedStr(LitPrefixedStr { prefix: Id, block: false, source: "\"7\"" })
+OK  10..11  Newline
+OK  11..19  LitPrefixedStr(LitPrefixedStr { prefix: Bytes, block: true, source: "\"\"\"x\"\"\"" })
+OK  19..20  Newline
+OK  20..28  LitPrefixedStr(LitPrefixedStr { prefix: Id, block: true, source: "\"\"\"x\"\"\"" })
+OK  28..29  Newline
+OK  29..43  LitPrefixedStr(LitPrefixedStr { prefix: Bytes, block: false, source: "\"\\x89PNG\\r\\n\"" })
+OK  43..44  Newline
+OK  44..49  LitPrefixedStr(LitPrefixedStr { prefix: Bytes, block: false, source: "\"é\"" })

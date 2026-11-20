@@ -72,7 +72,7 @@ lossless_production! {
         let implements = peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Implements);
         optional_implements::<Src, Ctx>(inp)?;
         let has_directives = peek_kind::<Src, Ctx>(inp)? == Some(Kind::At);
-        directives::<Src, Ctx>(inp, Constness::Const)?;
+        directives::<Src, Ctx>(inp, Constness::Schema)?;
         if implements || has_directives {
           return Ok(());
         }
@@ -100,7 +100,7 @@ lossless_production! {
         if peek_kind::<Src, Ctx>(inp)? != Some(Kind::At) {
           return recover::report_unexpected::<Src, Ctx>(inp, EXTENSION_TAIL_HEADS);
         }
-        directives::<Src, Ctx>(inp, Constness::Const)
+        directives::<Src, Ctx>(inp, Constness::Schema)
       },
     )
     .parse_input(inp)
@@ -166,7 +166,7 @@ lossless_production! {
     let implements = peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Implements);
     optional_implements::<Src, Ctx>(inp)?;
     let has_directives = peek_kind::<Src, Ctx>(inp)? == Some(Kind::At);
-    directives::<Src, Ctx>(inp, Constness::Const)?;
+    directives::<Src, Ctx>(inp, Constness::Schema)?;
     let constrained = peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Where);
     let has_block = constrained || peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace);
     constrained_fields::<Src, Ctx>(inp, input_object)?;
@@ -190,7 +190,7 @@ lossless_production! {
         let implements = peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Implements);
         optional_implements::<Src, Ctx>(inp)?;
         let has_directives = peek_kind::<Src, Ctx>(inp)? == Some(Kind::At);
-        directives::<Src, Ctx>(inp, Constness::Const)?;
+        directives::<Src, Ctx>(inp, Constness::Schema)?;
         let has_members = peek_kind::<Src, Ctx>(inp)? == Some(Kind::Equal);
         constrained_union_members::<Src, Ctx>(inp)?;
         if implements || has_directives || has_members {
@@ -215,7 +215,7 @@ lossless_production! {
         let implements = peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Implements);
         optional_implements::<Src, Ctx>(inp)?;
         let has_directives = peek_kind::<Src, Ctx>(inp)? == Some(Kind::At);
-        directives::<Src, Ctx>(inp, Constness::Const)?;
+        directives::<Src, Ctx>(inp, Constness::Schema)?;
         let has_values = peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace);
         if has_values {
           enum_values_definition::<Src, Ctx>(inp)?;
@@ -240,7 +240,7 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         let has_directives = peek_kind::<Src, Ctx>(inp)? == Some(Kind::At);
-        directives::<Src, Ctx>(inp, Constness::Const)?;
+        directives::<Src, Ctx>(inp, Constness::Schema)?;
         let has_block = peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace);
         if has_block {
           root_operation_types_definition::<Src, Ctx>(inp)?;

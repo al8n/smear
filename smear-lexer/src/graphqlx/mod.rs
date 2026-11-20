@@ -1,6 +1,12 @@
 use derive_more::{IsVariant, TryUnwrap, Unwrap};
 use tokora::{SimpleSpan, state::RecursionLimitExceeded, utils::DisplayHuman};
 
+use crate::{
+  LitBlockStr, LitComplexBlockStr, LitComplexInlineStr, LitInlineStr, LitPlainBlockStr,
+  LitPlainInlineStr, LitStr, skip_block_str_from_bytes, skip_inline_str_simd,
+  string_lexer::byte_str::ByteStrBody,
+};
+
 /// Errors for GraphQLx lexers
 pub mod error;
 
@@ -50,6 +56,9 @@ mod handlers;
 #[cfg(test)]
 #[path = "number/tests.rs"]
 mod number_tests;
+
+#[cfg(test)]
+mod block_tests;
 
 /// A GraphQLx integer literal, which can be in decimal, hexadecimal, binary, or octal format.
 #[derive(
@@ -200,9 +209,272 @@ impl<S> LitFloat<S> {
   }
 }
 
-/// One whole numeric literal, re-scanned by the lexer that produced it.
+/// The suffix of a GraphQLx integer literal: `i` or `u`, and a width, as in `1u8` or `-3i256`.
 ///
-/// The private half of `LitInt`'s and `LitFloat`'s `TryFrom<&str>`, which carry the contract.
+/// The width is the one the literal spells. Whether a program may write it is the analyzer's to
+/// say: `1u7` lexes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct IntSuffix {
+  signed: bool,
+  width: u32,
+}
+
+impl IntSuffix {
+  /// Whether the suffix is `i`, a signed integer's.
+  #[inline(always)]
+  pub const fn is_signed(&self) -> bool {
+    self.signed
+  }
+
+  /// The width the suffix spells: 8 for `u8`.
+  #[inline(always)]
+  pub const fn width(&self) -> u32 {
+    self.width
+  }
+}
+
+/// The suffix of a GraphQLx float literal, as in `1.5f32` or `1f64`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
+#[non_exhaustive]
+pub enum FloatSuffix {
+  /// `f32`.
+  F32,
+  /// `f64`.
+  F64,
+}
+
+/// The integer suffix `bytes` end with, and where it starts: at the one `_` directly before its
+/// letter, or at the letter.
+///
+/// A suffix is `i` or `u` and a width, `0` or a digit other than `0` and more digits, that fits a
+/// `u32`.
+fn int_suffix_of(bytes: &[u8]) -> Option<(usize, IntSuffix)> {
+  let digits = bytes
+    .iter()
+    .rev()
+    .take_while(|byte: &&u8| byte.is_ascii_digit())
+    .count();
+  if digits == 0 {
+    return None;
+  }
+  let letter = bytes.len().checked_sub(digits.checked_add(1)?)?;
+  let signed = match bytes.get(letter)? {
+    b'i' => true,
+    b'u' => false,
+    _ => return None,
+  };
+  let width_digits: &[u8] = bytes.get(letter.checked_add(1)?..)?;
+  if width_digits.len() > 1 && width_digits.first() == Some(&b'0') {
+    return None;
+  }
+  let width = width_digits
+    .iter()
+    .try_fold(0u32, |width: u32, digit: &u8| {
+      width
+        .checked_mul(10)?
+        .checked_add(u32::from(digit.wrapping_sub(b'0')))
+    })?;
+  Some((suffix_start(bytes, letter), IntSuffix { signed, width }))
+}
+
+/// The float suffix `bytes` end with, and where it starts, as [`int_suffix_of`] answers it.
+fn float_suffix_of(bytes: &[u8]) -> Option<(usize, FloatSuffix)> {
+  let suffix = match bytes {
+    [.., b'f', b'3', b'2'] => FloatSuffix::F32,
+    [.., b'f', b'6', b'4'] => FloatSuffix::F64,
+    _ => return None,
+  };
+  let letter = bytes.len().checked_sub(3)?;
+  Some((suffix_start(bytes, letter), suffix))
+}
+
+/// Where a suffix whose letter is at `letter` starts: at the `_` directly before it, if one is.
+fn suffix_start(bytes: &[u8], letter: usize) -> usize {
+  match letter.checked_sub(1) {
+    Some(before) if bytes.get(before) == Some(&b'_') => before,
+    _ => letter,
+  }
+}
+
+impl<S: AsRef<[u8]>> LitInt<S> {
+  /// The suffix the literal ends with, as in `1u8`, or `None` for a literal with none.
+  ///
+  /// It reads the literal's own bytes, and never panics: a literal built over any bytes answers
+  /// `None` unless they end in a well-formed suffix.
+  #[inline]
+  pub fn suffix(&self) -> Option<IntSuffix> {
+    int_suffix_of(self.source_ref().as_ref()).map(|(_, suffix): (usize, IntSuffix)| suffix)
+  }
+
+  /// How many bytes the suffix takes: its letter, its width, and the one `_` directly before the
+  /// letter if there is one. 0 for a literal with no suffix.
+  #[inline]
+  pub fn suffix_len(&self) -> usize {
+    let bytes = self.source_ref().as_ref();
+    int_suffix_of(bytes).map_or(0, |(start, _): (usize, IntSuffix)| {
+      bytes.len().saturating_sub(start)
+    })
+  }
+}
+
+impl<S: AsRef<[u8]>> LitFloat<S> {
+  /// The suffix the literal ends with, as in `1.5f32`, or `None` for a literal with none.
+  ///
+  /// It reads the literal's own bytes, and never panics: a literal built over any bytes answers
+  /// `None` unless they end in a well-formed suffix.
+  #[inline]
+  pub fn suffix(&self) -> Option<FloatSuffix> {
+    float_suffix_of(self.source_ref().as_ref()).map(|(_, suffix): (usize, FloatSuffix)| suffix)
+  }
+
+  /// How many bytes the suffix takes: `f32` or `f64`, and the one `_` directly before it if there
+  /// is one. 0 for a literal with no suffix.
+  #[inline]
+  pub fn suffix_len(&self) -> usize {
+    let bytes = self.source_ref().as_ref();
+    float_suffix_of(bytes).map_or(0, |(start, _): (usize, FloatSuffix)| {
+      bytes.len().saturating_sub(start)
+    })
+  }
+}
+
+/// A GraphQLx `char` literal: `'`, one character or one escape, and `'`.
+///
+/// The escapes are a string's, and `\'`; `"` may stand as it is. The literal spells exactly one
+/// Unicode scalar value, which [`value`](Self::value) answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LitChar<S> {
+  source: S,
+  value: char,
+}
+
+impl<S> LitChar<S> {
+  /// A literal over `source`, whose character the lexer read as `value`.
+  #[inline(always)]
+  pub(crate) const fn new(source: S, value: char) -> Self {
+    Self { source, value }
+  }
+
+  /// The literal's slice, both quotes included.
+  #[inline(always)]
+  pub const fn source_ref(&self) -> &S {
+    &self.source
+  }
+
+  /// The character the literal spells, its escape applied.
+  #[inline(always)]
+  pub const fn value(&self) -> char {
+    self.value
+  }
+}
+
+/// What a string's prefix makes it, inside a `const { … }` block: `b"…"` bytes, `i"…"` an id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, IsVariant)]
+#[non_exhaustive]
+pub enum StrPrefix {
+  /// `b`: the bytes its body spells, where `\x` and two hexadecimal digits is any one byte.
+  Bytes,
+  /// `i`: the id its body spells.
+  Id,
+}
+
+/// A prefixed string, which only a lexer inside a `const { … }` block makes: its prefix, and the
+/// string after it, which [`literal`](Self::literal) reads.
+///
+/// The token's span begins at the prefix's letter. What the token keeps begins at the string's
+/// quote: the literal's own slice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LitPrefixedStr<S> {
+  prefix: StrPrefix,
+  block: bool,
+  source: S,
+}
+
+impl<S> LitPrefixedStr<S> {
+  /// A prefixed string whose literal, a block string when `block`, is `source`.
+  #[inline(always)]
+  pub(crate) const fn new(prefix: StrPrefix, block: bool, source: S) -> Self {
+    Self {
+      prefix,
+      block,
+      source,
+    }
+  }
+
+  /// The string's prefix.
+  #[inline(always)]
+  pub const fn prefix(&self) -> StrPrefix {
+    self.prefix
+  }
+
+  /// Whether the string is a block string.
+  #[inline(always)]
+  pub(crate) const fn is_block(&self) -> bool {
+    self.block
+  }
+
+  /// The string's slice, from its opening quote.
+  #[inline(always)]
+  pub(crate) const fn source_ref(&self) -> &S {
+    &self.source
+  }
+}
+
+impl<S: Clone + AsRef<[u8]>> LitPrefixedStr<S> {
+  /// The string after the prefix, read again from its slice by the readers the lexers read it
+  /// with: a block string, or an inline string, `Complex` when its body holds an escape.
+  ///
+  /// Under `b` an inline string's body may hold `\x` and two hexadecimal digits, one byte, which
+  /// the literal's `required_capacity` counts as one. No text door reads that escape:
+  /// [`decode_string_value`](crate::decode_string_value) refuses the backslash, and the `Cow`
+  /// conversion copies it through. A block string's body has no such escape: `b"""\x41"""`
+  /// is the four characters it shows.
+  pub fn literal(&self) -> LitStr<S> {
+    let bytes = self.source.as_ref();
+    if self.block {
+      let block = match skip_block_str_from_bytes::<true>(bytes.get(3..).unwrap_or_default()) {
+        Ok(LitBlockStr::Complex(c)) => LitBlockStr::Complex(LitComplexBlockStr::new(
+          self.source.clone(),
+          c.num_escaped_triple_quotes(),
+          c.has_cr_terminators(),
+          c.leading_blank_lines(),
+          c.trailing_blank_lines(),
+          c.common_indent(),
+          c.total_lines(),
+          c.required_capacity(),
+        )),
+        // A literal the lexer accepted is not refused here; a refusal answers the plain literal.
+        Ok(LitBlockStr::Plain(_)) | Err(_) => {
+          LitBlockStr::Plain(LitPlainBlockStr::new(self.source.clone()))
+        }
+      };
+      return LitStr::Block(block);
+    }
+
+    let body = bytes.get(1..).unwrap_or_default();
+    let capacity = match self.prefix {
+      StrPrefix::Bytes => <u8 as ByteStrBody>::read_byte_str(body, 0)
+        .read
+        .ok()
+        .flatten(),
+      StrPrefix::Id => match skip_inline_str_simd::<true>(1, body) {
+        Ok(LitInlineStr::Complex(c)) => Some(c.required_capacity()),
+        Ok(LitInlineStr::Plain(_)) | Err(_) => None,
+      },
+    };
+    LitStr::Inline(match capacity {
+      Some(capacity) => {
+        LitInlineStr::Complex(LitComplexInlineStr::new(self.source.clone(), capacity))
+      }
+      None => LitInlineStr::Plain(LitPlainInlineStr::new(self.source.clone())),
+    })
+  }
+}
+
+/// One whole literal, re-scanned by the lexer that produced it.
+///
+/// The private half of `LitInt`'s, `LitFloat`'s and `LitChar`'s `TryFrom<&str>`, which carry the
+/// contract.
 ///
 /// # Why this exists: a payload with no door is a payload with a second custodian
 ///
@@ -234,13 +506,23 @@ impl<S> LitFloat<S> {
 /// instantiated for both scan alphabets. This one is not, and the reason is the consumer: the
 /// projection hands back an AST borrowing the caller's `&'src str`, so the slice it re-cooks is
 /// always text. A byte door here would be surface with no caller.
-fn scan_one_token<'de: 'a, 'a>(
-  value: &'de str,
+fn scan_one_token<'a>(
+  value: &'a str,
   what: &'static str,
+) -> Result<syntactic::SyntacticToken<&'a str>, error::LexerErrors<char, RecursionLimitExceeded>> {
+  scan_one_token_from(value, what, syntactic::SyntacticState::default())
+}
+
+/// [`scan_one_token`] from `state`: a door for a token only a lexer inside a `const { … }` block
+/// makes reads its slice from a state that has entered one.
+fn scan_one_token_from<'a>(
+  value: &'a str,
+  what: &'static str,
+  state: syntactic::SyntacticState,
 ) -> Result<syntactic::SyntacticToken<&'a str>, error::LexerErrors<char, RecursionLimitExceeded>> {
   use tokora::Lexer as _;
 
-  let mut lexer = syntactic::SyntacticLexer::<'de, str>::new(value);
+  let mut lexer = syntactic::SyntacticLexer::<'a, str>::with_state(value, state);
   let Some(first) = lexer.lex() else {
     return Err(
       error::LexerError::const_new(
@@ -303,6 +585,40 @@ pub fn identifier(value: &str) -> Result<&str, error::LexerErrors<char, Recursio
   }
 }
 
+/// The scanner's own reading of `value` as one whole integer literal inside a `const { … }` block,
+/// from a state that has entered one.
+///
+/// [`LitInt`]'s door for the block, and see [`LitInt::try_from`] for what "whole" means. The scanner
+/// reads no sign into a number there, so `-1` is a `-` and then an integer, and fails here as every
+/// other slice that is not one integer inside a block does.
+#[inline]
+pub fn int_in_block(
+  value: &str,
+) -> Result<LitInt<&str>, error::LexerErrors<char, RecursionLimitExceeded>> {
+  const WHAT: &str = "integer";
+  let mut state = syntactic::SyntacticState::default();
+  state.enter_const_block();
+  match scan_one_token_from(value, WHAT, state)? {
+    syntactic::SyntacticToken::LitInt(lit) => Ok(lit),
+    _ => Err(not_one_token(value.len(), WHAT)),
+  }
+}
+
+/// [`int_in_block`]'s twin for a float literal: the scanner's own reading of `value` as one whole
+/// float literal inside a `const { … }` block, where it reads no sign into a number.
+#[inline]
+pub fn float_in_block(
+  value: &str,
+) -> Result<LitFloat<&str>, error::LexerErrors<char, RecursionLimitExceeded>> {
+  const WHAT: &str = "float";
+  let mut state = syntactic::SyntacticState::default();
+  state.enter_const_block();
+  match scan_one_token_from(value, WHAT, state)? {
+    syntactic::SyntacticToken::LitFloat(lit) => Ok(lit),
+    _ => Err(not_one_token(value.len(), WHAT)),
+  }
+}
+
 impl<'de: 'a, 'a> TryFrom<&'de str> for LitInt<&'a str> {
   type Error = error::LexerErrors<char, RecursionLimitExceeded>;
 
@@ -351,6 +667,44 @@ impl<'de: 'a, 'a> TryFrom<&'de str> for LitFloat<&'a str> {
     const WHAT: &str = "float";
     match scan_one_token(value, WHAT)? {
       syntactic::SyntacticToken::LitFloat(lit) => Ok(lit),
+      _ => Err(not_one_token(value.len(), WHAT)),
+    }
+  }
+}
+
+impl<'de: 'a, 'a> TryFrom<&'de str> for LitPrefixedStr<&'a str> {
+  type Error = error::LexerErrors<char, RecursionLimitExceeded>;
+
+  /// The scanner's own reading of `value` as one whole prefixed string, from a state that has
+  /// entered a `const { … }` block, the only place a prefixed string is lexed: outside one the
+  /// slice is a name and then a string.
+  ///
+  /// [`LitInt`]'s twin — see [`LitInt::try_from`] for what "whole" means. The lexer's own refusal
+  /// of a reserved prefix or a malformed string passes through unchanged.
+  #[inline]
+  fn try_from(value: &'de str) -> Result<Self, Self::Error> {
+    const WHAT: &str = "prefixed string";
+    let mut state = syntactic::SyntacticState::default();
+    state.enter_const_block();
+    match scan_one_token_from(value, WHAT, state)? {
+      syntactic::SyntacticToken::LitPrefixedStr(lit) => Ok(lit),
+      _ => Err(not_one_token(value.len(), WHAT)),
+    }
+  }
+}
+
+impl<'de: 'a, 'a> TryFrom<&'de str> for LitChar<&'a str> {
+  type Error = error::LexerErrors<char, RecursionLimitExceeded>;
+
+  /// The scanner's own reading of `value` as one whole `char` literal.
+  ///
+  /// [`LitInt`]'s twin — see [`LitInt::try_from`] for what "whole" means. The lexer's own refusal
+  /// of a malformed literal passes through unchanged.
+  #[inline]
+  fn try_from(value: &'de str) -> Result<Self, Self::Error> {
+    const WHAT: &str = "character";
+    match scan_one_token(value, WHAT)? {
+      syntactic::SyntacticToken::LitChar(lit) => Ok(lit),
       _ => Err(not_one_token(value.len(), WHAT)),
     }
   }

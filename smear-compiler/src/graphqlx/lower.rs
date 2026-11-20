@@ -1804,15 +1804,29 @@ impl Lowering<'_, '_, '_> {
       let kind = match value {
         ConstInputValue::Boolean(boolean) => RawKind::Boolean(boolean.value()),
         ConstInputValue::String(_) => RawKind::String,
-        ConstInputValue::Float(float) => RawKind::Float(FloatSpelling {
-          hex: matches!(float.source(), LitFloat::Hex(_)),
-        }),
-        ConstInputValue::Int(int) => RawKind::Int(match int.source() {
-          LitInt::Decimal(_) => Radix::Decimal,
-          LitInt::Hex(_) => Radix::Hex,
-          LitInt::Octal(_) => Radix::Octal,
-          LitInt::Binary(_) => Radix::Binary,
-        }),
+        // A number with a suffix is a typed literal, which lowering does not read: reported once
+        // for the source, at the number, and lowered as the one refused node it counts as.
+        ConstInputValue::Float(float) => match float.source().suffix() {
+          Some(_) => {
+            self.unknown(source, span);
+            RawKind::Refused
+          }
+          None => RawKind::Float(FloatSpelling {
+            hex: matches!(float.source(), LitFloat::Hex(_)),
+          }),
+        },
+        ConstInputValue::Int(int) => match int.source().suffix() {
+          Some(_) => {
+            self.unknown(source, span);
+            RawKind::Refused
+          }
+          None => RawKind::Int(match int.source() {
+            LitInt::Decimal(_) => Radix::Decimal,
+            LitInt::Hex(_) => Radix::Hex,
+            LitInt::Octal(_) => Radix::Octal,
+            LitInt::Binary(_) => Radix::Binary,
+          }),
+        },
         ConstInputValue::Enum(path) => {
           let path = path.source();
           let written = self.written_path(path);
@@ -1837,6 +1851,29 @@ impl Lowering<'_, '_, '_> {
           ))
         }
         ConstInputValue::Null(_) => RawKind::Null,
+        // A `char` literal is a value lowering does not read yet: reported once for the source,
+        // at the literal, and lowered as the one refused node it counts as.
+        ConstInputValue::Char(_) => {
+          self.unknown(source, span);
+          RawKind::Refused
+        }
+        // A typed form is a value lowering does not read yet either: reported once for the source,
+        // at the form, and lowered as one refused node whatever it holds. What it holds is not in
+        // the model, so `held` answers none for it and nothing of it is entered.
+        ConstInputValue::TypedObject(_) | ConstInputValue::Typed(_) => {
+          self.unknown(source, span);
+          RawKind::Refused
+        }
+        // A block is the same: one refused node, and nothing of it entered. Lowering never enters
+        // a block, so the three forms only a block holds reach this match through no parse; their
+        // arms are the match's.
+        ConstInputValue::Block(_)
+        | ConstInputValue::Paren(_)
+        | ConstInputValue::Bytes(_)
+        | ConstInputValue::Id(_) => {
+          self.unknown(source, span);
+          RawKind::Refused
+        }
         ConstInputValue::List(_) => RawKind::List,
         ConstInputValue::Set(_) => RawKind::Set,
         ConstInputValue::Map(_) => RawKind::Map,
@@ -1886,7 +1923,14 @@ impl Lowering<'_, '_, '_> {
         | ConstInputValue::Float(_)
         | ConstInputValue::Int(_)
         | ConstInputValue::Enum(_)
-        | ConstInputValue::Null(_) => {}
+        | ConstInputValue::Null(_)
+        | ConstInputValue::Char(_)
+        | ConstInputValue::TypedObject(_)
+        | ConstInputValue::Typed(_)
+        | ConstInputValue::Block(_)
+        | ConstInputValue::Paren(_)
+        | ConstInputValue::Bytes(_)
+        | ConstInputValue::Id(_) => {}
       }
     }
     if let Some(count) = charged {
@@ -2758,7 +2802,14 @@ fn held<S>(value: &ConstInputValue<S>, index: usize) -> Option<&ConstInputValue<
     | ConstInputValue::Float(_)
     | ConstInputValue::Int(_)
     | ConstInputValue::Enum(_)
-    | ConstInputValue::Null(_) => None,
+    | ConstInputValue::Null(_)
+    | ConstInputValue::Char(_)
+    | ConstInputValue::TypedObject(_)
+    | ConstInputValue::Typed(_)
+    | ConstInputValue::Block(_)
+    | ConstInputValue::Paren(_)
+    | ConstInputValue::Bytes(_)
+    | ConstInputValue::Id(_) => None,
   }
 }
 

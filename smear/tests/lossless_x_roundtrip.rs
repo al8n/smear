@@ -379,7 +379,7 @@ fn an_uppercase_radix_prefix_is_refused_and_still_kept() {
 /// lexes is not in this class.
 #[test]
 fn a_source_that_is_nothing_but_a_lexer_error_does_not_panic() {
-  for src in ["\"unterminated", "%", "\"\"\"unterminated block"] {
+  for src in ["\"unterminated", "?", "\"\"\"unterminated block"] {
     let tree = parse_document(src);
     assert_eq!(text_of(&tree.syntax()), src, "{src:?}: lost bytes");
     assert!(

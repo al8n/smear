@@ -79,6 +79,7 @@ punct_atoms!(
   spread / try_spread => Spread,
   tilde / try_tilde => Tilde,
   caret / try_caret => Caret,
+  comma / try_comma => Comma,
 );
 
 /// The identifier lexer `L` yields, over its source slice and span, tagged with

@@ -125,9 +125,10 @@ const _: () = assert!(
 );
 
 impl<S, Span, Ty> Nestable for TypeSystemItem<S, Span, Ty> {
-  /// The module item tree: rank 2. It drops value, type and use nodes in place — see the
-  /// assertions above — and holds no selection.
-  const RANK: u8 = 2;
+  /// The module item tree: rank 3. It drops constant value, type and use nodes in place — see the
+  /// assertions above — and holds no selection. The constant value tree is rank 2, since a typed
+  /// form holds a type, so this tree ranks above it.
+  const RANK: u8 = 3;
 
   type Node = Self;
 

@@ -60,13 +60,13 @@ const RUN: usize = 400;
 /// Drives one lexer to exhaustion under `ceiling` and counts the items it produced.
 fn items<'a, L>(src: &'a L::Source, ceiling: Option<usize>) -> usize
 where
-  L: Lexer<'a, State = LosslessLimits>,
+  L: Lexer<'a, State: From<LosslessLimits>>,
 {
   let limits = match ceiling {
     Some(max) => LosslessLimits::default().with_max_tokens(max),
     None => LosslessLimits::default(),
   };
-  let mut lexer = L::with_state(src, limits);
+  let mut lexer = L::with_state(src, limits.into());
   let mut n = 0usize;
   while lexer.lex().is_some() {
     n += 1;
@@ -77,7 +77,7 @@ where
 /// Checks one cell across the whole cliff.
 fn cell<'a, L>(label: &str, src: &'a L::Source)
 where
-  L: Lexer<'a, State = LosslessLimits>,
+  L: Lexer<'a, State: From<LosslessLimits>>,
 {
   let total = items::<L>(src, None);
   assert!(

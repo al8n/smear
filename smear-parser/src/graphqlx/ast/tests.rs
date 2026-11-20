@@ -117,3 +117,24 @@ fn executable_selection_and_use_nodes_keep_their_span_type() {
   assert_eq!(operation.as_str(), "query");
   assert_eq!(operation.into_span(), CustomSpan(7));
 }
+
+/// Each GraphQLx value enum is 96 bytes: its two largest payloads, a string literal and an enum
+/// value's path, are 88 bytes each, and a tag stands beside them. A payload that outgrew them would
+/// make every value larger, in a document that never writes one, and an executable document holds a
+/// constant value too, in a variable's default.
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn each_value_enum_is_the_size_of_its_largest_payload_and_a_tag() {
+  use super::ConstInputValue;
+
+  assert_eq!(
+    core::mem::size_of::<InputValue<&str>>(),
+    96,
+    "the input value"
+  );
+  assert_eq!(
+    core::mem::size_of::<ConstInputValue<&str>>(),
+    96,
+    "the constant input value"
+  );
+}

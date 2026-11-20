@@ -17,7 +17,9 @@ use smear::parser::graphqlx::{
     ty::test_support::{
       parse_path, parse_path_or_recover, parse_type_generics, parse_type_path, parse_type_ref,
     },
-    value::test_support::{parse_const_value, parse_default_value, parse_map_entry, parse_value},
+    value::test_support::{
+      parse_const_value, parse_default_value, parse_map_entry, parse_schema_value, parse_value,
+    },
   },
 };
 
@@ -401,6 +403,122 @@ fn constness_reaches_every_nested_value_position() {
   }
 }
 
+/// A schema position reads what an executable document's constant position reads, until a form of
+/// its own is written: the same tree, and a variable reported at every depth as there.
+#[test]
+fn a_schema_position_answers_as_a_constant_one_does() {
+  for src in [
+    "$x",
+    "[$x]",
+    "{a: $x}",
+    "set!{ $x }",
+    "map!{ $x => 1 }",
+    "map!{ 1 => $x }",
+    "[1, 'c', {a: ^::b::C}]",
+  ] {
+    assert_eq!(
+      kinds!(parse_schema_value, src),
+      kinds!(parse_const_value, src),
+      "{src}: the two flavours build one tree"
+    );
+    assert_eq!(text!(parse_schema_value, src), src);
+    assert_eq!(
+      parse_schema_value(src).has_errors(),
+      parse_const_value(src).has_errors(),
+      "{src}: the two flavours report alike"
+    );
+  }
+  assert!(parse_schema_value("{a: $x}").has_errors());
+  assert!(!parse_schema_value("[1, 'c', {a: ^::b::C}]").has_errors());
+}
+
+#[test]
+fn a_schema_position_reads_the_typed_forms_and_a_constant_one_does_not() {
+  // A typed object holds its fields directly, after a type path that is always there.
+  assert_eq!(
+    kinds!(parse_schema_value, "P { x: 1 }"),
+    vec![
+      K::Root,
+      K::TypedObjectValue,
+      K::TypePath,
+      K::Path,
+      K::ObjectField,
+      K::IntValue
+    ]
+  );
+  assert_eq!(
+    kinds!(parse_schema_value, "Box<i32> {}"),
+    vec![
+      K::Root,
+      K::TypedObjectValue,
+      K::TypePath,
+      K::Path,
+      K::TypeGenerics,
+      K::DefinitionTypePath,
+      K::Path
+    ]
+  );
+  assert_eq!(
+    kinds!(parse_schema_value, "Url(\"x\")"),
+    vec![K::Root, K::TypedValue, K::TypePath, K::Path, K::StringValue]
+  );
+  // The next significant token decides, whatever trivia stands before it.
+  assert_eq!(
+    kinds!(parse_schema_value, "P # c\n { x: 1 }"),
+    kinds!(parse_schema_value, "P { x: 1 }")
+  );
+  // The corner: one element here, two in an executable document's constant position.
+  assert_eq!(
+    kinds!(parse_schema_value, "[RED {a: 1}]"),
+    vec![
+      K::Root,
+      K::ListValue,
+      K::TypedObjectValue,
+      K::TypePath,
+      K::Path,
+      K::ObjectField,
+      K::IntValue
+    ]
+  );
+  assert_eq!(
+    kinds!(parse_const_value, "[RED {a: 1}]"),
+    vec![
+      K::Root,
+      K::ListValue,
+      K::EnumValue,
+      K::Path,
+      K::ObjectValue,
+      K::ObjectField,
+      K::IntValue
+    ]
+  );
+  for src in [
+    "P { x: 1 }",
+    "Box<i32> {}",
+    "Url(\"x\")",
+    "[RED {a: 1}]",
+    "^::a::P { x: 1 }",
+  ] {
+    assert!(!parse_schema_value(src).has_errors(), "{src}");
+    assert_eq!(text!(parse_schema_value, src), src);
+  }
+  // Type arguments that open neither bracket: one report, and a typed object with no body.
+  let bodiless = parse_schema_value("Box<i32>");
+  assert_eq!(bodiless.diagnostics().len(), 1);
+  assert_eq!(
+    kinds!(parse_schema_value, "Box<i32>"),
+    vec![
+      K::Root,
+      K::TypedObjectValue,
+      K::TypePath,
+      K::Path,
+      K::TypeGenerics,
+      K::DefinitionTypePath,
+      K::Path
+    ]
+  );
+}
+
 // ---------------------------------------------------------------------------------------------
 // Divergences 2, 3, 4 — paths, generics and type references.
 // ---------------------------------------------------------------------------------------------
@@ -607,8 +725,9 @@ fn junk_inside_a_list_is_attributed_to_an_error_node() {
 /// What the depth counting buys, measured both ways: with the pair, the junk `<2>` is **one**
 /// `Error` node; without it, `<` is neutral, the `2` behind it is a depth-zero sync point, and the
 /// same source becomes `Error("<")`, a real `IntValue`, and `Error(">")` — three nodes, one of them
-/// a value the grammar never admitted. The nested form is sharper still: `<<2>>` becomes
-/// `Error("<<")`, an `IntValue` and **two** `Error`s.
+/// a value the grammar never admitted. The nested form is sharper still: `< <2> >` becomes
+/// `Error("< <")`, an `IntValue` and **two** `Error`s. Its `<` are apart because `<<` is one token,
+/// a shift.
 ///
 /// The byte-for-byte text is identical under both, which is why no round-trip gate can see this.
 #[test]
@@ -619,7 +738,7 @@ fn a_skipped_region_counts_angle_depth_like_every_other_pair() {
     "the whole `<2>` is one skipped region, not three"
   );
   assert_eq!(
-    kinds!(parse_value, "[1, <<2>>, 3]"),
+    kinds!(parse_value, "[1, < <2> >, 3]"),
     vec![K::Root, K::ListValue, K::IntValue, K::Error, K::IntValue],
     "nesting inside the skipped region is crossed, not restarted at"
   );
@@ -720,6 +839,7 @@ fn every_named_value_head_actually_opens_a_value() {
     ("1.5", K::FloatValue),
     ("\"s\"", K::StringValue),
     ("\"\"\"b\"\"\"", K::StringValue),
+    ("'c'", K::CharValue),
     ("[]", K::ListValue),
     ("{}", K::ObjectValue),
     ("a", K::EnumValue),

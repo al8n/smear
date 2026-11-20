@@ -44,15 +44,17 @@ use crate::lossless::recover::keyword_of;
 /// `true`, `false`, `null`, `set` and `map` are `Identifier`s to the lexer, so none of them needs
 /// an entry of its own; the value dispatcher separates them on their spelling, not on their kind.
 ///
-/// **`Tilde`, `DotDot` and `Caret` are here and are not in GraphQL's set.** A root's sigil opens a
-/// rooted enum value (`^::ns::Colour`), which is a value head this dialect has and the other does
-/// not. `PathSeparator` is not: a `::` only joins, so no value starts with one.
+/// **`Tilde`, `DotDot`, `Caret` and `Char` are here and are not in GraphQL's set.** A root's sigil
+/// opens a rooted enum value (`^::ns::Colour`), and a `char` literal is a value of its own, two
+/// value heads this dialect has and the other does not. `PathSeparator` is not: a `::` only joins,
+/// so no value starts with one.
 pub(crate) const VALUE_HEADS: &[Kind] = &[
   Kind::Dollar,
   Kind::Int,
   Kind::Float,
   Kind::InlineString,
   Kind::BlockString,
+  Kind::Char,
   Kind::LBracket,
   Kind::LBrace,
   Kind::Identifier,
@@ -72,6 +74,7 @@ pub(crate) const CONST_VALUE_HEADS: &[Kind] = &[
   Kind::Float,
   Kind::InlineString,
   Kind::BlockString,
+  Kind::Char,
   Kind::LBracket,
   Kind::LBrace,
   Kind::Identifier,
@@ -281,6 +284,94 @@ pub(crate) const LIST_CLOSER_HEADS: &[Kind] = &[Kind::RBracket];
 /// The `>` a generic list closes with, reported as [`PARENS_CLOSER_HEADS`] is.
 pub(crate) const ANGLE_CLOSER_HEADS: &[Kind] = &[Kind::RAngle];
 
+/// The two brackets a typed form opens with after its type path: `{` for a typed object and `(`
+/// for a typed value. What a schema value reports as expected where type arguments are followed by
+/// neither.
+pub(crate) const TYPED_FORM_HEADS: &[Kind] = &[Kind::LBrace, Kind::LParen];
+
+/// The `}` a `const { … }` block closes with: what its body reports as expected where something
+/// ended the expression without being the block's own, a `,` among them. A set, a map, an object
+/// and a typed object inside a block report the same where something ended a member without being
+/// their own.
+pub(crate) const BRACE_CLOSER_HEADS: &[Kind] = &[Kind::RBrace];
+
+/// What may begin an operand inside a `const { … }` block: the scalars' tokens, a prefixed string
+/// and a `char` literal, a name, a root's sigil, the `(` of a parenthesis, the `[` of a list and
+/// the `{` of an object. A number carries no sign there, so `-` is no head; and no variable is, as
+/// in a constant position.
+pub(crate) const BLOCK_OPERAND_HEADS: &[Kind] = &[
+  Kind::Int,
+  Kind::Float,
+  Kind::InlineString,
+  Kind::BlockString,
+  Kind::Char,
+  Kind::PrefixedString,
+  Kind::Identifier,
+  Kind::Tilde,
+  Kind::DotDot,
+  Kind::Caret,
+  Kind::LParen,
+  Kind::LBracket,
+  Kind::LBrace,
+];
+
+/// What may follow an operand inside a `const { … }` block and go on with the expression: one of
+/// the ten operators, or a `,`. A report through this set renders as
+/// [`OperatorOrSeparator`](crate::graphqlx::error::Expectation::OperatorOrSeparator), which no other
+/// set of this module has the contents of.
+pub(crate) const OPERATOR_OR_SEPARATOR_HEADS: &[Kind] = &[
+  Kind::Asterisk,
+  Kind::Slash,
+  Kind::Percent,
+  Kind::Plus,
+  Kind::Minus,
+  Kind::Shl,
+  Kind::Shr,
+  Kind::Ampersand,
+  Kind::Caret,
+  Kind::Pipe,
+  Kind::Separator,
+];
+
+/// The two tokens a `const { … }` block opens with, `const` and `{`: what a schema position offers
+/// where its value would be an expression. A report through this set renders as
+/// [`ConstBlock`](crate::graphqlx::error::Expectation::ConstBlock), which no other set of this module
+/// has the contents of.
+pub(crate) const CONST_BLOCK_HEADS: &[Kind] = &[Kind::Identifier, Kind::LBrace];
+
+/// Whether `kind` is one of the nine tokens an expression's operator is written with outside a
+/// block: `+`, `-`, `*`, `/`, `%`, `<<`, `&`, `|` and `!`.
+#[inline]
+pub(crate) const fn is_operator(kind: Kind) -> bool {
+  matches!(
+    kind,
+    Kind::Plus
+      | Kind::Minus
+      | Kind::Asterisk
+      | Kind::Slash
+      | Kind::Percent
+      | Kind::Shl
+      | Kind::Ampersand
+      | Kind::Pipe
+      | Kind::Bang
+  )
+}
+
+/// Whether `kind`, directly after a value where no second value may follow, can only go on with an
+/// expression: an operator's token, a `>`, which closes nothing there, a `^`, or a `(`. A number
+/// whose token begins with `-` goes on with one too, which its kind cannot say: see
+/// [`super::trivia::peek_signed_number`].
+#[inline]
+pub(crate) const fn continues_an_expression(kind: Kind) -> bool {
+  is_operator(kind) || matches!(kind, Kind::RAngle | Kind::Caret | Kind::LParen)
+}
+
+/// Whether `kind` is a number's, whose token may begin with `-`.
+#[inline]
+pub(crate) const fn is_number(kind: Kind) -> bool {
+  matches!(kind, Kind::Int | Kind::Float)
+}
+
 /// Whether `kind` can begin a value.
 ///
 /// [`VALUE_HEADS`] as a predicate. The two are kept in step by
@@ -302,6 +393,7 @@ pub(crate) const fn starts_value(kind: Kind) -> bool {
       | Kind::Float
       | Kind::InlineString
       | Kind::BlockString
+      | Kind::Char
       | Kind::LBracket
       | Kind::LBrace
       | Kind::Identifier
@@ -386,13 +478,16 @@ pub(crate) use crate::lossless::recover::opener_span;
 ///
 /// # What this dialect adds to GraphQL's set, and what it deliberately does not
 ///
-/// `Tilde`, `DotDot`, `Caret` and `RAngle` are in; `PathSeparator`, `LAngle`, `FatArrow`,
+/// `Tilde`, `DotDot`, `Caret`, `Char` and `RAngle` are in, and so are a block's `Separator` and
+/// prefixed string, which only a lexer in a block's mode makes, so no skip outside a block changes
+/// for them; `PathSeparator`, `LAngle`, `FatArrow`,
 /// `Asterisk`, `Plus` and `Minus` are out. A root's sigil starts a rooted path, which is a value and
 /// a type head, so a skip that ran past one would fold a whole rooted name into the junk before it.
-/// A `>` closes a generic list — the same argument the other three closers make. The six that stay
-/// out begin no production this suite can restart at: `::` and `=>` only ever join or separate,
-/// `<` only ever *follows* a path, and `*`/`+`/`-` reach the tree through recovery alone. Stopping
-/// at one of those would only split one `Error` node into two.
+/// A `char` literal starts a value, as a number does. A `>` closes a generic list — the same
+/// argument the other three closers make. The six that stay out begin no production this suite can
+/// restart at: `::` and `=>` only ever join or separate, `<` only ever *follows* a path, and
+/// `*`/`+`/`-` reach the tree through recovery alone. Stopping at one of those would only split one
+/// `Error` node into two.
 #[inline]
 fn is_sync_point(kind: Kind) -> bool {
   matches!(
@@ -402,6 +497,7 @@ fn is_sync_point(kind: Kind) -> bool {
       | Kind::Float
       | Kind::InlineString
       | Kind::BlockString
+      | Kind::Char
       | Kind::LBracket
       | Kind::LBrace
       | Kind::Identifier
@@ -413,6 +509,8 @@ fn is_sync_point(kind: Kind) -> bool {
       | Kind::RBrace
       | Kind::RParen
       | Kind::RAngle
+      | Kind::Separator
+      | Kind::PrefixedString
   )
 }
 
@@ -588,10 +686,69 @@ lossless_production! {
     crate::lossless::recover::report_unexpected(inp, expected)
   }
 
+  /// [`unexpected`] inside a `const { … }` block: report once, then skip with a scan that never
+  /// reads past a `}` it did not open, whatever else it left open.
+  ///
+  /// The shared skip balances one depth over every pair, so behind an unmatched `(` or `[` it reads
+  /// on past the block's `}`, in the block's mode, before its look-ahead for a `}` it did not open
+  /// takes that back, and what it read is paid for again under the produce-event budget. This one
+  /// reads forward once: it takes the head, then stops at the end of input, in front of a `}` none
+  /// of its own braces is open for, which it leaves staged for the block or the aggregate that owns
+  /// it, or in front of a restart point or a `=>` where its depth over every pair is zero: a `=>`
+  /// inside a block is a map entry's, read by the entry, so a skip in front of it never takes it.
+  /// A restart point at the head is taken alone, as the shared skip's fallback takes it. The caller
+  /// has asked about a `}` at the head before it calls, as every caller of the shared skip does.
+  fn unexpected_in_block<'inp, Src, Ctx>(inp, expected: &'static [Kind]) {
+    crate::lossless::recover::report_unexpected(inp, expected)?;
+    let Some(head) = super::trivia::peek_kind::<Src, Ctx>(inp)? else {
+      return Ok(());
+    };
+    let mark = inp.cst_mark();
+    let (mut depth, mut braces) = (0_usize, 0_usize);
+    let mut next = Some(head);
+    let mut first = true;
+    while let Some(kind) = next {
+      if !first
+        && ((kind == Kind::RBrace && braces == 0)
+          || (depth == 0 && (is_sync_point(kind) || kind == Kind::FatArrow)))
+      {
+        break;
+      }
+      inp.try_expect_or_stop(|_| true)?;
+      match delimiters(&kind) {
+        Balance::Open(pair) => {
+          depth += 1;
+          if pair == b'{' {
+            braces += 1;
+          }
+        }
+        Balance::Close(pair) => {
+          depth = depth.saturating_sub(1);
+          if pair == b'{' {
+            braces = braces.saturating_sub(1);
+          }
+        }
+        Balance::Neutral => {}
+      }
+      if first && is_sync_point(kind) {
+        break;
+      }
+      first = false;
+      next = super::trivia::peek_kind::<Src, Ctx>(inp)?;
+    }
+    inp.cst_start_at(mark, K::Error.raw());
+    inp.cst_finish(K::Error.raw());
+    Ok(())
+  }
+
   /// Nothing that could start one of `expected` is here, and there is still input.
   /// [`crate::lossless::recover::unexpected`] with this dialect's four pairs and its restart
-  /// predicate.
+  /// predicate, and inside a `const { … }` block, where the lexer's state says it is,
+  /// [`unexpected_in_block`], which reads nothing past the block's `}`.
   fn unexpected<'inp, Src, Ctx>(inp, expected: &'static [Kind]) {
+    if inp.state().in_const_block() {
+      return unexpected_in_block::<Src, Ctx>(inp, expected);
+    }
     // #168's scan allowance. Read here rather than inside the substrate helper because the
     // committed side is `smear-lexer`'s token tally and `crate::lossless::recover` may not name
     // that crate — `lossless_isolation.rs` enforces it. **Both numbers are produce-events**, and

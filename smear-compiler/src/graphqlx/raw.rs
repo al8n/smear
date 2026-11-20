@@ -54,9 +54,11 @@ pub(crate) enum RawKind {
   /// An object: its first row of the table's fields, the row of its first field, each later field
   /// the next row.
   Object(u32),
-  /// A value lowering did not read, its literals past `Limits::max_values`: the one node of its
-  /// tree, where the whole value is written. Coercion makes it one unresolved row, and says
-  /// nothing, lowering having said why.
+  /// A value lowering did not read: one with its literals past `Limits::max_values`, as the one
+  /// node of its tree, where the whole value is written; or a number with a suffix, a `char`
+  /// literal, a typed form or a `const { … }` block, each of which lowering reports as an item of a
+  /// kind it does not know, a typed form and a block as one node whatever they hold. Coercion makes it one unresolved row, and
+  /// says nothing, lowering having said why.
   Refused,
 }
 

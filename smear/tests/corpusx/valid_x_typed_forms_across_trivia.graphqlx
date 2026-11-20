@@ -1,0 +1,8 @@
+input Spaced {
+  point: Point = Point
+  # a comment
+  { x: 1 }
+  link: Link = Url
+  ("x")
+  boxed: Wrap = Box <i32> {}
+}

@@ -335,7 +335,7 @@ fn a_scanner_stop_reaches_this_dialect_marked_and_the_split_keeps_the_mark() {
 /// tokora's directly, so a plant on the sibling would have proved nothing about this.
 #[test]
 fn the_marks_smear_has_to_make_itself_reach_the_caller() {
-  use smear_lexer::limits::SyntacticLimits;
+  use smear_lexer::{graphqlx::syntactic::SyntacticState, limits::SyntacticLimits};
   use tokora::{
     FatalContext, Parse as _, Parser, ParserContext, cache::DefaultCache, emitter::Verbose,
     input::TokenBudget,
@@ -366,7 +366,7 @@ fn the_marks_smear_has_to_make_itself_reach_the_caller() {
     state: SyntacticLimits,
   ) -> Result<O, GraphqlxErrors<&'inp str>> {
     Parser::with_parser::<'inp, Lx<'inp>, O, GraphqlxErrors<&'inp str>, _, GraphQLx>(f)
-      .parse_str_with_state(src, state)
+      .parse_str_with_state(src, SyntacticState::new(state))
   }
 
   fn budgeted<'inp, O>(

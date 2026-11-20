@@ -11,7 +11,11 @@ use tokora::{
   diagnostic::{Diagnose, Location},
 };
 
-use crate::{SyntaxErrorKind, graphqlx::syntactic::SyntacticLexer, limits::SyntacticLimits};
+use crate::{
+  SyntaxErrorKind,
+  graphqlx::syntactic::{SyntacticLexer, SyntacticState},
+  limits::SyntacticLimits,
+};
 
 /// Whether `text` names a source position: a `[0-9]+..[0-9]+` range, or a word one is spelled
 /// with.
@@ -212,7 +216,10 @@ fn a_byte_source_refuses_an_ill_formed_string_as_invalid_utf8() {
 fn a_tripped_ceiling_reports_a_resource_limit() {
   let src = "<a::b>";
   let error = first_error!(
-    SyntacticLexer::<str>::with_state(src, SyntacticLimits::with_max_nesting_depth(0)),
+    SyntacticLexer::<str>::with_state(
+      src,
+      SyntacticState::new(SyntacticLimits::with_max_nesting_depth(0))
+    ),
     src
   );
   assert_refusal!(

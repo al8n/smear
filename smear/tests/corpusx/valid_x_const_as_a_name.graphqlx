@@ -1,0 +1,13 @@
+type const {
+  a: Int
+  b: const
+}
+
+input Modes {
+  m: Mode = const
+  n: Int
+  o: Mode = const { const }
+  t: T = ~::const { a: 1 }
+}
+
+{ const { id } }

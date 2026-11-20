@@ -1,7 +1,7 @@
 //! The Sink runner: binds a source to a `cst::Sink`, drives the document production, and
 //! materializes a `rowan` tree.
 
-use smear_lexer::limits::LosslessLimits;
+use smear_lexer::{graphqlx::lossless::LosslessState, limits::LosslessLimits};
 use tokora::{
   Source,
   cst::{CstProfile, KindValidator},
@@ -128,7 +128,7 @@ where
 {
   parse_lossless_document(
     src,
-    limits,
+    LosslessState::new(limits),
     super::document::type_system_document::<str, _>,
     lend,
   )
@@ -258,7 +258,7 @@ pub fn parse_document_with_limits(src: &str, limits: LosslessLimits) -> Parse {
   // The `&str` half of the root pair. `str` discharges the UTF-8 requirement by type and not the
   // length one, which is why this signature is not a `Result` and why an over-length source still
   // panics at materialisation — the precondition documented above.
-  document_root(src, limits)
+  document_root(src, LosslessState::new(limits))
 }
 
 /// [`parse_document`] over any source [`LosslessSource`] admits.
@@ -343,7 +343,7 @@ pub fn parse_document_from_with_limits<Src: LosslessSource + ?Sized>(
   // ONE CALL, AND IT IS THE WHOLE PARSE — and the only place in this root's four doors where a
   // source can be refused. The fallible half of the root pair takes the source's text, validating
   // it once if the source is bytes, and hands it to the `&str` half.
-  document_root_from(src, limits)
+  document_root_from(src, LosslessState::new(limits))
 }
 
 /// Parse a source as a GraphQLx **type-system** (SDL-only) document, losslessly.
@@ -378,7 +378,7 @@ pub fn parse_type_system_document_with_limits(src: &str, limits: LosslessLimits)
   // The `&str` half of the root pair. `str` discharges the UTF-8 requirement by type and not the
   // length one, which is why this signature is not a `Result` and why an over-length source still
   // panics at materialisation — the precondition documented above.
-  type_system_document_root(src, limits)
+  type_system_document_root(src, LosslessState::new(limits))
 }
 
 /// [`parse_type_system_document`] over any source [`LosslessSource`] admits.
@@ -401,7 +401,7 @@ pub fn parse_type_system_document_from_with_limits<Src: LosslessSource + ?Sized>
   // ONE CALL, AND IT IS THE WHOLE PARSE — and the only place in this root's four doors where a
   // source can be refused. The fallible half of the root pair takes the source's text, validating
   // it once if the source is bytes, and hands it to the `&str` half.
-  type_system_document_root_from(src, limits)
+  type_system_document_root_from(src, LosslessState::new(limits))
 }
 
 /// Parse a source as a GraphQLx **executable** document, losslessly.
@@ -429,7 +429,7 @@ pub fn parse_executable_document_with_limits(src: &str, limits: LosslessLimits) 
   // The `&str` half of the root pair. `str` discharges the UTF-8 requirement by type and not the
   // length one, which is why this signature is not a `Result` and why an over-length source still
   // panics at materialisation — the precondition documented above.
-  executable_document_root(src, limits)
+  executable_document_root(src, LosslessState::new(limits))
 }
 
 /// [`parse_executable_document`] over any source [`LosslessSource`] admits.
@@ -452,7 +452,7 @@ pub fn parse_executable_document_from_with_limits<Src: LosslessSource + ?Sized>(
   // ONE CALL, AND IT IS THE WHOLE PARSE — and the only place in this root's four doors where a
   // source can be refused. The fallible half of the root pair takes the source's text, validating
   // it once if the source is bytes, and hands it to the `&str` half.
-  executable_document_root_from(src, limits)
+  executable_document_root_from(src, LosslessState::new(limits))
 }
 
 /// Test-only scaffolding for probing the sink's own kind-validator door.

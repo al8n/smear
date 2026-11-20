@@ -106,7 +106,7 @@
 //! what that costs — an `expect` that skips trivia on its accepting branch as well as before it
 //! moves trailing placement across the whole corpus while round-trip, the gap census, the parity
 //! gate, the injection gate and the projection differential all stay green. So the sentence is now
-//! [`CLOSES_ON_TRAILING_TRIVIA`], forty-nine pairings re-derived on every run by
+//! [`CLOSES_ON_TRAILING_TRIVIA`], fifty-two pairings re-derived on every run by
 //! [`only_the_recorded_nodes_close_on_their_trailing_trivia`]. It is nearly twice its GraphQL
 //! twin's length for a reason the constant states: two GraphQLx productions end on a probe for an
 //! optional continuation that is usually not there — `::` for a path, `<` for a definition's name
@@ -305,7 +305,11 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 const CLOSES_ON_TRAILING_TRIVIA: &[&str] = &[
   "Argument > ListValue",
   "Arguments > Argument",
+  "Arguments > Error",
   "ArgumentsDefinition > InputValueDefinition",
+  "ConstBlock > Error",
+  "ConstBlock > Expression",
+  "DefaultValue > TypedObjectValue",
   "DefinitionTypeGenerics > DefinitionTypeParam",
   "DefinitionTypePath > Path",
   "DirectiveDefinition > DefinitionName",
@@ -338,6 +342,7 @@ const CLOSES_ON_TRAILING_TRIVIA: &[&str] = &[
   "ObjectTypeDefinition > Directives",
   "ObjectTypeExtension > Directives",
   "OperationDefinition > DefinitionName",
+  "ParenValue > Expression",
   "Root > Document",
   "ScalarTypeDefinition > DefinitionName",
   "ScalarTypeDefinition > Directives",
@@ -350,6 +355,7 @@ const CLOSES_ON_TRAILING_TRIVIA: &[&str] = &[
   "UnionTypeDefinition > DefinitionName",
   "UseDefinition > UseTree",
   "UseTree > Path",
+  "VariablesDefinition > Error",
   "VariablesDefinition > VariableDefinition",
   "WhereClause > WherePredicate",
 ];
@@ -468,6 +474,20 @@ const SHAPE_CASES: &[(&str, &str)] = &[
   (
     "qualified_path_nesting",
     "type T { f: [^::ns::Inner<Int>!]! }",
+  ),
+  // ---- The `const { … }` block ----
+  //
+  // The `Expression` node's extent: the trivia before the operand is the block's, and the trivia
+  // after it is the expression's own, crossed by the read that finds whether it goes on.
+  (
+    "const_block_one_value",
+    "input I { a: Int = const { 1 } }\n",
+  ),
+  // What follows an operand and ends no expression is skipped into an `Error` beside the
+  // `Expression`, in the block, and the block still closes on its own `}`.
+  (
+    "const_block_two_operands",
+    "input I { a: Int = const { 1 2 } }\n",
   ),
 ];
 
@@ -1060,20 +1080,20 @@ fn only_a_source_with_no_committed_token_tiles_its_gap_at_the_root() {
 
   // The positive controls, so this census cannot pass because nothing anywhere produces a gap.
   //
-  // GraphQLx lexes seven images GraphQL does not, so its "illegal character" is a different byte:
-  // `%` is still one, and it is the smallest source that reaches the fallback clause.
+  // GraphQLx lexes images GraphQL does not, `%` among them, so its "illegal character" is a
+  // different byte: `?` is one, and it is the smallest source that reaches the fallback clause.
   assert_eq!(
-    gap_parents("% {"),
+    gap_parents("? {"),
     vec![K::Document],
     "a leading run tiles at the node its first committed token lands in"
   );
   assert!(
-    !gap_at_root("{ %"),
+    !gap_at_root("{ ?"),
     "a run with nothing lexable after it must not escape to `Root`; if this fails, the \
      trailing-gap fix has been reverted upstream"
   );
   assert!(
-    gap_at_root("%"),
+    gap_at_root("?"),
     "a source with no committed token has no moment at which its run opens, so the run tiles \
      where the walk ends, which is `Root`"
   );
@@ -1211,7 +1231,7 @@ fn only_the_recorded_nodes_open_on_their_leading_trivia() {
 /// appeared where a production began holding its node open across a peek, and list pairings
 /// vanished, because trivia eaten by the `expect` that ends an element never reaches the loop peek
 /// that used to leave it inside the preceding sibling. So the failure is reported as the two
-/// differences rather than as two forty-nine-element vectors: which half moved is what tells a
+/// differences rather than as two fifty-two-element vectors: which half moved is what tells a
 /// reader whether a production gained a probe or lost one.
 #[test]
 fn only_the_recorded_nodes_close_on_their_trailing_trivia() {

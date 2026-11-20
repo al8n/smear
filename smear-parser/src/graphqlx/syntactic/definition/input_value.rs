@@ -19,7 +19,12 @@ definition_parser!(
     let name = take_name(inp)?;
     take_colon(inp)?;
     let ty = take_type(inp)?;
-    let default_value = default_value(inp)?;
+    let default_value = schema_default_value(inp)?;
+    // After a written default, what goes on with an expression is refused where it stands, against
+    // the block it offers: one more read of the staged head, and no lex, and none without a default.
+    if default_value.is_some() {
+      super::super::value::refuse_expression_after(inp)?;
+    }
     let directives = optional_const_directives(inp)?;
     let span = inp.span_since_trimmed(&node_start);
     Ok(Described::new(

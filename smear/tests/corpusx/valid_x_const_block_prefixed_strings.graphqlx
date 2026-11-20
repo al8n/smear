@@ -1,0 +1,6 @@
+input Prefixed {
+  png: Bytes = const { b"\x89PNG" }
+  id: ID = const { i"7" }
+  block: Bytes = const { b"""x""" }
+  tight: Bytes = const {b"x"}
+}

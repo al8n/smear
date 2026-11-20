@@ -1,0 +1,158 @@
+Root@0..173
+  Document@0..173
+    InputObjectTypeDefinition@0..117
+      Name@0..5 "input"
+      Space@5..6 " "
+      DefinitionName@6..13
+        Name@6..12 "Shapes"
+        Space@12..13 " "
+      InputFieldsDefinition@13..117
+        LBrace@13..14 "{"
+        Newline@14..15 "\n"
+        Space@15..16 " "
+        Space@16..17 " "
+        InputValueDefinition@17..49
+          Name@17..22 "point"
+          Colon@22..23 ":"
+          Space@23..24 " "
+          DefinitionTypePath@24..30
+            Path@24..30
+              Name@24..29 "Point"
+              Space@29..30 " "
+          DefaultValue@30..46
+            Equal@30..31 "="
+            Space@31..32 " "
+            TypedObjectValue@32..46
+              TypePath@32..38
+                Path@32..38
+                  Name@32..37 "Point"
+                  Space@37..38 " "
+              LBrace@38..39 "{"
+              Space@39..40 " "
+              ObjectField@40..44
+                Name@40..41 "x"
+                Colon@41..42 ":"
+                Space@42..43 " "
+                IntValue@43..44
+                  Int@43..44 "1"
+              Space@44..45 " "
+              RBrace@45..46 "}"
+          Newline@46..47 "\n"
+          Space@47..48 " "
+          Space@48..49 " "
+        InputValueDefinition@49..77
+          Name@49..54 "boxed"
+          Colon@54..55 ":"
+          Space@55..56 " "
+          DefinitionTypePath@56..61
+            Path@56..61
+              Name@56..60 "Wrap"
+              Space@60..61 " "
+          DefaultValue@61..74
+            Equal@61..62 "="
+            Space@62..63 " "
+            TypedObjectValue@63..74
+              TypePath@63..71
+                Path@63..66
+                  Name@63..66 "Box"
+                TypeGenerics@66..71
+                  LAngle@66..67 "<"
+                  DefinitionTypePath@67..70
+                    Path@67..70
+                      Name@67..70 "i32"
+                  RAngle@70..71 ">"
+              Space@71..72 " "
+              LBrace@72..73 "{"
+              RBrace@73..74 "}"
+          Newline@74..75 "\n"
+          Space@75..76 " "
+          Space@76..77 " "
+        InputValueDefinition@77..116
+          Name@77..83 "holder"
+          Colon@83..84 ":"
+          Space@84..85 " "
+          DefinitionTypePath@85..92
+            Path@85..92
+              Name@85..91 "Holder"
+              Space@91..92 " "
+          DefaultValue@92..115
+            Equal@92..93 "="
+            Space@93..94 " "
+            ObjectValue@94..115
+              LBrace@94..95 "{"
+              Space@95..96 " "
+              ObjectField@96..113
+                Name@96..97 "p"
+                Colon@97..98 ":"
+                Space@98..99 " "
+                TypedObjectValue@99..113
+                  TypePath@99..105
+                    Path@99..105
+                      Name@99..104 "Point"
+                      Space@104..105 " "
+                  LBrace@105..106 "{"
+                  Space@106..107 " "
+                  ObjectField@107..111
+                    Name@107..108 "x"
+                    Colon@108..109 ":"
+                    Space@109..110 " "
+                    IntValue@110..111
+                      Int@110..111 "1"
+                  Space@111..112 " "
+                  RBrace@112..113 "}"
+              Space@113..114 " "
+              RBrace@114..115 "}"
+          Newline@115..116 "\n"
+        RBrace@116..117 "}"
+    Newline@117..118 "\n"
+    Newline@118..119 "\n"
+    ObjectTypeDefinition@119..172
+      Name@119..123 "type"
+      Space@123..124 " "
+      DefinitionName@124..130
+        Name@124..129 "Query"
+        Space@129..130 " "
+      FieldsDefinition@130..172
+        LBrace@130..131 "{"
+        Newline@131..132 "\n"
+        Space@132..133 " "
+        Space@133..134 " "
+        FieldDefinition@134..171
+          Name@134..139 "shape"
+          Colon@139..140 ":"
+          Space@140..141 " "
+          DefinitionTypePath@141..145
+            Path@141..145
+              Name@141..144 "Int"
+              Space@144..145 " "
+          Directives@145..171
+            Directive@145..170
+              At@145..146 "@"
+              TypePath@146..150
+                Path@146..150
+                  Name@146..150 "look"
+              Arguments@150..170
+                LParen@150..151 "("
+                Argument@151..169
+                  Name@151..153 "at"
+                  Colon@153..154 ":"
+                  Space@154..155 " "
+                  TypedObjectValue@155..169
+                    TypePath@155..161
+                      Path@155..161
+                        Name@155..160 "Point"
+                        Space@160..161 " "
+                    LBrace@161..162 "{"
+                    Space@162..163 " "
+                    ObjectField@163..167
+                      Name@163..164 "x"
+                      Colon@164..165 ":"
+                      Space@165..166 " "
+                      IntValue@166..167
+                        Int@166..167 "1"
+                    Space@167..168 " "
+                    RBrace@168..169 "}"
+                RParen@169..170 ")"
+            Newline@170..171 "\n"
+        RBrace@171..172 "}"
+    Newline@172..173 "\n"

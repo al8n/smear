@@ -1066,6 +1066,25 @@ where
   assert_eq!(err.lexeme().unwrap_char_ref().position(), 3);
   assert_eq!(lexer.span(), 0..4);
 
+  // One refused letter is the unit refused, not the one after it: the `é` is left whole for the
+  // next item, where a span over its position alone would end inside it.
+  let mut lexer = Token::test_lexer("1.aé");
+  let err = lexer
+    .next()
+    .unwrap()
+    .unwrap_err()
+    .pop()
+    .unwrap()
+    .into_data()
+    .unwrap_float()
+    .unwrap_unexpected_lexeme();
+  assert_eq!(err.hint(), &FloatHint::Fractional);
+  assert_eq!(err.lexeme().unwrap_char_ref().char_ref(), &'a');
+  assert_eq!(err.lexeme().unwrap_char_ref().position(), 2);
+  assert_eq!(lexer.span(), 0..3);
+  assert!(lexer.next().is_some_and(|item| item.is_err()));
+  assert_eq!(lexer.span(), 3..5);
+
   let mut lexer = Token::test_lexer("1.abc");
   let err = lexer
     .next()
