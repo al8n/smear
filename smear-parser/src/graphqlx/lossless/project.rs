@@ -3533,10 +3533,15 @@ fn argument<'src>(node: Node<'_>, source: &'src str) -> Out<(Argument<&'src str>
   Ok((Argument::new(to_span(extent), name, value), extent))
 }
 
-fn optional_const_directives<'src>(
+/// A constant directive run, its arguments' values read by the grammar `G` names: [`Schema`] where
+/// a type-system definition or extension applies it, and [`Constant`] on a variable.
+fn optional_const_directives<'src, G>(
   run: Option<Node<'_>>,
   source: &'src str,
-) -> Out<Optional<ConstDirectives<&'src str>>> {
+) -> Out<Optional<ConstDirectives<&'src str>>>
+where
+  G: ValueGrammar<'src, Value = ConstInputValue<&'src str>>,
+{
   let Some(run) = run else {
     return Ok((None, None));
   };
@@ -3546,7 +3551,7 @@ fn optional_const_directives<'src>(
   cursor.end()?;
   let mut directives = Vec::with_capacity(listed.len());
   for child in listed {
-    directives.push(cursor.keep(const_directive(child, source)?));
+    directives.push(cursor.keep(const_directive::<G>(child, source)?));
   }
   let extent = cursor.range("a token")?;
   Ok((
@@ -3555,10 +3560,13 @@ fn optional_const_directives<'src>(
   ))
 }
 
-fn const_directive<'src>(
+fn const_directive<'src, G>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<(ConstDirective<&'src str>, TextRange)> {
+) -> Out<(ConstDirective<&'src str>, TextRange)>
+where
+  G: ValueGrammar<'src, Value = ConstInputValue<&'src str>>,
+{
   // `@ TypePath Arguments[Const]?`
   let mut cursor = Cursor::new(node);
   cursor.token(K::At, "the `@` a directive opens with")?;
@@ -3566,7 +3574,7 @@ fn const_directive<'src>(
   let arguments_node = cursor.opt_node(K::Arguments);
   cursor.end()?;
   let name = cursor.keep(type_path(name_node, source)?);
-  let arguments = cursor.keep_optional(optional_const_arguments(arguments_node, source)?);
+  let arguments = cursor.keep_optional(optional_const_arguments::<G>(arguments_node, source)?);
   let extent = cursor.range("a token")?;
   Ok((
     ConstDirective::new(to_span(extent), name, arguments),
@@ -3574,10 +3582,13 @@ fn const_directive<'src>(
   ))
 }
 
-fn optional_const_arguments<'src>(
+fn optional_const_arguments<'src, G>(
   list: Option<Node<'_>>,
   source: &'src str,
-) -> Out<Optional<ConstArguments<&'src str>>> {
+) -> Out<Optional<ConstArguments<&'src str>>>
+where
+  G: ValueGrammar<'src, Value = ConstInputValue<&'src str>>,
+{
   let Some(list) = list else {
     return Ok((None, None));
   };
@@ -3589,7 +3600,7 @@ fn optional_const_arguments<'src>(
   cursor.end()?;
   let mut arguments = Vec::with_capacity(listed.len());
   for child in listed {
-    arguments.push(cursor.keep(const_argument(child, source)?));
+    arguments.push(cursor.keep(const_argument::<G>(child, source)?));
   }
   let extent = cursor.range("a token")?;
   Ok((
@@ -3598,17 +3609,20 @@ fn optional_const_arguments<'src>(
   ))
 }
 
-fn const_argument<'src>(
+fn const_argument<'src, G>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<(ConstArgument<&'src str>, TextRange)> {
+) -> Out<(ConstArgument<&'src str>, TextRange)>
+where
+  G: ValueGrammar<'src, Value = ConstInputValue<&'src str>>,
+{
   // `Name : Value[Const]`
   let mut cursor = Cursor::new(node);
   let name = cursor.name_token(source, "an argument name")?;
   cursor.token(K::Colon, "the `:` before an argument's value")?;
   let value_node = cursor.one_of(&VALUE_KINDS, "a value")?;
   cursor.end()?;
-  let value = cursor.keep(const_value(node, value_node, source)?);
+  let value = cursor.keep(const_value::<G>(node, value_node, source)?);
   let extent = cursor.range("a token")?;
   Ok((ConstArgument::new(to_span(extent), name, value), extent))
 }
@@ -3773,7 +3787,8 @@ fn variable_value<'src>(
   Ok((VariableValue::new(to_span(extent), name), extent))
 }
 
-/// The two value grammars this dialect projects, over one walk.
+/// The value grammars this dialect projects, over one walk: an executable position's, an executable
+/// document's constant one, and a schema position's, which answers as the constant one does.
 ///
 /// `value` and `const_value` are each other with `Const` spelled in: twelve arms, eleven of them
 /// character-for-character identical, differing in the constructors they name and in one refusal.
@@ -3944,6 +3959,78 @@ impl<'src> ValueGrammar<'src> for Constant {
 
   fn entry(span: SimpleSpan, key: Self::Value, value: Self::Value) -> Self::Entry {
     ConstMapEntry::new(span, key, value)
+  }
+}
+
+/// A schema position: a constant position of a type-system definition or extension, which is a
+/// member's default and an argument of each directive such a definition applies.
+///
+/// It answers everything [`Constant`] answers, a variable's refusal included.
+struct Schema;
+
+impl<'src> ValueGrammar<'src> for Schema {
+  type Value = ConstInputValue<&'src str>;
+  type Field = ConstObjectField<&'src str>;
+  type Entry = ConstMapEntry<&'src str>;
+
+  fn variable(
+    parent: Node<'_>,
+    node: Node<'_>,
+    source: &'src str,
+  ) -> Out<(Self::Value, TextRange)> {
+    <Constant as ValueGrammar<'src>>::variable(parent, node, source)
+  }
+
+  fn int(span: SimpleSpan, value: LitInt<&'src str>) -> Self::Value {
+    <Constant as ValueGrammar<'src>>::int(span, value)
+  }
+
+  fn float(span: SimpleSpan, value: LitFloat<&'src str>) -> Self::Value {
+    <Constant as ValueGrammar<'src>>::float(span, value)
+  }
+
+  fn character(span: SimpleSpan, value: LitChar<&'src str>) -> Self::Value {
+    <Constant as ValueGrammar<'src>>::character(span, value)
+  }
+
+  fn string(value: StringValue<&'src str>) -> Self::Value {
+    <Constant as ValueGrammar<'src>>::string(value)
+  }
+
+  fn boolean(value: BooleanValue<&'src str>) -> Self::Value {
+    <Constant as ValueGrammar<'src>>::boolean(value)
+  }
+
+  fn null(span: SimpleSpan, text: &'src str) -> Self::Value {
+    <Constant as ValueGrammar<'src>>::null(span, text)
+  }
+
+  fn enumeration(value: EnumValue<&'src str>) -> Self::Value {
+    <Constant as ValueGrammar<'src>>::enumeration(value)
+  }
+
+  fn list(span: SimpleSpan, values: Vec<Self::Value>) -> Self::Value {
+    <Constant as ValueGrammar<'src>>::list(span, values)
+  }
+
+  fn set(span: SimpleSpan, values: Vec<Self::Value>) -> Self::Value {
+    <Constant as ValueGrammar<'src>>::set(span, values)
+  }
+
+  fn map(span: SimpleSpan, entries: Vec<Self::Entry>) -> Self::Value {
+    <Constant as ValueGrammar<'src>>::map(span, entries)
+  }
+
+  fn object(span: SimpleSpan, fields: Vec<Self::Field>) -> Self::Value {
+    <Constant as ValueGrammar<'src>>::object(span, fields)
+  }
+
+  fn field(span: SimpleSpan, name: Name<&'src str>, value: Self::Value) -> Self::Field {
+    <Constant as ValueGrammar<'src>>::field(span, name, value)
+  }
+
+  fn entry(span: SimpleSpan, key: Self::Value, value: Self::Value) -> Self::Entry {
+    <Constant as ValueGrammar<'src>>::entry(span, key, value)
   }
 }
 
@@ -4457,23 +4544,32 @@ fn value<'src>(node: Node<'_>, source: &'src str) -> Out<(InputValue<&'src str>,
   value_tree::<Executable>(node, node, source)
 }
 
-/// A constant value position, where the AST's own type system forbids a variable.
+/// A constant value position, where the AST's own type system forbids a variable, read by the
+/// grammar `G` names: [`Schema`] in a type-system definition or extension, and [`Constant`] in an
+/// executable document.
 ///
 /// `parent` is the node whose dispatch reached `node`. A green tree carries no parent pointer, and
 /// the caller's own frame is where the one the refusal names comes from.
-fn const_value<'src>(
+fn const_value<'src, G>(
   parent: Node<'_>,
   node: Node<'_>,
   source: &'src str,
-) -> Out<(ConstInputValue<&'src str>, TextRange)> {
-  value_tree::<Constant>(parent, node, source)
+) -> Out<(ConstInputValue<&'src str>, TextRange)>
+where
+  G: ValueGrammar<'src, Value = ConstInputValue<&'src str>>,
+{
+  value_tree::<G>(parent, node, source)
 }
 
-/// `= Value[Const]`, which is const in both positions the grammar puts it in.
-fn optional_default_value<'src>(
+/// `= Value[Const]`, which is const in both positions the grammar puts it in: a member's default,
+/// read by [`Schema`], and a variable's, read by [`Constant`].
+fn optional_default_value<'src, G>(
   default: Option<Node<'_>>,
   source: &'src str,
-) -> Out<Option<(DefaultInputValue<&'src str>, TextRange)>> {
+) -> Out<Option<(DefaultInputValue<&'src str>, TextRange)>>
+where
+  G: ValueGrammar<'src, Value = ConstInputValue<&'src str>>,
+{
   let Some(default) = default else {
     return Ok(None);
   };
@@ -4482,7 +4578,7 @@ fn optional_default_value<'src>(
   cursor.token(K::Equal, "the `=` a default opens with")?;
   let value_node = cursor.one_of(&VALUE_KINDS, "a value")?;
   cursor.end()?;
-  let value = cursor.keep(const_value(default, value_node, source)?);
+  let value = cursor.keep(const_value::<G>(default, value_node, source)?);
   let extent = cursor.range("a token")?;
   Ok(Some((
     DefaultInputValue::new(to_span(extent), value),
@@ -5028,8 +5124,11 @@ fn variable_definition<'src>(
   let (description, described) = hoisted_description(description_token, source)?;
   let variable = cursor.keep(variable_value(variable_node, source)?);
   let ty = cursor.keep(ty(type_node, source)?);
-  let default_value = cursor.keep_opt(optional_default_value(default_node, source)?);
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let default_value = cursor.keep_opt(optional_default_value::<Constant>(default_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Constant>(
+    directives_node,
+    source,
+  )?);
 
   // The one described node below document level whose inner span excludes the description — see
   // the module header for the three that do not.
@@ -5211,7 +5310,10 @@ fn field_definition<'src>(
   let arguments_definition =
     cursor.keep_opt(optional_arguments_definition(arguments_node, source)?);
   let ty = cursor.keep(ty(type_node, source)?);
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
 
   let extent = cursor.range("a token")?;
   let span = to_span(extent);
@@ -5278,8 +5380,11 @@ fn input_value_definition<'src>(
 
   let (description, _) = hoisted_description(description_token, source)?;
   let ty = cursor.keep(ty(type_node, source)?);
-  let default_value = cursor.keep_opt(optional_default_value(default_node, source)?);
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let default_value = cursor.keep_opt(optional_default_value::<Schema>(default_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
 
   let extent = cursor.range("a token")?;
   let span = to_span(extent);
@@ -5384,7 +5489,10 @@ fn enum_value_definition<'src>(
   cursor.end()?;
 
   let (description, _) = hoisted_description(description_token, source)?;
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
 
   let extent = cursor.range("a token")?;
   let span = to_span(extent);
@@ -5417,7 +5525,10 @@ fn scalar_type_definition<'src>(
   let (description, described) = hoisted_description(description_token, source)?;
   let name = cursor.keep(definition_name(name_node, source)?);
   let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
   let where_clause = cursor.keep_opt(optional_where_clause(where_node, source)?);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
@@ -5453,7 +5564,10 @@ fn object_type_definition<'src>(
   let (description, described) = hoisted_description(description_token, source)?;
   let name = cursor.keep(definition_name(name_node, source)?);
   let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
   let fields = optional_constrained_before(
     node,
     optional_where_clause(where_node, source)?,
@@ -5495,7 +5609,10 @@ fn interface_type_definition<'src>(
   let (description, described) = hoisted_description(description_token, source)?;
   let name = cursor.keep(definition_name(name_node, source)?);
   let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
   let fields = optional_constrained_before(
     node,
     optional_where_clause(where_node, source)?,
@@ -5537,7 +5654,10 @@ fn union_type_definition<'src>(
   let (description, described) = hoisted_description(description_token, source)?;
   let name = cursor.keep(definition_name(name_node, source)?);
   let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
   let members = optional_constrained_after(
     node,
     optional_union_members(members_node, source)?,
@@ -5578,7 +5698,10 @@ fn enum_type_definition<'src>(
   let (description, described) = hoisted_description(description_token, source)?;
   let name = cursor.keep(definition_name(name_node, source)?);
   let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
   let values = cursor.keep_opt(optional_enum_values(values_node, source)?);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
@@ -5608,7 +5731,10 @@ fn input_object_type_definition<'src>(
   let (description, described) = hoisted_description(description_token, source)?;
   let name = cursor.keep(definition_name(name_node, source)?);
   let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
   let fields = optional_constrained_before(
     node,
     optional_where_clause(where_node, source)?,
@@ -5659,7 +5785,10 @@ fn directive_definition<'src>(
   let name = cursor.keep(definition_name(name_node, source)?);
   let arguments_definition =
     cursor.keep_opt(optional_arguments_definition(arguments_node, source)?);
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
   // The other site this grammar puts the clause after the thing it constrains.
   let locations = cursor.keep(constrained_after(
     directive_locations(locations_node)?,
@@ -5726,7 +5855,10 @@ fn schema_definition<'src>(
   )?;
 
   let (description, described) = hoisted_description(description_token, source)?;
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
   let roots = cursor.keep(root_operation_types(roots_node, source)?);
 
   cursor.end()?;
@@ -5880,7 +6012,10 @@ fn extension_parts<'src>(node: Node<'_>, source: &'src str) -> Out<ExtensionPart
 
   let name = cursor.keep(extension_name(name_node, source)?);
   let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
 
   // At most one tail is in any kind's sequence, so the three below cannot both be `Some` and the
   // clause belongs to whichever one is here.
@@ -6090,7 +6225,10 @@ fn schema_extension<'src>(
   let directives_node = cursor.opt_node(K::Directives);
   let roots_node = cursor.opt_node(K::RootOperationTypesDefinition);
 
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
   let roots = match roots_node {
     Some(block) => Some(cursor.keep(root_operation_types(block, source)?)),
     None => None,
@@ -6129,7 +6267,10 @@ fn directive_extension<'src>(
   let name = cursor.keep(extension_name(name_node, source)?);
   // The extension's only tail, so the grammar makes it mandatory.
   let directives = cursor
-    .keep_optional(optional_const_directives(directives_node, source)?)
+    .keep_optional(optional_const_directives::<Schema>(
+      directives_node,
+      source,
+    )?)
     .ok_or_else(|| missing(node, "the directives a directive extension must add"))?;
   let extent = cursor.range("a token")?;
   Ok((

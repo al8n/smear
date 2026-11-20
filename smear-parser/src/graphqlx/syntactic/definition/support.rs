@@ -114,8 +114,9 @@ where
   )
 }
 
-/// Parses an optional run of constant directives, normalizing an empty run to
-/// `None` for AST fields whose grammar uses optional directives.
+/// Parses an optional run of a schema position's directives, the ones a type-system definition or
+/// extension applies, normalizing an empty run to `None` for AST fields whose grammar uses optional
+/// directives.
 pub(super) fn optional_const_directives<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<Option<ConstDirectives<GraphqlxSlice<'inp, Src>>>, GraphqlxError<'inp, Src, Ctx>>
@@ -128,7 +129,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  let directives = super::super::directive::const_directives(inp)?;
+  let directives = super::super::directive::schema_directives(inp)?;
   Ok((!directives.directives().is_empty()).then_some(directives))
 }
 

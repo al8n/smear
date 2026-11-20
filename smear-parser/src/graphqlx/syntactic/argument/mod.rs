@@ -137,6 +137,26 @@ argument_parser!(
   }
 );
 
+/// Parses one committed GraphQLx `Argument` production in a schema position: an argument of a
+/// directive that a type-system definition or extension applies.
+///
+/// Every argument [`const_argument`] reads is one here.
+#[inline(always)]
+pub fn schema_argument<'inp, Src, Ctx>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<ConstArgument<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  const_argument(inp)
+}
+
 fn decide_argument_head<'inp, Src, Ctx>(
   mut peeked: Peeked<'_, 'inp, GraphqlxLexer<'inp, Src>, U1>,
   _: EmitterView<'_, 'inp, GraphqlxLexer<'inp, Src>, Ctx::Emitter, GraphQLx>,
@@ -240,15 +260,47 @@ argument_parser!(
   }
 );
 
+/// Parses a GraphQLx `Arguments` collection in a schema position: the arguments of a directive that
+/// a type-system definition or extension applies.
+///
+/// When `(` is absent, this returns an empty zero-width collection without consuming input. Every
+/// collection [`const_arguments`] reads is one here.
+#[inline(always)]
+pub fn schema_arguments<'inp, Src, Ctx>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<ConstArguments<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  const_arguments(inp)
+}
+
 macro_rules! impl_argument_api {
   (
     $(#[$meta:meta])* $slice:ident, $node:ty, $parser:ident;
+  ) => {
+    impl_argument_api!(@impl graphqlx; $(#[$meta])* $slice, $node, $parser;);
+  };
+  // A schema position's twin, under the method name the invocation gives.
+  (
+    $(#[$meta:meta])* $slice:ident, $node:ty, $parser:ident as $method:ident;
+  ) => {
+    impl_argument_api!(@impl $method; $(#[$meta])* $slice, $node, $parser;);
+  };
+  (
+    @impl $method:ident; $(#[$meta:meta])* $slice:ident, $node:ty, $parser:ident;
   ) => {
     impl<$slice> $node {
       $(#[$meta])*
       ///
       /// The lexer source is inferred from `inp`.
-      pub fn graphqlx<'inp, Src, Ctx>(
+      pub fn $method<'inp, Src, Ctx>(
         inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
       ) -> Result<Self, GraphqlxError<'inp, Src, Ctx>>
       where
@@ -315,6 +367,23 @@ impl_argument_api!(
   S,
   ConstArguments<S>,
   const_arguments;
+);
+impl_argument_api!(
+  /// Parses one committed GraphQLx argument in a schema position.
+  ///
+  /// See [`schema_argument`] and the [GraphQL Arguments specification](https://spec.graphql.org/draft/#sec-Language.Arguments).
+  S,
+  ConstArgument<S>,
+  schema_argument as graphqlx_schema;
+);
+impl_argument_api!(
+  /// Parses GraphQLx arguments in a schema position, returning an empty zero-width list without
+  /// consuming input when `(` is absent.
+  ///
+  /// See [`schema_arguments`] and the [GraphQL Arguments specification](https://spec.graphql.org/draft/#sec-Language.Arguments).
+  S,
+  ConstArguments<S>,
+  schema_arguments as graphqlx_schema;
 );
 
 #[cfg(test)]

@@ -1012,6 +1012,28 @@ value_parser!(
   }
 );
 
+/// Parses a committed GraphQLx value in a schema position: a constant position of a type-system
+/// definition or extension, which is a member's default and an argument of each directive such a
+/// definition applies.
+///
+/// Every form [`const_value`] reads is a value here, and an executable document's constant
+/// positions read [`const_value`] alone.
+#[inline(always)]
+pub fn schema_value<'inp, Src, Ctx>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<ConstInputValue<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  const_value(inp)
+}
+
 /// Attempts an optional GraphQLx default assignment without consuming when
 /// `=` is absent. Once the assignment opener is present, its constant value is
 /// committed and receives the normal constant-value diagnostic.
@@ -1066,20 +1088,60 @@ where
   try_default_value(inp).map(Into::into)
 }
 
+/// Attempts an optional GraphQLx default assignment in a schema position, a member's default,
+/// without consuming when `=` is absent. Once the `=` is present its value is committed, and read
+/// by [`schema_value`].
+///
+/// See [`try_default_value`] and the [GraphQL Input Value Definitions specification](https://spec.graphql.org/draft/#sec-Input-Value-Definitions).
+#[inline(always)]
+pub fn try_schema_default_value<'inp, Src, Ctx>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<ParseAttempt<DefaultInputValue<GraphqlxSlice<'inp, Src>>>, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  try_default_value(inp)
+}
+
+/// Parses an optional GraphQLx default assignment in a schema position, a member's default.
+///
+/// See [`try_schema_default_value`] and the [GraphQL Input Value Definitions specification](https://spec.graphql.org/draft/#sec-Input-Value-Definitions).
+#[inline(always)]
+pub fn schema_default_value<'inp, Src, Ctx>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<Option<DefaultInputValue<GraphqlxSlice<'inp, Src>>>, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  try_schema_default_value(inp).map(Into::into)
+}
+
 macro_rules! graphqlx_value_api {
   ($(#[$meta:meta])* $node:ty, $parse:ident, []) => {
-    graphqlx_value_api!(@impl $(#[$meta])* $node, $parse, []);
+    graphqlx_value_api!(@impl graphqlx; $(#[$meta])* $node, $parse, []);
   };
   ($(#[$meta:meta])* $node:ty, $parse:ident, [contextual]) => {
     graphqlx_value_api!(
-      @impl $(#[$meta])* $node,
+      @impl graphqlx; $(#[$meta])* $node,
       $parse,
       [GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,]
     );
   };
   ($(#[$meta:meta])* $node:ty, $parse:ident, [punctuated]) => {
     graphqlx_value_api!(
-      @impl $(#[$meta])* $node,
+      @impl graphqlx; $(#[$meta])* $node,
       $parse,
       [
       ]
@@ -1087,7 +1149,7 @@ macro_rules! graphqlx_value_api {
   };
   ($(#[$meta:meta])* $node:ty, $parse:ident, [path]) => {
     graphqlx_value_api!(
-      @impl $(#[$meta])* $node,
+      @impl graphqlx; $(#[$meta])* $node,
       $parse,
       [
         GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,
@@ -1096,18 +1158,28 @@ macro_rules! graphqlx_value_api {
   };
   ($(#[$meta:meta])* $node:ty, $parse:ident, [complex]) => {
     graphqlx_value_api!(
-      @impl $(#[$meta])* $node,
+      @impl graphqlx; $(#[$meta])* $node,
       $parse,
       [
         GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,
       ]
     );
   };
-  (@impl $(#[$meta:meta])* $node:ty, $parse:ident, [$($bounds:tt)*]) => {
+  // A schema position's twin of a `[complex]` production, under the method name `graphqlx_schema`.
+  (@schema $(#[$meta:meta])* $node:ty, $parse:ident) => {
+    graphqlx_value_api!(
+      @impl graphqlx_schema; $(#[$meta])* $node,
+      $parse,
+      [
+        GraphqlxToken<'inp, Src>: DowncastRef<ContextualKeyword>,
+      ]
+    );
+  };
+  (@impl $method:ident; $(#[$meta:meta])* $node:ty, $parse:ident, [$($bounds:tt)*]) => {
     impl<S> $node {
       $(#[$meta])*
       /// Parses this committed GraphQLx value production.
-      pub fn graphqlx<'inp, Src, Ctx>(
+      pub fn $method<'inp, Src, Ctx>(
         inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
       ) -> Result<Self, GraphqlxError<'inp, Src, Ctx>>
       where
@@ -1321,6 +1393,15 @@ graphqlx_value_api!(
   const_value,
   [complex]
 );
+graphqlx_value_api!(
+  @schema
+  /// Parses a committed GraphQLx value in a schema position: a constant position of a type-system
+  /// definition or extension.
+  ///
+  /// See [`schema_value`] and the [GraphQL Input Values specification](https://spec.graphql.org/draft/#sec-Input-Values).
+  ConstInputValue<S>,
+  schema_value
+);
 
 impl<S> DefaultInputValue<S> {
   /// Parses an optional GraphQLx default assignment.
@@ -1363,6 +1444,45 @@ impl<S> DefaultInputValue<S> {
     GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<S>>,
   {
     try_default_value(inp)
+  }
+
+  /// Parses an optional GraphQLx default assignment in a schema position, a member's default.
+  ///
+  /// The lexer source is inferred from `inp`.
+  ///
+  /// See [`schema_default_value`] and the [GraphQL Input Value Definitions specification](https://spec.graphql.org/draft/#sec-Input-Value-Definitions).
+  pub fn graphqlx_schema<'inp, Src, Ctx>(
+    inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+  ) -> Result<Option<Self>, GraphqlxError<'inp, Src, Ctx>>
+  where
+    Src: Source<usize, Slice<'inp> = S> + ?Sized,
+    S: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+    GraphqlxToken<'inp, Src>:
+      Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
+    GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+    Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+    GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<S>>,
+  {
+    schema_default_value(inp)
+  }
+
+  /// Attempts a GraphQLx default assignment in a schema position without consuming when `=` is
+  /// absent.
+  ///
+  /// See [`try_schema_default_value`] and the [GraphQL Input Value Definitions specification](https://spec.graphql.org/draft/#sec-Input-Value-Definitions).
+  pub fn try_graphqlx_schema<'inp, Src, Ctx>(
+    inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+  ) -> Result<ParseAttempt<Self>, GraphqlxError<'inp, Src, Ctx>>
+  where
+    Src: Source<usize, Slice<'inp> = S> + ?Sized,
+    S: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+    GraphqlxToken<'inp, Src>:
+      Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
+    GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+    Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+    GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<S>>,
+  {
+    try_schema_default_value(inp)
   }
 }
 

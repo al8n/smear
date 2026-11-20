@@ -310,15 +310,67 @@ directive_parser!(
   }
 );
 
+/// Parses one committed GraphQLx `Directive` production in a schema position: a directive that a
+/// type-system definition or extension applies.
+///
+/// Every directive [`const_directive`] reads is one here.
+#[inline(always)]
+pub fn schema_directive<'inp, Src, Ctx>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<ConstDirective<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  const_directive(inp)
+}
+
+/// Parses a GraphQLx `Directives` collection in a schema position: the directives a type-system
+/// definition or extension applies.
+///
+/// If `@` is absent, this returns an empty zero-width collection without consuming input. Every
+/// collection [`const_directives`] reads is one here.
+#[inline(always)]
+pub fn schema_directives<'inp, Src, Ctx>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<ConstDirectives<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
+  GraphqlxLexer<'inp, Src>:
+    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  const_directives(inp)
+}
+
 macro_rules! impl_directive_api {
   (
     $(#[$meta:meta])* $slice:ident, $node:ty, $parser:ident;
+  ) => {
+    impl_directive_api!(@impl graphqlx; $(#[$meta])* $slice, $node, $parser;);
+  };
+  // A schema position's twin, under the method name the invocation gives.
+  (
+    $(#[$meta:meta])* $slice:ident, $node:ty, $parser:ident as $method:ident;
+  ) => {
+    impl_directive_api!(@impl $method; $(#[$meta])* $slice, $node, $parser;);
+  };
+  (
+    @impl $method:ident; $(#[$meta:meta])* $slice:ident, $node:ty, $parser:ident;
   ) => {
     impl<$slice> $node {
       $(#[$meta])*
       ///
       /// The lexer source is inferred from `inp`.
-      pub fn graphqlx<'inp, Src, Ctx>(
+      pub fn $method<'inp, Src, Ctx>(
         inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
       ) -> Result<Self, GraphqlxError<'inp, Src, Ctx>>
       where
@@ -385,6 +437,23 @@ impl_directive_api!(
   S,
   ConstDirectives<S>,
   const_directives;
+);
+impl_directive_api!(
+  /// Parses one committed GraphQLx directive in a schema position.
+  ///
+  /// See [`schema_directive`] and the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
+  S,
+  ConstDirective<S>,
+  schema_directive as graphqlx_schema;
+);
+impl_directive_api!(
+  /// Parses GraphQLx directives in a schema position, returning an empty zero-width list without
+  /// consuming input when `@` is absent.
+  ///
+  /// See [`schema_directives`] and the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
+  S,
+  ConstDirectives<S>,
+  schema_directives as graphqlx_schema;
 );
 
 #[cfg(test)]

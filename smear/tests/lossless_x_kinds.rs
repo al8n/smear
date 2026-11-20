@@ -210,6 +210,33 @@ const SOURCES_WITH_NO_KIND: &[(&str, &str)] = &[
     "TypeSystemItem",
     "the same dispatcher for TypeSystemDocument",
   ),
+  // ---- a schema position is a parse-time flavour, as constness is: each production builds the
+  // node its constant twin builds ----
+  (
+    "SchemaValue",
+    "the `schema_value` production; the choice `Value` names, in a schema position, and each arm \
+     is a *Value node",
+  ),
+  (
+    "SchemaDefaultValue",
+    "the `schema_default_value` production; it builds a DefaultValue node, in a schema position",
+  ),
+  (
+    "SchemaArgument",
+    "the `schema_argument` production; it builds an Argument node, in a schema position",
+  ),
+  (
+    "SchemaArguments",
+    "the `schema_arguments` production; it builds an Arguments node, in a schema position",
+  ),
+  (
+    "SchemaDirective",
+    "the `schema_directive` production; it builds a Directive node, in a schema position",
+  ),
+  (
+    "SchemaDirectives",
+    "the `schema_directives` production; it builds a Directives node, in a schema position",
+  ),
   // ---- one token is not a region: the parent already says what it is ----
   (
     "Name",

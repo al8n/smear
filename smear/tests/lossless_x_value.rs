@@ -17,7 +17,9 @@ use smear::parser::graphqlx::{
     ty::test_support::{
       parse_path, parse_path_or_recover, parse_type_generics, parse_type_path, parse_type_ref,
     },
-    value::test_support::{parse_const_value, parse_default_value, parse_map_entry, parse_value},
+    value::test_support::{
+      parse_const_value, parse_default_value, parse_map_entry, parse_schema_value, parse_value,
+    },
   },
 };
 
@@ -399,6 +401,35 @@ fn constness_reaches_every_nested_value_position() {
       "{src}: and the non-const flavour must not report it"
     );
   }
+}
+
+/// A schema position reads what an executable document's constant position reads, until a form of
+/// its own is written: the same tree, and a variable reported at every depth as there.
+#[test]
+fn a_schema_position_answers_as_a_constant_one_does() {
+  for src in [
+    "$x",
+    "[$x]",
+    "{a: $x}",
+    "set!{ $x }",
+    "map!{ $x => 1 }",
+    "map!{ 1 => $x }",
+    "[1, 'c', {a: ^::b::C}]",
+  ] {
+    assert_eq!(
+      kinds!(parse_schema_value, src),
+      kinds!(parse_const_value, src),
+      "{src}: the two flavours build one tree"
+    );
+    assert_eq!(text!(parse_schema_value, src), src);
+    assert_eq!(
+      parse_schema_value(src).has_errors(),
+      parse_const_value(src).has_errors(),
+      "{src}: the two flavours report alike"
+    );
+  }
+  assert!(parse_schema_value("{a: $x}").has_errors());
+  assert!(!parse_schema_value("[1, 'c', {a: ^::b::C}]").has_errors());
 }
 
 // ---------------------------------------------------------------------------------------------

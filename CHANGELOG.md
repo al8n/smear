@@ -4,6 +4,14 @@ All notable changes to Smear are documented in this file.
 
 ## [Unreleased]
 
+- `smear-parser`: a GraphQLx schema position, a constant position of a type-system definition or
+  extension, reads its values through productions of its own: `schema_value`,
+  `schema_default_value` and `try_schema_default_value`, `schema_argument`, `schema_arguments`,
+  `schema_directive` and `schema_directives`, each reachable as `graphqlx_schema` on the node it
+  builds, and `try_graphqlx_schema` on `DefaultInputValue`. A member's default and every directive
+  of a type-system definition or extension read them, and each reads what its constant twin reads.
+  An executable document's constant positions, a variable's default and its directives, read the
+  constant family as they did.
 - `smear-parser`!: a GraphQLx `char` literal is a value in every value grammar, executable and
   constant alike.
   - **The AST.** `graphqlx::ast::CharValue`, its span and the lexer's `LitChar`, with

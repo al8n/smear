@@ -118,9 +118,9 @@ lossless_production! {
         // Dispatched on a peek rather than attempted, so the `=` is consumed *inside* the
         // `DefaultValue` node and an absent default opens nothing.
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Equal) {
-          default_value::<Src, Ctx>(inp)?;
+          default_value::<Src, Ctx>(inp, Constness::Schema)?;
         }
-        directives::<Src, Ctx>(inp, Constness::Const)
+        directives::<Src, Ctx>(inp, Constness::Schema)
       },
     )
     .parse_input(inp)
@@ -179,7 +179,7 @@ lossless_production! {
         }
         expect::<Src, Ctx>(inp, Kind::Colon)?;
         type_ref::<Src, Ctx>(inp)?;
-        directives::<Src, Ctx>(inp, Constness::Const)
+        directives::<Src, Ctx>(inp, Constness::Schema)
       },
     )
     .parse_input(inp)
@@ -379,7 +379,7 @@ lossless_production! {
           recover::report_unexpected::<Src, Ctx>(inp, NAME_HEADS)?;
         }
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        directives::<Src, Ctx>(inp, Constness::Const)
+        directives::<Src, Ctx>(inp, Constness::Schema)
       },
     )
     .parse_input(inp)
@@ -508,7 +508,7 @@ lossless_production! {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         definition_name::<Src, Ctx>(inp)?;
         optional_implements::<Src, Ctx>(inp)?;
-        directives::<Src, Ctx>(inp, Constness::Const)?;
+        directives::<Src, Ctx>(inp, Constness::Schema)?;
         optional_where_clause::<Src, Ctx>(inp)
       },
     )
@@ -561,7 +561,7 @@ lossless_production! {
   /// type and an interface type share, verbatim. Opens no node of its own.
   fn object_body<'inp, Src, Ctx>(inp) {
     optional_implements::<Src, Ctx>(inp)?;
-    directives::<Src, Ctx>(inp, Constness::Const)?;
+    directives::<Src, Ctx>(inp, Constness::Schema)?;
     constrained_fields::<Src, Ctx>(inp, false)
   }
 
@@ -584,7 +584,7 @@ lossless_production! {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         definition_name::<Src, Ctx>(inp)?;
         optional_implements::<Src, Ctx>(inp)?;
-        directives::<Src, Ctx>(inp, Constness::Const)?;
+        directives::<Src, Ctx>(inp, Constness::Schema)?;
         constrained_union_members::<Src, Ctx>(inp)
       },
     )
@@ -627,7 +627,7 @@ lossless_production! {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         definition_name::<Src, Ctx>(inp)?;
         optional_implements::<Src, Ctx>(inp)?;
-        directives::<Src, Ctx>(inp, Constness::Const)?;
+        directives::<Src, Ctx>(inp, Constness::Schema)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
           enum_values_definition::<Src, Ctx>(inp)?;
         }
@@ -650,7 +650,7 @@ lossless_production! {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         definition_name::<Src, Ctx>(inp)?;
         optional_implements::<Src, Ctx>(inp)?;
-        directives::<Src, Ctx>(inp, Constness::Const)?;
+        directives::<Src, Ctx>(inp, Constness::Schema)?;
         constrained_fields::<Src, Ctx>(inp, true)
       },
     )
@@ -681,7 +681,7 @@ lossless_production! {
         }
         // The definition's own directives, after its arguments and before `repeatable` (draft
         // §3.13). No `@` opens no node.
-        directives::<Src, Ctx>(inp, Constness::Const)?;
+        directives::<Src, Ctx>(inp, Constness::Schema)?;
         // `repeatable` is a contextual keyword and a flag, not a node: the token is in the tree and
         // the kind space has no image for it.
         if peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Repeatable) {
@@ -717,7 +717,7 @@ lossless_production! {
       K::SchemaDefinition.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        directives::<Src, Ctx>(inp, Constness::Const)?;
+        directives::<Src, Ctx>(inp, Constness::Schema)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
           root_operation_types_definition::<Src, Ctx>(inp)
         } else {

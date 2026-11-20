@@ -66,25 +66,30 @@ use super::{
   ty::{path, path_tail},
 };
 
-/// The spec's `[Const]` grammar parameter, as an argument.
+/// The spec's `[Const]` grammar parameter, as an argument, and the schema position beside it.
 ///
-/// Threaded through every production that can reach a value, so one set of productions serves both
-/// flavours. `lossless_drivers!` imports this by a literal path (`super::super::value::Constness`),
-/// which is why the name and the module are fixed rather than free.
+/// Threaded through every production that can reach a value, so one set of productions serves
+/// every flavour. `lossless_drivers!` imports this by a literal path
+/// (`super::super::value::Constness`), which is why the name and the module are fixed rather than
+/// free.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Constness {
-  /// A `Value[Const]` position: `DefaultValue`, and every `Directives[Const]` context. A
-  /// `VariableValue` here is reported.
+  /// A `Value[Const]` position of an executable document: a variable's default and its
+  /// directives. A `VariableValue` here is reported.
   Const,
   /// An ordinary `Value` position. A `VariableValue` here is exactly what the grammar is for.
   NonConst,
+  /// A schema position: a constant position of a type-system definition or extension, which is a
+  /// member's default and every directive such a definition applies. It reads every form a
+  /// [`Const`](Self::Const) position reads, and a `VariableValue` here is reported as there.
+  Schema,
 }
 
 impl Constness {
   /// Whether a variable in this position is a grammar error.
   #[inline]
   pub(crate) const fn forbids_variable(self) -> bool {
-    matches!(self, Self::Const)
+    matches!(self, Self::Const | Self::Schema)
   }
 
   /// The head set a diagnostic raised in this position names — [`VALUE_HEADS`] without the `$` when
@@ -92,7 +97,7 @@ impl Constness {
   #[inline]
   pub(crate) const fn value_heads(self) -> &'static [Kind] {
     match self {
-      Self::Const => CONST_VALUE_HEADS,
+      Self::Const | Self::Schema => CONST_VALUE_HEADS,
       Self::NonConst => VALUE_HEADS,
     }
   }
@@ -439,17 +444,18 @@ lossless_production! {
     .parse_input(inp)
   }
 
-  /// `= Value[Const]`
+  /// `= Value[Const]`, in the flavour `konst` names.
   ///
-  /// **Takes no [`Constness`] argument, and must not.** `DefaultValue` is const in both positions
-  /// the grammar puts it in, so the flavour is a property of this production rather than of its
-  /// call site.
-  fn default_value<'inp, Src, Ctx>(inp) {
+  /// A default is constant in both positions the grammar puts it in, and the two read different
+  /// value grammars: a member's default is a [`Schema`](Constness::Schema) position, and a
+  /// variable's an executable document's [`Const`](Constness::Const) one. So the flavour is the
+  /// call site's, as every other value position's is.
+  fn default_value<'inp, Src, Ctx>(inp, konst: Constness) {
     node(
       K::DefaultValue.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Equal)?;
-        required_value::<Src, Ctx>(inp, Constness::Const)
+        required_value::<Src, Ctx>(inp, konst)
       },
     )
     .parse_input(inp)
@@ -522,12 +528,17 @@ lossless_drivers! {
   /// `super::value` over `src`, in an ordinary (non-const) position.
   fn parse_value => value [Constness::NonConst];
 
-  /// `super::value` over `src`, in a **const** position — the flavour `DefaultValue` and every SDL
-  /// directive argument reach, and the only door to the `$` rejection below the document level.
+  /// `super::value` over `src`, in an executable document's **const** position — the flavour a
+  /// variable's default and its directives reach.
   fn parse_const_value => value [Constness::Const];
 
-  /// `super::default_value` over `src` — the one value production `value` cannot reach.
-  fn parse_default_value => default_value;
+  /// `super::value` over `src`, in a **schema** position — the flavour a member's default and every
+  /// SDL directive argument reach.
+  fn parse_schema_value => value [Constness::Schema];
+
+  /// `super::default_value` over `src`, in a const position — the one value production `value`
+  /// cannot reach.
+  fn parse_default_value => default_value [Constness::Const];
 
   /// `super::map_entry` over `src`, on its own: the production a malformed `map` body would
   /// otherwise only be observable through.

@@ -22,7 +22,7 @@ use super::{
   keyword_of,
   ty::ty,
   unexpected_here,
-  value::default_value,
+  value::schema_default_value,
 };
 use crate::{
   combinator::{ParseCtx, try_at, try_colon, try_equal},

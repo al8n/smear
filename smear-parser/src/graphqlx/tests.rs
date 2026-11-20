@@ -401,6 +401,56 @@ fn a_char_literal_is_a_value_in_every_value_grammar() {
 }
 
 #[test]
+fn a_schema_position_reads_what_a_constant_one_reads() {
+  for src in [
+    "[1, 'c', {a: ^::b::C}]",
+    "set!{ X }",
+    "map!{ 1 => true }",
+    "null",
+  ] {
+    assert_eq!(
+      drive_str(ast::ConstInputValue::graphqlx_schema, src).expect(src),
+      drive_str(ast::ConstInputValue::graphqlx, src).expect(src),
+      "{src}"
+    );
+  }
+  assert!(drive_str(ast::ConstInputValue::graphqlx_schema, "$x").is_err());
+
+  assert_eq!(
+    drive_str(ast::DefaultInputValue::graphqlx_schema, "= [1]").expect("a default"),
+    drive_str(ast::DefaultInputValue::graphqlx, "= [1]").expect("a default"),
+  );
+  let (declined, leftover) = drive_str(
+    |inp| {
+      let attempt = ast::DefaultInputValue::try_graphqlx_schema(inp)?;
+      let leftover = inp.next()?.map(|token| token.data().kind());
+      Ok::<_, GraphqlxErrors<&str>>((attempt == ParseAttempt::Decline, leftover))
+    },
+    "@d",
+  )
+  .expect("an absent default declines");
+  assert!(declined);
+  assert_eq!(leftover, Some(SyntacticTokenKind::At));
+
+  assert_eq!(
+    drive_str(ast::ConstArgument::graphqlx_schema, "x: 'c'").expect("an argument"),
+    drive_str(ast::ConstArgument::graphqlx, "x: 'c'").expect("an argument"),
+  );
+  assert_eq!(
+    drive_str(ast::ConstArguments::graphqlx_schema, "(x: 1, y: [2])").expect("arguments"),
+    drive_str(ast::ConstArguments::graphqlx, "(x: 1, y: [2])").expect("arguments"),
+  );
+  assert_eq!(
+    drive_str(ast::ConstDirective::graphqlx_schema, "@a(x: 1)").expect("a directive"),
+    drive_str(ast::ConstDirective::graphqlx, "@a(x: 1)").expect("a directive"),
+  );
+  assert_eq!(
+    drive_str(ast::ConstDirectives::graphqlx_schema, "@a(x: 1) @b").expect("directives"),
+    drive_str(ast::ConstDirectives::graphqlx, "@a(x: 1) @b").expect("directives"),
+  );
+}
+
+#[test]
 fn public_value_composition_parsers_and_direct_apis_are_source_generic() {
   fn check_set<S: AsRef<[u8]>>(value: ast::Set<S>) {
     assert_eq!(value.values().len(), 1);

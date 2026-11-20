@@ -19,7 +19,7 @@ definition_parser!(
     let name = take_name(inp)?;
     take_colon(inp)?;
     let ty = take_type(inp)?;
-    let default_value = default_value(inp)?;
+    let default_value = schema_default_value(inp)?;
     let directives = optional_const_directives(inp)?;
     let span = inp.span_since_trimmed(&node_start);
     Ok(Described::new(
