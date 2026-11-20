@@ -506,8 +506,8 @@ impl<S: Clone + AsRef<[u8]>> LitPrefixedStr<S> {
 /// instantiated for both scan alphabets. This one is not, and the reason is the consumer: the
 /// projection hands back an AST borrowing the caller's `&'src str`, so the slice it re-cooks is
 /// always text. A byte door here would be surface with no caller.
-fn scan_one_token<'de: 'a, 'a>(
-  value: &'de str,
+fn scan_one_token<'a>(
+  value: &'a str,
   what: &'static str,
 ) -> Result<syntactic::SyntacticToken<&'a str>, error::LexerErrors<char, RecursionLimitExceeded>> {
   scan_one_token_from(value, what, syntactic::SyntacticState::default())
@@ -515,14 +515,14 @@ fn scan_one_token<'de: 'a, 'a>(
 
 /// [`scan_one_token`] from `state`: a door for a token only a lexer inside a `const { … }` block
 /// makes reads its slice from a state that has entered one.
-fn scan_one_token_from<'de: 'a, 'a>(
-  value: &'de str,
+fn scan_one_token_from<'a>(
+  value: &'a str,
   what: &'static str,
   state: syntactic::SyntacticState,
 ) -> Result<syntactic::SyntacticToken<&'a str>, error::LexerErrors<char, RecursionLimitExceeded>> {
   use tokora::Lexer as _;
 
-  let mut lexer = syntactic::SyntacticLexer::<'de, str>::with_state(value, state);
+  let mut lexer = syntactic::SyntacticLexer::<'a, str>::with_state(value, state);
   let Some(first) = lexer.lex() else {
     return Err(
       error::LexerError::const_new(

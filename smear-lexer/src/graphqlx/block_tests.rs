@@ -261,7 +261,7 @@ fn a_lexer_resumed_inside_a_block_answers_as_the_one_that_ran_through() {
 }
 
 /// The literal a prefixed string read with each lexer's own reader, the first time and again.
-fn syntactic_literal<'a>(src: &'a str) -> LitStr<&'a str> {
+fn syntactic_literal(src: &str) -> LitStr<&str> {
   match SyntacticLexer::<str>::with_state(src, entered()).lex() {
     Some(Ok(SyntacticToken::LitPrefixedStr(lit))) => lit.literal(),
     other => panic!("{src:?} is no prefixed string: {other:?}"),
