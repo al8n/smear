@@ -423,3 +423,65 @@ impl ValidateNumberChar<GraphQLxBinaryNumber> for u8 {
     matches!(*self, b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'.')
   }
 }
+
+/// Which suffix a typed number rule matched.
+#[derive(Clone, Copy)]
+pub(super) enum Suffix {
+  /// `i` or `u`, and a width.
+  Int,
+  /// `f32` or `f64`.
+  Float,
+}
+
+/// Where a typed number's suffix is refused: the offset of its letter in the rule's match, and
+/// how many bytes past the match the refused run takes.
+pub(super) struct SuffixRefusal {
+  pub(super) letter: usize,
+  pub(super) past: usize,
+}
+
+/// Whether the suffix a typed number rule matched stands; and when it does not, where the refused
+/// run begins and how far past the match it reaches.
+///
+/// A suffix stands when the byte after it is none of a letter, a digit, `.` and `_`, and, for an
+/// integer's, when its width fits a `u32`. Otherwise the number is refused as a letter after it is
+/// today, by [`handle_number_suffix`]'s rule: over the run that begins at the suffix's letter and
+/// takes letters, digits and `.`. `slice` is the rule's match, and `remainder` what follows it.
+pub(super) fn suffix_refusal(
+  slice: &[u8],
+  remainder: &[u8],
+  suffix: Suffix,
+) -> Option<SuffixRefusal> {
+  // The rule's pattern ends in the suffix, so its letter is the last `i` or `u` of an integer's
+  // match, before the width's digits, and the last `f` of a float's.
+  let letter = match suffix {
+    Suffix::Int => slice
+      .iter()
+      .rposition(|byte: &u8| matches!(byte, b'i' | b'u'))?,
+    Suffix::Float => slice.iter().rposition(|byte: &u8| *byte == b'f')?,
+  };
+  let fits = match suffix {
+    Suffix::Int => slice
+      .get(letter.saturating_add(1)..)
+      .unwrap_or_default()
+      .iter()
+      .try_fold(0u32, |width: u32, digit: &u8| {
+        width
+          .checked_mul(10)?
+          .checked_add(u32::from(digit.wrapping_sub(b'0')))
+      })
+      .is_some(),
+    Suffix::Float => true,
+  };
+  let touched = remainder
+    .first()
+    .is_some_and(|byte: &u8| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_'));
+  if fits && !touched {
+    return None;
+  }
+  let past = remainder
+    .iter()
+    .take_while(|byte: &&u8| byte.is_ascii_alphanumeric() || **byte == b'.')
+    .count();
+  Some(SuffixRefusal { letter, past })
+}

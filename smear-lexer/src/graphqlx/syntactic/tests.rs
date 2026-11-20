@@ -608,6 +608,10 @@ fn syntactic_token_kind_census() {
     Tilde => SyntacticToken::Tilde,
     DotDot => SyntacticToken::DotDot,
     Caret => SyntacticToken::Caret,
+    Slash => SyntacticToken::Slash,
+    Percent => SyntacticToken::Percent,
+    Shl => SyntacticToken::Shl,
+    Char => SyntacticToken::LitChar(crate::graphqlx::LitChar::new("'a'", 'a')),
   }
 }
 

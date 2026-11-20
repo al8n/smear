@@ -4770,7 +4770,9 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// by the walk's definition: no literal is read.
   fn classify(&self, kind: RawKind, ty: Option<TyId>) -> Class {
     // Asked before the type, so that no type that keeps a literal as written keeps the text of a
-    // value lowering refused.
+    // value lowering refused whole. A refused node nested in a list a custom scalar keeps whole is
+    // never asked about: the list's text is kept with it, a suffixed number's among it, and
+    // lowering has reported that number.
     if matches!(kind, RawKind::Refused) {
       return Class::Refused;
     }

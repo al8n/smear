@@ -1,0 +1,11 @@
+OK  0..6  LitFloat(Hex("0x1p10"))
+OK  6..7  Newline
+OK  7..14  LitFloat(Hex("0x1p1_0"))
+OK  14..15  Newline
+ERR LexerErrors([LexerError { span: SimpleSpan { start: 15, end: 21 }, data: HexFloat(UnexpectedSuffix(Char(PositionedChar { char: 'f', position: 20 }))) }])
+OK  21..22  Newline
+ERR LexerErrors([LexerError { span: SimpleSpan { start: 22, end: 29 }, data: HexFloat(UnexpectedSuffix(Char(PositionedChar { char: 'A', position: 28 }))) }])
+OK  29..30  Newline
+ERR LexerErrors([LexerError { span: SimpleSpan { start: 30, end: 39 }, data: HexFloat(UnexpectedSuffix(Char(PositionedChar { char: 'e', position: 38 }))) }])
+OK  39..40  Newline
+ERR LexerErrors([LexerError { span: SimpleSpan { start: 40, end: 44 }, data: HexFloat(UnexpectedLexeme(UnexpectedLexeme { lexeme: Char(PositionedChar { char: 'f', position: 44 }), hint: Exponent(SignOrDigit) })) }])

@@ -115,7 +115,7 @@ impl<Char> NumberLexerToken<Char> {
   }
 }
 
-/// The number grammars' one macro: the subpatterns and the nineteen rules a number or a `-` can
+/// The number grammars' one macro: the subpatterns and every rule a number or a `-` can
 /// be, written once, and three ways to render them.
 ///
 /// - `number_token_impl!(name(Char, handlers, utf8))` is one syntactic instance: a primitive `str`
@@ -158,8 +158,10 @@ macro_rules! number_token_impl {
         esign = "[eE][+-]?",
         exp = "(?&esign)(?&digits_with_sep)",
         psign = "[pP][+-]?",
-        hex_exp = "(?&psign)(?&hex_digits_with_sep)",
+        hex_exp = "(?&psign)(?&digits_with_sep)",
         hex_frac = "\\.(?&hex_digits_with_sep)",
+        int_suffix = "_?[iu](0|[1-9][0-9]*)",
+        float_suffix = "_?f(32|64)",
       ]
       {
         Minus {
@@ -174,10 +176,14 @@ macro_rules! number_token_impl {
             => FloatFractionEmptyExponent(handle_exponent_error[]),
           regex "(?&decimal)\\._*" => FloatEmptyFraction(handle_fractional_error[]),
           regex "(?&decimal)(?&esign)" => FloatEmptyExponent(handle_exponent_error[]),
+          regex "(?&decimal)((?&frac)(?&exp)|(?&frac)|(?&exp))(?&float_suffix)"
+            => FloatSuffixed(handle_float_suffix[FloatError::UnexpectedSuffix]),
+          regex "(?&decimal)(?&float_suffix)"
+            => IntegerFloatSuffixed(handle_float_suffix[DecimalError::UnexpectedSuffix]),
         },
         HexFloat {
           regex "(?&hex)(?&hex_frac)?(?&hex_exp)"
-            => HexFloat(handle_valid_hex_suffix[HexFloatError::UnexpectedSuffix]),
+            => HexFloat(handle_valid_hex_float_suffix[HexFloatError::UnexpectedSuffix]),
           regex "(?&hex)(?&hex_frac)"
             => HexFloatMissingExponent(handle_hex_float_missing_exponent_then_check_suffix[]),
           regex "-?(?&hex_frac)(?&hex_exp)"
@@ -188,21 +194,30 @@ macro_rules! number_token_impl {
             => HexFloatFractionEmptyExponent(handle_hex_exponent_error[]),
           regex "(?&hex)\\._*" => HexFloatEmptyFraction(handle_hex_fractional_error[]),
           regex "(?&hex)(?&psign)" => HexFloatEmptyExponent(handle_hex_exponent_error[]),
+          regex "(?&hex)(?&hex_frac)?(?&hex_exp)(?&float_suffix)"
+            => HexFloatSuffixed(handle_float_suffix[HexFloatError::UnexpectedSuffix]),
         },
         Decimal {
           regex "(?&decimal)" => Decimal(handle_decimal_suffix[DecimalError::UnexpectedSuffix]),
+          regex "(?&decimal)(?&int_suffix)"
+            => DecimalSuffixed(handle_int_suffix[DecimalError::UnexpectedSuffix]),
         },
         Binary {
           regex "(?&binary)" => Binary(handle_valid_binary_suffix[BinaryError::UnexpectedSuffix]),
           regex "(?&binary_start)" => BinaryMissingDigits(handle_invalid_binary_suffix[]),
+          regex "(?&binary)(?&int_suffix)"
+            => BinarySuffixed(handle_int_suffix[BinaryError::UnexpectedSuffix]),
         },
         Octal {
           regex "(?&octal)" => Octal(handle_valid_octal_suffix[OctalError::UnexpectedSuffix]),
           regex "(?&octal_start)" => OctalMissingDigits(handle_invalid_octal_suffix[]),
+          regex "(?&octal)(?&int_suffix)"
+            => OctalSuffixed(handle_int_suffix[OctalError::UnexpectedSuffix]),
         },
         Hex {
           regex "(?&hex)" => Hex(handle_valid_hex_suffix[HexError::UnexpectedSuffix]),
           regex "(?&hex_start)" => HexMissingDigits(handle_invalid_hex_suffix[]),
+          regex "(?&hex)(?&int_suffix)" => HexSuffixed(handle_int_suffix[HexError::UnexpectedSuffix]),
         },
       }
     }
@@ -357,7 +372,7 @@ macro_rules! number_token_impl {
       ),* $(,)?}
     ),* $(,)?}
   ) => {
-    /// The rule of the sign's grammar that matched at a `-`, one for each of the nineteen.
+    /// The rule of the sign's grammar that matched at a `-`, one for each rule.
     ///
     /// The lossless grammar's `-` callback maps each to the hook and the handler of the rule's
     /// unsigned twin. A class is not enough: `-1.` and `-1.5` are both a float, and their rules
@@ -378,7 +393,7 @@ number_token_impl!(slice_number(u8, slice, false));
 /// The sign's grammar: the lossless grammar reads a `-` with it.
 ///
 /// The lossless grammar matches a `-` alone, and its callback lexes from the `-` with this grammar,
-/// which holds every rule a `-` can begin: the bare `-` and the eighteen signed number rules, the
+/// which holds every rule a `-` can begin: the bare `-` and every signed number rule, the
 /// syntactic instances' own. So its longest match at a `-` is the one the full grammar would make.
 /// It answers the rule's tag and its extent, and the callback then runs that rule's hook and
 /// handler on the lossless lexer itself.

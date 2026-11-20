@@ -1581,8 +1581,9 @@ fn gqlx_slice_lexemes(src: &str, max_tokens: Option<usize>) -> usize {
 ///
 /// # What the two numbers are
 ///
-/// Neither is read off the implementation. `4 000` is the document's own lexeme count — `%` is a
-/// rule in neither dialect, so each one is one unmatched lexeme — and `CEILING + 1` is the unit
+/// Neither is read off the implementation. `4 000` is the document's own lexeme count — each
+/// cell's `atom` is a rule of no grammar its dialect has, so each one is one unmatched lexeme — and
+/// `CEILING + 1` is the unit
 /// `a_token_ceiling_stops_the_lex_one_lexeme_past_itself` establishes and this file's header
 /// derives: the charge lands before the check, so lexeme 101 takes the tally past 100 and
 /// tokora's post-scan `check()` latches on it.
@@ -1595,11 +1596,15 @@ fn gqlx_slice_lexemes(src: &str, max_tokens: Option<usize>) -> usize {
 /// centralisation defends against — and each time the matching cell read 4 000 rather than 101
 /// while the other three stayed green.
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
-fn a_copy_of_the_error_callback_charges(door: &str, lex: fn(&str, Option<usize>) -> usize) {
+fn a_copy_of_the_error_callback_charges(
+  door: &str,
+  atom: &str,
+  lex: fn(&str, Option<usize>) -> usize,
+) {
   const CEILING: usize = 100;
   const ATOMS: usize = 4_000;
 
-  let src = "%".repeat(ATOMS);
+  let src = atom.repeat(ATOMS);
 
   let uncapped = lex(&src, None);
   assert_eq!(
@@ -1625,32 +1630,36 @@ fn a_copy_of_the_error_callback_charges(door: &str, lex: fn(&str, Option<usize>)
   );
 }
 
-/// `smear-lexer/src/graphql/handlers/str.rs`. See [`a_copy_of_the_error_callback_charges`].
+/// `smear-lexer/src/graphql/handlers/str.rs`. See [`a_copy_of_the_error_callback_charges`]. Its atom
+/// is `%`, which no GraphQL grammar has a rule for.
 #[test]
 #[cfg(feature = "graphql")]
 fn the_graphql_str_error_callback_charges_the_token_ceiling() {
-  a_copy_of_the_error_callback_charges("gql str", gql_str_lexemes);
+  a_copy_of_the_error_callback_charges("gql str", "%", gql_str_lexemes);
 }
 
-/// `smear-lexer/src/graphql/handlers/slice.rs`. See [`a_copy_of_the_error_callback_charges`].
+/// `smear-lexer/src/graphql/handlers/slice.rs`. See [`a_copy_of_the_error_callback_charges`]. Its
+/// atom is `%`, which no GraphQL grammar has a rule for.
 #[test]
 #[cfg(feature = "graphql")]
 fn the_graphql_slice_error_callback_charges_the_token_ceiling() {
-  a_copy_of_the_error_callback_charges("gql slice", gql_slice_lexemes);
+  a_copy_of_the_error_callback_charges("gql slice", "%", gql_slice_lexemes);
 }
 
-/// `smear-lexer/src/graphqlx/handlers/str.rs`. See [`a_copy_of_the_error_callback_charges`].
+/// `smear-lexer/src/graphqlx/handlers/str.rs`. See [`a_copy_of_the_error_callback_charges`]. Its
+/// atom is `?`, which no GraphQLx grammar has a rule for: `%` is the dialect's remainder operator.
 #[test]
 #[cfg(feature = "graphqlx")]
 fn the_graphqlx_str_error_callback_charges_the_token_ceiling() {
-  a_copy_of_the_error_callback_charges("gqlx str", gqlx_str_lexemes);
+  a_copy_of_the_error_callback_charges("gqlx str", "?", gqlx_str_lexemes);
 }
 
-/// `smear-lexer/src/graphqlx/handlers/slice.rs`. See [`a_copy_of_the_error_callback_charges`].
+/// `smear-lexer/src/graphqlx/handlers/slice.rs`. See [`a_copy_of_the_error_callback_charges`]. Its
+/// atom is `?`, which no GraphQLx grammar has a rule for: `%` is the dialect's remainder operator.
 #[test]
 #[cfg(feature = "graphqlx")]
 fn the_graphqlx_slice_error_callback_charges_the_token_ceiling() {
-  a_copy_of_the_error_callback_charges("gqlx slice", gqlx_slice_lexemes);
+  a_copy_of_the_error_callback_charges("gqlx slice", "?", gqlx_slice_lexemes);
 }
 
 /// The burnt twin of `lossless_document::a_resync_that_lands_on_a_definition_head_does_not_eat_it`.

@@ -1436,25 +1436,25 @@ fn a_gap_token_is_a_hole_the_scan_sees() {
   for (what, src, parent, at) in [
     (
       "beside a complete definition",
-      "type T { f: Int } %",
+      "type T { f: Int } ?",
       K::Document,
       18..19,
     ),
     (
       "inside a fields block",
-      "type T { % f: Int }",
+      "type T { ? f: Int }",
       K::FieldsDefinition,
       9..10,
     ),
     (
       "inside an argument list",
-      "type T @d(a: 1 %) { f: Int }",
+      "type T @d(a: 1 ?) { f: Int }",
       K::Arguments,
       15..16,
     ),
     (
       "inside a list value",
-      "type T @d(a: [1 %]) { f: Int }",
+      "type T @d(a: [1 ?]) { f: Int }",
       K::ListValue,
       16..17,
     ),
@@ -1488,8 +1488,8 @@ fn a_gap_token_is_a_hole_the_scan_sees() {
 
   // A gap the parser leaves beside the *document node* is a child of `Root`, which is the shape
   // smear #57 produces and the reason the scan starts at the root rather than at the document.
-  let parse = parse_executable_document("%");
-  let refusal = project_executable_document(&parse, "%")
+  let parse = parse_executable_document("?");
+  let refusal = project_executable_document(&parse, "?")
     .map(|_| ())
     .expect_err("a gap under the root is still a hole");
   assert_eq!(
@@ -2416,8 +2416,8 @@ fn the_recovering_projector_refuses_a_pair_it_is_not_a_projection_of() {
 #[test]
 fn a_gap_beside_the_document_node_is_counted() {
   for (what, src, projected, skipped) in [
-    ("a gap beside an empty document node", "%", 0, 1),
-    ("a gap inside the document node", "{ a } %", 1, 1),
+    ("a gap beside an empty document node", "?", 0, 1),
+    ("a gap inside the document node", "{ a } ?", 1, 1),
     ("no document node at all", "{ a }\nquery Bad(", 1, 3),
     ("only trivia", "# nothing\n", 0, 0),
     ("nothing at all", "", 0, 0),
@@ -2440,8 +2440,8 @@ fn a_gap_beside_the_document_node_is_counted() {
 
   // The SDL door is the same walk with a different root kind, so it is the same defect and the
   // same repair; a gate that proved it of one root would be proving it of half the code.
-  let parse = parse_type_system_document("%");
-  let (ast, recovery) = project_type_system_document_recovered(&parse, "%")
+  let parse = parse_type_system_document("?");
+  let (ast, recovery) = project_type_system_document_recovered(&parse, "?")
     .expect("a parse projects against its own text");
   assert_eq!(ast.definitions().len(), 0);
   assert_eq!(recovery, Recovery::new(0, 1));

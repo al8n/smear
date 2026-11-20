@@ -120,26 +120,48 @@ mod graphqlx {
   use super::*;
   use smear::lexer::graphqlx::{lossless::LosslessLexer, syntactic::SyntacticLexer};
 
+  /// The dialect's own sources, each its cases joined by `\n`: typed numbers, a hexadecimal float's
+  /// decimal exponent, `char` literals, `/`, `%` and `<<`, a name before a quote, every `>`, and
+  /// every place a `-` stands.
+  const DIALECT: &[&str] = &[
+    "1u8\n-3i256\n0xFF_u32\n0b1010u8\n0o17i16\n0u0",
+    "1.5f32\n1f64\n1e3_f32\n0x1p3f32",
+    "0x1p10\n0x1p1_0\n0x1p1f\n-0x1p1A\n0x1.8p-1e\n0x1pf",
+    "'a'\n'\\n'\n'\\u{1F600}'\n'\\''\n'\"'\n''\n'ab'\n'a",
+    "1 / 2 % 3",
+    "b\"ab\"\nr\"x\"\nenum E { A\"d\" B }\nb'a'",
+    "1 << 2 >> 3\nPage<Edge<User>>\nBox< <",
+    "HOUR-1\nHOUR -1\n- 1\n1e-5\n-.5\n-0x\n-5\n-2.5\n-0xFF\n--5\n-x\n-",
+  ];
+
+  /// The shared corpus, and the dialect's own sources after it.
+  fn dialect_corpus() -> Vec<&'static str> {
+    corpus()
+      .into_iter()
+      .chain(DIALECT.iter().copied())
+      .collect()
+  }
+
   #[test]
   fn syntactic_conformance() {
-    Harness::<SyntacticLexer<'_, str>>::over(corpus()).run();
+    Harness::<SyntacticLexer<'_, str>>::over(dialect_corpus()).run();
   }
 
   #[test]
   fn syntactic_conformance_partial() {
-    Harness::<SyntacticLexer<'_, str>>::over(corpus()).run_partial();
+    Harness::<SyntacticLexer<'_, str>>::over(dialect_corpus()).run_partial();
   }
 
   #[test]
   fn lossless_conformance() {
-    Harness::<LosslessLexer<'_>>::over(corpus())
+    Harness::<LosslessLexer<'_>>::over(dialect_corpus())
       .lossless()
       .run();
   }
 
   #[test]
   fn lossless_conformance_partial() {
-    Harness::<LosslessLexer<'_>>::over(corpus())
+    Harness::<LosslessLexer<'_>>::over(dialect_corpus())
       .lossless()
       .run_partial();
   }

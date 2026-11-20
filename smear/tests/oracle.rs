@@ -984,6 +984,36 @@ const GRAPHQLX_KEPT: &[(&str, &str)] = &[
   ),
 ];
 
+/// The tokens the dialect has outside a block and in one, from the state a document starts in:
+/// typed numbers, a hexadecimal float's decimal exponent, `char` literals, `/`, `%` and `<<`; and
+/// the spellings that stay GraphQL's tokens outside a block, a name before a quote and every `>`.
+/// Each source is its cases joined by `\n`.
+#[cfg(feature = "graphqlx")]
+const GRAPHQLX_TOKENS: &[(&str, &str)] = &[
+  (
+    "gx_int_suffix",
+    "1u8\n-3i256\n0xFF_u32\n0b1010u8\n0o17i16\n0u0",
+  ),
+  ("gx_float_suffix", "1.5f32\n1f64\n1e3_f32\n0x1p3f32"),
+  (
+    "gx_hex_exponent",
+    "0x1p10\n0x1p1_0\n0x1p1f\n-0x1p1A\n0x1.8p-1e\n0x1pf",
+  ),
+  (
+    "gx_char",
+    "'a'\n'\\n'\n'\\u{1F600}'\n'\\''\n'\"'\n''\n'ab'\n'a",
+  ),
+  ("gx_slash_percent", "1 / 2 % 3"),
+  (
+    "gx_name_before_quote",
+    "b\"ab\"\nr\"x\"\nenum E { A\"d\" B }\nb'a'",
+  ),
+  (
+    "gx_angles_outside_a_block",
+    "1 << 2 >> 3\nPage<Edge<User>>\nBox< <",
+  ),
+];
+
 /// The lossless row `gx_sign_ceilings` lexes this under every token ceiling
 /// from 0 to 10, one past its ten lexemes: a number with its sign, a lone `-`,
 /// a sign before a refused float, a signed hexadecimal number, and a `-`
@@ -1008,6 +1038,7 @@ fn graphqlx_syntactic_simd_oracle() {
     .iter()
     .chain(GRAPHQLX_SIMD_EXTRA)
     .chain(GRAPHQLX_KEPT)
+    .chain(GRAPHQLX_TOKENS)
   {
     let rendered = render_stream!(SyntacticLexer::<str>::new(src));
     check("graphqlx-syntactic", name, &rendered, &mut mismatches);
@@ -1256,6 +1287,9 @@ fn same_gx_error_data(
     (GxErrorData::State(b), GxErrorData::State(s)) => b == s,
     (GxErrorData::InvalidUtf8(b), GxErrorData::InvalidUtf8(s)) => b == s,
     (GxErrorData::Other(b), GxErrorData::Other(s)) => b == s,
+    (GxErrorData::EmptyChar, GxErrorData::EmptyChar)
+    | (GxErrorData::LongChar, GxErrorData::LongChar)
+    | (GxErrorData::UnterminatedChar, GxErrorData::UnterminatedChar) => true,
     _ => false,
   }
 }
@@ -1317,6 +1351,9 @@ fn same_gx_token<B: AsRef<[u8]>>(byte: &GxToken<B>, str_: &GxToken<&str>) -> boo
     (Tok::LitFloat(b), Tok::LitFloat(s)) => same_gx_lit_float(b, s),
     (Tok::LitInlineStr(b), Tok::LitInlineStr(s)) => same_inline_str(b, s),
     (Tok::LitBlockStr(b), Tok::LitBlockStr(s)) => same_block_str(b, s),
+    (Tok::LitChar(b), Tok::LitChar(s)) => {
+      b.source_ref().as_ref() == s.source_ref().as_bytes() && b.value() == s.value()
+    }
     // Every other variant carries no payload; the `kind()` check above already
     // confirmed they're the same punctuation/spread token.
     _ => true,
@@ -1384,6 +1421,7 @@ fn graphqlx_syntactic_simd_source_matrix_u8() {
     .iter()
     .chain(GRAPHQLX_SIMD_EXTRA)
     .chain(GRAPHQLX_KEPT)
+    .chain(GRAPHQLX_TOKENS)
   {
     assert_gx_matches_str_stream!("[u8]", name, GxSimd::<[u8]>::new(src.as_bytes()), src);
   }
@@ -1396,6 +1434,7 @@ fn graphqlx_syntactic_simd_source_matrix_bytes() {
     .iter()
     .chain(GRAPHQLX_SIMD_EXTRA)
     .chain(GRAPHQLX_KEPT)
+    .chain(GRAPHQLX_TOKENS)
   {
     let owned = bytes_1::Bytes::copy_from_slice(src.as_bytes());
     assert_gx_matches_str_stream!("Bytes", name, GxSimd::<bytes_1::Bytes>::new(&owned), src);
@@ -1409,6 +1448,7 @@ fn graphqlx_syntactic_simd_source_matrix_smol_bytes() {
     .iter()
     .chain(GRAPHQLX_SIMD_EXTRA)
     .chain(GRAPHQLX_KEPT)
+    .chain(GRAPHQLX_TOKENS)
   {
     let owned = smol_bytes_0_2::shared::Bytes::copy_from_slice(src.as_bytes());
     assert_gx_matches_str_stream!(
@@ -1442,6 +1482,7 @@ fn graphqlx_syntactic_simd_source_matrix_smol_utf8_bytes() {
     .iter()
     .chain(GRAPHQLX_SIMD_EXTRA)
     .chain(GRAPHQLX_KEPT)
+    .chain(GRAPHQLX_TOKENS)
   {
     let owned = smol_bytes_0_2::Utf8Bytes::from(*src);
     assert_gx_matches_str_stream!(
@@ -1474,6 +1515,7 @@ fn graphqlx_lossless_oracle() {
     .iter()
     .chain(GRAPHQLX_SIMD_EXTRA)
     .chain(GRAPHQLX_KEPT)
+    .chain(GRAPHQLX_TOKENS)
   {
     let rendered = render_stream!(LosslessLexer::<&str>::new(src));
     check("graphqlx-lossless", name, &rendered, &mut mismatches);
@@ -1530,6 +1572,44 @@ fn gx_sign_extents() {
       lexer.span(),
       SimpleSpan::new(0, end),
       "{source:?}: where the lexer stands after the refused item"
+    );
+  }
+}
+
+/// The two GraphQLx lexers agree, trivia apart: over every row of the dialect's own tokens and of
+/// the streams no later token may move, the lossless stream with its trivia dropped is the
+/// syntactic stream, line for line. It cannot see a defect the two share: only a row's own golden
+/// can.
+#[cfg(feature = "graphqlx")]
+#[test]
+fn the_two_graphqlx_lexers_agree_trivia_apart() {
+  use smear::lexer::graphqlx::{lossless::LosslessLexer, syntactic::SyntacticLexer};
+
+  const TRIVIA: &[&str] = &[
+    "Space",
+    "Tab",
+    "Newline",
+    "CarriageReturn",
+    "CarriageReturnAndNewline",
+    "Comma",
+  ];
+  for (name, src) in GRAPHQLX_TOKENS.iter().chain(GRAPHQLX_KEPT) {
+    let syntactic = render_stream!(SyntacticLexer::<str>::new(src));
+    let lossless = render_stream!(LosslessLexer::<&str>::new(src));
+    let kept: Vec<&str> = lossless
+      .lines()
+      .filter(|line: &&str| {
+        let token = line.splitn(3, "  ").nth(2).unwrap_or_default();
+        !(line.starts_with("OK ")
+          && (TRIVIA.contains(&token)
+            || token.starts_with("Comment(")
+            || token.starts_with("Bom(")))
+      })
+      .collect();
+    assert_eq!(
+      kept,
+      syntactic.lines().collect::<Vec<&str>>(),
+      "{name}: the lexers part, trivia apart"
     );
   }
 }

@@ -58,7 +58,7 @@ macro_rules! token_impl {
             open_brace,
           },
           lossless::{LosslessToken, LosslessTokenKind},
-          LitInt, LitFloat,
+          LitChar, LitInt, LitFloat,
         },
         handlers::{
           close_brace, decrease_recursion_depth_and_increase_token,
@@ -117,7 +117,7 @@ macro_rules! token_impl {
               .map(Signed::Float)
           }
           Rule::HexFloat => one(tt_hook_and_then(lexer, |lexer| {
-            handlers::$handlers::handle_valid_hex_suffix(lexer, HexFloatError::UnexpectedSuffix)
+            handlers::$handlers::handle_valid_hex_float_suffix(lexer, HexFloatError::UnexpectedSuffix)
           }))
           .map(Signed::HexFloat),
           Rule::HexFloatMissingExponent => tt_hook_and_then_into_errors(
@@ -170,6 +170,34 @@ macro_rules! token_impl {
             tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_invalid_hex_suffix)
               .map(Signed::Hex)
           }
+          Rule::FloatSuffixed => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_float_suffix(lexer, FloatError::UnexpectedSuffix)
+          }))
+          .map(Signed::Float),
+          Rule::IntegerFloatSuffixed => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_float_suffix(lexer, DecimalError::UnexpectedSuffix)
+          }))
+          .map(Signed::Float),
+          Rule::HexFloatSuffixed => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_float_suffix(lexer, HexFloatError::UnexpectedSuffix)
+          }))
+          .map(Signed::HexFloat),
+          Rule::DecimalSuffixed => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_int_suffix(lexer, DecimalError::UnexpectedSuffix)
+          }))
+          .map(Signed::Decimal),
+          Rule::BinarySuffixed => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_int_suffix(lexer, BinaryError::UnexpectedSuffix)
+          }))
+          .map(Signed::Binary),
+          Rule::OctalSuffixed => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_int_suffix(lexer, OctalError::UnexpectedSuffix)
+          }))
+          .map(Signed::Octal),
+          Rule::HexSuffixed => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_int_suffix(lexer, HexError::UnexpectedSuffix)
+          }))
+          .map(Signed::Hex),
         }
       }
 
@@ -247,8 +275,10 @@ macro_rules! token_impl {
       #[logos(subpattern esign = "[eE][+-]?")]
       #[logos(subpattern exp = "(?&esign)(?&digits_with_sep)")]
       #[logos(subpattern psign = "[pP][+-]?")]
-      #[logos(subpattern hex_exp = "(?&psign)(?&hex_digits_with_sep)")]
+      #[logos(subpattern hex_exp = "(?&psign)(?&digits_with_sep)")]
       #[logos(subpattern hex_frac = "\\.(?&hex_digits_with_sep)")]
+      #[logos(subpattern int_suffix = "_?[iu](0|[1-9][0-9]*)")]
+      #[logos(subpattern float_suffix = "_?f(32|64)")]
       pub enum Token<$logos_lt> {
         #[token("*", tt_hook)]
         Asterisk,
@@ -320,6 +350,18 @@ macro_rules! token_impl {
         #[token("^", tt_hook)]
         Caret,
 
+        #[token("/", tt_hook)]
+        Slash,
+
+        #[token("%", tt_hook)]
+        Percent,
+
+        #[token("<<", tt_hook)]
+        Shl,
+
+        #[token("'", |lexer| tt_hook_and_then(lexer, handlers::$handlers::char_literal))]
+        LitChar(LitChar<$logos_slice>),
+
         #[token("=>", tt_hook)]
         FatArrow,
 
@@ -358,9 +400,11 @@ macro_rules! token_impl {
         #[regex("(?&decimal)(?&frac)(?&esign)", |lexer| tt_hook_and_then(lexer, handlers::$handlers::handle_exponent_error))]
         #[regex("(?&decimal)\\._*", |lexer| tt_hook_and_then(lexer, handlers::$handlers::handle_fractional_error))]
         #[regex("(?&decimal)(?&esign)", |lexer| tt_hook_and_then(lexer, handlers::$handlers::handle_exponent_error))]
+        #[regex("(?&decimal)((?&frac)(?&exp)|(?&frac)|(?&exp))(?&float_suffix)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_float_suffix(lexer, FloatError::UnexpectedSuffix)))]
+        #[regex("(?&decimal)(?&float_suffix)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_float_suffix(lexer, DecimalError::UnexpectedSuffix)))]
         Float($logos_slice),
 
-        #[regex("(?&hex)(?&hex_frac)?(?&hex_exp)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_valid_hex_suffix(lexer, HexFloatError::UnexpectedSuffix)))]
+        #[regex("(?&hex)(?&hex_frac)?(?&hex_exp)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_valid_hex_float_suffix(lexer, HexFloatError::UnexpectedSuffix)))]
         #[regex("(?&hex)(?&hex_frac)", |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_hex_float_missing_exponent_then_check_suffix))]
         #[regex(
           "(?&hex_frac)(?&hex_exp)",
@@ -369,21 +413,26 @@ macro_rules! token_impl {
         #[regex("(?&hex)(?&hex_frac)(?&psign)", |lexer| tt_hook_and_then(lexer, handlers::$handlers::handle_hex_exponent_error))]
         #[regex("(?&hex)\\._*", |lexer| tt_hook_and_then(lexer, handlers::$handlers::handle_hex_fractional_error))]
         #[regex("(?&hex)(?&psign)", |lexer| tt_hook_and_then(lexer, handlers::$handlers::handle_hex_exponent_error))]
+        #[regex("(?&hex)(?&hex_frac)?(?&hex_exp)(?&float_suffix)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_float_suffix(lexer, HexFloatError::UnexpectedSuffix)))]
         HexFloat($logos_slice),
 
         #[regex("(?&decimal)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_decimal_suffix(lexer, DecimalError::UnexpectedSuffix)))]
+        #[regex("(?&decimal)(?&int_suffix)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_int_suffix(lexer, DecimalError::UnexpectedSuffix)))]
         Decimal($logos_slice),
 
         #[regex("(?&binary)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_valid_binary_suffix(lexer, BinaryError::UnexpectedSuffix)))]
         #[regex("(?&binary_start)", |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_invalid_binary_suffix))]
+        #[regex("(?&binary)(?&int_suffix)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_int_suffix(lexer, BinaryError::UnexpectedSuffix)))]
         Binary($logos_slice),
 
         #[regex("(?&octal)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_valid_octal_suffix(lexer, OctalError::UnexpectedSuffix)))]
         #[regex("(?&octal_start)", |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_invalid_octal_suffix))]
+        #[regex("(?&octal)(?&int_suffix)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_int_suffix(lexer, OctalError::UnexpectedSuffix)))]
         Octal($logos_slice),
 
         #[regex("(?&hex)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_valid_hex_suffix(lexer, HexError::UnexpectedSuffix)))]
         #[regex("(?&hex_start)", |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_invalid_hex_suffix))]
+        #[regex("(?&hex)(?&int_suffix)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_int_suffix(lexer, HexError::UnexpectedSuffix)))]
         Hex($logos_slice),
 
         #[token("\"", |lexer| {
@@ -446,6 +495,14 @@ macro_rules! token_impl {
             Token::Tilde => Self::Tilde,
             Token::DotDot => Self::DotDot,
             Token::Caret => Self::Caret,
+            Token::Slash => Self::Slash,
+            Token::Percent => Self::Percent,
+            Token::Shl => Self::Shl,
+            Token::LitChar(lit) => {
+              let value = lit.value();
+              let $val = *lit.source_ref();
+              Self::LitChar(LitChar::new($convert, value))
+            }
             Token::Comma => Self::Comma,
             Token::Space => Self::Space,
             Token::Tab => Self::Tab,
@@ -492,7 +549,7 @@ macro_rules! token_impl {
             open_brace,
           },
           lossless::{LosslessToken, LosslessTokenKind},
-          LitInt, LitFloat,
+          LitChar, LitInt, LitFloat,
         },
         handlers::{
           close_brace, decrease_recursion_depth_and_increase_token,
@@ -551,7 +608,7 @@ macro_rules! token_impl {
               .map(Signed::Float)
           }
           Rule::HexFloat => one(tt_hook_and_then(lexer, |lexer| {
-            handlers::$handlers::handle_valid_hex_suffix(lexer, HexFloatError::UnexpectedSuffix)
+            handlers::$handlers::handle_valid_hex_float_suffix(lexer, HexFloatError::UnexpectedSuffix)
           }))
           .map(Signed::HexFloat),
           Rule::HexFloatMissingExponent => tt_hook_and_then_into_errors(
@@ -604,6 +661,34 @@ macro_rules! token_impl {
             tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_invalid_hex_suffix)
               .map(Signed::Hex)
           }
+          Rule::FloatSuffixed => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_float_suffix(lexer, FloatError::UnexpectedSuffix)
+          }))
+          .map(Signed::Float),
+          Rule::IntegerFloatSuffixed => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_float_suffix(lexer, DecimalError::UnexpectedSuffix)
+          }))
+          .map(Signed::Float),
+          Rule::HexFloatSuffixed => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_float_suffix(lexer, HexFloatError::UnexpectedSuffix)
+          }))
+          .map(Signed::HexFloat),
+          Rule::DecimalSuffixed => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_int_suffix(lexer, DecimalError::UnexpectedSuffix)
+          }))
+          .map(Signed::Decimal),
+          Rule::BinarySuffixed => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_int_suffix(lexer, BinaryError::UnexpectedSuffix)
+          }))
+          .map(Signed::Binary),
+          Rule::OctalSuffixed => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_int_suffix(lexer, OctalError::UnexpectedSuffix)
+          }))
+          .map(Signed::Octal),
+          Rule::HexSuffixed => one(tt_hook_and_then(lexer, |lexer| {
+            handlers::$handlers::handle_int_suffix(lexer, HexError::UnexpectedSuffix)
+          }))
+          .map(Signed::Hex),
         }
       }
 
@@ -681,8 +766,10 @@ macro_rules! token_impl {
       #[logos(subpattern esign = "[eE][+-]?")]
       #[logos(subpattern exp = "(?&esign)(?&digits_with_sep)")]
       #[logos(subpattern psign = "[pP][+-]?")]
-      #[logos(subpattern hex_exp = "(?&psign)(?&hex_digits_with_sep)")]
+      #[logos(subpattern hex_exp = "(?&psign)(?&digits_with_sep)")]
       #[logos(subpattern hex_frac = "\\.(?&hex_digits_with_sep)")]
+      #[logos(subpattern int_suffix = "_?[iu](0|[1-9][0-9]*)")]
+      #[logos(subpattern float_suffix = "_?f(32|64)")]
       pub enum Token<$logos_lt> {
         #[token("*", tt_hook)]
         Asterisk,
@@ -754,6 +841,18 @@ macro_rules! token_impl {
         #[token("^", tt_hook)]
         Caret,
 
+        #[token("/", tt_hook)]
+        Slash,
+
+        #[token("%", tt_hook)]
+        Percent,
+
+        #[token("<<", tt_hook)]
+        Shl,
+
+        #[token("'", |lexer| tt_hook_and_then(lexer, handlers::$handlers::char_literal))]
+        LitChar(LitChar<$logos_slice>),
+
         #[token("=>", tt_hook)]
         FatArrow,
 
@@ -792,9 +891,11 @@ macro_rules! token_impl {
         #[regex("(?&decimal)(?&frac)(?&esign)", |lexer| tt_hook_and_then(lexer, handlers::$handlers::handle_exponent_error))]
         #[regex("(?&decimal)\\._*", |lexer| tt_hook_and_then(lexer, handlers::$handlers::handle_fractional_error))]
         #[regex("(?&decimal)(?&esign)", |lexer| tt_hook_and_then(lexer, handlers::$handlers::handle_exponent_error))]
+        #[regex("(?&decimal)((?&frac)(?&exp)|(?&frac)|(?&exp))(?&float_suffix)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_float_suffix(lexer, FloatError::UnexpectedSuffix)))]
+        #[regex("(?&decimal)(?&float_suffix)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_float_suffix(lexer, DecimalError::UnexpectedSuffix)))]
         Float($logos_slice),
 
-        #[regex("(?&hex)(?&hex_frac)?(?&hex_exp)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_valid_hex_suffix(lexer, HexFloatError::UnexpectedSuffix)))]
+        #[regex("(?&hex)(?&hex_frac)?(?&hex_exp)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_valid_hex_float_suffix(lexer, HexFloatError::UnexpectedSuffix)))]
         #[regex("(?&hex)(?&hex_frac)", |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_hex_float_missing_exponent_then_check_suffix))]
         #[regex(
           "(?&hex_frac)(?&hex_exp)",
@@ -803,21 +904,26 @@ macro_rules! token_impl {
         #[regex("(?&hex)(?&hex_frac)(?&psign)", |lexer| tt_hook_and_then(lexer, handlers::$handlers::handle_hex_exponent_error))]
         #[regex("(?&hex)\\._*", |lexer| tt_hook_and_then(lexer, handlers::$handlers::handle_hex_fractional_error))]
         #[regex("(?&hex)(?&psign)", |lexer| tt_hook_and_then(lexer, handlers::$handlers::handle_hex_exponent_error))]
+        #[regex("(?&hex)(?&hex_frac)?(?&hex_exp)(?&float_suffix)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_float_suffix(lexer, HexFloatError::UnexpectedSuffix)))]
         HexFloat($logos_slice),
 
         #[regex("(?&decimal)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_decimal_suffix(lexer, DecimalError::UnexpectedSuffix)))]
+        #[regex("(?&decimal)(?&int_suffix)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_int_suffix(lexer, DecimalError::UnexpectedSuffix)))]
         Decimal($logos_slice),
 
         #[regex("(?&binary)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_valid_binary_suffix(lexer, BinaryError::UnexpectedSuffix)))]
         #[regex("(?&binary_start)", |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_invalid_binary_suffix))]
+        #[regex("(?&binary)(?&int_suffix)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_int_suffix(lexer, BinaryError::UnexpectedSuffix)))]
         Binary($logos_slice),
 
         #[regex("(?&octal)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_valid_octal_suffix(lexer, OctalError::UnexpectedSuffix)))]
         #[regex("(?&octal_start)", |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_invalid_octal_suffix))]
+        #[regex("(?&octal)(?&int_suffix)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_int_suffix(lexer, OctalError::UnexpectedSuffix)))]
         Octal($logos_slice),
 
         #[regex("(?&hex)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_valid_hex_suffix(lexer, HexError::UnexpectedSuffix)))]
         #[regex("(?&hex_start)", |lexer| tt_hook_and_then_into_errors(lexer, handlers::$handlers::handle_invalid_hex_suffix))]
+        #[regex("(?&hex)(?&int_suffix)", |lexer| tt_hook_and_then(lexer, |lexer| handlers::$handlers::handle_int_suffix(lexer, HexError::UnexpectedSuffix)))]
         Hex($logos_slice),
 
         #[token("\"", |lexer| {
@@ -880,6 +986,14 @@ macro_rules! token_impl {
             Token::Tilde => Self::Tilde,
             Token::DotDot => Self::DotDot,
             Token::Caret => Self::Caret,
+            Token::Slash => Self::Slash,
+            Token::Percent => Self::Percent,
+            Token::Shl => Self::Shl,
+            Token::LitChar(lit) => {
+              let value = lit.value();
+              let $val = *lit.source_ref();
+              Self::LitChar(LitChar::new($convert, value))
+            }
             Token::Comma => Self::Comma,
             Token::Space => Self::Space,
             Token::Tab => Self::Tab,

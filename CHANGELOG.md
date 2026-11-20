@@ -4,6 +4,30 @@ All notable changes to Smear are documented in this file.
 
 ## [Unreleased]
 
+- `smear-lexer`!: GraphQLx's two lexers make the tokens the dialect has outside a `const` block
+  and in one.
+  - **Punctuators.** `/`, `%` and `<<` are the tokens `Slash`, `Percent` and `Shl`, with their
+    kinds. `<<` is one token wherever it is written, and steps no bracket tally. `>` stays one
+    token, and `>>` two. `SyntacticToken`'s `PunctuatorToken` impl answers `slash`, `percent`
+    and `shl`, and `smear_lexer::punctuator` gains `Slash`, `Percent` and `Shl`.
+  - **Typed numbers.** A number with a suffix is one token: `1u8`, `0xFF_u32` and `1.5f32`, and
+    `1f32`, a float. A suffix stands only when no letter, digit, `.` or `_` touches it, and an
+    integer's width fits a `u32`. Otherwise the number is refused as a letter after it is. A
+    hexadecimal float's exponent is decimal, so `0x1p1f` is refused at the `f`. `LitInt` and
+    `LitFloat` gain `suffix` and `suffix_len`, which answer `IntSuffix` and `FloatSuffix`.
+  - **Character literals.** `'a'` is the token `LitChar`, kind `Char`. Its escapes are a
+    string's, and `\'`. `LitChar` answers its slice and its character, and `LitChar<&str>` has
+    the `TryFrom<&str>` door its numbers have.
+  - **Refusals.** `LexerErrorData` gains `EmptyChar`, `LongChar` and `UnterminatedChar`. Their
+    kinds are new: `InvalidChar`, `smear::syntax::invalid-char`, and `UnterminatedChar`,
+    `smear::syntax::unterminated-char`.
+  - **`const`.** `ContextualKeyword` gains `Const` and `smear_lexer::keywords` gains `Const`. The
+    lexers answer it as a name, as every contextual keyword.
+- `smear-parser`!: GraphQLx's `SyntaxKind` gains the images `Slash`, `Percent`, `Shl` and `Char`
+  after `BlockString`, which moves the raw value of every later kind by four. A new token stands
+  where no production expects one, and is refused as any unexpected token is.
+- `smear-compiler`: a GraphQLx number with a suffix is reported as `smear::graphqlx::unknown-item`,
+  once for a file, at the number, until the analyzer gives a suffix its meaning.
 - `smear-lexer` and `smear-parser`!: each GraphQLx lexer has a state type of its own.
   `graphqlx::syntactic::SyntacticState` is the syntactic lexer's `Lexer::State`, and
   `graphqlx::lossless::LosslessState` is the lossless lexer's and its grammar's Logos `Extras`,

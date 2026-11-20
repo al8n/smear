@@ -1060,20 +1060,20 @@ fn only_a_source_with_no_committed_token_tiles_its_gap_at_the_root() {
 
   // The positive controls, so this census cannot pass because nothing anywhere produces a gap.
   //
-  // GraphQLx lexes seven images GraphQL does not, so its "illegal character" is a different byte:
-  // `%` is still one, and it is the smallest source that reaches the fallback clause.
+  // GraphQLx lexes images GraphQL does not, `%` among them, so its "illegal character" is a
+  // different byte: `?` is one, and it is the smallest source that reaches the fallback clause.
   assert_eq!(
-    gap_parents("% {"),
+    gap_parents("? {"),
     vec![K::Document],
     "a leading run tiles at the node its first committed token lands in"
   );
   assert!(
-    !gap_at_root("{ %"),
+    !gap_at_root("{ ?"),
     "a run with nothing lexable after it must not escape to `Root`; if this fails, the \
      trailing-gap fix has been reverted upstream"
   );
   assert!(
-    gap_at_root("%"),
+    gap_at_root("?"),
     "a source with no committed token has no moment at which its run opens, so the run tiles \
      where the walk ends, which is `Root`"
   );

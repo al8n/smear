@@ -8,7 +8,7 @@ use tokora::{
   punct::{
     Ampersand, Asterisk, At, Caret, CloseAngle, CloseBrace, CloseBracket, CloseParen, Colon,
     Dollar, DoubleColon, Equal, Exclamation, FatArrow, Hyphen, OpenAngle, OpenBrace, OpenBracket,
-    OpenParen, Pipe, Plus, Spread, Tilde,
+    OpenParen, Percent, Pipe, Plus, ShiftLeft, Slash, Spread, Tilde,
   },
   state::RecursionLimitExceeded,
   utils::{CharLen, DowncastRef},
@@ -19,7 +19,10 @@ use crate::{
   error::{BadStateError, UnterminatedSpreadOperatorError},
   graphqlx::error::{LexerError, LexerErrorData, LexerErrors},
   skip_block_str_from_bytes, skip_inline_str_simd,
-  string_lexer::{DelegateStringError, DelegatedRefusal},
+  string_lexer::{
+    DelegateStringError, DelegatedRefusal,
+    char_literal::{CharFault, CharLiteral},
+  },
   utf8::IllFormedUtf8,
 };
 
@@ -42,7 +45,7 @@ mod state;
 
 use super::{
   super::{LitBlockStr, LitInlineStr},
-  ContextualKeyword, LitFloat, LitInt, error,
+  ContextualKeyword, LitChar, LitFloat, LitInt, error,
 };
 
 /// The focused GraphQLx number sub-lexer the SIMD lexer delegates malformed and
@@ -239,6 +242,18 @@ pub enum SyntacticToken<S> {
   #[unwrap(ignore)]
   #[try_unwrap(ignore)]
   Caret,
+  /// Slash `/` token, the division operator
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
+  Slash,
+  /// Percent `%` token, the remainder operator
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
+  Percent,
+  /// Shift-left `<<` token, one token wherever it is written
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
+  Shl,
   /// Identifier token
   Identifier(S),
   /// Float literal token
@@ -249,6 +264,8 @@ pub enum SyntacticToken<S> {
   LitInlineStr(LitInlineStr<S>),
   /// Block string token
   LitBlockStr(LitBlockStr<S>),
+  /// Character literal token
+  LitChar(LitChar<S>),
 }
 
 impl<S> SyntacticToken<S> {
@@ -285,6 +302,10 @@ impl<S> SyntacticToken<S> {
       Self::DotDot => SyntacticTokenKind::DotDot,
       Self::Caret => SyntacticTokenKind::Caret,
       Self::Asterisk => SyntacticTokenKind::Asterisk,
+      Self::Slash => SyntacticTokenKind::Slash,
+      Self::Percent => SyntacticTokenKind::Percent,
+      Self::Shl => SyntacticTokenKind::Shl,
+      Self::LitChar(_) => SyntacticTokenKind::Char,
     }
   }
 }
@@ -552,6 +573,21 @@ where
   fn caret() -> Option<Self::Kind> {
     Some(SyntacticTokenKind::Caret)
   }
+
+  #[inline(always)]
+  fn slash() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Slash)
+  }
+
+  #[inline(always)]
+  fn percent() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Percent)
+  }
+
+  #[inline(always)]
+  fn shl() -> Option<Self::Kind> {
+    Some(SyntacticTokenKind::Shl)
+  }
 }
 
 /// The kind of a [`SyntacticToken`], without the associated source data.
@@ -621,6 +657,14 @@ pub enum SyntacticTokenKind {
   DotDot,
   /// Caret `^` token
   Caret,
+  /// Slash `/` token
+  Slash,
+  /// Percent `%` token
+  Percent,
+  /// Shift-left `<<` token
+  Shl,
+  /// Character literal token
+  Char,
 }
 
 macro_rules! into_token_kind {
@@ -660,6 +704,9 @@ into_token_kind!(
   Plus::Plus,
   Spread::Spread,
   Tilde::Tilde,
+  Slash::Slash,
+  Percent::Percent,
+  ShiftLeft::Shl,
 );
 
 /// The kind as a diagnostic names what it found: punctuation in backticks, and every class as a
@@ -696,6 +743,10 @@ impl core::fmt::Display for SyntacticTokenKind {
       Self::Tilde => f.write_str("`~`"),
       Self::DotDot => f.write_str("`..`"),
       Self::Caret => f.write_str("`^`"),
+      Self::Slash => f.write_str("`/`"),
+      Self::Percent => f.write_str("`%`"),
+      Self::Shl => f.write_str("`<<`"),
+      Self::Char => f.write_str("character"),
     }
   }
 }
@@ -977,9 +1028,15 @@ where
         b'+' => return Some(emit_punct!(self: token_start, SyntacticToken::Plus)),
         b'~' => return Some(emit_punct!(self: token_start, SyntacticToken::Tilde)),
         b'^' => return Some(emit_punct!(self: token_start, SyntacticToken::Caret)),
+        b'/' => return Some(emit_punct!(self: token_start, SyntacticToken::Slash)),
+        b'%' => return Some(emit_punct!(self: token_start, SyntacticToken::Percent)),
         b'(' => return Some(increase_recursion!(self: token_start, SyntacticToken::LParen)),
         b'[' => return Some(increase_recursion!(self: token_start, SyntacticToken::LBracket)),
         b'{' => return Some(increase_recursion!(self: token_start, SyntacticToken::LBrace)),
+        // `<<` is one token by longest match, and a shift opens nothing: it steps no tally.
+        b'<' if bytes.get(1) == Some(&b'<') => {
+          return Some(emit_punct2!(self: token_start, SyntacticToken::Shl));
+        }
         b'<' => return Some(increase_recursion!(self: token_start, SyntacticToken::LAngle)),
         b')' => return Some(decrease_recursion!(self: token_start, SyntacticToken::RParen)),
         b']' => return Some(decrease_recursion!(self: token_start, SyntacticToken::RBracket)),
@@ -1129,6 +1186,43 @@ where
                 // error here.
                 Err(_) => return self.delegate_string_error(token_start, false),
               }
+            }
+          }
+        }
+        // A `char` literal, read to its closing `'` or its line's end by the reader the lossless
+        // lexer shares. A refused literal is one error token over everything it holds.
+        b'\'' => {
+          let after: &[u8] = bytes.get(1..).unwrap_or_default();
+          match crate::string_lexer::char_literal::read_char_literal(after) {
+            CharLiteral::Char { value, len } => {
+              self.cursor += len;
+              self.last_span = SimpleSpan::new(token_start, self.cursor);
+              let slice = self.src.slice(&token_start..&self.cursor)?;
+              return Some(finish!(
+                self,
+                SyntacticToken::LitChar(LitChar::new(slice, value))
+              ));
+            }
+            CharLiteral::Refused { fault, len } => {
+              let escaped = match fault {
+                CharFault::Escape => self
+                  .src
+                  .slice(&(token_start + 2)..)
+                  .and_then(|rest: S::Slice<'inp>| rest.iter().next())
+                  .map(|ch: <S::Slice<'inp> as Slice<'inp>>::Char| {
+                    let len = ch.char_len();
+                    (ch, len)
+                  }),
+                _ => None,
+              };
+              self.cursor += len;
+              let span = SimpleSpan::new(token_start, self.cursor);
+              self.last_span = span;
+              self.last_error_span = Some(span);
+              return Some(Err(LexerErrors::from(LexerError::new(
+                span,
+                error::char_refusal(fault, token_start, escaped),
+              ))));
             }
           }
         }

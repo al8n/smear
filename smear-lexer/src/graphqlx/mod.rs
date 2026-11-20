@@ -200,9 +200,169 @@ impl<S> LitFloat<S> {
   }
 }
 
-/// One whole numeric literal, re-scanned by the lexer that produced it.
+/// The suffix of a GraphQLx integer literal: `i` or `u`, and a width, as in `1u8` or `-3i256`.
 ///
-/// The private half of `LitInt`'s and `LitFloat`'s `TryFrom<&str>`, which carry the contract.
+/// The width is the one the literal spells. Whether a program may write it is the analyzer's to
+/// say: `1u7` lexes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct IntSuffix {
+  signed: bool,
+  width: u32,
+}
+
+impl IntSuffix {
+  /// Whether the suffix is `i`, a signed integer's.
+  #[inline(always)]
+  pub const fn is_signed(&self) -> bool {
+    self.signed
+  }
+
+  /// The width the suffix spells: 8 for `u8`.
+  #[inline(always)]
+  pub const fn width(&self) -> u32 {
+    self.width
+  }
+}
+
+/// The suffix of a GraphQLx float literal, as in `1.5f32` or `1f64`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, IsVariant)]
+#[non_exhaustive]
+pub enum FloatSuffix {
+  /// `f32`.
+  F32,
+  /// `f64`.
+  F64,
+}
+
+/// The integer suffix `bytes` end with, and where it starts: at the one `_` directly before its
+/// letter, or at the letter.
+///
+/// A suffix is `i` or `u` and a width, `0` or a digit other than `0` and more digits, that fits a
+/// `u32`.
+fn int_suffix_of(bytes: &[u8]) -> Option<(usize, IntSuffix)> {
+  let digits = bytes
+    .iter()
+    .rev()
+    .take_while(|byte: &&u8| byte.is_ascii_digit())
+    .count();
+  if digits == 0 {
+    return None;
+  }
+  let letter = bytes.len().checked_sub(digits.checked_add(1)?)?;
+  let signed = match bytes.get(letter)? {
+    b'i' => true,
+    b'u' => false,
+    _ => return None,
+  };
+  let width_digits: &[u8] = bytes.get(letter.checked_add(1)?..)?;
+  if width_digits.len() > 1 && width_digits.first() == Some(&b'0') {
+    return None;
+  }
+  let width = width_digits
+    .iter()
+    .try_fold(0u32, |width: u32, digit: &u8| {
+      width
+        .checked_mul(10)?
+        .checked_add(u32::from(digit.wrapping_sub(b'0')))
+    })?;
+  Some((suffix_start(bytes, letter), IntSuffix { signed, width }))
+}
+
+/// The float suffix `bytes` end with, and where it starts, as [`int_suffix_of`] answers it.
+fn float_suffix_of(bytes: &[u8]) -> Option<(usize, FloatSuffix)> {
+  let suffix = match bytes {
+    [.., b'f', b'3', b'2'] => FloatSuffix::F32,
+    [.., b'f', b'6', b'4'] => FloatSuffix::F64,
+    _ => return None,
+  };
+  let letter = bytes.len().checked_sub(3)?;
+  Some((suffix_start(bytes, letter), suffix))
+}
+
+/// Where a suffix whose letter is at `letter` starts: at the `_` directly before it, if one is.
+fn suffix_start(bytes: &[u8], letter: usize) -> usize {
+  match letter.checked_sub(1) {
+    Some(before) if bytes.get(before) == Some(&b'_') => before,
+    _ => letter,
+  }
+}
+
+impl<S: AsRef<[u8]>> LitInt<S> {
+  /// The suffix the literal ends with, as in `1u8`, or `None` for a literal with none.
+  ///
+  /// It reads the literal's own bytes, and never panics: a literal built over any bytes answers
+  /// `None` unless they end in a well-formed suffix.
+  #[inline]
+  pub fn suffix(&self) -> Option<IntSuffix> {
+    int_suffix_of(self.source_ref().as_ref()).map(|(_, suffix): (usize, IntSuffix)| suffix)
+  }
+
+  /// How many bytes the suffix takes: its letter, its width, and the one `_` directly before the
+  /// letter if there is one. 0 for a literal with no suffix.
+  #[inline]
+  pub fn suffix_len(&self) -> usize {
+    let bytes = self.source_ref().as_ref();
+    int_suffix_of(bytes).map_or(0, |(start, _): (usize, IntSuffix)| {
+      bytes.len().saturating_sub(start)
+    })
+  }
+}
+
+impl<S: AsRef<[u8]>> LitFloat<S> {
+  /// The suffix the literal ends with, as in `1.5f32`, or `None` for a literal with none.
+  ///
+  /// It reads the literal's own bytes, and never panics: a literal built over any bytes answers
+  /// `None` unless they end in a well-formed suffix.
+  #[inline]
+  pub fn suffix(&self) -> Option<FloatSuffix> {
+    float_suffix_of(self.source_ref().as_ref()).map(|(_, suffix): (usize, FloatSuffix)| suffix)
+  }
+
+  /// How many bytes the suffix takes: `f32` or `f64`, and the one `_` directly before it if there
+  /// is one. 0 for a literal with no suffix.
+  #[inline]
+  pub fn suffix_len(&self) -> usize {
+    let bytes = self.source_ref().as_ref();
+    float_suffix_of(bytes).map_or(0, |(start, _): (usize, FloatSuffix)| {
+      bytes.len().saturating_sub(start)
+    })
+  }
+}
+
+/// A GraphQLx `char` literal: `'`, one character or one escape, and `'`.
+///
+/// The escapes are a string's, and `\'`; `"` may stand as it is. The literal spells exactly one
+/// Unicode scalar value, which [`value`](Self::value) answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LitChar<S> {
+  source: S,
+  value: char,
+}
+
+impl<S> LitChar<S> {
+  /// A literal over `source`, whose character the lexer read as `value`.
+  #[inline(always)]
+  pub(crate) const fn new(source: S, value: char) -> Self {
+    Self { source, value }
+  }
+
+  /// The literal's slice, both quotes included.
+  #[inline(always)]
+  pub const fn source_ref(&self) -> &S {
+    &self.source
+  }
+
+  /// The character the literal spells, its escape applied.
+  #[inline(always)]
+  pub const fn value(&self) -> char {
+    self.value
+  }
+}
+
+/// One whole literal, re-scanned by the lexer that produced it.
+///
+/// The private half of `LitInt`'s, `LitFloat`'s and `LitChar`'s `TryFrom<&str>`, which carry the
+/// contract.
 ///
 /// # Why this exists: a payload with no door is a payload with a second custodian
 ///
@@ -351,6 +511,23 @@ impl<'de: 'a, 'a> TryFrom<&'de str> for LitFloat<&'a str> {
     const WHAT: &str = "float";
     match scan_one_token(value, WHAT)? {
       syntactic::SyntacticToken::LitFloat(lit) => Ok(lit),
+      _ => Err(not_one_token(value.len(), WHAT)),
+    }
+  }
+}
+
+impl<'de: 'a, 'a> TryFrom<&'de str> for LitChar<&'a str> {
+  type Error = error::LexerErrors<char, RecursionLimitExceeded>;
+
+  /// The scanner's own reading of `value` as one whole `char` literal.
+  ///
+  /// [`LitInt`]'s twin — see [`LitInt::try_from`] for what "whole" means. The lexer's own refusal
+  /// of a malformed literal passes through unchanged.
+  #[inline]
+  fn try_from(value: &'de str) -> Result<Self, Self::Error> {
+    const WHAT: &str = "character";
+    match scan_one_token(value, WHAT)? {
+      syntactic::SyntacticToken::LitChar(lit) => Ok(lit),
       _ => Err(not_one_token(value.len(), WHAT)),
     }
   }

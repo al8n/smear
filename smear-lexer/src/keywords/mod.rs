@@ -177,6 +177,7 @@ keyword! {
   (Where, "where_KW", "where"),
   (Set, "set_KW", "set"),
   (Map, "map_KW", "map"),
+  (Const, "const_KW", "const"),
 }
 
 // GraphQL Keywords

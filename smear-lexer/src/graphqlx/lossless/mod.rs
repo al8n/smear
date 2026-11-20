@@ -3,7 +3,7 @@ use tokora::state::LimitExceeded;
 
 use super::{
   super::{LitBlockStr, LitInlineStr},
-  LitFloat, LitInt, error,
+  LitChar, LitFloat, LitInt, error,
 };
 
 use token::{token, token_impl};
@@ -224,6 +224,18 @@ pub enum LosslessToken<S> {
   #[unwrap(ignore)]
   #[try_unwrap(ignore)]
   Caret,
+  /// Slash `/` token, the division operator
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
+  Slash,
+  /// Percent `%` token, the remainder operator
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
+  Percent,
+  /// Shift-left `<<` token, one token wherever it is written
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
+  Shl,
   /// Identifier token
   Identifier(S),
   /// Float literal token
@@ -234,6 +246,8 @@ pub enum LosslessToken<S> {
   LitInlineStr(LitInlineStr<S>),
   /// Block string token
   LitBlockStr(LitBlockStr<S>),
+  /// Character literal token
+  LitChar(LitChar<S>),
 }
 
 impl<S> LosslessToken<S> {
@@ -285,6 +299,10 @@ impl<S> LosslessToken<S> {
       Self::Tilde => LosslessTokenKind::Tilde,
       Self::DotDot => LosslessTokenKind::DotDot,
       Self::Caret => LosslessTokenKind::Caret,
+      Self::Slash => LosslessTokenKind::Slash,
+      Self::Percent => LosslessTokenKind::Percent,
+      Self::Shl => LosslessTokenKind::Shl,
+      Self::LitChar(_) => LosslessTokenKind::Char,
       Self::Asterisk => LosslessTokenKind::Asterisk,
       Self::Space => LosslessTokenKind::Space,
       Self::Tab => LosslessTokenKind::Tab,
@@ -395,6 +413,14 @@ pub enum LosslessTokenKind {
   InlineString,
   /// Block string token
   BlockString,
+  /// Slash `/` token
+  Slash,
+  /// Percent `%` token
+  Percent,
+  /// Shift-left `<<` token
+  Shl,
+  /// Character literal token
+  Char,
 }
 
 /// The kind as a diagnostic names what it found: punctuation in backticks, and every class —
@@ -439,6 +465,10 @@ impl core::fmt::Display for LosslessTokenKind {
       Self::Int => f.write_str("integer"),
       Self::InlineString => f.write_str("string"),
       Self::BlockString => f.write_str("block string"),
+      Self::Slash => f.write_str("`/`"),
+      Self::Percent => f.write_str("`%`"),
+      Self::Shl => f.write_str("`<<`"),
+      Self::Char => f.write_str("character"),
     }
   }
 }
@@ -523,6 +553,10 @@ mod tests {
       Int => LosslessToken::LitInt(LitInt::Decimal("1")),
       InlineString => LosslessToken::LitInlineStr(LitInlineStr::Plain(LitPlainInlineStr::new("\"s\""))),
       BlockString => LosslessToken::LitBlockStr(LitBlockStr::Plain(LitPlainBlockStr::new("\"\"\"b\"\"\""))),
+      Slash => LosslessToken::Slash,
+      Percent => LosslessToken::Percent,
+      Shl => LosslessToken::Shl,
+      Char => LosslessToken::LitChar(LitChar::new("'a'", 'a')),
     }
   }
 
@@ -588,6 +622,37 @@ mod tests {
     items
   }
 
+  /// Each arm of the grammar's macro lexes the dialect's tokens alike: typed numbers, a
+  /// hexadecimal float's exponent, `char` literals, `/`, `%`, `<<` and a name before a quote. Each
+  /// arm spells every rule itself, and the oracle lexes a `&str` alone.
+  #[test]
+  fn each_arm_lexes_the_dialects_tokens_alike() {
+    const ROWS: &[&str] = &[
+      "1u8\n-3i256\n0xFF_u32\n0b1010u8\n0o17i16\n0u0",
+      "1.5f32\n1f64\n1e3_f32\n0x1p3f32",
+      "0x1p10\n0x1p1_0\n0x1p1f\n-0x1p1A\n0x1.8p-1e\n0x1pf",
+      "'a'\n'\\n'\n'\\u{1F600}'\n'\\''\n'\"'\n''\n'ab'\n'a",
+      "1 / 2 % 3",
+      "b\"ab\"\nr\"x\"\nenum E { A\"d\" B }\nb'a'",
+      "1 << 2 >> 3\nPage<Edge<User>>\nBox< <",
+    ];
+    for row in ROWS {
+      let text = kinds_and_spans(LosslessLexer::<&str>::new(row));
+      assert!(!text.is_empty(), "{row:?}: the `&str` stream is empty");
+      assert_eq!(
+        kinds_and_spans(LosslessLexer::<&[u8]>::new(row.as_bytes())),
+        text,
+        "{row:?}: &[u8]"
+      );
+      #[cfg(feature = "bytes_1")]
+      assert_eq!(
+        kinds_and_spans(LosslessLexer::<bytes_1::Bytes>::new(row.as_bytes())),
+        text,
+        "{row:?}: bytes::Bytes"
+      );
+    }
+  }
+
   /// Each arm of the grammar's macro lexes every place a `-` stands alike: as the operator, as a
   /// sign, and before a refusal. Each arm spells the `-` rule and its callback itself, and the
   /// oracle lexes a `&str` alone.
@@ -620,10 +685,15 @@ mod tests {
   #[test]
   fn only_braces_move_the_brace_count() {
     // Openers of the other three pairs, never closed: the bracket tally counts all six and no
-    // brace is open.
-    assert_brace_counts_over_each_arm("(([[<<", &[0; 6]);
-    let opened = final_state(LosslessLexer::<&str>::new("(([[<<"));
+    // brace is open. The two `<` are apart, since `<<` is one token, and the space between them is
+    // an item of its own.
+    assert_brace_counts_over_each_arm("(([[< <", &[0; 7]);
+    let opened = final_state(LosslessLexer::<&str>::new("(([[< <"));
     assert_eq!((opened.brace_depth(), opened.depth()), (0, 6));
+
+    // `<<` is one item, a shift, and opens nothing.
+    assert_brace_counts_over_each_arm("<<", &[0]);
+    assert_eq!(final_state(LosslessLexer::<&str>::new("<<")).depth(), 0);
 
     // Their closers with nothing open.
     assert_brace_counts_over_each_arm("))]]>>", &[0; 6]);

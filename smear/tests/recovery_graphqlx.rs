@@ -870,8 +870,8 @@ mod lossless {
     for (what, text, own) in [
       (
         "angles in an argument list",
-        "mod m { scalar A @d(<<< } mod n { >>>) scalar B }",
-        "mod m { scalar A @d(<<< }",
+        "mod m { scalar A @d(< < < } mod n { >>>) scalar B }",
+        "mod m { scalar A @d(< < < }",
       ),
       (
         "brackets behind a parenthesis",
@@ -880,13 +880,13 @@ mod lossless {
       ),
       (
         "a definition's generic list",
-        "mod m { type T<<< } mod n { >>> scalar B }",
-        "mod m { type T<<< }",
+        "mod m { type T< < < } mod n { >>> scalar B }",
+        "mod m { type T< < < }",
       ),
       (
         "a type's generic list",
-        "mod m { type T { f: Box<<< } } mod n { >>> scalar B }",
-        "mod m { type T { f: Box<<< } }",
+        "mod m { type T { f: Box< < < } } mod n { >>> scalar B }",
+        "mod m { type T { f: Box< < < } }",
       ),
       (
         "a field's argument list",

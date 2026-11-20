@@ -607,8 +607,9 @@ fn junk_inside_a_list_is_attributed_to_an_error_node() {
 /// What the depth counting buys, measured both ways: with the pair, the junk `<2>` is **one**
 /// `Error` node; without it, `<` is neutral, the `2` behind it is a depth-zero sync point, and the
 /// same source becomes `Error("<")`, a real `IntValue`, and `Error(">")` — three nodes, one of them
-/// a value the grammar never admitted. The nested form is sharper still: `<<2>>` becomes
-/// `Error("<<")`, an `IntValue` and **two** `Error`s.
+/// a value the grammar never admitted. The nested form is sharper still: `< <2> >` becomes
+/// `Error("< <")`, an `IntValue` and **two** `Error`s. Its `<` are apart because `<<` is one token,
+/// a shift.
 ///
 /// The byte-for-byte text is identical under both, which is why no round-trip gate can see this.
 #[test]
@@ -619,7 +620,7 @@ fn a_skipped_region_counts_angle_depth_like_every_other_pair() {
     "the whole `<2>` is one skipped region, not three"
   );
   assert_eq!(
-    kinds!(parse_value, "[1, <<2>>, 3]"),
+    kinds!(parse_value, "[1, < <2> >, 3]"),
     vec![K::Root, K::ListValue, K::IntValue, K::Error, K::IntValue],
     "nesting inside the skipped region is crossed, not restarted at"
   );

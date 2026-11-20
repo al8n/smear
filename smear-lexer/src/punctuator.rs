@@ -74,3 +74,12 @@ pub type Tilde = tokora::punct::Tilde<tokora::SimpleSpan>;
 
 /// The `^` punctuator.
 pub type Caret = tokora::punct::Caret<tokora::SimpleSpan>;
+
+/// The `/` punctuator.
+pub type Slash = tokora::punct::Slash<tokora::SimpleSpan>;
+
+/// The `%` punctuator.
+pub type Percent = tokora::punct::Percent<tokora::SimpleSpan>;
+
+/// The `<<` punctuator.
+pub type Shl = tokora::punct::ShiftLeft<tokora::SimpleSpan>;

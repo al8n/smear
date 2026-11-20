@@ -77,6 +77,10 @@ const TOKEN_IMAGES: &[&str] = &[
   "Int",
   "InlineString",
   "BlockString",
+  "Slash",
+  "Percent",
+  "Shl",
+  "Char",
   "Bom",
   "Comma",
   "Space",
@@ -514,6 +518,10 @@ fn the_image_block_matches_the_graphqlx_lexer() {
     LosslessTokenKind::Int,
     LosslessTokenKind::InlineString,
     LosslessTokenKind::BlockString,
+    LosslessTokenKind::Slash,
+    LosslessTokenKind::Percent,
+    LosslessTokenKind::Shl,
+    LosslessTokenKind::Char,
   ];
 
   for (index, kind) in LEXER_KINDS.iter().enumerate() {
@@ -669,6 +677,10 @@ fn image_of(kind: LosslessTokenKind) -> X {
     LosslessTokenKind::Int => X::Int,
     LosslessTokenKind::InlineString => X::InlineString,
     LosslessTokenKind::BlockString => X::BlockString,
+    LosslessTokenKind::Slash => X::Slash,
+    LosslessTokenKind::Percent => X::Percent,
+    LosslessTokenKind::Shl => X::Shl,
+    LosslessTokenKind::Char => X::Char,
     // `LosslessTokenKind` is `#[non_exhaustive]`, so this arm is forced. It is a panic rather
     // than a fallback kind: an image with no tree kind must stop the suite, not land in the tree
     // as something else.
@@ -682,7 +694,7 @@ fn image_of(kind: LosslessTokenKind) -> X {
 /// string literals' constructors are `pub(crate)`, so they cannot be built from here at all. The
 /// broad one is better: a hand-built token proves only that a variant exists, while a lexed one
 /// proves the GraphQLx lexer *emits* it — which is what the image block claims about all
-/// thirty-seven of them. One snippet per image, so a snippet that lexes into something unexpected
+/// forty-one of them. One snippet per image, so a snippet that lexes into something unexpected
 /// shows up as a missing kind rather than being absorbed by a neighbour.
 fn lexed_samples() -> BTreeMap<LosslessTokenKind, LosslessToken<&'static str>> {
   use tokora::lexer::Lexer as _;
@@ -725,6 +737,10 @@ fn lexed_samples() -> BTreeMap<LosslessTokenKind, LosslessToken<&'static str>> {
     "1",
     "\"s\"",
     "\"\"\"b\"\"\"",
+    "/",
+    "%",
+    "<<",
+    "'a'",
   ];
 
   let mut samples = BTreeMap::new();

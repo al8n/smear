@@ -317,6 +317,18 @@ pub enum LexerErrorData<Char = char, StateError = ()> {
   State(StateError),
   /// Not a valid UTF-8 source.
   InvalidUtf8(core::str::Utf8Error),
+  /// A `char` literal with nothing between its quotes: `''`.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
+  EmptyChar,
+  /// A `char` literal that spells more than one character: `'ab'`.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
+  LongChar,
+  /// A `char` literal that a line terminator or the end of input cuts before its closing `'`.
+  #[unwrap(ignore)]
+  #[try_unwrap(ignore)]
+  UnterminatedChar,
   /// How many more errors a comment held than its refusal keeps: N more errors in this comment
   /// were found and not kept.
   ///
@@ -366,6 +378,8 @@ impl<Char, StateError> LexerErrorData<Char, StateError> {
       Self::UnterminatedSpreadOperator => SyntaxErrorKind::UnterminatedSpread,
       Self::State(_) => SyntaxErrorKind::ResourceLimit,
       Self::InvalidUtf8(_) => SyntaxErrorKind::InvalidUtf8,
+      Self::EmptyChar | Self::LongChar => SyntaxErrorKind::InvalidChar,
+      Self::UnterminatedChar => SyntaxErrorKind::UnterminatedChar,
       Self::Omitted(_) | Self::Other(_) => SyntaxErrorKind::InvalidSyntax,
     }
   }
@@ -401,7 +415,10 @@ impl<Char, StateError> LexerErrorData<Char, StateError> {
       | Self::UnknownLexeme(_)
       | Self::UnexpectedEndOfInput
       | Self::State(_)
-      | Self::InvalidUtf8(_) => f.write_str(self.kind().message()),
+      | Self::InvalidUtf8(_)
+      | Self::EmptyChar
+      | Self::LongChar
+      | Self::UnterminatedChar => f.write_str(self.kind().message()),
     }
   }
 
@@ -737,5 +754,43 @@ impl<Char, StateError> BadStateError for LexerErrors<Char, StateError> {
   #[inline]
   fn bad_state(span: Span, error: Self::StateError) -> Self {
     LexerError::const_new(span, LexerErrorData::State(error)).into()
+  }
+}
+
+/// The data of a refused `char` literal that starts at `start`, by the fault its reader found.
+///
+/// `escaped` is, for a backslash that begins no escape, the character after it and that
+/// character's length in bytes. The backslash is the literal's second byte, so that character
+/// is its third. A fault in the body is a string's own error, as the same fault in a string is.
+pub(crate) fn char_refusal<Char, StateError>(
+  fault: crate::string_lexer::char_literal::CharFault,
+  start: usize,
+  escaped: Option<(Char, usize)>,
+) -> LexerErrorData<Char, StateError> {
+  use crate::string_lexer::char_literal::CharFault;
+
+  match fault {
+    CharFault::Empty => LexerErrorData::EmptyChar,
+    CharFault::Long => LexerErrorData::LongChar,
+    CharFault::Unterminated => LexerErrorData::UnterminatedChar,
+    CharFault::Escape => match escaped {
+      Some((ch, len)) => {
+        let at = start.saturating_add(2);
+        LexerErrorData::String(StringErrors::from(StringError::UnexpectedEscapedCharacter(
+          EscapedCharacter::new(
+            PositionedChar::with_position(ch, at),
+            Span::new(at.saturating_sub(1), at.saturating_add(len)),
+          ),
+        )))
+      }
+      None => LexerErrorData::UnterminatedChar,
+    },
+    CharFault::Utf8(error) => {
+      let at = start.saturating_add(1).saturating_add(error.valid_up_to());
+      let len = error.error_len().unwrap_or(1);
+      LexerErrorData::String(StringErrors::from(StringError::UnsupportedCharacter(
+        Lexeme::Range(Span::new(at, at.saturating_add(len))),
+      )))
+    }
   }
 }

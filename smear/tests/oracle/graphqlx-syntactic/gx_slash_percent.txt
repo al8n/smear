@@ -1,0 +1,5 @@
+OK  0..1  LitInt(Decimal("1"))
+OK  2..3  Slash
+OK  4..5  LitInt(Decimal("2"))
+OK  6..7  Percent
+OK  8..9  LitInt(Decimal("3"))

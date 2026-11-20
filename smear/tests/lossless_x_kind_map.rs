@@ -17,10 +17,10 @@
 //!   A *wrong* arm is what a panicking wildcard can never see, and it is also the failure mode
 //!   that survives every downstream gate: a mis-imaged token still round-trips through `text()`,
 //!   still passes the validator, and still prints a plausible golden tree.
-//! - [`the_mapper_covers_the_whole_lexer_vocabulary`] — the case list reaches thirty-seven distinct
-//!   lexer kinds and `BlockString` is still the last of them, so a variant *added* to the lexer is
+//! - [`the_mapper_covers_the_whole_lexer_vocabulary`] — the case list reaches forty-one distinct
+//!   lexer kinds and `Char` is still the last of them, so a variant *added* to the lexer is
 //!   a failure here rather than a silent widening of the wildcard.
-//! - [`the_only_fold_is_the_line_terminator`] — thirty-seven tokens reach exactly thirty-five
+//! - [`the_only_fold_is_the_line_terminator`] — forty-one tokens reach exactly thirty-nine
 //!   images, all of them inside the image block.
 //! - [`the_mapper_wildcard_arm_panics_rather_than_classifying`] — a source scan, because the shape
 //!   of the wildcard is a property of the text and not of any value. A wildcard that answered
@@ -96,6 +96,10 @@ const CASES: &[(&str, LK, X)] = &[
   ("1.0", LK::Float, X::Float),
   ("\"s\"", LK::InlineString, X::InlineString),
   ("\"\"\"b\"\"\"", LK::BlockString, X::BlockString),
+  ("/", LK::Slash, X::Slash),
+  ("%", LK::Percent, X::Percent),
+  ("<<", LK::Shl, X::Shl),
+  ("'a'", LK::Char, X::Char),
 ];
 
 /// Lex `src` and hand back its single token, asserting that it *is* single.
@@ -143,23 +147,23 @@ fn every_token_maps_to_its_tree_image() {
 /// and a `#[non_exhaustive]` enum gives the compiler no way to notice.
 ///
 /// The second half is the part the compiler cannot do at all. `LosslessTokenKind` is `#[repr(u16)]`
-/// with default discriminants, so `BlockString as u16 == 36` says the enum has exactly thirty-seven
-/// variants and that `BlockString` is the last — a variant appended, inserted or removed moves it.
-/// Without this, a thirty-eighth lexer token would simply start falling into the mapper's wildcard.
+/// with default discriminants, so `Char as u16 == 40` says the enum has exactly forty-one
+/// variants and that `Char` is the last — a variant appended, inserted or removed moves it.
+/// Without this, a forty-second lexer token would simply start falling into the mapper's wildcard.
 #[test]
 fn the_mapper_covers_the_whole_lexer_vocabulary() {
   let reached: BTreeSet<LK> = CASES.iter().map(|(_, kind, _)| *kind).collect();
   assert_eq!(
     reached.len(),
-    37,
-    "the case list reaches {} lexer kinds; the GraphQLx lossless token has 37 variants",
+    41,
+    "the case list reaches {} lexer kinds; the GraphQLx lossless token has 41 variants",
     reached.len()
   );
 
   assert_eq!(
-    LK::BlockString as u16,
-    36,
-    "`LosslessTokenKind` no longer ends at BlockString/36, so the lexer's vocabulary changed and \
+    LK::Char as u16,
+    40,
+    "`LosslessTokenKind` no longer ends at Char/40, so the lexer's vocabulary changed and \
      the mapper's wildcard is absorbing whatever was added"
   );
 }
@@ -198,8 +202,8 @@ fn the_only_fold_is_the_line_terminator() {
     .collect();
   assert_eq!(
     images.len(),
-    35,
-    "37 tokens must reach exactly 35 distinct images — the line-terminator fold is the only \
+    39,
+    "41 tokens must reach exactly 39 distinct images — the line-terminator fold is the only \
      collapse; reached {}",
     images.len()
   );
@@ -251,8 +255,8 @@ fn the_mapper_wildcard_arm_panics_rather_than_classifying() {
   }
 
   assert_eq!(
-    named, 37,
-    "the mapper names {named} `LosslessToken::` arms; it must name all 37, or its wildcard is \
+    named, 41,
+    "the mapper names {named} `LosslessToken::` arms; it must name all 41, or its wildcard is \
      carrying variants the compiler cannot tell it about"
   );
   assert_eq!(

@@ -1804,15 +1804,29 @@ impl Lowering<'_, '_, '_> {
       let kind = match value {
         ConstInputValue::Boolean(boolean) => RawKind::Boolean(boolean.value()),
         ConstInputValue::String(_) => RawKind::String,
-        ConstInputValue::Float(float) => RawKind::Float(FloatSpelling {
-          hex: matches!(float.source(), LitFloat::Hex(_)),
-        }),
-        ConstInputValue::Int(int) => RawKind::Int(match int.source() {
-          LitInt::Decimal(_) => Radix::Decimal,
-          LitInt::Hex(_) => Radix::Hex,
-          LitInt::Octal(_) => Radix::Octal,
-          LitInt::Binary(_) => Radix::Binary,
-        }),
+        // A number with a suffix is a typed literal, which lowering does not read: reported once
+        // for the source, at the number, and lowered as the one refused node it counts as.
+        ConstInputValue::Float(float) => match float.source().suffix() {
+          Some(_) => {
+            self.unknown(source, span);
+            RawKind::Refused
+          }
+          None => RawKind::Float(FloatSpelling {
+            hex: matches!(float.source(), LitFloat::Hex(_)),
+          }),
+        },
+        ConstInputValue::Int(int) => match int.source().suffix() {
+          Some(_) => {
+            self.unknown(source, span);
+            RawKind::Refused
+          }
+          None => RawKind::Int(match int.source() {
+            LitInt::Decimal(_) => Radix::Decimal,
+            LitInt::Hex(_) => Radix::Hex,
+            LitInt::Octal(_) => Radix::Octal,
+            LitInt::Binary(_) => Radix::Binary,
+          }),
+        },
         ConstInputValue::Enum(path) => {
           let path = path.source();
           let written = self.written_path(path);

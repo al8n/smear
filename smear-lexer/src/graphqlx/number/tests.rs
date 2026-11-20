@@ -178,3 +178,77 @@ fn a_spelling_that_is_not_one_whole_identifier_refuses() {
     );
   }
 }
+
+/// A typed literal answers its suffix, read off its own bytes, and how many bytes the suffix
+/// takes: the one `_` directly before its letter included. A literal with none answers `None` and
+/// 0, and so does one built over bytes that end in no suffix.
+#[test]
+fn a_typed_literal_answers_its_suffix() {
+  use super::FloatSuffix;
+
+  for (text, signed, width, len) in [
+    ("1u8", false, 8u32, 2usize),
+    ("-3i256", true, 256, 4),
+    ("0xFF_u32", false, 32, 4),
+    ("0b1010u8", false, 8, 2),
+    ("0o17i16", true, 16, 3),
+    ("0u0", false, 0, 2),
+  ] {
+    let lit = LitInt::try_from(text).unwrap_or_else(|e| panic!("{text:?} does not lex: {e:?}"));
+    let suffix = lit
+      .suffix()
+      .unwrap_or_else(|| panic!("{text:?} answers no suffix"));
+    assert_eq!(
+      (suffix.is_signed(), suffix.width(), lit.suffix_len()),
+      (signed, width, len),
+      "{text:?}"
+    );
+  }
+
+  for (text, suffix, len) in [
+    ("1.5f32", FloatSuffix::F32, 3usize),
+    ("1f64", FloatSuffix::F64, 3),
+    ("1e3_f32", FloatSuffix::F32, 4),
+    ("0x1p3f32", FloatSuffix::F32, 3),
+  ] {
+    let lit = LitFloat::try_from(text).unwrap_or_else(|e| panic!("{text:?} does not lex: {e:?}"));
+    assert_eq!(
+      (lit.suffix(), lit.suffix_len()),
+      (Some(suffix), len),
+      "{text:?}"
+    );
+  }
+
+  let hex_digits = LitInt::Hex("0x1f32");
+  assert!(hex_digits.suffix().is_none() && hex_digits.suffix_len() == 0);
+  let plain = LitFloat::Decimal("1.5");
+  assert!(plain.suffix().is_none() && plain.suffix_len() == 0);
+  let built = LitInt::Decimal(&b"zz"[..]);
+  assert!(built.suffix().is_none() && built.suffix_len() == 0);
+}
+
+/// The `char` literal's door reads back what the scanner reads, and refuses a slice that is not
+/// one whole literal: a prefix of one, trivia around it, two of them, a refused literal, and a
+/// token of another kind.
+#[test]
+fn the_char_door_reads_one_whole_literal() {
+  use super::LitChar;
+
+  for (text, value) in [
+    ("'a'", 'a'),
+    ("'\\n'", '\n'),
+    ("'\\u{1F600}'", '\u{1F600}'),
+    ("'\\''", '\''),
+    ("'\"'", '"'),
+  ] {
+    let lit = LitChar::try_from(text).unwrap_or_else(|e| panic!("{text:?} does not lex: {e:?}"));
+    assert_eq!((*lit.source_ref(), lit.value()), (text, value), "{text:?}");
+  }
+
+  for text in ["'a", "'", " 'a'", "'a' ", "'a''b'", "''", "'ab'", "a", "1"] {
+    assert!(
+      LitChar::try_from(text).is_err(),
+      "{text:?} is not one whole `char` literal"
+    );
+  }
+}

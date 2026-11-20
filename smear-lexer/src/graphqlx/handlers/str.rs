@@ -1,5 +1,6 @@
 use super::error;
 use tokora::{
+  SimpleSpan,
   error::UnexpectedEnd,
   logos::{Lexer, Logos, Source},
   utils::Lexeme,
@@ -7,6 +8,7 @@ use tokora::{
 
 use crate::{
   graphqlx::{
+    LitChar,
     error::{BinaryError, HexError, OctalError},
     lossless::LosslessState,
   },
@@ -443,6 +445,132 @@ where
     Err(e) => {
       errs.push(error::LexerError::new(lexer.span(), e.into()));
       Err(errs)
+    }
+  }
+}
+
+/// The valid hexadecimal float's check of what follows its exponent, over a text source.
+///
+/// The exponent is decimal, so a letter after it is no digit of it: `0x1p1f` is refused at the
+/// `f`, where the class of hexadecimal digits would let `0x1p1` stand and `f` begin a name.
+pub(crate) fn handle_valid_hex_float_suffix<'a, S, T, E, Extras>(
+  lexer: &mut Lexer<'a, T>,
+  unexpected_suffix: impl FnOnce(Lexeme<char>) -> E,
+) -> Result<S::Slice<'a>, LexerError<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<str>,
+  E: Into<error::LexerErrorData<char, Extras>>,
+{
+  let remainder = lexer.remainder();
+  let remainder_len = remainder.as_ref().len();
+  super::handle_hex_float_suffix(
+    lexer,
+    remainder_len,
+    remainder.as_ref().chars(),
+    unexpected_suffix,
+  )
+  .map_err(|e| LexerError::new(lexer.span(), e.into()))
+}
+
+/// A number with an integer suffix over a text source, as the rule matched it; or, when the
+/// suffix does not stand, the number refused as a letter after it is.
+pub(crate) fn handle_int_suffix<'a, S, T, E, Extras>(
+  lexer: &mut Lexer<'a, T>,
+  unexpected_suffix: impl FnOnce(Lexeme<char>) -> E,
+) -> Result<S::Slice<'a>, LexerError<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<str>,
+  E: Into<error::LexerErrorData<char, Extras>>,
+{
+  typed_suffix(lexer, super::Suffix::Int, unexpected_suffix)
+}
+
+/// A number with a float suffix over a text source, as the rule matched it; or, when the suffix
+/// does not stand, the number refused as a letter after it is.
+pub(crate) fn handle_float_suffix<'a, S, T, E, Extras>(
+  lexer: &mut Lexer<'a, T>,
+  unexpected_suffix: impl FnOnce(Lexeme<char>) -> E,
+) -> Result<S::Slice<'a>, LexerError<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<str>,
+  E: Into<error::LexerErrorData<char, Extras>>,
+{
+  typed_suffix(lexer, super::Suffix::Float, unexpected_suffix)
+}
+
+/// The two suffix handlers' one body: the match as it stands, or the refused run bumped over and
+/// reported as `unexpected_suffix` reports a letter after the number.
+fn typed_suffix<'a, S, T, E, Extras>(
+  lexer: &mut Lexer<'a, T>,
+  suffix: super::Suffix,
+  unexpected_suffix: impl FnOnce(Lexeme<char>) -> E,
+) -> Result<S::Slice<'a>, LexerError<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<str>,
+  E: Into<error::LexerErrorData<char, Extras>>,
+{
+  let slice = lexer.slice();
+  let remainder = lexer.remainder();
+  match super::suffix_refusal(
+    slice.as_ref().as_bytes(),
+    remainder.as_ref().as_bytes(),
+    suffix,
+  ) {
+    None => Ok(slice),
+    Some(super::SuffixRefusal { letter, past }) => {
+      let at = lexer.span().start.saturating_add(letter);
+      lexer.bump(past);
+      let lexeme = Lexeme::Range(SimpleSpan::new(at, lexer.span().end));
+      Err(LexerError::new(
+        lexer.span(),
+        unexpected_suffix(lexeme).into(),
+      ))
+    }
+  }
+}
+
+/// The lossless `'` rule's callback over a text source: the `char` literal the `'` opens, read to
+/// its end by the reader both of the dialect's lexers share, and bumped over.
+#[inline]
+pub(crate) fn char_literal<'a, S, T, Extras>(
+  lexer: &mut Lexer<'a, T>,
+) -> Result<LitChar<S::Slice<'a>>, LexerError<Extras>>
+where
+  T: Logos<'a, Source = S>,
+  S: ?Sized + Source,
+  S::Slice<'a>: AsRef<str>,
+{
+  use crate::string_lexer::char_literal::{CharFault, CharLiteral, read_char_literal};
+
+  let start = lexer.span().start;
+  let rest = lexer.remainder();
+  let text: &str = rest.as_ref();
+  match read_char_literal(text.as_bytes()) {
+    CharLiteral::Char { value, len } => {
+      lexer.bump(len.saturating_sub(1));
+      Ok(LitChar::new(lexer.slice(), value))
+    }
+    CharLiteral::Refused { fault, len } => {
+      let escaped = match fault {
+        CharFault::Escape => text
+          .get(1..)
+          .and_then(|tail: &str| tail.chars().next())
+          .map(|ch: char| (ch, ch.len_utf8())),
+        _ => None,
+      };
+      lexer.bump(len.saturating_sub(1));
+      Err(LexerError::new(
+        lexer.span(),
+        error::char_refusal(fault, start, escaped),
+      ))
     }
   }
 }
