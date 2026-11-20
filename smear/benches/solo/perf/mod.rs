@@ -35,9 +35,9 @@
 //! a delta on both is a parser or lexer change and a delta on one is the builder's.
 //!
 //! The lex and graphqlx families are subjects with no control. A lex row is one dialect's
-//! syntactic lexer and nothing else. The graphqlx row is GraphQLx's syntactic parser over the
-//! parse family's fixtures, kept out of that family so that a change to the dialect cannot move
-//! the control.
+//! syntactic lexer and nothing else. The graphqlx rows are GraphQLx's syntactic parser over the
+//! parse family's fixtures, one row for each of its two roots, kept out of that family so that a
+//! change to the dialect cannot move the control.
 //!
 //! # Where the ceilings come in
 //!
@@ -78,9 +78,15 @@ use smear::{
     },
     graphqlx::{
       GraphQLx,
-      ast::TypeSystemDocument as GraphqlxTypeSystemDocument,
+      ast::{
+        ExecutableDocument as GraphqlxExecutableDocument,
+        TypeSystemDocument as GraphqlxTypeSystemDocument,
+      },
       error::GraphqlxErrors,
-      syntactic::{GraphqlxLexer, type_system_document as graphqlx_type_system_document},
+      syntactic::{
+        GraphqlxLexer, executable_document as graphqlx_executable_document,
+        type_system_document as graphqlx_type_system_document,
+      },
     },
   },
   validator::{Budget, Collect, Diagnostic, Schema, Scratch, validate_executable},
@@ -217,6 +223,13 @@ pub const WORKLOADS: &[Workload] = &[
     hi: 8,
     run: parse_graphqlx_type_system,
   },
+  Workload {
+    name: "parse_graphqlx_executable",
+    family: Family::Graphqlx,
+    lo: 64,
+    hi: 128,
+    run: parse_graphqlx_executable,
+  },
 ];
 
 /// How deep each value in `parse_deep_values` nests.
@@ -323,6 +336,19 @@ pub fn parse_graphqlx_sdl(sdl: &str) -> GraphqlxTypeSystemDocument<&str> {
   >(graphqlx_type_system_document)
   .parse_str(sdl)
   .unwrap_or_else(|errors| panic!("a perf corpus SDL does not parse as GraphQLx: {errors:?}"))
+}
+
+/// `source` through GraphQLx's syntactic parser, at its executable root.
+pub fn parse_graphqlx_executable_document(source: &str) -> GraphqlxExecutableDocument<&str> {
+  Parser::with_parser::<
+    GraphqlxLexer<'_, str>,
+    GraphqlxExecutableDocument<&str>,
+    GraphqlxErrors<&str>,
+    _,
+    GraphQLx,
+  >(graphqlx_executable_document)
+  .parse_str(source)
+  .unwrap_or_else(|errors| panic!("a perf corpus document does not parse as GraphQLx: {errors:?}"))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -638,6 +664,24 @@ fn parse_graphqlx_type_system(n: usize, region: &mut Region<'_>) {
     for &source in &sources {
       parsed.push(parse_graphqlx_sdl(source));
     }
+    black_box(&parsed);
+  });
+}
+
+/// `parse_executable`'s twin through GraphQLx's syntactic parser: the same `n` renamed copies of
+/// one realistic operation, parsed and retained.
+///
+/// The executable root is the one a request reaches at run time, so it is timed apart from the
+/// type-system one: the two do not share a parser entry point.
+fn parse_graphqlx_executable(n: usize, region: &mut Region<'_>) {
+  let mut source = String::with_capacity(EXECUTABLE_UNIT.len() * n + n * 32);
+  for i in 0..n {
+    let _ = write!(source, "query Copy{i} ");
+    source.push_str(strip_leading_operation(EXECUTABLE_UNIT));
+    source.push('\n');
+  }
+  region(&mut || {
+    let parsed = parse_graphqlx_executable_document(&source);
     black_box(&parsed);
   });
 }
