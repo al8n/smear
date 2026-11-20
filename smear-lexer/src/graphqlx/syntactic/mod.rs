@@ -1299,11 +1299,10 @@ where
           // suffix error), so hand the whole token to it rather than
           // mis-emitting an unterminated-spread-operator error.
           //
-          // Inside a block the `-` before a fraction is an operator of its own, so the fraction
-          // after it is lexed alone, where the lossless grammar's longest match reads `._5` and
-          // `.ap1` as numbers too: the dispatch follows it there.
-          if matches!(bytes.get(1), Some(b'0'..=b'9')) || (IN_BLOCK && dot_begins_a_fraction(bytes))
-          {
+          // The lossless grammar's longest match reads `._5` and `.ap1` as numbers too, a fraction
+          // whose first digit is not the byte after the `.`, inside a block and outside one alike:
+          // the dispatch follows it in both.
+          if matches!(bytes.get(1), Some(b'0'..=b'9')) || dot_begins_a_fraction(bytes) {
             return self.delegate_number_to_logos(token_start, IN_BLOCK);
           }
           // A lone `.` (or `.` before any non-digit) is an unterminated spread
