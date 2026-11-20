@@ -2,7 +2,10 @@
 
 use std::{format, string::String};
 
-use smear_lexer::{graphqlx::syntactic::SyntacticTokenKind, limits::SyntacticLimits};
+use smear_lexer::{
+  graphqlx::syntactic::{SyntacticState, SyntacticTokenKind},
+  limits::SyntacticLimits,
+};
 use tokora::{FatalContext, Parse, Parser, SimpleSpan, utils::Equivalent};
 
 use super::super::{GraphqlxInput, GraphqlxLexer};
@@ -53,7 +56,10 @@ fn drive_str_deep<'inp, O>(
   Parser::with_parser::<'inp, GraphqlxLexer<'inp, str>, O, GraphqlxErrors<&'inp str>, _, GraphQLx>(
     f,
   )
-  .parse_str_with_state(input, SyntacticLimits::with_max_nesting_depth(128))
+  .parse_str_with_state(
+    input,
+    SyntacticState::new(SyntacticLimits::with_max_nesting_depth(128)),
+  )
 }
 
 fn drive_slice<'inp, O>(

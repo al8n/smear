@@ -8,6 +8,9 @@ use super::{
 
 use token::{token, token_impl};
 
+pub use state::LosslessState;
+
+mod state;
 mod token;
 
 mod slice;
@@ -526,7 +529,7 @@ mod tests {
   /// Holds the brace count after each item `lexer` produces to `expected`, as it goes.
   fn assert_brace_counts<'a, L>(mut lexer: L, expected: &[usize], what: &str)
   where
-    L: Lexer<'a, State = LosslessLimits>,
+    L: Lexer<'a, State = LosslessState>,
   {
     let mut items = 0usize;
     while lexer.lex().is_some() {
@@ -560,9 +563,9 @@ mod tests {
   }
 
   /// The state `lexer` is left in after its last item.
-  fn final_state<'a, L>(mut lexer: L) -> LosslessLimits
+  fn final_state<'a, L>(mut lexer: L) -> LosslessState
   where
-    L: Lexer<'a, State = LosslessLimits>,
+    L: Lexer<'a, State = LosslessState>,
   {
     while lexer.lex().is_some() {}
     *lexer.state()
@@ -617,8 +620,10 @@ mod tests {
 
   #[test]
   fn a_refused_opener_is_counted_as_the_tally_counts_it() {
-    let mut lexer =
-      LosslessLexer::<&str>::with_state("{{", LosslessLimits::with_max_nesting_depth(1));
+    let mut lexer = LosslessLexer::<&str>::with_state(
+      "{{",
+      LosslessState::new(LosslessLimits::with_max_nesting_depth(1)),
+    );
     assert!(matches!(lexer.lex(), Some(Ok(_))));
     assert_eq!((lexer.state().brace_depth(), lexer.state().depth()), (1, 1));
 

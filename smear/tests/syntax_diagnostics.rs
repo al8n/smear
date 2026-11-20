@@ -610,6 +610,7 @@ mod graphqlx {
   use smear::{
     lexer::{
       SyntaxErrorKind,
+      graphqlx::syntactic::SyntacticState,
       limits::SyntacticLimits,
       tokora::{Parse as _, Parser},
     },
@@ -633,7 +634,7 @@ mod graphqlx {
       _,
       GraphQLx,
     >(document)
-    .parse_str_with_state(src, limits)
+    .parse_str_with_state(src, SyntacticState::new(limits))
     .expect_err("the fixture does not parse")
   }
 

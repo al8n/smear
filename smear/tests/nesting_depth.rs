@@ -1732,6 +1732,7 @@ fn the_child_parsed(output: &std::process::Output, depth: usize, chain: &str) ->
 fn a_use_group_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
   use smear::{
     lexer::{
+      graphqlx::syntactic::SyntacticState,
       limits::{LosslessLimits, SyntacticLimits},
       tokora::{Parse as _, Parser},
     },
@@ -1751,7 +1752,7 @@ fn a_use_group_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
     Parser::with_parser::<GraphqlxLexer<'_, str>, Document<&str>, GraphqlxErrors<&str>, _, GraphQLx>(
       document,
     )
-    .parse_str_with_state(src, limits)
+    .parse_str_with_state(src, SyntacticState::new(limits))
     .is_ok()
   }
 
@@ -2286,6 +2287,7 @@ fn a_flat_mod_body_costs_no_depth() {
 fn a_mod_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
   use smear::{
     lexer::{
+      graphqlx::syntactic::SyntacticState,
       limits::{LosslessLimits, SyntacticLimits},
       tokora::{Parse as _, Parser},
     },
@@ -2305,7 +2307,7 @@ fn a_mod_chain_at_twice_the_ceiling_returns_on_the_default_thread() {
     Parser::with_parser::<GraphqlxLexer<'_, str>, Document<&str>, GraphqlxErrors<&str>, _, GraphQLx>(
       document,
     )
-    .parse_str_with_state(src, limits)
+    .parse_str_with_state(src, SyntacticState::new(limits))
     .is_ok()
   }
 

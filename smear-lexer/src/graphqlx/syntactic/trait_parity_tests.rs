@@ -23,7 +23,7 @@ use tokora::Lexer;
 
 use crate::limits::SyntacticLimits;
 
-use crate::graphqlx::syntactic::SyntacticLexer;
+use crate::graphqlx::syntactic::{SyntacticLexer, SyntacticState};
 
 /// Run `f`, returning `true` if it panicked, with the panic message suppressed
 /// so an expected panic doesn't clutter test output.
@@ -324,7 +324,7 @@ fn full_trait_parity_low_recursion_limit() {
   assert_eq!(
     render_full!(SyntacticLexer::<str>::with_state(
       src,
-      SyntacticLimits::with_max_nesting_depth(limit)
+      SyntacticState::new(SyntacticLimits::with_max_nesting_depth(limit))
     )),
     expected
   );
@@ -333,8 +333,10 @@ fn full_trait_parity_low_recursion_limit() {
   #[cfg(feature = "std")]
   {
     let simd_panicked = panics(|| {
-      let mut simd =
-        SyntacticLexer::<str>::with_state(src, SyntacticLimits::with_max_nesting_depth(limit));
+      let mut simd = SyntacticLexer::<str>::with_state(
+        src,
+        SyntacticState::new(SyntacticLimits::with_max_nesting_depth(limit)),
+      );
       while simd.lex().is_some() {}
       simd.bump(&1usize);
     });

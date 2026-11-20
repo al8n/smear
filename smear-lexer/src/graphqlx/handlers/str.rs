@@ -6,10 +6,12 @@ use tokora::{
 };
 
 use crate::{
-  graphqlx::error::{BinaryError, HexError, OctalError},
+  graphqlx::{
+    error::{BinaryError, HexError, OctalError},
+    lossless::LosslessState,
+  },
   handlers::{self, is_ignored_char},
   hints::{BinaryHint, ExponentHint, FloatHint, HexExponentHint, HexFloatHint, HexHint, OctalHint},
-  limits::LosslessLimits,
 };
 
 type LexerError<Extras> = error::LexerError<char, Extras>;
@@ -36,7 +38,7 @@ pub(crate) fn cst_default_error<'a, S, T, Extras>(
   lexer: &mut Lexer<'a, T>,
 ) -> error::LexerErrors<char, Extras>
 where
-  T: Logos<'a, Source = S, Extras = LosslessLimits>,
+  T: Logos<'a, Source = S, Extras = LosslessState>,
   S: ?Sized + Source,
   S::Slice<'a>: AsRef<str>,
 {

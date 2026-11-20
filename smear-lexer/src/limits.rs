@@ -29,10 +29,12 @@
 //! tokora's type.
 //!
 //! So these two newtypes are the decision: they are what [`Lexer::State`](tokora::Lexer::State)
-//! resolves to for smear's four lexers, and their `Default` is [`MAX_NESTING_DEPTH`]. Every
-//! existing call site — `parse_str`, `Lexer::new`, each `parse_lossless` — picks the ceiling up
-//! without being edited, and a caller who wants a different one hands a different value to
-//! `with_state` / `parse_*_with_state` / a lossless `*_with_limits` entry point.
+//! resolves to for GraphQL's two lexers, each GraphQLx lexer's state holds one, and their
+//! `Default` is [`MAX_NESTING_DEPTH`]. Every existing call site — `parse_str`, `Lexer::new`, each
+//! `parse_lossless` — picks the ceiling up without being edited. A caller who wants a different
+//! one hands a different value to `with_state` / `parse_*_with_state`, inside the state
+//! (`SyntacticState`, `LosslessState`) where the lexer is GraphQLx's, or to a lossless
+//! `*_with_limits` entry point.
 //!
 //! # What this counter is **not**, and the correction that says so
 //!
@@ -455,11 +457,10 @@ const DEFAULT_MAX_DIAGNOSTICS: usize = 1 << 15;
 /// The budget a **syntactic** lex runs under: nesting depth, and nothing else.
 ///
 /// This is [`Lexer::State`](tokora::Lexer::State) for
-/// [`graphql::syntactic::SyntacticLexer`](crate::graphql::syntactic::SyntacticLexer) and its
-/// GraphQLx twin, so [`Default`] is what `Parser::with_parser(…).parse_str(src)` seeds a parse
-/// with — which is the whole reason the type exists rather than a bare
-/// [`RecursionLimiter`]. See the module
-/// header.
+/// [`graphql::syntactic::SyntacticLexer`](crate::graphql::syntactic::SyntacticLexer), and its
+/// GraphQLx twin's state, `SyntacticState`, holds one. So [`Default`] is what
+/// `Parser::with_parser(…).parse_str(src)` seeds a parse with — which is the whole reason the
+/// type exists rather than a bare [`RecursionLimiter`]. See the module header.
 ///
 /// ```
 /// use smear_lexer::limits::{MAX_NESTING_DEPTH, SyntacticLimits};
@@ -568,9 +569,10 @@ impl State for SyntacticLimits {
 /// produce-event ceiling, and the ceiling on the diagnostics a parse keeps.
 ///
 /// This is [`Lexer::State`](tokora::Lexer::State) for
-/// [`graphql::lossless::LosslessLexer`](crate::graphql::lossless::LosslessLexer) and its GraphQLx
-/// twin — the Logos `Extras` those token grammars declare — so [`Default`] is what every
-/// `parse_lossless` call seeds a parse with. See the module header.
+/// [`graphql::lossless::LosslessLexer`](crate::graphql::lossless::LosslessLexer), the Logos
+/// `Extras` its token grammar declares, and its GraphQLx twin's state, `LosslessState`, holds
+/// one. So [`Default`] is what every `parse_lossless` call seeds a parse with. See the module
+/// header.
 ///
 /// The **token** half is left at tokora's unlimited default and is not part of issue #61's
 /// decision: a token count is bounded by the input length, so unlike nesting depth it cannot

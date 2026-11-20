@@ -4,6 +4,19 @@ All notable changes to Smear are documented in this file.
 
 ## [Unreleased]
 
+- `smear-lexer` and `smear-parser`!: each GraphQLx lexer has a state type of its own.
+  `graphqlx::syntactic::SyntacticState` is the syntactic lexer's `Lexer::State`, and
+  `graphqlx::lossless::LosslessState` is the lossless lexer's and its grammar's Logos `Extras`,
+  where both were the limits types. Each holds its limits and nothing more, reads them back
+  through `limits()`, and answers `Default` with the limits' default. `LosslessState` answers the
+  eight reads of `LosslessLimits` with their signatures, and `smear-parser`'s
+  `graphqlx::lossless::LexerState` is it.
+  - **Building one by hand.** A caller who hands a GraphQLx lexer or parser a state, through
+    `with_state`, `parse_with_state` or `parse_str_with_state`, builds it from the limits with
+    `new` or `From`: `SyntacticState::new(SyntacticLimits::with_max_nesting_depth(32))`.
+  - **What does not change.** `SyntacticLimits` and `LosslessLimits` are as they were, and each
+    is still the state of GraphQL's lexers. Every door takes the parameter it took: the layers
+    their limits, and each lossless `*_with_limits` door a `LosslessLimits`.
 - `smear-compiler`! and `smear`: `smear-schema`, `smear-semantics` and `smear-analysis` are folded
   into `smear-compiler`, and the set is five crates from this release. Under `smear` no path and no
   feature changes: `smear::diagnostic`, `smear::validator`, `smear::validator::schema` and

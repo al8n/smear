@@ -48,7 +48,7 @@ macro_rules! token_impl {
       };
       use crate::{
         error::StringErrors,
-        limits::LosslessLimits,
+        graphqlx::lossless::LosslessState,
         graphqlx::{
           error::{LexerErrors, LexerError, DecimalError, HexError, FloatError, HexFloatError, BinaryError, OctalError},
           handlers::{
@@ -113,7 +113,7 @@ macro_rules! token_impl {
       )]
       #[logos(
         crate = tokora::logos,
-        extras = LosslessLimits,
+        extras = LosslessState,
         utf8 = $utf8,
         error(TokenErrors, handlers::$handlers::cst_default_error)
       )]
@@ -362,7 +362,7 @@ macro_rules! token_impl {
       };
       use crate::{
         error::StringErrors,
-        limits::LosslessLimits,
+        graphqlx::lossless::LosslessState,
         graphqlx::{
           error::{LexerErrors, LexerError, DecimalError, HexError, FloatError, HexFloatError, BinaryError, OctalError},
           handlers::{
@@ -427,7 +427,7 @@ macro_rules! token_impl {
       )]
       #[logos(
         crate = tokora::logos,
-        extras = LosslessLimits,
+        extras = LosslessState,
         utf8 = $utf8,
         error(TokenErrors, handlers::$handlers::cst_default_error)
       )]

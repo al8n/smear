@@ -12,7 +12,7 @@ use std::string::String;
 
 use tokora::Lexer;
 
-use crate::limits::SyntacticLimits;
+use crate::{graphqlx::syntactic::SyntacticState, limits::SyntacticLimits};
 
 use crate::graphqlx::syntactic::SyntacticLexer;
 
@@ -146,7 +146,9 @@ fn recursion_limit_region_matches_logos() {
 #19 is_err=false span=SimpleSpan { start: 19, end: 20 } slice=\")\"
 #20 is_err=false span=SimpleSpan { start: 20, end: 21 } slice=\")\"
 ";
-  let simd =
-    SyntacticLexer::<str>::with_state(src.as_str(), SyntacticLimits::with_max_nesting_depth(limit));
+  let simd = SyntacticLexer::<str>::with_state(
+    src.as_str(),
+    SyntacticState::new(SyntacticLimits::with_max_nesting_depth(limit)),
+  );
   assert_eq!(render_error_path(simd, &src), expected);
 }

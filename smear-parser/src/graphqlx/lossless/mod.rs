@@ -132,14 +132,14 @@ pub type Keyword = smear_lexer::graphqlx::ContextualKeyword;
 #[allow(type_alias_bounds)]
 pub type Lexer<'inp, Src: Source<usize> + ?Sized> = GraphqlxLosslessLexer<'inp, Src>;
 
-/// The resource budget this dialect's lossless lex runs under — the Logos `Extras`, and the
-/// [`Lexer::State`](tokora::Lexer::State) the shared production bundle pins.
+/// The state this dialect's lossless lex runs under, which holds its resource budget — the Logos
+/// `Extras`, and the [`Lexer::State`](tokora::Lexer::State) the shared production bundle pins.
 ///
 /// Pinned rather than left as a projection because a production has to *read* it: the nesting
 /// ceiling a parse was configured with lives here, and this module's `descend` hands it to the
 /// parser-frame budget. Over a generic `Src` the projection has nothing to normalize against
 /// without the equality, exactly as the token's `Kind` does not.
-pub type LexerState = smear_lexer::limits::LosslessLimits;
+pub type LexerState = smear_lexer::graphqlx::lossless::LosslessState;
 
 /// [`GraphqlxLosslessToken`], under the name the shared macros reach it by.
 #[allow(type_alias_bounds)]

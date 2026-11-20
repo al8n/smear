@@ -1514,14 +1514,14 @@ fn a_token_ceiling_stops_the_lex_one_lexeme_past_itself() {
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 fn lex_items<'a, L>(src: &'a L::Source, max_tokens: Option<usize>) -> usize
 where
-  L: tokora::Lexer<'a, State = smear::lexer::limits::LosslessLimits>,
+  L: tokora::Lexer<'a, State: From<smear::lexer::limits::LosslessLimits>>,
 {
   let limits = smear::lexer::limits::LosslessLimits::default();
   let limits = match max_tokens {
     Some(max) => limits.with_max_tokens(max),
     None => limits,
   };
-  let mut lexer = L::with_state(src, limits);
+  let mut lexer = L::with_state(src, limits.into());
   let mut items = 0usize;
   while lexer.lex().is_some() {
     items += 1;

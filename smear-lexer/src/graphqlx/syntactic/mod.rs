@@ -36,6 +36,10 @@ use crate::simd::{
 // derived, and with the type whose `Default` actually delivers it.
 pub use crate::limits::{MAX_NESTING_DEPTH, SyntacticLimits};
 
+pub use state::SyntacticState;
+
+mod state;
+
 use super::{
   super::{LitBlockStr, LitInlineStr},
   ContextualKeyword, LitFloat, LitInt, error,
@@ -720,7 +724,7 @@ pub struct SyntacticLexer<'inp, S: ?Sized = str> {
   last_span: SimpleSpan,
   /// Span of the most recently returned error token, if any.
   last_error_span: Option<SimpleSpan>,
-  state: SyntacticLimits,
+  state: SyntacticState,
 }
 
 impl<'inp, S> Lexer<'inp> for SyntacticLexer<'inp, S>
@@ -744,7 +748,7 @@ where
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
   <S::Slice<'inp> as Slice<'inp>>::Char: CharLen,
 {
-  type State = SyntacticLimits;
+  type State = SyntacticState;
 
   type Source = S;
 
@@ -791,7 +795,7 @@ where
 
   #[inline(always)]
   fn check(&self) -> Result<(), <Self::Token as tokora::Token<'inp>>::Error> {
-    self.state.check().map_err(Into::into)
+    self.state.limits().check().map_err(Into::into)
   }
 
   #[inline(always)]
@@ -839,7 +843,7 @@ where
     // check always passes, so every existing stream is unchanged.
     macro_rules! finish {
       ($this:ident, $token:expr) => {
-        match $this.state.check() {
+        match $this.state.limits().check() {
           Ok(()) => Ok($token),
           Err(e) => Err($this.over_recursion_limit(e)),
         }
@@ -869,7 +873,7 @@ where
       ($this:ident: $token_start:expr, $expr:expr) => {{
         $this.cursor += 1;
         $this.last_span = SimpleSpan::new($token_start, $this.cursor);
-        $this.state_mut().decrease();
+        $this.state.limits_mut().decrease();
         finish!($this, $expr)
       }};
     }
@@ -878,8 +882,8 @@ where
       ($this:ident: $token_start:expr, $expr:expr) => {{
         $this.cursor += 1;
         let span = SimpleSpan::new($token_start, $this.cursor);
-        $this.state_mut().increase();
-        match $this.state.check() {
+        $this.state.limits_mut().increase();
+        match $this.state.limits().check() {
           Ok(()) => {
             $this.last_span = span;
             Ok($expr)
@@ -1270,14 +1274,14 @@ where
     match crate::simd::delegate_to_logos::<NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>(
       self.src.as_ref(),
       self.cursor,
-      self.state,
+      *self.state.limits(),
     )? {
       Delegated::Token(LexedToken { token, end, state }) => {
         let number = token.into_number_token();
         let slice = self.src.slice(&token_start..&end)?;
         self.cursor = end;
         self.last_span = SimpleSpan::new(token_start, end);
-        self.state = state;
+        *self.state.limits_mut() = state;
         Some(Ok(number.into_syntactic_token(slice)))
       }
       Delegated::Error(LexFailure { error, span }) => {

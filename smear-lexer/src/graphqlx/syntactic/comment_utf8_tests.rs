@@ -15,7 +15,7 @@ use tokora::{Lexer as _, SimpleSpan, state::LimitExceeded, utils::Lexeme};
 use crate::{
   graphqlx::{
     error::{LexerErrorData, LexerErrors},
-    lossless::{LosslessLexer, LosslessToken},
+    lossless::{LosslessLexer, LosslessState, LosslessToken},
     syntactic::{SyntacticLexer, SyntacticToken},
   },
   limits::LosslessLimits,
@@ -622,9 +622,10 @@ fn assert_ceiling_refusal<'a, L, T, Char>(
 #[test]
 fn a_spent_token_ceiling_refuses_a_whole_comment() {
   // `x` and a space are two items, so a ceiling of two refuses the comment after them.
-  let after_two = LosslessLimits::default().with_max_tokens(2);
+  let after_two = LosslessState::new(LosslessLimits::default().with_max_tokens(2));
   let mut spent = LosslessLimits::default().with_max_tokens(0);
   spent.increase_token();
+  let spent = LosslessState::new(spent);
 
   let end = line_end(LONG_COMMENT);
   let text = core::str::from_utf8(LONG_COMMENT).expect("ASCII");

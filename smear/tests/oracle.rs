@@ -1030,7 +1030,10 @@ fn graphqlx_syntactic_simd_oracle() {
 #[cfg(feature = "graphqlx")]
 #[test]
 fn graphqlx_syntactic_simd_low_recursion_parity() {
-  use smear::lexer::{graphqlx::syntactic::SyntacticLexer, limits::SyntacticLimits};
+  use smear::lexer::{
+    graphqlx::syntactic::{SyntacticLexer, SyntacticState},
+    limits::SyntacticLimits,
+  };
 
   const CASES: &[(&str, &str)] = &[
     (
@@ -1135,7 +1138,7 @@ fn graphqlx_syntactic_simd_low_recursion_parity() {
   for (src, expected) in CASES {
     let simd = render_stream!(SyntacticLexer::<str>::with_state(
       src,
-      SyntacticLimits::with_max_nesting_depth(0),
+      SyntacticState::new(SyntacticLimits::with_max_nesting_depth(0)),
     ));
     assert_eq!(&simd, expected, "low-limit stream mismatch for {src:?}");
   }
@@ -1462,7 +1465,10 @@ fn graphqlx_syntactic_simd_source_matrix_smol_utf8_bytes() {
 #[cfg(feature = "graphqlx")]
 #[test]
 fn graphqlx_lossless_oracle() {
-  use smear::lexer::{graphqlx::lossless::LosslessLexer, limits::LosslessLimits};
+  use smear::lexer::{
+    graphqlx::lossless::{LosslessLexer, LosslessState},
+    limits::LosslessLimits,
+  };
   let mut mismatches = Vec::new();
   for (name, src) in GRAPHQLX_EXTRA
     .iter()
@@ -1482,7 +1488,7 @@ fn graphqlx_lossless_oracle() {
     rendered.push_str(&format!("max_tokens {max_tokens}\n"));
     rendered.push_str(&render_stream!(LosslessLexer::<&str>::with_state(
       GX_SIGN_CEILINGS,
-      LosslessLimits::default().with_max_tokens(max_tokens),
+      LosslessState::new(LosslessLimits::default().with_max_tokens(max_tokens)),
     )));
   }
   check(
@@ -1505,14 +1511,17 @@ fn graphqlx_lossless_oracle() {
 #[cfg(feature = "graphqlx")]
 #[test]
 fn gx_sign_extents() {
-  use smear::lexer::{graphqlx::lossless::LosslessLexer, limits::LosslessLimits};
+  use smear::lexer::{
+    graphqlx::lossless::{LosslessLexer, LosslessState},
+    limits::LosslessLimits,
+  };
   use tokora::SimpleSpan;
 
   const CASES: &[(&str, usize)] = &[("-5abc", 2), ("-.5", 3), ("-0x1F", 5), ("-x", 1)];
   for &(source, end) in CASES {
     let mut limits = LosslessLimits::default().with_max_tokens(0);
     limits.increase_token();
-    let mut lexer = LosslessLexer::<&str>::with_state(source, limits);
+    let mut lexer = LosslessLexer::<&str>::with_state(source, LosslessState::new(limits));
     assert!(
       matches!(lexer.lex(), Some(Err(_))),
       "{source:?}: the first item is not refused"
