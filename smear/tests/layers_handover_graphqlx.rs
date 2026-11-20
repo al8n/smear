@@ -562,6 +562,30 @@ mod lossless {
     assert_eq!(lent, 1, "one report, at the `-`");
   }
 
+  /// After a value where no second value may follow, a number written with its `-` and a `(` are
+  /// refused against the block by both layers alike; where a second value may follow, each stays
+  /// a value.
+  #[test]
+  fn a_signed_number_or_a_parenthesis_after_one_value_offers_the_block_in_both_layers() {
+    for (text, at) in [
+      ("input I { a: u32 = HOUR-1 }", "at 23..25"),
+      ("input I { a: u32 = 1 (2) }", "at 21..22"),
+    ] {
+      let (ours, theirs, lent) = said(text);
+      assert_eq!(ours, theirs, "{text}");
+      assert!(ours.contains(at), "{text}: {ours}");
+      assert!(ours.contains("`const { … }` block"), "{text}: {ours}");
+      assert_eq!(lent, 1, "{text}: one report");
+    }
+    for text in [
+      "input I { a: [Int] = [1 -2] }",
+      "input I { a: M = map!{ 1 => 2 -3 => 4 } }",
+    ] {
+      let nothing = String::from("nothing");
+      assert_eq!(said(text), (nothing.clone(), nothing, 0), "{text}");
+    }
+  }
+
   // ── The message bound ──────────────────────────────────────────────────────────────────────
 
   /// The most bytes a syntax error's message holds.

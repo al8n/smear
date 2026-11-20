@@ -117,6 +117,7 @@ macro_rules! value_parser {
     where
       Src: Source<usize> + ?Sized,
       GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+      <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
       GraphqlxToken<'inp, Src>:
         Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
       GraphqlxLexer<'inp, Src>: Lexer<
@@ -146,6 +147,7 @@ macro_rules! value_parser {
     where
       Src: Source<usize> + ?Sized,
       GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+      <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
       GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>,
       GraphqlxLexer<'inp, Src>: Lexer<
         'inp,
@@ -344,6 +346,7 @@ fn enum_after_first<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
@@ -466,6 +469,7 @@ fn variable_after_dollar<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
@@ -530,6 +534,7 @@ fn decide_value_head<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
       Source = Src,
@@ -556,6 +561,7 @@ fn decide_const_value_head<'inp, Src, Ctx, const SCHEMA: bool>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
       Source = Src,
@@ -580,6 +586,7 @@ fn decide_brace_member<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
       Source = Src,
@@ -607,6 +614,7 @@ fn decide_field_member<'inp, Src, Ctx, const SCHEMA: bool>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
       Source = Src,
@@ -620,9 +628,12 @@ where
 {
   match peeked.pop_front() {
     Some(token) if matches!(token.token(), GraphqlxToken::<'inp, Src>::RBrace) => Ok(Action::Stop),
-    Some(token) if SCHEMA && continues_an_expression(token.token().kind()) => Err(
-      expression_refused::<Src, Ctx>(token.token().kind(), *token.span()),
-    ),
+    Some(token) if SCHEMA && goes_on_with_an_expression(token.token().kind(), token.token()) => {
+      Err(expression_refused::<Src, Ctx>(
+        token.token().kind(),
+        *token.span(),
+      ))
+    }
     Some(_) => Ok(Action::Continue),
     None => Ok(Action::Stop),
   }
@@ -652,9 +663,38 @@ const fn begins_an_expression(kind: SyntacticTokenKind) -> bool {
 }
 
 /// Whether `kind`, directly after a value where no second value may follow, can only go on with an
-/// expression: an operator's token, a `>`, which closes nothing there, or a `^`.
-pub(super) const fn continues_an_expression(kind: SyntacticTokenKind) -> bool {
-  is_operator(kind) || matches!(kind, SyntacticTokenKind::RAngle | SyntacticTokenKind::Caret)
+/// expression: an operator's token, a `>`, which closes nothing there, a `^`, or a `(`.
+const fn continues_an_expression(kind: SyntacticTokenKind) -> bool {
+  is_operator(kind)
+    || matches!(
+      kind,
+      SyntacticTokenKind::RAngle | SyntacticTokenKind::Caret | SyntacticTokenKind::LParen
+    )
+}
+
+/// Whether `token`, of kind `kind`, directly after a value where no second value may follow, can
+/// only go on with an expression: one of `continues_an_expression`'s kinds, or a number whose
+/// token begins with `-`, as in `HOUR-1`. The number's first character is read only where the token
+/// is a number.
+#[inline]
+pub(super) fn goes_on_with_an_expression<'inp, Src>(
+  kind: SyntacticTokenKind,
+  token: &GraphqlxToken<'inp, Src>,
+) -> bool
+where
+  Src: Source<usize> + ?Sized,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
+{
+  continues_an_expression(kind)
+    || match token {
+      GraphqlxToken::<'inp, Src>::LitInt(lit) => {
+        crate::graphqlx::begins_with_minus(lit.source_ref())
+      }
+      GraphqlxToken::<'inp, Src>::LitFloat(lit) => {
+        crate::graphqlx::begins_with_minus(lit.source_ref())
+      }
+      _ => false,
+    }
 }
 
 /// The refusal of an expression's token in a schema position: what was found, where it was found,
@@ -666,6 +706,7 @@ pub(super) fn expression_refused<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
       Source = Src,
@@ -689,6 +730,7 @@ pub(super) fn refuse_expression_after<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
       Source = Src,
@@ -700,8 +742,8 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  match super::peek_kind(inp)? {
-    Some(kind) if continues_an_expression(kind) => unexpected_here(inp, Expectation::ConstBlock),
+  match inp.peek_head_map(|token| goes_on_with_an_expression(token.data.kind(), token.data))? {
+    Some(true) => unexpected_here(inp, Expectation::ConstBlock),
     _ => Ok(()),
   }
 }
@@ -1026,6 +1068,7 @@ fn collection_bang<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
       Source = Src,
@@ -1051,6 +1094,7 @@ fn set_after_keyword<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
@@ -1081,6 +1125,7 @@ fn const_set_after_keyword<'inp, Src, Ctx, const SCHEMA: bool>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
@@ -1110,6 +1155,7 @@ fn map_after_keyword<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
@@ -1140,6 +1186,7 @@ fn const_map_after_keyword<'inp, Src, Ctx, const SCHEMA: bool>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
@@ -1440,6 +1487,7 @@ fn schema_path_value<'inp, Src, Ctx, const IN_BLOCK: bool>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
@@ -1477,6 +1525,7 @@ fn typed_form<'inp, Src, Ctx, const IN_BLOCK: bool>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
@@ -1581,6 +1630,7 @@ fn const_block_after_keyword<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
@@ -1617,6 +1667,7 @@ fn block_inside<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
@@ -1647,6 +1698,7 @@ fn nested_block_after_keyword<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
@@ -1880,6 +1932,7 @@ fn block_members<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
@@ -1998,6 +2051,7 @@ fn block_set_after_keyword<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
@@ -2033,6 +2087,7 @@ fn block_map_after_keyword<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
@@ -2096,6 +2151,7 @@ pub fn schema_value<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
@@ -2125,6 +2181,7 @@ pub fn try_default_value<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
@@ -2175,6 +2232,7 @@ pub fn default_value<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
@@ -2201,6 +2259,7 @@ pub fn try_schema_default_value<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
@@ -2225,6 +2284,7 @@ pub fn schema_default_value<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
@@ -2297,6 +2357,7 @@ macro_rules! graphqlx_value_api {
       where
         Src: Source<usize, Slice<'inp> = S> + ?Sized,
         S: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+        <S as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
         GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>,
         GraphqlxLexer<'inp, Src>: Lexer<
             'inp,
@@ -2538,6 +2599,7 @@ impl<S> DefaultInputValue<S> {
   where
     Src: Source<usize, Slice<'inp> = S> + ?Sized,
     S: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+    <S as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
     GraphqlxToken<'inp, Src>:
       Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
     GraphqlxLexer<'inp, Src>: Lexer<
@@ -2565,6 +2627,7 @@ impl<S> DefaultInputValue<S> {
   where
     Src: Source<usize, Slice<'inp> = S> + ?Sized,
     S: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+    <S as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
     GraphqlxToken<'inp, Src>:
       Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
     GraphqlxLexer<'inp, Src>: Lexer<
@@ -2592,6 +2655,7 @@ impl<S> DefaultInputValue<S> {
   where
     Src: Source<usize, Slice<'inp> = S> + ?Sized,
     S: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+    <S as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
     GraphqlxToken<'inp, Src>:
       Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
     GraphqlxLexer<'inp, Src>: Lexer<
@@ -2618,6 +2682,7 @@ impl<S> DefaultInputValue<S> {
   where
     Src: Source<usize, Slice<'inp> = S> + ?Sized,
     S: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+    <S as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
     GraphqlxToken<'inp, Src>:
       Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
     GraphqlxLexer<'inp, Src>: Lexer<

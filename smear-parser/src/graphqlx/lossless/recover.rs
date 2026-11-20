@@ -358,10 +358,18 @@ pub(crate) const fn is_operator(kind: Kind) -> bool {
 }
 
 /// Whether `kind`, directly after a value where no second value may follow, can only go on with an
-/// expression: an operator's token, a `>`, which closes nothing there, or a `^`.
+/// expression: an operator's token, a `>`, which closes nothing there, a `^`, or a `(`. A number
+/// whose token begins with `-` goes on with one too, which its kind cannot say: see
+/// [`super::trivia::peek_signed_number`].
 #[inline]
 pub(crate) const fn continues_an_expression(kind: Kind) -> bool {
-  is_operator(kind) || matches!(kind, Kind::RAngle | Kind::Caret)
+  is_operator(kind) || matches!(kind, Kind::RAngle | Kind::Caret | Kind::LParen)
+}
+
+/// Whether `kind` is a number's, whose token may begin with `-`.
+#[inline]
+pub(crate) const fn is_number(kind: Kind) -> bool {
+  matches!(kind, Kind::Int | Kind::Float)
 }
 
 /// Whether `kind` can begin a value.

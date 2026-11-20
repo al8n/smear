@@ -88,9 +88,9 @@ use super::{
     BLOCK_OPERAND_HEADS, BRACE_CLOSER_HEADS, CONST_BLOCK_HEADS, CONST_VALUE_HEADS,
     LIST_CLOSER_HEADS, OBJECT_FIELD_HEADS, OPERATOR_OR_SEPARATOR_HEADS, PARENS_CLOSER_HEADS,
     TYPED_FORM_HEADS, VALUE_HEADS, closes_enclosing_block, continues_an_expression, is_closer,
-    is_operator, opener_span, starts_value,
+    is_number, is_operator, opener_span, starts_value,
   },
-  trivia::{eat_if, expect, peek_as, peek_kind},
+  trivia::{eat_if, expect, peek_as, peek_kind, peek_signed_number},
   ty::{path, path_root, path_tail, type_generics},
 };
 
@@ -355,7 +355,11 @@ lossless_production! {
         Some(Kind::Identifier) => object_field::<Src, Ctx>(inp, konst)?,
         // At a schema position's member position, what goes on with an expression offers a block,
         // and the run consumes.
-        Some(head) if konst == Constness::Schema && continues_an_expression(head) => {
+        Some(head)
+          if konst == Constness::Schema
+            && (continues_an_expression(head)
+              || (is_number(head) && peek_signed_number::<Src, Ctx>(inp)?)) =>
+        {
           expression_run::<Src, Ctx>(inp, true)?
         }
         // The head is checked here rather than left to `object_field`'s own `expect`, because
@@ -396,7 +400,9 @@ lossless_production! {
         // After a schema position's key, what goes on with an expression offers a block, and the
         // run reads on to the `=>`. The read is the one `expect` makes, in the same node.
         if konst == Constness::Schema
-          && peek_kind::<Src, Ctx>(inp)?.is_some_and(continues_an_expression)
+          && let Some(head) = peek_kind::<Src, Ctx>(inp)?
+          && (continues_an_expression(head)
+            || (is_number(head) && peek_signed_number::<Src, Ctx>(inp)?))
         {
           expression_run::<Src, Ctx>(inp, true)?;
         }
@@ -660,7 +666,11 @@ lossless_production! {
             }
             // After the one value a schema position's typed value holds, what goes on with an
             // expression offers a block, and the run consumes.
-            Some(head) if konst == Constness::Schema && continues_an_expression(head) => {
+            Some(head)
+              if konst == Constness::Schema
+                && (continues_an_expression(head)
+                  || (is_number(head) && peek_signed_number::<Src, Ctx>(inp)?)) =>
+            {
               expression_run::<Src, Ctx>(inp, true)?
             }
             // `unexpected` reports and consumes, so every turn returns or consumes.
@@ -1172,7 +1182,8 @@ lossless_production! {
   /// tokens, an operator's, a `>`, and a `^` after a value, into one `Error` with no report of its
   /// own, and a value that follows them, read as the value it is. A `(` where the run would read a
   /// value, and the `(` that begins the run, is skipped balanced to its own `)` into an `Error` of
-  /// its own, and counts as a value (R3′). A value that follows a value ends the run, a `(` among
+  /// its own, and counts as a value (R3′). A number whose token begins with `-` is a value wherever
+  /// it stands, as in `HOUR-1`. Any other value that follows a value ends the run, a `(` among
   /// them, so in a list it is the next element, and a map entry's `=>` is left to the entry.
   fn expression_run<'inp, Src, Ctx>(inp, after_value: bool) {
     let mut after_value = after_value;
@@ -1193,6 +1204,11 @@ lossless_production! {
         }
         Some(Kind::LParen) if !after_value => {
           expression_group::<Src, Ctx>(inp)?;
+          after_value = true;
+        }
+        // A number written with a `-` is a value wherever it stands in the run.
+        Some(head) if is_number(head) && peek_signed_number::<Src, Ctx>(inp)? => {
+          value::<Src, Ctx>(inp, Constness::Schema)?;
           after_value = true;
         }
         Some(head) if !after_value && starts_value(head) => {

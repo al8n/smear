@@ -66,8 +66,9 @@ All notable changes to Smear are documented in this file.
   - **The atoms.** `smear_parser::combinator` gains `comma` and `try_comma`.
 - `smear-parser`: a GraphQLx schema position offers a `const { … }` block where its value would be
   an expression, in both layers: at an operator's token or a `(` at a value's head, and after a
-  value where no second value may follow at an operator's token, a `>` or a `^`. Each is refused at
-  that token against `Expectation::ConstBlock`, "a `const { … }` block around the expression". The
+  value where no second value may follow at an operator's token, a `>`, a `^`, a `(` or a number
+  written with its `-`, as in `HOUR-1`. Each is refused at that token against
+  `Expectation::ConstBlock`, "a `const { … }` block around the expression". The
   lossless layer reports once and reads the rest of the expression on, its tokens into an `Error`
   and its values as values, in the node the refusal stands in. An executable document is as it was.
 - `smear-parser`: a GraphQLx schema position, a constant position of a type-system definition or

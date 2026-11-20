@@ -292,6 +292,7 @@ fn read_type_system_document<'src, Src, K>(
 where
   Src: Source<usize> + ?Sized + 'src,
   GraphqlxSlice<'src, Src>: Clone + Leaf,
+  <GraphqlxSlice<'src, Src> as tokora::Slice<'src>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'src, Src>: DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'src, Src>: Lexer<
       'src,

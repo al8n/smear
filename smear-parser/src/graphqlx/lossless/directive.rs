@@ -49,9 +49,9 @@ use super::{
   GraphqlxLosslessInput, recover,
   recover::{
     ARGUMENT_HEADS, PARENS_CLOSER_HEADS, closes_enclosing_block, continues_an_expression,
-    opener_span,
+    is_number, opener_span,
   },
-  trivia::{eat_if, expect, peek_kind},
+  trivia::{eat_if, expect, peek_kind, peek_signed_number},
   ty::type_path,
   value::{Constness, expression_run, required_value},
 };
@@ -109,7 +109,11 @@ lossless_production! {
             Some(Kind::Identifier) => argument::<Src, Ctx>(inp, konst)?,
             // At a schema position's member position, what goes on with an expression offers a
             // block, and the run consumes.
-            Some(head) if konst == Constness::Schema && continues_an_expression(head) => {
+            Some(head)
+              if konst == Constness::Schema
+                && (continues_an_expression(head)
+                  || (is_number(head) && peek_signed_number::<Src, Ctx>(inp)?)) =>
+            {
               expression_run::<Src, Ctx>(inp, true)?
             }
             Some(_) => recover::unexpected::<Src, Ctx>(inp, ARGUMENT_HEADS)?,

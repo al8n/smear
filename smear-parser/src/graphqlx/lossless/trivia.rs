@@ -30,17 +30,19 @@
 //! `\r`, `\n` and `\r\n` apart where the tree's folds all three, but **no atom here can expose
 //! that difference**, because every atom skips trivia before it answers.
 
+use smear_lexer::graphqlx::lossless::LosslessToken;
 use tokora::{
-  Lexer, ParseAttempt, SimpleSpan, Source, Token,
+  Lexer, ParseAttempt, SimpleSpan, Slice, Source, Token,
   error::{UnexpectedEot, UnexpectedToken},
   lexer::FromLogos,
-  utils::DowncastRef,
+  utils::{DowncastRef, IsAsciiChar},
 };
 
 use crate::graphqlx::GraphQLx;
 
 use super::{
-  GraphqlxLosslessError, GraphqlxLosslessInput, GraphqlxLosslessLexer, GraphqlxLosslessToken,
+  GraphqlxLosslessError, GraphqlxLosslessInput, GraphqlxLosslessLexer, GraphqlxLosslessSlice,
+  GraphqlxLosslessToken,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -82,6 +84,35 @@ where
   GraphqlxLosslessError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>,
 {
   crate::lossless::trivia::peek_kind(inp)
+}
+
+/// Whether the head is a number whose token begins with `-`: after a value where no second value
+/// may follow, the one number an expression goes on with, as in `HOUR-1`, and inside the run that
+/// reads that expression a value wherever it stands. The caller has peeked the head, so this reads
+/// the cache and lexes nothing, and a token's first character is read only where it is a number.
+#[inline]
+pub(crate) fn peek_signed_number<'inp, Src, Ctx>(
+  inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>,
+) -> Result<bool, GraphqlxLosslessError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  <GraphqlxLosslessSlice<'inp, Src> as Slice<'inp>>::Char: IsAsciiChar,
+  GraphqlxLosslessToken<'inp, Src>: Token<'inp> + FromLogos<'inp>,
+  GraphqlxLosslessLexer<'inp, Src>:
+    Lexer<'inp, Token = GraphqlxLosslessToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: tokora::ParseContext<'inp, GraphqlxLosslessLexer<'inp, Src>, GraphQLx>,
+  GraphqlxLosslessError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>,
+{
+  peek_kind::<Src, Ctx>(inp)?;
+  Ok(
+    inp
+      .peek_head_map(|t| match t.data {
+        LosslessToken::LitInt(lit) => crate::graphqlx::begins_with_minus(lit.source_ref()),
+        LosslessToken::LitFloat(lit) => crate::graphqlx::begins_with_minus(lit.source_ref()),
+        _ => false,
+      })?
+      .unwrap_or(false),
+  )
 }
 
 /// Commit any leading trivia, then report the kind of the **second significant** token — the one
