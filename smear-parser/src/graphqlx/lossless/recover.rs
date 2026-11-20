@@ -694,9 +694,10 @@ lossless_production! {
   /// takes that back, and what it read is paid for again under the produce-event budget. This one
   /// reads forward once: it takes the head, then stops at the end of input, in front of a `}` none
   /// of its own braces is open for, which it leaves staged for the block or the aggregate that owns
-  /// it, or in front of a restart point where its depth over every pair is zero. A restart point at
-  /// the head is taken alone, as the shared skip's fallback takes it. The caller has asked about a
-  /// `}` at the head before it calls, as every caller of the shared skip does.
+  /// it, or in front of a restart point or a `=>` where its depth over every pair is zero: a `=>`
+  /// inside a block is a map entry's, read by the entry, so a skip in front of it never takes it.
+  /// A restart point at the head is taken alone, as the shared skip's fallback takes it. The caller
+  /// has asked about a `}` at the head before it calls, as every caller of the shared skip does.
   fn unexpected_in_block<'inp, Src, Ctx>(inp, expected: &'static [Kind]) {
     crate::lossless::recover::report_unexpected(inp, expected)?;
     let Some(head) = super::trivia::peek_kind::<Src, Ctx>(inp)? else {
@@ -707,7 +708,10 @@ lossless_production! {
     let mut next = Some(head);
     let mut first = true;
     while let Some(kind) = next {
-      if !first && ((kind == Kind::RBrace && braces == 0) || (depth == 0 && is_sync_point(kind))) {
+      if !first
+        && ((kind == Kind::RBrace && braces == 0)
+          || (depth == 0 && (is_sync_point(kind) || kind == Kind::FatArrow)))
+      {
         break;
       }
       inp.try_expect_or_stop(|_| true)?;

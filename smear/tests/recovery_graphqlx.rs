@@ -1547,6 +1547,27 @@ mod lossless {
     }
   }
 
+  /// A skip inside a block stops in front of a `=>`, which only a map entry reads: junk after an
+  /// entry's key leaves the entry its arrow, and the entries after it are read.
+  #[test]
+  fn a_skip_inside_a_block_leaves_a_map_entry_its_arrow() {
+    let text = "input I { a: T = const { map!{ 1 + => 3, 4 => 5 } } b: Int }";
+    let answer = read(text);
+    assert_eq!(answer.reports, 1, "one report, at the `+`");
+    let entries = answer
+      .tree
+      .descendants()
+      .filter(|node: &SyntaxNode| node.kind() == K::MapEntry)
+      .count();
+    assert_eq!(entries, 2);
+    let members = answer
+      .tree
+      .descendants()
+      .filter(|node: &SyntaxNode| node.kind() == K::InputValueDefinition)
+      .count();
+    assert_eq!(members, 2, "`b` stays a field of `I`");
+  }
+
   // ── Through the analyzer ───────────────────────────────────────────────────────────────────
 
   #[cfg(feature = "analysis")]
