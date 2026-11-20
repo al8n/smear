@@ -113,6 +113,19 @@ const GRAPHQL_WHOLE_SLICE_DOOR: &str = "One token's slice, re-cooked: the GraphQ
      payload — and the document it came from is already verified and sliced by the caller. Test 4 \
      does not acquit it because a free function over one slice has no source type to hold.";
 
+/// GraphQLx's two whole-slice doors for a numeric leaf inside a `const { … }` block.
+const GRAPHQLX_BLOCK_WHOLE_SLICE_DOOR: &str = "One token's slice, re-cooked as the scanner reads \
+     it inside a `const { … }` block: the GraphQLx CST → AST projection hands in the bytes under a \
+     single `Int` or `Float` token of a block and asks whether the shipped scanner, started in the \
+     block's mode, reads exactly one token of that kind over all of them — the question \
+     `LitInt::try_from` and `LitFloat::try_from` answer outside a block, beside it, and the one \
+     `smear::lexer::graphqlx::identifier` answers for a name. It is text by construction — the \
+     answer borrows it back as the leaf's payload, the same `&str` in and out — and the document \
+     it came from is already verified and sliced by the caller, so a byte door would be surface \
+     with no caller. Test 1 does not acquit it because the `LitInt` or `LitFloat` it answers \
+     carries a position in that one slice, and a free function over one slice has no source type \
+     to hold.";
+
 /// The twelve concrete lossless parse doors, `fn(&str) -> Parse`.
 const LOSSLESS_DOOR: &str = "Concrete BY DESIGN, and beside a wide sibling that is not. \
    al8n/smear#121 made all twelve of these generic over the source and Codex measured what that \
@@ -624,6 +637,22 @@ pub const EXEMPTIONS: &[Exemption] = &[
              name's payload, the same `&str` in and out — and the document it came from is already \
              verified and sliced by the caller. Test 4 does not acquit it because a free function \
              over one slice has no source type to hold.",
+  },
+  Exemption {
+    module: "smear::lexer::graphqlx",
+    entry: "int_in_block",
+    param: "value",
+    kind: Kind::NotSource,
+    issue: None,
+    reason: GRAPHQLX_BLOCK_WHOLE_SLICE_DOOR,
+  },
+  Exemption {
+    module: "smear::lexer::graphqlx",
+    entry: "float_in_block",
+    param: "value",
+    kind: Kind::NotSource,
+    issue: None,
+    reason: GRAPHQLX_BLOCK_WHOLE_SLICE_DOOR,
   },
   // ── §7.1.7 `extensions`, whose keys are the service's and not the document's ─────────────────
   Exemption {
