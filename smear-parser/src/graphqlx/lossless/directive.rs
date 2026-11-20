@@ -114,7 +114,7 @@ lossless_production! {
                 && (continues_an_expression(head)
                   || (is_number(head) && peek_signed_number::<Src, Ctx>(inp)?)) =>
             {
-              expression_run::<Src, Ctx>(inp, true)?
+              expression_run::<Src, Ctx>(inp, true, false)?
             }
             Some(_) => recover::unexpected::<Src, Ctx>(inp, ARGUMENT_HEADS)?,
           }

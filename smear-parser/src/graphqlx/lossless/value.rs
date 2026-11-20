@@ -360,7 +360,7 @@ lossless_production! {
             && (continues_an_expression(head)
               || (is_number(head) && peek_signed_number::<Src, Ctx>(inp)?)) =>
         {
-          expression_run::<Src, Ctx>(inp, true)?
+          expression_run::<Src, Ctx>(inp, true, false)?
         }
         // The head is checked here rather than left to `object_field`'s own `expect`, because
         // that `expect` would return `Err` and abort the whole value — the list's recovery
@@ -396,7 +396,13 @@ lossless_production! {
     node(
       K::MapEntry.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
-        value::<Src, Ctx>(inp, konst)?;
+        // A schema key that begins with `(` is an expression the block is offered for, and its run
+        // reads that `(` to its own `)`, so the entry keeps its `=>` and its value.
+        if konst == Constness::Schema && peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
+          expression_run::<Src, Ctx>(inp, false, true)?;
+        } else {
+          value::<Src, Ctx>(inp, konst)?;
+        }
         // After a schema position's key, what goes on with an expression offers a block, and the
         // run reads on to the `=>`. The read is the one `expect` makes, in the same node.
         if konst == Constness::Schema
@@ -404,7 +410,7 @@ lossless_production! {
           && (continues_an_expression(head)
             || (is_number(head) && peek_signed_number::<Src, Ctx>(inp)?))
         {
-          expression_run::<Src, Ctx>(inp, true)?;
+          expression_run::<Src, Ctx>(inp, true, true)?;
         }
         expect::<Src, Ctx>(inp, Kind::FatArrow)?;
         required_value::<Src, Ctx>(inp, konst)
@@ -671,7 +677,7 @@ lossless_production! {
                 && (continues_an_expression(head)
                   || (is_number(head) && peek_signed_number::<Src, Ctx>(inp)?)) =>
             {
-              expression_run::<Src, Ctx>(inp, true)?
+              expression_run::<Src, Ctx>(inp, true, false)?
             }
             // `unexpected` reports and consumes, so every turn returns or consumes.
             Some(_) => recover::unexpected::<Src, Ctx>(inp, PARENS_CLOSER_HEADS)?,
@@ -1173,7 +1179,7 @@ lossless_production! {
       // In a schema position an operator's token or a `(` at a value's head begins an expression,
       // which only a `const { … }` block reads: the block is offered, and the run reads on.
       Some(head) if konst == Constness::Schema && (is_operator(head) || head == Kind::LParen) => {
-        expression_run::<Src, Ctx>(inp, false)
+        expression_run::<Src, Ctx>(inp, false, false)
       }
       _ => recover::unexpected::<Src, Ctx>(inp, konst.value_heads()),
     }
@@ -1185,21 +1191,27 @@ lossless_production! {
   ///
   /// `after_value` says whether that token directly follows a value. The run takes an expression's
   /// tokens, an operator's, a `>`, and a `^` after a value, into one `Error` with no report of its
-  /// own, and a value that follows them, read as the value it is. A `(` that begins the run is
-  /// reported and taken by the shared balanced skip, as junk at every position the run begins at
-  /// was taken before the block was offered, so a member list keeps the members and the `)` that
-  /// skip leaves it; it counts as a value. A `(` where the run would read an operand is skipped to
-  /// its own `)` into an `Error` of its own, and counts as a value (R3′), so a map entry's `=>`
-  /// after it is the entry's. A number whose token begins with `-` is a value wherever it stands,
-  /// as in `HOUR-1`. Any other value that follows a value ends the run, a `(` among them, so in a
-  /// list it is the next element.
-  fn expression_run<'inp, Src, Ctx>(inp, after_value: bool) {
+  /// own, and a value that follows them, read as the value it is. A `(` where the run would read an
+  /// operand is skipped to its own `)` into an `Error` of its own, and counts as a value (R3′), so
+  /// a map entry's `=>` after it is the entry's. A `(` that begins the run counts as a value too,
+  /// and how it is skipped is the position's: in a map entry's key, where `at_key` holds, to its own
+  /// `)` the same way, so the entry keeps its `=>`; anywhere else by the shared balanced skip, as
+  /// junk at those positions was taken before the block was offered, so a member list keeps the
+  /// members and the `)` that skip leaves it. A number whose token begins with `-` is a value
+  /// wherever it stands, as in `HOUR-1`. Any other value that follows a value ends the run, a `(`
+  /// among them, so in a list it is the next element.
+  fn expression_run<'inp, Src, Ctx>(inp, after_value: bool, at_key: bool) {
     let mut after_value = after_value;
-    if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
+    let leading_group = peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen);
+    if leading_group && !at_key {
       recover::unexpected::<Src, Ctx>(inp, CONST_BLOCK_HEADS)?;
       after_value = true;
     } else {
       recover::report_unexpected::<Src, Ctx>(inp, CONST_BLOCK_HEADS)?;
+      if leading_group {
+        expression_group::<Src, Ctx>(inp)?;
+        after_value = true;
+      }
     }
     // Every turn consumes or returns: the tokens' arm takes at least the one it peeked, the group's
     // the `(` it peeked, and the value's arm reads a value whose head it peeked.

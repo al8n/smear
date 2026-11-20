@@ -1495,6 +1495,36 @@ mod lossless {
     assert_eq!(members[1], "b: Int", "`b` stays a field of `I`");
   }
 
+  /// A schema map's key that begins with `(` is read to its own `)`, so the entry keeps its `=>`
+  /// and its value, and the field after the map stays a field.
+  #[test]
+  fn a_key_that_begins_with_a_parenthesis_leaves_the_arrow_to_its_entry() {
+    let answer = read("input I { a: T = map!{ (2) => 3 } b: Int }");
+    assert_eq!(answer.reports, 1, "one report, at the `(`");
+    let entry = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::MapEntry)
+      .expect("the map's entry");
+    assert!(
+      entry
+        .children_with_tokens()
+        .any(|element| element.kind() == K::FatArrow),
+      "the entry keeps its `=>`"
+    );
+    assert_eq!(
+      kinds(&entry).last(),
+      Some(&K::IntValue),
+      "the entry keeps its value"
+    );
+    let members = answer
+      .tree
+      .descendants()
+      .filter(|node: &SyntaxNode| node.kind() == K::InputValueDefinition)
+      .count();
+    assert_eq!(members, 2, "`b` stays a field of `I`");
+  }
+
   /// A skip inside a block stops at the block's `}`, with its `(` still open, so nothing after the
   /// `}` is lexed in the block's mode and then again outside it: under a produce-event budget of
   /// one event for each lexeme, and one more, the text reads to its end.
