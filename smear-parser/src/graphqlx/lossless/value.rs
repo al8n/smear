@@ -734,7 +734,8 @@ lossless_production! {
       Some(Kind::LParen) => paren_value::<Src, Ctx>(inp),
       Some(Kind::Tilde | Kind::DotDot | Kind::Caret) => enum_value::<Src, Ctx>(inp),
       Some(Kind::Identifier) => block_name::<Src, Ctx>(inp),
-      head if head.is_none_or(is_closer) => {
+      None => recover::report_unexpected::<Src, Ctx>(inp, BLOCK_OPERAND_HEADS),
+      Some(head) if is_closer(head) => {
         recover::report_unexpected::<Src, Ctx>(inp, BLOCK_OPERAND_HEADS)
       }
       Some(_) => recover::unexpected::<Src, Ctx>(inp, BLOCK_OPERAND_HEADS),
