@@ -1806,7 +1806,8 @@ value_parser!(
       Some(SyntacticTokenKind::LParen) => paren_value(inp).map(ConstInputValue::Paren),
       Some(SyntacticTokenKind::LBracket) => block_list_value(inp).map(ConstInputValue::List),
       Some(SyntacticTokenKind::LBrace) => block_object_value(inp).map(ConstInputValue::Object),
-      Some(SyntacticTokenKind::PathSeparator) => leading_path_separator(inp),
+      // A `::` begins no operand, and is refused as every head that begins none is, so the code
+      // is the one the lossless layer reports there.
       _ => unexpected_here(inp, Expectation::ConstInputValue),
     }
   }

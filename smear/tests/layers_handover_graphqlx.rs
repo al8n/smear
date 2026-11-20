@@ -586,6 +586,19 @@ mod lossless {
     }
   }
 
+  /// A `::` at a block operand's head begins no operand, and both layers refuse it as they refuse
+  /// every head that begins none: one code, at one token.
+  #[test]
+  fn a_leading_separator_in_a_block_is_one_code_in_both_layers() {
+    let (ours, theirs, _) = said("input I { a: T = const { ::X } }");
+    let code_and_span = |line: &str| line.split(": ").next().unwrap_or_default().to_string();
+    assert_eq!(code_and_span(&ours), code_and_span(&theirs));
+    assert_eq!(
+      code_and_span(&ours),
+      "smear::syntax::unexpected-token at 25..27"
+    );
+  }
+
   // ── The message bound ──────────────────────────────────────────────────────────────────────
 
   /// The most bytes a syntax error's message holds.
