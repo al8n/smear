@@ -977,9 +977,10 @@ where
 
   #[inline(always)]
   fn lex(&mut self) -> Option<Result<Self::Token, <Self::Token as tokora::Token<'inp>>::Error>> {
-    // The word is the parser's to write, between two calls, so it is read once here and the body
-    // asks a constant: the instance outside a block is the one this inlines, and a block's is kept
-    // out of line.
+    if self.state.in_const_block() {
+      core::hint::cold_path();
+      return None;
+    }
     self.lex_body::<false>()
   }
 
