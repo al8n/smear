@@ -536,3 +536,39 @@ fn a_refused_number_ends_before_a_blocks_brace() {
     "outside a block the refusal takes the brace, as it did"
   );
 }
+
+/// A refused unit is the one its refusal takes, whatever follows it, in both lexers, in and out of
+/// a block: `0x1paé` refuses `a` at 4..5, not the `é` after it, which is left whole to begin the
+/// next item. A span over the `é`'s position alone would end inside it.
+#[test]
+fn a_refused_unit_is_the_one_its_refusal_takes() {
+  const SRC: &str = "0x1paé";
+  let refused = "LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 4 }, data: \
+                 HexFloat(UnexpectedLexeme(UnexpectedLexeme { lexeme: Char(PositionedChar { \
+                 char: 'a', position: 4 }), hint: Exponent(SignOrDigit) })) }])";
+  for (lexer, items) in [
+    ("syntactic", items!(SyntacticLexer::<str>::new(SRC))),
+    (
+      "syntactic, in a block",
+      items!(SyntacticLexer::<str>::with_state(SRC, entered())),
+    ),
+    ("lossless", items!(LosslessLexer::<&str>::new(SRC))),
+    (
+      "lossless, in a block",
+      items!(LosslessLexer::<&str>::with_state(SRC, lossless_entered())),
+    ),
+  ] {
+    assert_eq!(
+      items.first(),
+      Some(&(String::from(refused), SimpleSpan::new(0, 5))),
+      "{lexer}"
+    );
+    assert_eq!(
+      items
+        .get(1)
+        .map(|(_, span): &(String, SimpleSpan)| span.start()),
+      Some(5),
+      "{lexer}: the `é` begins the next item"
+    );
+  }
+}

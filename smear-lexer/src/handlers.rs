@@ -322,8 +322,8 @@ where
       let mut curr = 1;
       let span = lexer.span();
 
-      for ch in remainder {
-        if ch.is_following_invalid_char() {
+      for next in remainder {
+        if next.is_following_invalid_char() {
           curr += 1;
           continue;
         }
@@ -331,6 +331,8 @@ where
         // bump the lexer to the end of the invalid sequence
         lexer.bump(curr);
 
+        // One unit refused: `ch`, the one the bump covers. `next` only ends the run, and is left
+        // whole for the next token.
         let l = if curr == 1 {
           let pc = PositionedChar::with_position(ch, span.end);
           Lexeme::Char(pc)
