@@ -1,0 +1,1 @@
+query ($a: i32 = const { 1 + 2 }) { f }
