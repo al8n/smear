@@ -87,7 +87,9 @@
 //! of its two readings to fail failed, and the other reading's failure at that place for that
 //! reason, whatever it wanted there, is not reported again: `Missing::RED` read both ways is one
 //! `unresolved-path`, at `Missing`, which the prefix wants as a type and the whole path as a
-//! module. A failure at another place, or for another reason, is reported as any other.
+//! module. A path past `Limits::max_path_segments` both ways is one `resource-limit` too, over the
+//! segments the first reading read, its place in the key being its first segment. A failure at
+//! another place, or for another reason, is reported as any other.
 //!
 //! An object literal against an input object is read once and kept, by the literal and the input
 //! object: a field whose name is the name of one of the input object's fields, the first of that

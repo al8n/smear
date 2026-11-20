@@ -569,7 +569,8 @@ struct Failure<'p> {
 /// is said once.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Failed {
-  /// Where the failure is reported: the segment, or the root, that does not resolve.
+  /// Where the failure is: the segment, or the root, that does not resolve; for a path too long,
+  /// its first segment, which both readings share, though each reports over the segments it reads.
   at: Location,
   /// Why.
   reason: Reason,
@@ -838,8 +839,16 @@ impl Scopes<'_> {
     match self.walk(names, request, root, segments) {
       Ok(resolved) => resolved,
       Err(failure) => {
+        // A path too long is reported over the segments its reading reads, a prefix's span ending
+        // a segment before the whole path's: one path, so one place, its first segment.
+        let at = match failure.why {
+          Why::TooLong(_) => segments
+            .first()
+            .map_or(failure.at, |first: &Segment<'_>| first.at),
+          _ => failure.at,
+        };
         let this = Failed {
-          at: failure.at,
+          at,
           reason: failure.why.reason(),
         };
         if *failed != Some(this) {
