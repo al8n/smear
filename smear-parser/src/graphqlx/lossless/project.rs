@@ -3198,6 +3198,42 @@ fn type_path<'src>(node: Node<'_>, source: &'src str) -> Out<(TypePath<&'src str
   type_path_except(node, source, &[], "")
 }
 
+/// The type a typed form names, read by the rules the value head reads its path by, in a block
+/// and out of one.
+///
+/// A relative path whose first segment is `true`, `false` or `null` is a boolean or a null there,
+/// and a bare `const` before `{`, with no root, no second segment and no type arguments, opens a
+/// block: neither names a typed form, so `object` says whether the form is a typed object. Each is
+/// [`SemanticRule`](ProjectErrorKind::SemanticRule). `~::const {}`, `const<T> {}`, `const(1)` and
+/// `x::true {}` are typed forms the parser builds.
+fn typed_form_type<'src>(
+  node: Node<'_>,
+  source: &'src str,
+  object: bool,
+) -> Out<(TypePath<&'src str>, TextRange)> {
+  let (ty, extent) = type_path_except(
+    node,
+    source,
+    &[
+      ContextualKeyword::True,
+      ContextualKeyword::False,
+      ContextualKeyword::Null,
+    ],
+    "a typed form's type may not begin with `true`, `false` or `null`",
+  )?;
+  let bare_const = object
+    && ty.type_generics().is_none()
+    && ty.path().root().is_relative()
+    && matches!(ty.path().segments(), [only] if *only.source() == "const");
+  if bare_const {
+    return Err(ProjectError::new(
+      ProjectErrorKind::SemanticRule("a bare `const` before `{` opens a block, not a typed object"),
+      to_range(extent),
+    ));
+  }
+  Ok((ty, extent))
+}
+
 /// [`type_path`] whose path is read through [`path_except`] — a fragment spread's target.
 fn type_path_except<'src>(
   node: Node<'_>,
@@ -4569,7 +4605,7 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
         // object's is, each field's value one descent.
         let mut cursor = Cursor::new(node);
         let ty_node = cursor.node(K::TypePath, "the type a typed object names")?;
-        let ty = cursor.keep(type_path(ty_node, source)?);
+        let ty = cursor.keep(typed_form_type(ty_node, source, true)?);
         cursor.token(K::LBrace, "the `{` a typed object opens with")?;
         match next_field(&mut cursor, source, in_block)? {
           Some(open) => {
@@ -4598,7 +4634,7 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
         // `TypePath ( Value )` — the type path read whole, then the one value, one descent.
         let mut cursor = Cursor::new(node);
         let ty_node = cursor.node(K::TypePath, "the type a typed value names")?;
-        let ty = cursor.keep(type_path(ty_node, source)?);
+        let ty = cursor.keep(typed_form_type(ty_node, source, false)?);
         cursor.token(K::LParen, "the `(` a typed value opens with")?;
         let first = cursor.one_of(member_kinds(in_block), "the value a typed value holds")?;
         frames.push(ValueFrame {

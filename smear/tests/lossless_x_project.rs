@@ -2792,6 +2792,50 @@ fn a_char_leaf_that_spells_two_characters_refuses() {
 }
 
 #[test]
+fn a_typed_form_named_what_the_value_head_reads_otherwise_refuses() {
+  // The tree of `Point {}` with its type spelled `const`: both parsers read those bytes as an
+  // empty block, so a typed object named `const` is no value either builds.
+  let typed_object = |ty: &str| {
+    let text = std::format!("scalar S@d(n:{ty}{{}})");
+    let mut tree = Tree::new();
+    tree.open(K::Document);
+    tree.open(K::ScalarTypeDefinition);
+    tree.token(K::Name, "scalar").token(K::Space, " ");
+    tree.open(K::DefinitionName).token(K::Name, "S").close();
+    tree.one_argument("n", |tree| {
+      tree.open(K::TypedObjectValue);
+      tree.open(K::TypePath).path(ty).close();
+      tree.token(K::LBrace, "{").token(K::RBrace, "}");
+      tree.close();
+    });
+    tree.close();
+    tree.close();
+    (tree.finish(), text)
+  };
+  let (tree, text) = typed_object("const");
+  assert_eq!(
+    refuse_tree(tree, &text),
+    ProjectErrorKind::SemanticRule("a bare `const` before `{` opens a block, not a typed object")
+  );
+  let (tree, text) = typed_object("true");
+  assert_eq!(
+    refuse_tree(tree, &text),
+    ProjectErrorKind::SemanticRule(
+      "a typed form's type may not begin with `true`, `false` or `null`"
+    )
+  );
+  // The control: a type the value head reads as a path is a typed object.
+  let (tree, text) = typed_object("Point");
+  assert!(
+    DocumentNode::cast_node(tree)
+      .expect("the synthetic root is a Document")
+      .to_ast(&text)
+      .is_ok(),
+    "{text}"
+  );
+}
+
+#[test]
 fn a_tree_that_splits_a_token_projects_the_tree_it_was_handed() {
   // **A decision, not a defect** — see the module header's *what a tree the parser did not build is
   // promised*. Over `[-12]` a caller can build two adjacent `IntValue` tokens; each slice is one
