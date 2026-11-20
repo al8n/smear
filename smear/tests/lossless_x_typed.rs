@@ -2268,18 +2268,18 @@ fn every_fixture_is_a_document_the_suite_accepts() {
 /// A list wrapper's children are all of one kind by construction — a `FieldsDefinition` holds
 /// `FieldDefinition`s and nothing else — so on every valid document `field_definitions()` and "hand
 /// back every child node" are the same function. Recovery is the only thing that ever puts a
-/// foreign child in such a list, and these eight are where it does. A ninth and a tenth are
+/// foreign child in such a list, and these seven are where it does. An eighth and a ninth are
 /// malformed for another property: a variable in a typed value and in a block, which a schema
 /// position reports and still builds, so the typed value's `variable_value` and the expression's
 /// `variable_values` have something to answer.
 ///
-/// **They are eight and not twenty-three because that is what was measured**, and
+/// **They are seven and not twenty-three because that is what was measured**, and
 /// [`every_added_source_earns_its_place`] re-measures it every run. Twenty-three malformed shapes
-/// were probed and fifteen dropped, in two groups:
+/// were probed and sixteen dropped, in two groups:
 ///
-/// - **Six the corpus already covers.** A hole in a selection set, an enum body, a `use` group, a
-///   list value, a set value or a generic argument list separates nothing the `invalid_*` corpus
-///   entries do not separate already.
+/// - **Seven the corpus already covers.** A hole in a selection set, an enum body, a `use` group,
+///   a list value, a set value, a generic argument list or a variables definition separates
+///   nothing the `invalid_*` corpus entries do not separate already.
 /// - **Nine that produce no foreign child at all.** Five aimed at `Directives`,
 ///   `ImplementInterfaces`, `UnionMemberTypes`, `WhereClause` and `WherePredicate`, and four aimed
 ///   at putting an `Error` in front of a definition's name. Both fail for the same structural
@@ -2288,7 +2288,7 @@ fn every_fixture_is_a_document_the_suite_accepts() {
 ///   `Error`s at document level and loses the enclosing node entirely. Those wrappers are in
 ///   [`UNDISCRIMINATED`].
 ///
-/// One of the eight is worth a line on its own. `type T { a: Int ! b: Int }` — the shape the
+/// One of the seven is worth a line on its own. `type T { a: Int ! b: Int }` — the shape the
 /// GraphQL twin uses for this — **parses clean here**, because `Int !` is a non-null marker and the
 /// `!` is consumed by the type rather than left as a hole. The `*` in its place is an
 /// [`Asterisk`](K::Asterisk), which no field definition admits.
@@ -2320,11 +2320,6 @@ const RECOVERY_FIXTURES: &[(&str, &str)] = &[
   ),
   // …inside an `InputFieldsDefinition`.
   ("an_input_body_with_a_hole", "input In { a: Int * b: Int }"),
-  // …inside a `VariablesDefinition`.
-  (
-    "a_variables_definition_with_a_hole",
-    "query Q($a: Int * $b: Int) { f }",
-  ),
   // Not a hole: a variable in a typed value, which a schema position reports and still builds, so
   // the one getter no valid document can answer has a tree to answer from.
   ("a_variable_in_a_typed_value", "input I { a: T = W($v) }"),
@@ -2367,7 +2362,7 @@ fn every_added_source_earns_its_place() {
      already have — either the corpus grew into their shape or they were never needed:{}",
     listed(freeloaders)
   );
-  assert_eq!(sources.len(), 18);
+  assert_eq!(sources.len(), 17);
 }
 
 #[test]

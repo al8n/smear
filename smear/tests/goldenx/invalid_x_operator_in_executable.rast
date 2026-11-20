@@ -15,9 +15,9 @@ Root@0..16
               IntValue@7..8
                 Int@7..8 "1"
             Space@8..9 " "
-            Error@9..10
+            Error@9..11
               Plus@9..10 "+"
-            Space@10..11 " "
+              Space@10..11 " "
             Error@11..12
               Int@11..12 "2"
             RParen@12..13 ")"

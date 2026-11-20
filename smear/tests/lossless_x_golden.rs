@@ -305,7 +305,9 @@ const OPENS_ON_LEADING_TRIVIA: &[&str] = &["Root > Document"];
 const CLOSES_ON_TRAILING_TRIVIA: &[&str] = &[
   "Argument > ListValue",
   "Arguments > Argument",
+  "Arguments > Error",
   "ArgumentsDefinition > InputValueDefinition",
+  "ConstBlock > Error",
   "ConstBlock > Expression",
   "DefaultValue > TypedObjectValue",
   "DefinitionTypeGenerics > DefinitionTypeParam",
@@ -353,6 +355,7 @@ const CLOSES_ON_TRAILING_TRIVIA: &[&str] = &[
   "UnionTypeDefinition > DefinitionName",
   "UseDefinition > UseTree",
   "UseTree > Path",
+  "VariablesDefinition > Error",
   "VariablesDefinition > VariableDefinition",
   "WhereClause > WherePredicate",
 ];

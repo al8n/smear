@@ -4254,6 +4254,14 @@ const SITES: &[Site] = &[
   (
     "value.rs",
     "report",
+    "input I { a: T = const {",
+    Root::Mixed,
+    "MissingChild Expression",
+    Absent::Imaged,
+  ),
+  (
+    "value.rs",
+    "report",
     "input I { a: T = const { (1 } }",
     Root::Mixed,
     "Ok",
@@ -4558,7 +4566,7 @@ fn every_report_and_build_site_has_a_measured_answer() {
   };
   assert_eq!(
     (total("report"), total("unclosed")),
-    (73, 22),
+    (74, 22),
     "the two families' populations"
   );
 

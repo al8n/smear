@@ -30,9 +30,9 @@ Root@0..35
                   EnumValue@26..27
                     Path@26..27
                       Name@26..27 "a"
-                Error@27..28
+                Error@27..29
                   Colon@27..28 ":"
-                Space@28..29 " "
+                  Space@28..29 " "
                 Error@29..30
                   Int@29..30 "1"
                 RBrace@30..31 "}"

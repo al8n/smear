@@ -63,8 +63,8 @@ invalid_x_mod_unclosed_body.graphqlx: lossless 1 first smear::syntax::unclosed-d
 invalid_x_mod_without_body.graphqlx: lossless 1 first smear::syntax::unexpected-token at 6..10; syntactic 1 first smear::syntax::unexpected-token at 6..10; code same, span same, message differs
 invalid_x_mod_without_name.graphqlx: lossless 1 first smear::syntax::unexpected-token at 4..5; syntactic 1 first smear::syntax::unexpected-token at 4..5; code same, span same, message differs
 invalid_x_name_adjacent_to_angle_in_generics.graphqlx: lossless 1 first smear::syntax::unexpected-token at 27..28; syntactic 1 first smear::syntax::unexpected-token at 27..28; code same, span same, message differs
-invalid_x_operator_in_executable.graphqlx: lossless 3 first smear::syntax::unexpected-token at 0..1; syntactic 1 first smear::syntax::unexpected-token at 0..1; code same, span same, message differs
-invalid_x_paren_in_executable.graphqlx: lossless 6 first smear::syntax::unexpected-token at 0..5; syntactic 1 first smear::syntax::unexpected-token at 0..5; code same, span same, message differs
+invalid_x_operator_in_executable.graphqlx: lossless 4 first smear::syntax::unexpected-token at 0..1; syntactic 1 first smear::syntax::unexpected-token at 0..1; code same, span same, message differs
+invalid_x_paren_in_executable.graphqlx: lossless 5 first smear::syntax::unexpected-token at 0..5; syntactic 1 first smear::syntax::unexpected-token at 0..5; code same, span same, message differs
 invalid_x_path_starts_with_separator.graphqlx: lossless 1 first smear::syntax::unexpected-token at 16..18; syntactic 1 first smear::syntax::unexpected-token at 16..18; code same, span same, message differs
 invalid_x_qualified_enum_value_definition.graphqlx: lossless 1 first smear::syntax::unexpected-token at 11..13; syntactic 1 first smear::syntax::unexpected-token at 11..13; code same, span same, message differs
 invalid_x_qualified_object_field_key.graphqlx: lossless 5 first smear::syntax::unexpected-token at 0..5; syntactic 1 first smear::syntax::unexpected-token at 0..5; code same, span same, message differs

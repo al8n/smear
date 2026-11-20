@@ -120,10 +120,10 @@
 //! GraphQLx's lossless productions **report and continue**: a violation goes on the diagnostic
 //! channel and the node is built anyway, so `Parse::has_errors()` sees it and the *shape* does not.
 //! Every one of those shapes reaches this projection looking well-formed, and each needs an
-//! answer. The population is every call that reports without building a hole — **73**
+//! answer. The population is every call that reports without building a hole — **74**
 //! `recover::report_unexpected::<…>` sites and **22** `recover::unclosed_{list,object,parens,angle}::<…>`
 //! sites across `graphqlx/lossless/*.rs`, the counts `grep -c` gives for those spellings — and
-//! **all 95 are mapped** in the table below, one probe each: a text that reaches the site with a
+//! **all 96 are mapped** in the table below, one probe each: a text that reaches the site with a
 //! hole-free tree, and what this projection answers for it. The table is executable:
 //! `every_report_and_build_site_has_a_measured_answer` holds the same rows, asserts their count
 //! per file and family against the source's own spelling of each call, and measures every answer.
@@ -145,7 +145,7 @@
 //! without the token — and the cell derives the missing-token table below from exactly that and
 //! asserts the two are the same set.
 //!
-//! **Twenty-nine project; sixty-six refuse.** The twenty-nine are the lenient rows a site can leave
+//! **Twenty-nine project; sixty-seven refuse.** The twenty-nine are the lenient rows a site can leave
 //! with a well-formed value. The others refuse either the shape the site built, or — for the
 //! unclosed sites whose definition the parser cannot finish at end of input — the rubble the
 //! document is left holding, or, for the two rows above, the hole.
@@ -238,6 +238,7 @@
 //! | `value.rs` | report | `input I { a: T = U(1 }` | `)` of `TypedValue` — **no image** | **projects** |
 //! | `value.rs` | report | `input I { a: T = const { $v } }` | nothing — a present token is refused | `UnexpectedChild(Expression, VariableValue)` |
 //! | `value.rs` | report | `input I { a: T = const { } }` | a constituent with an image | `MissingChild(Expression)` |
+//! | `value.rs` | report | `input I { a: T = const {` | a constituent with an image | `MissingChild(Expression)` |
 //! | `value.rs` | report | `input I { a: T = const { (1 } }` | `)` of `ParenValue` — **no image** | **projects** |
 //! | `value.rs` | unclosed | `input I { a: T = const { 1` | `}` of `ConstBlock` — **no image** | **projects** |
 //! | `value.rs` | unclosed | `input I { a: T = const { (1` | `)` of `ParenValue` — **no image** | **projects** |

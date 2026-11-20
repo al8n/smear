@@ -636,19 +636,19 @@ const TRIED: &[((&str, &str), usize)] = &[
 const TRIED_TOTAL: usize = 165_830;
 
 /// Skeleton-unfaithful: the no-panic obligation only.
-const UNFAITHFUL: usize = 147_228;
+const UNFAITHFUL: usize = 148_271;
 
 /// Skeleton-faithful, nothing lenient missing, and the projection equal to the parse.
-const EQUAL: usize = 13_835;
+const EQUAL: usize = 13_189;
 
 /// Skeleton-faithful, nothing lenient missing, and both refusing.
-const BOTH_REFUSE: usize = 4080;
+const BOTH_REFUSE: usize = 3687;
 
 /// Skeleton-faithful with a lenient token missing, and the projection equal to the restored parse.
-const LENIENT_EQUAL: usize = 551;
+const LENIENT_EQUAL: usize = 545;
 
 /// Skeleton-faithful with a lenient token missing, and both refusing the restored text.
-const LENIENT_BOTH_REFUSE: usize = 136;
+const LENIENT_BOTH_REFUSE: usize = 138;
 
 /// How many restorations each [`LENIENT`] row contributed to [`LENIENT_EQUAL`], in table order —
 /// the value witnesses this law finds.
@@ -674,7 +674,7 @@ const LENIENT_BOTH_REFUSE: usize = 136;
 /// reached by the three of `valid_x_const_block_nested` that stand in front of a block's `}`, and
 /// by every faithful mutation of `invalid_x_const_block_unclosed_paren`, whose `)` never was.
 const LENIENT_HITS: [usize; 25] = [
-  100, 102, 26, 6, 6, 96, 15, 12, 0, 9, 0, 66, 2, 41, 0, 0, 0, 0, 0, 0, 64, 0, 2, 0, 56,
+  100, 102, 26, 6, 6, 96, 15, 12, 0, 9, 0, 66, 2, 41, 0, 0, 0, 0, 0, 0, 64, 0, 2, 0, 58,
 ];
 
 /// How many restorations each row contributed to [`LENIENT_BOTH_REFUSE`] — restored texts the
@@ -682,7 +682,7 @@ const LENIENT_HITS: [usize; 25] = [
 /// either list is a position no one-child mutation of this corpus reaches, and its witness is its
 /// report-and-build probe alone.
 const LENIENT_REFUSED_HITS: [usize; 25] = [
-  8, 29, 8, 6, 4, 10, 2, 4, 2, 15, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 43, 0, 0, 0, 0,
+  8, 29, 8, 6, 4, 10, 2, 4, 2, 15, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0, 43, 0, 0, 0, 2,
 ];
 
 /// Every faithful **deletion of a token** the parser and the projection both refuse, as
