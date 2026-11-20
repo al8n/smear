@@ -357,11 +357,17 @@
 //! | an enum value is not a relative `true…`, `false…` or `null…` | `value.rs`'s `enum_value` (the enum production, `Expectation::EnumValue`), and the value dispatch that reads those spellings as a boolean or a null in both grammars — the identifier arms of `value` and `const_value` | `path_except` in `enum_value`, shared by both value grammars |
 //! | an enum value definition is not named `true`, `false` or `null` | `definition/enum_type.rs:21-22` (`Expectation::EnumValue`) | `name_except` in `enum_value_definition` |
 //!
+//! A fifth position has no refusal of its own and is the dispatch's alone: **a typed form's type
+//! is not a relative `true…`, `false…` or `null…`, nor a bare `const` before `{`**, since the value
+//! head reads those as a boolean, a null and a block, in a block and out of one. It answers
+//! `SemanticRule` from `typed_form_type`, and `~::const {}`, `const<T> {}` and `const(1)` stay typed
+//! forms.
+//!
 //! Each answers [`SemanticRule`](ProjectErrorKind::SemanticRule) at the offending segment, and a
 //! path rule reads only the first segment of a relative path, one with no root — `^::on`, `..::on`,
 //! `ns::on`, `~::true` and `x::true` are the parser's too. The two path rules are invisible to the
 //! mutation law: a tree the parser builds never holds them, and a retexted one re-parses to a
-//! different skeleton. Hand-built cells pin all four. Beside them, two shapes rather than rules:
+//! different skeleton. Hand-built cells pin all four. Beside them, three shapes rather than rules:
 //!
 //! - **A variable has no place in a constant position.** The AST's own type system forbids it —
 //!   [`ConstInputValue`] has no `Variable` variant — so it is
@@ -370,6 +376,11 @@
 //! - **A `use` source must be an inline string.** [`UsePrefix::Source`] holds an
 //!   [`InlineStringValue`], so a block string there is a shape the AST cannot store, and the
 //!   refusal names the token.
+//! - **A path and an object right after it are one typed object** in a schema position outside a
+//!   block, where a `,` is trivia: a list or a set that holds them as two members, or a map whose
+//!   entry's value is the path and whose next entry's key is the object, is no value either parser
+//!   builds there, and is [`UnexpectedChild`](ProjectErrorKind::UnexpectedChild) at the object. An
+//!   executable position, and a block, whose `,` separates, keep two members.
 //!
 //! The fragment-name rule is the draft's `FragmentName : Name but not on`, the same rule the
 //! vanilla dialect carries; this dialect accepted the spelling in both suites until
@@ -3994,6 +4005,11 @@ trait ValueGrammar<'src> {
 
   /// An id value inside a block, on the terms of [`typed_object`](Self::typed_object).
   fn id(value: IdValue<&'src str>) -> Option<Self::Value>;
+
+  /// Whether `value` is an enum value: a path, which in a schema position outside a block an object
+  /// right after it makes a typed object's type. The walk asks it only where
+  /// [`SCHEMA_FORMS`](Self::SCHEMA_FORMS) holds.
+  fn is_enum(value: &Self::Value) -> bool;
 }
 
 /// A value position that admits a variable — an argument, a collection member, or an object field
@@ -4036,6 +4052,10 @@ impl<'src> ValueGrammar<'src> for Executable {
 
   fn enumeration(value: EnumValue<&'src str>) -> Self::Value {
     InputValue::Enum(value)
+  }
+
+  fn is_enum(value: &Self::Value) -> bool {
+    matches!(value, InputValue::Enum(_))
   }
 
   fn list(span: SimpleSpan, values: Vec<Self::Value>) -> Self::Value {
@@ -4135,6 +4155,10 @@ impl<'src> ValueGrammar<'src> for Constant {
 
   fn enumeration(value: EnumValue<&'src str>) -> Self::Value {
     ConstInputValue::Enum(value)
+  }
+
+  fn is_enum(value: &Self::Value) -> bool {
+    matches!(value, ConstInputValue::Enum(_))
   }
 
   fn list(span: SimpleSpan, values: Vec<Self::Value>) -> Self::Value {
@@ -4238,6 +4262,10 @@ impl<'src> ValueGrammar<'src> for Schema {
 
   fn enumeration(value: EnumValue<&'src str>) -> Self::Value {
     <Constant as ValueGrammar<'src>>::enumeration(value)
+  }
+
+  fn is_enum(value: &Self::Value) -> bool {
+    <Constant as ValueGrammar<'src>>::is_enum(value)
   }
 
   fn list(span: SimpleSpan, values: Vec<Self::Value>) -> Self::Value {
@@ -4829,12 +4857,21 @@ fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
   Ok(match built {
     Built::Values(mut values) => {
       cursor.extent.cover(piece);
+      let after_a_path = G::SCHEMA_FORMS && !in_block && G::is_enum(&value);
       values.push(value);
       let next = if past_separator(&mut cursor, in_block) {
         cursor.opt_one_of(member_kinds(in_block))
       } else {
         None
       };
+      // A path and an object right after it are one typed object in a schema position outside a
+      // block, where no `,` separates them, so both parsers build no list of the two.
+      if let Some(next) = next
+        && after_a_path
+        && next.kind() == K::ObjectValue
+      {
+        return Err(unexpected(node, K::ObjectValue, next.text_range()));
+      }
       match next {
         Some(next) => {
           frames.push(ValueFrame {
@@ -4984,6 +5021,7 @@ fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
       }) => {
         inner.cover(piece);
         let range = inner.range(entry, "a token")?;
+        let after_a_path = G::SCHEMA_FORMS && !in_block && G::is_enum(&value);
         entries.push(G::entry(to_span(range), key, value));
         cursor.extent.cover(range);
         let next = if past_separator(&mut cursor, in_block) {
@@ -4991,6 +5029,18 @@ fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
         } else {
           None
         };
+        // An entry's value that is a path, and the next entry's key that is an object, are one
+        // typed object outside a block: both parsers read the entry's value on through the object.
+        if let Some(next) = &next
+          && after_a_path
+          && next.pending().kind() == K::ObjectValue
+        {
+          return Err(unexpected(
+            next.node(),
+            K::ObjectValue,
+            next.pending().text_range(),
+          ));
+        }
         match next {
           Some(next) => {
             let (parent, pending) = (next.node(), next.pending());

@@ -2889,6 +2889,96 @@ fn a_signed_number_inside_a_block_refuses() {
 }
 
 #[test]
+fn a_path_and_an_object_after_it_are_one_typed_object_outside_a_block() {
+  // A caller can split `RED {x: 1}` into two members of a schema list, or into an entry's value
+  // and the next entry's key. Outside a block the `,` is trivia and an object right after a path
+  // makes it a typed object's type, so both parsers build one typed object and neither shape.
+  let in_argument = |text: &str, value: &dyn Fn(&mut Tree)| {
+    let mut tree = Tree::new();
+    tree.open(K::Document);
+    tree.open(K::ScalarTypeDefinition);
+    tree.token(K::Name, "scalar").token(K::Space, " ");
+    tree.open(K::DefinitionName).token(K::Name, "S").close();
+    tree.one_argument("n", |tree| value(tree));
+    tree.close();
+    tree.close();
+    (tree.finish(), text.to_string())
+  };
+  let object = |tree: &mut Tree| {
+    tree.open(K::ObjectValue).token(K::LBrace, "{");
+    tree
+      .open(K::ObjectField)
+      .token(K::Name, "x")
+      .token(K::Colon, ":");
+    tree.open(K::IntValue).token(K::Int, "1").close();
+    tree.close();
+    tree.token(K::RBrace, "}").close();
+  };
+  let path = |tree: &mut Tree| {
+    tree.open(K::EnumValue).path("RED").close();
+  };
+  let one = |tree: &mut Tree| {
+    tree.open(K::IntValue).token(K::Int, "1").close();
+  };
+
+  let (tree, text) = in_argument("scalar S@d(n:[RED,{x:1}])", &|tree: &mut Tree| {
+    tree.open(K::ListValue).token(K::LBracket, "[");
+    path(tree);
+    tree.token(K::Comma, ",");
+    object(tree);
+    tree.token(K::RBracket, "]").close();
+  });
+  assert!(
+    matches!(
+      refuse_tree(tree, &text),
+      ProjectErrorKind::UnexpectedChild(_)
+    ),
+    "{text}"
+  );
+  let (tree, text) = in_argument("scalar S@d(n:map!{1=>RED,{x:1}=>1})", &|tree: &mut Tree| {
+    tree.open(K::MapValue);
+    tree
+      .token(K::Name, "map")
+      .token(K::Bang, "!")
+      .token(K::LBrace, "{");
+    tree.open(K::MapEntry);
+    one(tree);
+    tree.token(K::FatArrow, "=>");
+    path(tree);
+    tree.close();
+    tree.token(K::Comma, ",");
+    tree.open(K::MapEntry);
+    object(tree);
+    tree.token(K::FatArrow, "=>");
+    one(tree);
+    tree.close();
+    tree.token(K::RBrace, "}").close();
+  });
+  assert!(
+    matches!(
+      refuse_tree(tree, &text),
+      ProjectErrorKind::UnexpectedChild(_)
+    ),
+    "{text}"
+  );
+  // The control: a path and a member that is no object are two members.
+  let (tree, text) = in_argument("scalar S@d(n:[RED,1])", &|tree: &mut Tree| {
+    tree.open(K::ListValue).token(K::LBracket, "[");
+    path(tree);
+    tree.token(K::Comma, ",");
+    one(tree);
+    tree.token(K::RBracket, "]").close();
+  });
+  assert!(
+    DocumentNode::cast_node(tree)
+      .expect("the synthetic root is a Document")
+      .to_ast(&text)
+      .is_ok(),
+    "{text}"
+  );
+}
+
+#[test]
 fn a_tree_that_splits_a_token_projects_the_tree_it_was_handed() {
   // **A decision, not a defect** — see the module header's *what a tree the parser did not build is
   // promised*. Over `[-12]` a caller can build two adjacent `IntValue` tokens; each slice is one
