@@ -422,6 +422,7 @@ macro_rules! items {
 /// Inside a block a `-` before a fraction is the operator, and the fraction after it is lexed
 /// alone, by the number grammars' longest match in both lexers: `-._5,` is `Minus`, one refusal
 /// over `._5`, and `Separator`, and a hexadecimal fraction with its exponent is one number too.
+/// A `.` that begins no number is refused alone, or is `..` or `...`, alike in both.
 #[test]
 fn a_fraction_after_a_blocks_minus_is_one_number_in_both_lexers() {
   for src in [
@@ -430,9 +431,15 @@ fn a_fraction_after_a_blocks_minus_is_one_number_in_both_lexers() {
     "-.5,",
     "-.ap1,",
     "-._a_p-1_,",
+    "-.a1p_1,",
     "-._,",
     "-.a,",
     "-.ap,",
+    "-.a1_p_,",
+    "-.___}",
+    "-.,",
+    "-..,",
+    "-...,",
   ] {
     // No source here holds trivia, so the two streams compare item for item.
     let syntactic = items!(SyntacticLexer::<str>::with_state(src, entered()));

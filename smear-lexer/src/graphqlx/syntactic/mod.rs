@@ -39,31 +39,44 @@ use crate::simd::{
 /// `(?&hex_frac)(?&hex_exp)`, a `.`, a run of hexadecimal digits and `_` that holds a digit, and an
 /// exponent: `p` or `P`, a sign or none, and a run of digits and `_` that holds a digit.
 ///
-/// It reads the number's own bytes and no further, so its cost is the token's.
+/// One pass, each byte read once. It answers yes at a digit before any hexadecimal letter, or at
+/// the exponent's first digit, so a yes has read only bytes the number's token takes. A no has
+/// read the whole candidate: the run of hexadecimal digits and `_`, and after a `p` its sign and
+/// the exponent's run of `_`. The `.` is then refused alone, and the tokens after it take that
+/// run, so each of its bytes is read twice in all: here, and by the token that takes it.
 fn dot_begins_a_fraction(bytes: &[u8]) -> bool {
-  /// Whether `run` is a run of `digit`s and `_` holding at least one `digit`, before `rest`.
-  fn holds_a_digit(run: &[u8], digit: fn(&u8) -> bool) -> (bool, &[u8]) {
-    let len = run
-      .iter()
-      .take_while(|&byte: &&u8| digit(byte) || *byte == b'_')
-      .count();
-    let held = run.get(..len).unwrap_or_default();
-    (held.iter().any(digit), run.get(len..).unwrap_or_default())
+  let mut at = 1;
+  // Whether a hexadecimal letter has ended the run of digits and `_` a decimal fraction reads,
+  // and whether the run holds a hexadecimal digit.
+  let (mut letter, mut hex) = (false, false);
+  while let Some(&byte) = bytes.get(at) {
+    match byte {
+      b'0'..=b'9' if !letter => return true,
+      b'0'..=b'9' => hex = true,
+      b'a'..=b'f' | b'A'..=b'F' => {
+        letter = true;
+        hex = true;
+      }
+      b'_' => {}
+      _ => break,
+    }
+    at += 1;
   }
-
-  let after = bytes.get(1..).unwrap_or_default();
-  if holds_a_digit(after, u8::is_ascii_digit).0 {
-    return true;
-  }
-  let (hex, rest) = holds_a_digit(after, u8::is_ascii_hexdigit);
-  let Some((b'p' | b'P', exponent)) = rest.split_first() else {
+  if !hex || !matches!(bytes.get(at), Some(b'p' | b'P')) {
     return false;
-  };
-  let exponent = match exponent.split_first() {
-    Some((b'+' | b'-', digits)) => digits,
-    _ => exponent,
-  };
-  hex && holds_a_digit(exponent, u8::is_ascii_digit).0
+  }
+  at += 1;
+  if matches!(bytes.get(at), Some(b'+' | b'-')) {
+    at += 1;
+  }
+  while let Some(&byte) = bytes.get(at) {
+    match byte {
+      b'0'..=b'9' => return true,
+      b'_' => at += 1,
+      _ => break,
+    }
+  }
+  false
 }
 
 // The four whitespace bytes without the comma, which inside a `const { … }` block with no `<`
