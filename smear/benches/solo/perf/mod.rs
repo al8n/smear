@@ -34,6 +34,11 @@
 //! *same* fixtures and differ only in whether [`Schema::build`] is inside the measured region, so
 //! a delta on both is a parser or lexer change and a delta on one is the builder's.
 //!
+//! The lex and graphqlx families are subjects with no control. A lex row is one dialect's
+//! syntactic lexer and nothing else. The graphqlx row is GraphQLx's syntactic parser over the
+//! parse family's fixtures, kept out of that family so that a change to the dialect cannot move
+//! the control.
+//!
 //! # Where the ceilings come in
 //!
 //! Two of the schema workloads are deliberately sized **past** a budget the builder enforces —
@@ -59,12 +64,24 @@
 use std::{fmt::Write as _, hint::black_box};
 
 use smear::{
-  lexer::tokora::{Parse as _, Parser},
-  parser::graphql::{
-    GraphQL,
-    ast::{ExecutableDocument, TypeSystemDocument},
-    error::GraphqlErrors,
-    syntactic::{GraphqlLexer, executable_document, type_system_document},
+  lexer::{
+    graphql::syntactic as graphql_lexer,
+    graphqlx::syntactic as graphqlx_lexer,
+    tokora::{Parse as _, Parser, lexer::Lexer as _},
+  },
+  parser::{
+    graphql::{
+      GraphQL,
+      ast::{ExecutableDocument, TypeSystemDocument},
+      error::GraphqlErrors,
+      syntactic::{GraphqlLexer, executable_document, type_system_document},
+    },
+    graphqlx::{
+      GraphQLx,
+      ast::TypeSystemDocument as GraphqlxTypeSystemDocument,
+      error::GraphqlxErrors,
+      syntactic::{GraphqlxLexer, type_system_document as graphqlx_type_system_document},
+    },
   },
   validator::{Budget, Collect, Diagnostic, Schema, Scratch, validate_executable},
 };
@@ -85,6 +102,11 @@ pub enum Family {
   Validate,
   /// Inside the region: the parser alone. This is the control — see the module header.
   Parse,
+  /// Inside the region: one dialect's syntactic lexer alone, every item it answers written into a
+  /// `Vec` reserved for exactly that many. Outside: the run that counts them.
+  Lex,
+  /// Inside the region: GraphQLx's syntactic parser, with its lexer under it. Not a control.
+  Graphqlx,
 }
 
 impl Family {
@@ -93,6 +115,8 @@ impl Family {
       Self::Schema => "schema",
       Self::Validate => "validate",
       Self::Parse => "parse",
+      Self::Lex => "lex",
+      Self::Graphqlx => "graphqlx",
     }
   }
 }
@@ -171,6 +195,27 @@ pub const WORKLOADS: &[Workload] = &[
     lo: 128,
     hi: 256,
     run: parse_deep_values,
+  },
+  Workload {
+    name: "lex_graphql_syntactic",
+    family: Family::Lex,
+    lo: 4,
+    hi: 8,
+    run: lex_graphql_syntactic,
+  },
+  Workload {
+    name: "lex_graphqlx_syntactic",
+    family: Family::Lex,
+    lo: 4,
+    hi: 8,
+    run: lex_graphqlx_syntactic,
+  },
+  Workload {
+    name: "parse_graphqlx_type_system",
+    family: Family::Graphqlx,
+    lo: 4,
+    hi: 8,
+    run: parse_graphqlx_type_system,
   },
 ];
 
@@ -265,6 +310,19 @@ pub fn parse_executable_document(source: &str) -> ExecutableDocument<&str> {
   >(executable_document)
   .parse_str(source)
   .unwrap_or_else(|errors| panic!("a perf corpus document does not parse: {errors:?}"))
+}
+
+/// `sdl` through GraphQLx's syntactic parser, at the root the analyzer's syntactic layer reads.
+pub fn parse_graphqlx_sdl(sdl: &str) -> GraphqlxTypeSystemDocument<&str> {
+  Parser::with_parser::<
+    GraphqlxLexer<'_, str>,
+    GraphqlxTypeSystemDocument<&str>,
+    GraphqlxErrors<&str>,
+    _,
+    GraphQLx,
+  >(graphqlx_type_system_document)
+  .parse_str(sdl)
+  .unwrap_or_else(|errors| panic!("a perf corpus SDL does not parse as GraphQLx: {errors:?}"))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -497,6 +555,91 @@ fn strip_leading_operation(unit: &str) -> &str {
     .find('{')
     .expect("the executable fixture has a selection set");
   &unit[start..]
+}
+
+// ---------------------------------------------------------------------------------------------
+// the lex family, and the GraphQLx parse
+// ---------------------------------------------------------------------------------------------
+
+/// One item GraphQL's syntactic lexer answers over `str`: a token, or the errors of one lexeme.
+type GraphqlItem<'a> =
+  Result<graphql_lexer::SyntacticToken<&'a str>, graphql_lexer::SyntacticLexerErrors>;
+
+/// One item GraphQLx's syntactic lexer answers over `str`: a token, or the errors of one lexeme.
+type GraphqlxItem<'a> =
+  Result<graphqlx_lexer::SyntacticToken<&'a str>, graphqlx_lexer::SyntacticLexerErrors>;
+
+/// GraphQL's syntactic lexer alone, over the first `n` of [`REAL_SCHEMAS`], every item it answers
+/// kept.
+///
+/// A run before the region counts the items, and the region reserves a `Vec` for exactly that
+/// many. So the peak is one item's size times the count, and it moves exactly when an item's size
+/// does. The clock reads the lexing and one write for each item.
+fn lex_graphql_syntactic(n: usize, region: &mut Region<'_>) {
+  let sources: Vec<&str> = REAL_SCHEMAS[..n]
+    .iter()
+    .map(|&(_, sdl): &(&str, &str)| sdl)
+    .collect();
+  let mut count = 0usize;
+  for &source in &sources {
+    let mut lexer = graphql_lexer::SyntacticLexer::<str>::new(source);
+    while lexer.lex().is_some() {
+      count += 1;
+    }
+  }
+  region(&mut || {
+    let mut items: Vec<GraphqlItem<'_>> = Vec::with_capacity(count);
+    for &source in &sources {
+      let mut lexer = graphql_lexer::SyntacticLexer::<str>::new(source);
+      while let Some(item) = lexer.lex() {
+        items.push(item);
+      }
+    }
+    black_box(&items);
+  });
+}
+
+/// `lex_graphql_syntactic`'s twin through GraphQLx's syntactic lexer, over the same schemas.
+///
+/// They are GraphQL documents, so to this lexer they are documents with no `const` block in them.
+fn lex_graphqlx_syntactic(n: usize, region: &mut Region<'_>) {
+  let sources: Vec<&str> = REAL_SCHEMAS[..n]
+    .iter()
+    .map(|&(_, sdl): &(&str, &str)| sdl)
+    .collect();
+  let mut count = 0usize;
+  for &source in &sources {
+    let mut lexer = graphqlx_lexer::SyntacticLexer::<str>::new(source);
+    while lexer.lex().is_some() {
+      count += 1;
+    }
+  }
+  region(&mut || {
+    let mut items: Vec<GraphqlxItem<'_>> = Vec::with_capacity(count);
+    for &source in &sources {
+      let mut lexer = graphqlx_lexer::SyntacticLexer::<str>::new(source);
+      while let Some(item) = lexer.lex() {
+        items.push(item);
+      }
+    }
+    black_box(&items);
+  });
+}
+
+/// `parse_type_system`'s twin through GraphQLx's syntactic parser: the first `n` of
+/// [`REAL_SCHEMAS`], parsed and retained.
+fn parse_graphqlx_type_system(n: usize, region: &mut Region<'_>) {
+  let sources: Vec<&str> = REAL_SCHEMAS[..n]
+    .iter()
+    .map(|&(_, sdl): &(&str, &str)| sdl)
+    .collect();
+  region(&mut || {
+    let mut parsed: Vec<GraphqlxTypeSystemDocument<&str>> = Vec::with_capacity(n);
+    for &source in &sources {
+      parsed.push(parse_graphqlx_sdl(source));
+    }
+    black_box(&parsed);
+  });
 }
 
 // ---------------------------------------------------------------------------------------------
