@@ -437,7 +437,7 @@ use super::{
   builtin::{ALLOC, CORE, DIRECTIVE, TYPE},
   code::{DiagnosticKind, schema},
   declare::Declarations,
-  diagnostic::{Diagnostic, Excerpt, Message, Reporter},
+  diagnostic::{DefName, Diagnostic, Excerpt, Message, Reporter},
   id::{
     ApplicationId, DefId, MemberId, PoolRange, SourceId, Sym, TyId, TypeExprId, ValueId, dense,
   },
@@ -2085,12 +2085,13 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// How a report at a use of an instantiation of `def` begins: a type instantiated there, or a
   /// directive applied there.
   fn used(&self, def: DefId) -> String {
-    let name = Excerpt(self.builder.def_name(def));
-    if self.builder.def_kind(def) == Some(DefKind::Directive) {
-      format!("`@{name}` is applied here")
+    let named = DefName::of(self.builder, def);
+    let verb = if named.is_directive() {
+      "applied"
     } else {
-      format!("`{name}` is instantiated here")
-    }
+      "instantiated"
+    };
+    format!("`{named}` is {verb} here")
   }
 
   /// Reports, at `at`, a use of an instantiation of `def`, the row recorded at `row` that the
@@ -2185,25 +2186,25 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// Reports, at `at`, a use of an instantiation of `def`, that `stop` kept what `def` holds from
   /// being checked under its arguments.
   fn report_unchecked(&mut self, at: Location, def: DefId, stop: Stop) {
-    let (sigil, verb) = if self.builder.def_kind(def) == Some(DefKind::Directive) {
-      ("@", "applied")
+    let named = DefName::of(self.builder, def);
+    let verb = if named.is_directive() {
+      "applied"
     } else {
-      ("", "instantiated")
+      "instantiated"
     };
-    let name = Excerpt(self.builder.def_name(def));
     let message = match stop {
       Stop::Steps => Message {
         text: format!(
-          "the values `{sigil}{name}` holds could not be checked under the type arguments it is \
-           {verb} with here within `Limits::max_value_steps`, {}, the steps the analysis may take \
-           to complete values",
+          "the values `{named}` holds could not be checked under the type arguments it is {verb} \
+           with here within `Limits::max_value_steps`, {}, the steps the analysis may take to \
+           complete values",
           self.values.max()
         ),
         help: Cow::Borrowed(
           "raise the limit with `Limits::with_max_value_steps`, or instantiate fewer types",
         ),
       },
-      Stop::Built(_) => self.stopped(stop, &format!("a value `{sigil}{name}` holds takes")),
+      Stop::Built(_) => self.stopped(stop, &format!("a value `{named}` holds takes")),
     };
     self.limit(at, stop, message);
   }

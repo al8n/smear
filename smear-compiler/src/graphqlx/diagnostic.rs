@@ -6,6 +6,11 @@ use std::{borrow::Cow, collections::BinaryHeap, string::String, vec::Vec};
 
 use tokora::diagnostic::{Code, Diagnose, Label, Location, PathSegment, Severity};
 
+use super::{
+  id::DefId,
+  model::{DefKind, ModelBuilder},
+};
+
 /// One finding about the input: smear's, or a consumer's built with the same builder.
 ///
 /// A diagnostic owns its message, labels and help, and holds only locations into the sources: it
@@ -158,6 +163,42 @@ impl core::fmt::Display for Excerpt<'_> {
     write_lossy(f, &bytes[..head])?;
     f.write_str("…")?;
     write_lossy(f, &bytes[tail..])
+  }
+}
+
+/// A definition's name as a message quotes it, inside the message's backticks: a directive's with
+/// its `@`, as an application spells it, and any other's bare, an [`Excerpt`] either way. It names
+/// a definition that may be either, as what an instantiation is of, or what derives one, may be,
+/// so that the `@` is decided once for every message that names one through it.
+pub(crate) struct DefName<'a> {
+  /// Whether the definition is a directive.
+  directive: bool,
+  /// Its name.
+  name: &'a [u8],
+}
+
+impl<'a> DefName<'a> {
+  /// The name of `def`, as `builder` holds it.
+  pub(crate) fn of(builder: &'a ModelBuilder, def: DefId) -> Self {
+    Self {
+      directive: builder.def_kind(def) == Some(DefKind::Directive),
+      name: builder.def_name(def),
+    }
+  }
+
+  /// Whether the definition is a directive, which an application applies where a type
+  /// instantiates any other.
+  pub(crate) const fn is_directive(&self) -> bool {
+    self.directive
+  }
+}
+
+impl core::fmt::Display for DefName<'_> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    if self.directive {
+      f.write_str("@")?;
+    }
+    core::fmt::Display::fmt(&Excerpt(self.name), f)
   }
 }
 

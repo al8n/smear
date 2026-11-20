@@ -36,9 +36,9 @@ use tokora::diagnostic::Location;
 use super::{Comparison, Implementing, Latent, List, Made, Twin, Verdict, labelled};
 use crate::graphqlx::{
   code::schema,
-  diagnostic::{Diagnostic, Excerpt},
+  diagnostic::{DefName, Diagnostic, Excerpt},
   id::{ApplicationId, DefId, TyId, TypeExprId},
-  model::{Applied, DefKind, Occurrence, Resolution, Shape, Written},
+  model::{Applied, Occurrence, Resolution, Shape, Written},
   set::ROOT,
   types::{
     Spent, Stop,
@@ -288,12 +288,13 @@ impl Implementing<'_> {
   /// How a report at a use of an instantiation of `def` begins: a type instantiated there, or a
   /// directive applied there.
   fn used(&self, def: DefId) -> String {
-    let name = Excerpt(self.builder.def_name(def));
-    if self.builder.def_kind(def) == Some(DefKind::Directive) {
-      format!("`@{name}` is applied here")
+    let named = DefName::of(self.builder, def);
+    let verb = if named.is_directive() {
+      "applied"
     } else {
-      format!("`{name}` is instantiated here")
-    }
+      "instantiated"
+    };
+    format!("`{named}` is {verb} here")
   }
 
   /// Where `place` is written, when it is somewhere a label can point.
@@ -324,8 +325,8 @@ impl Implementing<'_> {
       Some(Verdict::Stopped(stop)) => {
         let subject = format!(
           "the entries and members of an instantiation of `{}` that `{}` derives here",
-          Excerpt(self.builder.def_name(failed.def)),
-          Excerpt(self.builder.def_name(user))
+          DefName::of(self.builder, failed.def),
+          DefName::of(self.builder, user)
         );
         self.report_limit(at, &subject, stop);
       }
@@ -396,8 +397,8 @@ impl Implementing<'_> {
       Some(Made::Stopped(stop)) => {
         let subject = format!(
           "the arguments the fields of an instantiation of `{}` that `{}` derives here require",
-          Excerpt(self.builder.def_name(failed.def)),
-          Excerpt(self.builder.def_name(user))
+          DefName::of(self.builder, failed.def),
+          DefName::of(self.builder, user)
         );
         self.report_limit(at, &subject, stop);
       }

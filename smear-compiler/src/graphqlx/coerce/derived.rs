@@ -135,7 +135,7 @@ use tokora::diagnostic::Location;
 use super::{Checked, Coercion, CountKey, OmittedArgument, Owed, OwedValue, Recorded};
 use crate::graphqlx::{
   code::schema,
-  diagnostic::{Diagnostic, Excerpt, Message},
+  diagnostic::{DefName, Diagnostic, Excerpt, Message},
   id::{ApplicationId, DefId, MemberId, PoolRange, Sym, TyId, TypeExprId, dense},
   model::{Applied, DefKind, Occurrence, Resolution, Shape, Written, WrittenParam},
   raw::RawTree,
@@ -1269,7 +1269,7 @@ impl Coercion<'_, '_, '_> {
         let message = format!(
           "{used} with type arguments that derive an instantiation of `{}` under which `{}`, a \
            value it holds, does not fit the type it takes",
-          Excerpt(self.builder.def_name(def)),
+          DefName::of(self.builder, def),
           Excerpt(self.raw.text(source, node.span))
         );
         let (code, label) = site.refusal();
@@ -1308,7 +1308,7 @@ impl Coercion<'_, '_, '_> {
         let message = format!(
           "{used} with type arguments that derive an instantiation of `{}` under which `@{}` \
            requires its argument `{}`, and an application it holds leaves it out",
-          Excerpt(self.builder.def_name(def)),
+          DefName::of(self.builder, def),
           Excerpt(directive),
           Excerpt(name)
         );
@@ -1332,21 +1332,10 @@ impl Coercion<'_, '_, '_> {
   /// Reports, at `at`, a use of an instantiation of `user` whose expansion derives an instantiation
   /// of `def`, that `stop` kept what `def` holds from being checked under its arguments.
   fn report_derived_unchecked(&mut self, at: Location, user: DefId, def: DefId, stop: Stop) {
-    // A directive is named with its `@`, the instantiation's definition as much as the one that
-    // derives it, as `report_unexpanded` and the written check's stop name theirs.
-    let sigil = |named: DefId| -> &'static str {
-      if self.builder.def_kind(named) == Some(DefKind::Directive) {
-        "@"
-      } else {
-        ""
-      }
-    };
     let what = format!(
-      "an instantiation of `{}{}` that `{}{}` derives here",
-      sigil(def),
-      Excerpt(self.builder.def_name(def)),
-      sigil(user),
-      Excerpt(self.builder.def_name(user))
+      "an instantiation of `{}` that `{}` derives here",
+      DefName::of(self.builder, def),
+      DefName::of(self.builder, user)
     );
     let message = match stop {
       Stop::Steps => Message {
@@ -1367,14 +1356,14 @@ impl Coercion<'_, '_, '_> {
   /// Reports, at `at`, where the root `user` whose expansion was running is first written, that
   /// `stop` kept what it derives from being read: once, and the closure ends.
   fn report_unexpanded(&mut self, at: Location, user: DefId, stop: Stop) {
-    let (sigil, verb) = if self.builder.def_kind(user) == Some(DefKind::Directive) {
-      ("@", "applied")
+    let named = DefName::of(self.builder, user);
+    let verb = if named.is_directive() {
+      "applied"
     } else {
-      ("", "instantiated")
+      "instantiated"
     };
     let what = format!(
-      "what `{sigil}{}` derives under the type arguments it is {verb} with here could not be read",
-      Excerpt(self.builder.def_name(user))
+      "what `{named}` derives under the type arguments it is {verb} with here could not be read"
     );
     let limits = self.types.limits();
     let message = match stop {
