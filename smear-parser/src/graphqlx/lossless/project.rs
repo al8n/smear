@@ -23,8 +23,8 @@
 //! The contract, the error vocabulary, the span rule, the `(tree, source)` verification and the
 //! green traversal are [the substrate](crate::lossless::project)'s, and the entry shapes are the
 //! naming symmetry its header states. **Everything below that is this dialect's**: sixteen of
-//! GraphQLx's seventy-six wrappers are structurally identical to a GraphQL one, thirty-seven
-//! share a name with a different shape, and twenty-three have no GraphQL image at all. Three of those
+//! GraphQLx's seventy-seven wrappers are structurally identical to a GraphQL one, thirty-seven
+//! share a name with a different shape, and twenty-four have no GraphQL image at all. Three of those
 //! differences are *mapping* divergences rather than renamings, and each one changes what a walk
 //! has to do rather than what it has to call something:
 //!
@@ -335,7 +335,7 @@
 //! |---|---|---|
 //! | a fragment's name is not `on` | `generic/mod.rs:392` (`Expectation::FragmentName`) | `name_except` in `executable_definition_name` |
 //! | a fragment spread's target is not a relative `on…` | `selection/mod.rs:440` (the spread dispatch reads `on` as an inline fragment's head) and `:541-542` (`fragment_type_path`, `Expectation::Path`) | `path_except` through `type_path_except` in `fragment_spread` |
-//! | an enum value is not a relative `true…`, `false…` or `null…` | `value.rs:290-295` (the enum production, `Expectation::EnumValue`), and the value dispatch that reads those spellings as a boolean or a null in both grammars — `value.rs:814-823` non-const, `:925-934` const | `path_except` in `enum_value`, shared by both value grammars |
+//! | an enum value is not a relative `true…`, `false…` or `null…` | `value.rs`'s `enum_value` (the enum production, `Expectation::EnumValue`), and the value dispatch that reads those spellings as a boolean or a null in both grammars — the identifier arms of `value` and `const_value` | `path_except` in `enum_value`, shared by both value grammars |
 //! | an enum value definition is not named `true`, `false` or `null` | `definition/enum_type.rs:21-22` (`Expectation::EnumValue`) | `name_except` in `enum_value_definition` |
 //!
 //! Each answers [`SemanticRule`](ProjectErrorKind::SemanticRule) at the offending segment, and a
@@ -513,6 +513,7 @@
 //! |---|---|---|
 //! | [`Int`](SyntaxKind::Int) | [`LitInt`] | `LitInt::try_from`, the shipped scanner, whole-slice |
 //! | [`Float`](SyntaxKind::Float) | [`LitFloat`] | `LitFloat::try_from`, likewise |
+//! | [`Char`](SyntaxKind::Char) | [`LitChar`] | `LitChar::try_from`, likewise: a literal that spells no one character fails there |
 //! | [`InlineString`](SyntaxKind::InlineString), [`BlockString`](SyntaxKind::BlockString) | [`LitStr`] | `LitStr::try_from`, the string sub-lexer — it is what decides `Plain` vs `Complex` and the `required_capacity`, so a malformed image (a slice without its quotes, a bad escape) fails there |
 //! | [`Name`](SyntaxKind::Name) whose text becomes a name | `Name<&str>` | [`identifier`], added beside [`LitInt`]'s for this — every name position reaches it through `Cursor::name_token` |
 //! | a `Name` read for its **spelling** | an operation type, a directive location, `true`/`false`/`null` | `contextual_keyword` — the lexer's own table — and every reader of it refuses a spelling it does not classify |
@@ -633,15 +634,17 @@ use tokora::SimpleSpan;
 
 use smear_lexer::{
   LitStr,
-  graphqlx::{ContextualKeyword, LitFloat, LitInt, identifier, keyword::contextual_keyword},
+  graphqlx::{
+    ContextualKeyword, LitChar, LitFloat, LitInt, identifier, keyword::contextual_keyword,
+  },
 };
 
 use crate::{
   graphqlx::{
     ast::{
-      Alias, Argument, Arguments, ArgumentsDefinition, BooleanValue, ConstArgument, ConstArguments,
-      ConstDirective, ConstDirectives, ConstInputValue, ConstList, ConstMap, ConstMapEntry,
-      ConstObject, ConstObjectField, ConstSet, DefaultInputValue, DefinitionName,
+      Alias, Argument, Arguments, ArgumentsDefinition, BooleanValue, CharValue, ConstArgument,
+      ConstArguments, ConstDirective, ConstDirectives, ConstInputValue, ConstList, ConstMap,
+      ConstMapEntry, ConstObject, ConstObjectField, ConstSet, DefaultInputValue, DefinitionName,
       DefinitionTypeGenerics, DefinitionTypeParam, DefinitionTypePath, Described,
       DescribedVariableDefinition, Directive, DirectiveExtension, DirectiveLocations, Directives,
       Document, DocumentItem, EnumTypeDefinition, EnumTypeExtension, EnumTypeExtensionData,
@@ -1765,6 +1768,18 @@ fn float_lit(text: &str, span: SimpleSpan) -> Out<LitFloat<&str>> {
   LitFloat::try_from(text).map_err(|_| {
     ProjectError::new(
       ProjectErrorKind::MalformedToken(K::Float),
+      span.start()..span.end(),
+    )
+  })
+}
+
+/// A `char` literal's payload, re-scanned by the lexer that produced it — [`int_lit`]'s twin, and
+/// see it for why the classification is the scanner's rather than this module's. A slice that
+/// spells no one character, or more than one, is refused here.
+fn char_lit(text: &str, span: SimpleSpan) -> Out<LitChar<&str>> {
+  LitChar::try_from(text).map_err(|_| {
+    ProjectError::new(
+      ProjectErrorKind::MalformedToken(K::Char),
       span.start()..span.end(),
     )
   })
@@ -3602,9 +3617,9 @@ fn const_argument<'src>(
 // values
 // ---------------------------------------------------------------------------------------------
 
-/// The eleven value node kinds — GraphQL's nine plus [`SetValue`](SyntaxKind::SetValue) and
-/// [`MapValue`](SyntaxKind::MapValue).
-const VALUE_KINDS: [SyntaxKind; 11] = [
+/// The twelve value node kinds — GraphQL's nine plus [`SetValue`](SyntaxKind::SetValue),
+/// [`MapValue`](SyntaxKind::MapValue) and [`CharValue`](SyntaxKind::CharValue).
+const VALUE_KINDS: [SyntaxKind; 12] = [
   K::VariableValue,
   K::IntValue,
   K::FloatValue,
@@ -3616,6 +3631,7 @@ const VALUE_KINDS: [SyntaxKind; 11] = [
   K::SetValue,
   K::MapValue,
   K::ObjectValue,
+  K::CharValue,
 ];
 
 /// A leaf value's slice, its **token's** span and the node's extent.
@@ -3759,7 +3775,7 @@ fn variable_value<'src>(
 
 /// The two value grammars this dialect projects, over one walk.
 ///
-/// `value` and `const_value` are each other with `Const` spelled in: eleven arms, ten of them
+/// `value` and `const_value` are each other with `Const` spelled in: twelve arms, eleven of them
 /// character-for-character identical, differing in the constructors they name and in one refusal.
 /// Duplicating a `match` is cheap; **duplicating a worklist is not** — the arms are the easy half
 /// and the frame discipline is the half a second copy gets subtly wrong — so the machine below is
@@ -3782,6 +3798,7 @@ trait ValueGrammar<'src> {
 
   fn int(span: SimpleSpan, value: LitInt<&'src str>) -> Self::Value;
   fn float(span: SimpleSpan, value: LitFloat<&'src str>) -> Self::Value;
+  fn character(span: SimpleSpan, value: LitChar<&'src str>) -> Self::Value;
   fn string(value: StringValue<&'src str>) -> Self::Value;
   fn boolean(value: BooleanValue<&'src str>) -> Self::Value;
   fn null(span: SimpleSpan, text: &'src str) -> Self::Value;
@@ -3814,6 +3831,10 @@ impl<'src> ValueGrammar<'src> for Executable {
 
   fn float(span: SimpleSpan, value: LitFloat<&'src str>) -> Self::Value {
     InputValue::Float(FloatValue::new(span, value))
+  }
+
+  fn character(span: SimpleSpan, value: LitChar<&'src str>) -> Self::Value {
+    InputValue::Char(CharValue::new(span, value))
   }
 
   fn string(value: StringValue<&'src str>) -> Self::Value {
@@ -3879,6 +3900,10 @@ impl<'src> ValueGrammar<'src> for Constant {
 
   fn float(span: SimpleSpan, value: LitFloat<&'src str>) -> Self::Value {
     ConstInputValue::Float(FloatValue::new(span, value))
+  }
+
+  fn character(span: SimpleSpan, value: LitChar<&'src str>) -> Self::Value {
+    ConstInputValue::Char(CharValue::new(span, value))
   }
 
   fn string(value: StringValue<&'src str>) -> Self::Value {
@@ -4162,6 +4187,14 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
           range: extent,
         } = leaf(node, source, K::Float, "a float literal")?;
         return Ok((G::float(span, float_lit(text, span)?), extent));
+      }
+      K::CharValue => {
+        let LeafText {
+          text,
+          span,
+          range: extent,
+        } = leaf(node, source, K::Char, "a character literal")?;
+        return Ok((G::character(span, char_lit(text, span)?), extent));
       }
       K::StringValue => {
         let (string, extent) = string_literal(node, source)?;

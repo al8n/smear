@@ -359,6 +359,48 @@ fn graphqlx_radix_literals_and_enum_paths_preserve_their_heads() {
 }
 
 #[test]
+fn a_char_literal_is_a_value_in_every_value_grammar() {
+  fn check_char<S: AsRef<[u8]>>(value: ast::CharValue<S>) {
+    assert_eq!(value.value().value(), '\'');
+    assert_eq!(value.span(), &SimpleSpan::new(0, 4));
+  }
+  accept_all!(ast::CharValue::graphqlx, "'\\''", check_char);
+
+  // A list's member test goes on at a `char`, so the two are two elements.
+  fn check_list<S: AsRef<[u8]>>(value: ast::InputValue<S>) {
+    let list = match value {
+      ast::InputValue::List(list) => list,
+      _ => panic!("expected a list"),
+    };
+    assert_eq!(list.values().len(), 2);
+    assert!(matches!(
+      &list.values()[1],
+      ast::InputValue::Char(value) if value.value().value() == '\n'
+    ));
+  }
+  accept_all!(ast::InputValue::graphqlx, "['a' '\\n']", check_list);
+
+  fn check_const<S: AsRef<[u8]>>(value: ast::ConstInputValue<S>) {
+    let set = match value {
+      ast::ConstInputValue::Set(set) => set,
+      _ => panic!("expected a set"),
+    };
+    assert!(matches!(
+      &set.values()[0],
+      ast::ConstInputValue::Char(value) if value.value().value() == '"'
+    ));
+  }
+  accept_all!(ast::ConstInputValue::graphqlx, "set!{ '\"' }", check_const);
+
+  assert_unexpected(
+    |inp| ast::CharValue::graphqlx(inp).map(|_| ()),
+    "\"a\"",
+    Expectation::Production("a character"),
+    Some(SyntacticTokenKind::InlineString),
+  );
+}
+
+#[test]
 fn public_value_composition_parsers_and_direct_apis_are_source_generic() {
   fn check_set<S: AsRef<[u8]>>(value: ast::Set<S>) {
     assert_eq!(value.values().len(), 1);

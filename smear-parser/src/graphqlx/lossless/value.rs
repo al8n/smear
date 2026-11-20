@@ -9,7 +9,7 @@
 //! `Value[Const]` is **threaded** through a private `Constness` argument rather than duplicated
 //! into a second set of productions.
 //!
-//! # The four places GraphQLx's value grammar is not GraphQL's
+//! # The five places GraphQLx's value grammar is not GraphQL's
 //!
 //! **1. An enum value is a whole path.** `graphqlx/syntactic/value.rs`'s `enum_after_first` builds
 //! `EnumValue::new(span, path)`, so `^::ns::Colour` and `Colour` are both enum values and the node
@@ -18,21 +18,27 @@
 //! shape the AST has, so a typed wrapper can ask an enum value for its segments.
 //!
 //! **2. A root's sigil is a value head.** `~::ns::Colour`, `^::ns::Colour` and `..::Colour` in
-//! value position are rooted enum values (`value.rs:878-880`), which is why `recover::VALUE_HEADS`
-//! carries `Tilde`, `DotDot` and `Caret` and GraphQL's does not. A `::` is not a head: it only
-//! joins, and a value that starts with one is refused.
+//! value position are rooted enum values (the declined arm of `graphqlx/syntactic/value.rs`'s
+//! `value`), which is why `recover::VALUE_HEADS` carries `Tilde`, `DotDot` and `Caret` and
+//! GraphQL's does not. A `::` is not a head: it only joins, and a value that starts with one is
+//! refused.
 //!
 //! **3. `set` and `map` are contextual, and the test is the *immediately following* token.**
 //! `set!{ 1, 2 }` is a [`SetValue`](crate::graphqlx::kinds::SyntaxKind::SetValue); `set` alone,
-//! `set::Thing`, and the `set` of `set { a: 1 }`, are ordinary enum values
-//! (`value.rs:826-841, 938-953`). See this module's private `collection_or_enum` for why the test
-//! needs a retro-wrap rather than a two-token peek.
+//! `set::Thing`, and the `set` of `set { a: 1 }`, are ordinary enum values (the `set` and `map`
+//! arms of `value` and `const_value` in `graphqlx/syntactic/value.rs`). See this module's private
+//! `collection_or_enum` for why the test needs a retro-wrap rather than a two-token peek.
 //!
 //! **4. `MapEntry` is `Value => Value`,** with both halves full values — a map key is not
 //! restricted to a name.
 //!
-//! What did **not** widen: an `ObjectField`'s key is still a plain `Name`
-//! (`value.rs:522-543`, `name then_ignore(colon) then(value)`). Only the value side moved.
+//! **5. A `char` literal is a value.** `'a'` is one token, and its node is
+//! [`CharValue`](crate::graphqlx::kinds::SyntaxKind::CharValue) wherever GraphQL takes a scalar:
+//! an executable value, a constant one, and a member of every collection.
+//!
+//! What did **not** widen: an `ObjectField`'s key is still a plain `Name` (`object_field` in
+//! `graphqlx/syntactic/value.rs`, `name then_ignore(colon) then(value)`). Only the value side
+//! moved.
 //!
 //! # A `VariableValue` in a const position is reported **and still built**
 //!
@@ -185,6 +191,15 @@ lossless_production! {
     .parse_input(inp)
   }
 
+  /// `CharValue` — a `'…'` literal, GraphQLx only: one character or one escape.
+  fn char_value<'inp, Src, Ctx>(inp) {
+    node(
+      K::CharValue.raw(),
+      |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| expect::<Src, Ctx>(inp, Kind::Char),
+    )
+    .parse_input(inp)
+  }
+
   /// `true` | `false`
   ///
   /// **Precondition: the head is an `Identifier` spelled `true` or `false`.** The spelling is
@@ -299,8 +314,9 @@ lossless_production! {
   /// `Name : Value`
   ///
   /// **The key is a `Name`, not a `Path`.** GraphQLx widened the enum *value* to a path and left
-  /// the object field's key alone (`graphqlx/syntactic/value.rs:522-543`), so `{ ns::a: 1 }` is not
-  /// a field with a qualified key — the `::` ends the field and is recovered.
+  /// the object field's key alone (`graphqlx/syntactic/value.rs`'s `object_field`), so
+  /// `{ ns::a: 1 }` is not a field with a qualified key — the `::` ends the field and is
+  /// recovered.
   fn object_field<'inp, Src, Ctx>(inp, konst: Constness) {
     node(
       K::ObjectField.raw(),
@@ -456,11 +472,11 @@ lossless_production! {
 
   /// Dispatch on the value head. Opens **no** node of its own; the chosen production opens its own.
   ///
-  /// Two arms have no GraphQL counterpart. A root's sigil opens a rooted enum value, and
-  /// the `set`/`map` spellings inside the `Identifier` arm route to [`collection_or_enum`] rather
-  /// than straight to [`enum_value`] — everything else about the identifier arm is GraphQL's, since
-  /// `true`, `false` and `null` are reserved in both dialects and reserved only in a path's first
-  /// segment.
+  /// Three arms have no GraphQL counterpart. A `char` literal opens a [`char_value`], a root's
+  /// sigil opens a rooted enum value, and the `set`/`map` spellings inside the `Identifier` arm
+  /// route to [`collection_or_enum`] rather than straight to [`enum_value`] — everything else
+  /// about the identifier arm is GraphQL's, since `true`, `false` and `null` are reserved in both
+  /// dialects and reserved only in a path's first segment.
   fn value<'inp, Src, Ctx>(inp, konst: Constness) {
     match peek_kind::<Src, Ctx>(inp)? {
       Some(Kind::Dollar) => {
@@ -472,6 +488,7 @@ lossless_production! {
       Some(Kind::Int) => int_value::<Src, Ctx>(inp),
       Some(Kind::Float) => float_value::<Src, Ctx>(inp),
       Some(Kind::InlineString | Kind::BlockString) => string_value::<Src, Ctx>(inp),
+      Some(Kind::Char) => char_value::<Src, Ctx>(inp),
       Some(Kind::LBracket) => list_value::<Src, Ctx>(inp, konst),
       Some(Kind::LBrace) => object_value::<Src, Ctx>(inp, konst),
       // GraphQLx only: a root's sigil opens a rooted enum value. A `::` opens nothing and falls to

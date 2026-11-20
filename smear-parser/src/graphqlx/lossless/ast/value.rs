@@ -1,13 +1,13 @@
-//! Typed wrappers over the fourteen value node kinds.
+//! Typed wrappers over the fifteen value node kinds.
 //!
-//! # Why a value position carries eleven getters instead of one
+//! # Why a value position carries twelve getters instead of one
 //!
 //! `apollo-parser` gives a value position a single `value() -> Option<Value>`, where `Value` is a
 //! generated **union enum** casting on any of the value kinds. This layer has no such union: the
 //! inventory is one wrapper per node kind and a union is not a node kind, so [`ObjectField`],
 //! [`DefaultValue`] and [`Argument`](super::directive::Argument) each expose one `opt` getter per
-//! value kind and at most one of the eleven answers `Some`. Eleven and not GraphQL's nine, because
-//! [`SetValue`] and [`MapValue`] are values here too.
+//! value kind and at most one of the twelve answers `Some`. Twelve and not GraphQL's nine, because
+//! [`SetValue`], [`MapValue`] and [`CharValue`] are values here too.
 //!
 //! That is complete and it is checkable — every getter is a kind test with a decline to assert —
 //! but it does lose one thing a union would keep: **document order across kinds**. [`ListValue`]
@@ -20,7 +20,7 @@
 //!
 //! - **[`MapEntry`] holds two values.** `Value => Value`, both halves full values and a map key
 //!   not restricted to a name, so an `opt` getter would answer the key whenever the two are the
-//!   same kind and the value would be unreachable. Its eleven getters are therefore `many`, and a
+//!   same kind and the value would be unreachable. Its twelve getters are therefore `many`, and a
 //!   consumer that needs the halves apart walks the entry's children: the key is the first, the
 //!   value the one after the `=>`.
 //! - **[`SetValue`] holds a run of them.** `set!{ … }` is a collection like [`ListValue`], not a
@@ -147,6 +147,8 @@ ast_node!(
     map_values: many MapValue,
     /// Every object in the list.
     object_values: many ObjectValue,
+    /// Every `char` literal in the list.
+    char_values: many CharValue,
   }
 );
 
@@ -181,6 +183,8 @@ ast_node!(
     map_values: many MapValue,
     /// Every object in the set.
     object_values: many ObjectValue,
+    /// Every `char` literal in the set.
+    char_values: many CharValue,
   }
 );
 
@@ -221,6 +225,8 @@ ast_node!(
     map_values: many MapValue,
     /// Every half of the entry that is an object.
     object_values: many ObjectValue,
+    /// Every half of the entry that is a `char` literal.
+    char_values: many CharValue,
   }
 );
 
@@ -265,6 +271,8 @@ ast_node!(
     map_value: opt MapValue,
     /// The field's value, when it is an object.
     object_value: opt ObjectValue,
+    /// The field's value, when it is a `char` literal.
+    char_value: opt CharValue,
   }
 );
 
@@ -302,5 +310,16 @@ ast_node!(
     map_value: opt MapValue,
     /// The default, when it is an object.
     object_value: opt ObjectValue,
+    /// The default, when it is a `char` literal.
+    char_value: opt CharValue,
+  }
+);
+
+ast_node!(
+  lang = crate::graphqlx::kinds::GraphQLxLang;
+  /// A `char` literal value, `'a'` — GraphQLx only.
+  CharValue => K::CharValue {
+    /// The literal token, both quotes included.
+    char_token: tok K::Char,
   }
 );

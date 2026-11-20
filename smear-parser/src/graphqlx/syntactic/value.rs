@@ -6,7 +6,8 @@
 //! `!`.
 //!
 //! GraphQLx retains GraphQL input values while extending enum values to paths
-//! and adding `set` and `map` collection values.
+//! and adding `set` and `map` collection values and a `char` literal, `'a'`,
+//! which every value grammar reads where GraphQL reads a scalar.
 //!
 //! See the [GraphQL Input Values specification](https://spec.graphql.org/draft/#sec-Input-Values).
 
@@ -29,7 +30,7 @@ use crate::{
   graphqlx::{
     GraphQLx,
     ast::{
-      BooleanValue, ConstInputValue, ConstList, ConstMap, ConstMapEntry, ConstObject,
+      BooleanValue, CharValue, ConstInputValue, ConstList, ConstMap, ConstMapEntry, ConstObject,
       ConstObjectField, ConstSet, DefaultInputValue, EnumValue, FloatValue, InlineStringValue,
       InputValue, IntValue, List, Map, MapEntry, NullValue, Object, ObjectField, Set, StringValue,
       VariableValue,
@@ -185,6 +186,32 @@ value_parser!(
         unexpected_after_consumed::<Src, Ctx, _>(token, span, Expectation::StringValue)
       }
       None => unexpected_here(inp, Expectation::StringValue),
+    }
+  }
+);
+
+value_parser!(
+  /// Parses a committed GraphQLx `char` value: `'a'`, one character or one escape between single
+  /// quotes.
+  ///
+  /// A `char` literal is a GraphQLx dialect extension with no corresponding GraphQL draft
+  /// production.
+  pub char_value,
+  inp,
+  CharValue<GraphqlxSlice<'inp, Src>>,
+  [],
+  {
+    match inp.next_or_stop()? {
+      Some(Spanned {
+        span,
+        data: GraphqlxToken::<'inp, Src>::LitChar(value),
+      }) => Ok(CharValue::new(span, value)),
+      Some(Spanned { span, data: token }) => unexpected_after_consumed::<Src, Ctx, _>(
+        token,
+        span,
+        Expectation::Production("a character"),
+      ),
+      None => unexpected_here(inp, Expectation::Production("a character")),
     }
   }
 );
@@ -390,6 +417,7 @@ pub(crate) enum ValueHead {
   Int,
   Float,
   String,
+  Char,
   Identifier,
   Dollar,
   List,
@@ -407,6 +435,7 @@ pub(crate) fn value_head<S>(
     smear_lexer::graphqlx::syntactic::SyntacticToken::LitFloat(_) => ValueHead::Float,
     smear_lexer::graphqlx::syntactic::SyntacticToken::LitInlineStr(_)
     | smear_lexer::graphqlx::syntactic::SyntacticToken::LitBlockStr(_) => ValueHead::String,
+    smear_lexer::graphqlx::syntactic::SyntacticToken::LitChar(_) => ValueHead::Char,
     smear_lexer::graphqlx::syntactic::SyntacticToken::Identifier(_) => ValueHead::Identifier,
     smear_lexer::graphqlx::syntactic::SyntacticToken::Dollar => ValueHead::Dollar,
     smear_lexer::graphqlx::syntactic::SyntacticToken::LBracket => ValueHead::List,
@@ -873,6 +902,7 @@ value_parser!(
     ParseAttempt::Decline => match super::peek_kind(inp)? {
       Some(SyntacticTokenKind::LBracket) => list_value(inp).map(InputValue::List),
       Some(SyntacticTokenKind::LBrace) => object_value(inp).map(InputValue::Object),
+      Some(SyntacticTokenKind::Char) => char_value(inp).map(InputValue::Char),
       Some(
         SyntacticTokenKind::Tilde | SyntacticTokenKind::DotDot | SyntacticTokenKind::Caret,
       ) => path(inp).map(|path| InputValue::Enum(EnumValue::new(*path.span(), path))),
@@ -971,6 +1001,7 @@ value_parser!(
     ParseAttempt::Decline => match super::peek_kind(inp)? {
       Some(SyntacticTokenKind::LBracket) => const_list_value(inp).map(ConstInputValue::List),
       Some(SyntacticTokenKind::LBrace) => const_object_value(inp).map(ConstInputValue::Object),
+      Some(SyntacticTokenKind::Char) => char_value(inp).map(ConstInputValue::Char),
       Some(
         SyntacticTokenKind::Tilde | SyntacticTokenKind::DotDot | SyntacticTokenKind::Caret,
       ) => path(inp).map(|path| ConstInputValue::Enum(EnumValue::new(*path.span(), path))),
@@ -1122,6 +1153,14 @@ graphqlx_value_api!(
   /// See [`string_value`] and the [GraphQL String Value specification](https://spec.graphql.org/draft/#sec-String-Value).
   StringValue<S>,
   string_value,
+  []
+);
+graphqlx_value_api!(
+  /// Parses a committed GraphQLx `char` value.
+  ///
+  /// See [`char_value`].
+  CharValue<S>,
+  char_value,
   []
 );
 graphqlx_value_api!(

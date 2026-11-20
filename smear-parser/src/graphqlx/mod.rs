@@ -18,7 +18,7 @@
 //! So every valid GraphQL document lexes and parses as GraphQL parses it, through all three
 //! document roots and every production entry point.
 
-/// GraphQLx AST aliases and dialect-specific `use` and `mod` nodes.
+/// GraphQLx AST aliases and dialect-specific value, `use` and `mod` nodes.
 pub mod ast;
 /// GraphQLx parser errors and Tokora conversion glue.
 pub mod error;

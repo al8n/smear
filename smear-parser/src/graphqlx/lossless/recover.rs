@@ -44,15 +44,17 @@ use crate::lossless::recover::keyword_of;
 /// `true`, `false`, `null`, `set` and `map` are `Identifier`s to the lexer, so none of them needs
 /// an entry of its own; the value dispatcher separates them on their spelling, not on their kind.
 ///
-/// **`Tilde`, `DotDot` and `Caret` are here and are not in GraphQL's set.** A root's sigil opens a
-/// rooted enum value (`^::ns::Colour`), which is a value head this dialect has and the other does
-/// not. `PathSeparator` is not: a `::` only joins, so no value starts with one.
+/// **`Tilde`, `DotDot`, `Caret` and `Char` are here and are not in GraphQL's set.** A root's sigil
+/// opens a rooted enum value (`^::ns::Colour`), and a `char` literal is a value of its own, two
+/// value heads this dialect has and the other does not. `PathSeparator` is not: a `::` only joins,
+/// so no value starts with one.
 pub(crate) const VALUE_HEADS: &[Kind] = &[
   Kind::Dollar,
   Kind::Int,
   Kind::Float,
   Kind::InlineString,
   Kind::BlockString,
+  Kind::Char,
   Kind::LBracket,
   Kind::LBrace,
   Kind::Identifier,
@@ -72,6 +74,7 @@ pub(crate) const CONST_VALUE_HEADS: &[Kind] = &[
   Kind::Float,
   Kind::InlineString,
   Kind::BlockString,
+  Kind::Char,
   Kind::LBracket,
   Kind::LBrace,
   Kind::Identifier,
@@ -302,6 +305,7 @@ pub(crate) const fn starts_value(kind: Kind) -> bool {
       | Kind::Float
       | Kind::InlineString
       | Kind::BlockString
+      | Kind::Char
       | Kind::LBracket
       | Kind::LBrace
       | Kind::Identifier
@@ -386,13 +390,14 @@ pub(crate) use crate::lossless::recover::opener_span;
 ///
 /// # What this dialect adds to GraphQL's set, and what it deliberately does not
 ///
-/// `Tilde`, `DotDot`, `Caret` and `RAngle` are in; `PathSeparator`, `LAngle`, `FatArrow`,
+/// `Tilde`, `DotDot`, `Caret`, `Char` and `RAngle` are in; `PathSeparator`, `LAngle`, `FatArrow`,
 /// `Asterisk`, `Plus` and `Minus` are out. A root's sigil starts a rooted path, which is a value and
 /// a type head, so a skip that ran past one would fold a whole rooted name into the junk before it.
-/// A `>` closes a generic list — the same argument the other three closers make. The six that stay
-/// out begin no production this suite can restart at: `::` and `=>` only ever join or separate,
-/// `<` only ever *follows* a path, and `*`/`+`/`-` reach the tree through recovery alone. Stopping
-/// at one of those would only split one `Error` node into two.
+/// A `char` literal starts a value, as a number does. A `>` closes a generic list — the same
+/// argument the other three closers make. The six that stay out begin no production this suite can
+/// restart at: `::` and `=>` only ever join or separate, `<` only ever *follows* a path, and
+/// `*`/`+`/`-` reach the tree through recovery alone. Stopping at one of those would only split one
+/// `Error` node into two.
 #[inline]
 fn is_sync_point(kind: Kind) -> bool {
   matches!(
@@ -402,6 +407,7 @@ fn is_sync_point(kind: Kind) -> bool {
       | Kind::Float
       | Kind::InlineString
       | Kind::BlockString
+      | Kind::Char
       | Kind::LBracket
       | Kind::LBrace
       | Kind::Identifier

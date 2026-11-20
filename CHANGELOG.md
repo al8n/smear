@@ -4,6 +4,20 @@ All notable changes to Smear are documented in this file.
 
 ## [Unreleased]
 
+- `smear-parser`!: a GraphQLx `char` literal is a value in every value grammar, executable and
+  constant alike.
+  - **The AST.** `graphqlx::ast::CharValue`, its span and the lexer's `LitChar`, with
+    `CharValueComponents`, and the variants `InputValue::Char` and `ConstInputValue::Char`. Neither
+    enum grows: each stays 96 bytes on a 64-bit target.
+  - **The productions.** `graphqlx::syntactic::value::char_value` and `CharValue::graphqlx`, and
+    `value` and `const_value` read a `char` where they read a scalar, a list's member among them.
+  - **The tree.** `SyntaxKind` gains the node `CharValue` after `DefaultValue`, which moves the raw
+    value of every later kind by one, and the lossless layer's typed wrapper `CharValue`. Each
+    wrapper that holds a value gains a `char` getter: `char_values` on `ListValue`, `SetValue` and
+    `MapEntry`, and `char_value` on `ObjectField`, `DefaultValue` and `Argument`. The projection
+    reads the literal again through `LitChar`'s `TryFrom<&str>` door.
+- `smear-compiler`: a GraphQLx `char` literal is reported as `smear::graphqlx::unknown-item`, once
+  for a file, at the literal, until the analyzer gives a `char` its meaning.
 - `smear-lexer`!: each GraphQLx lexer has a `const { … }` block's lexing mode, held in its state.
   - **The state.** `SyntacticState` and `LosslessState` gain one word, and `in_const_block`,
     `open_angles`, `enter_const_block` and `leave_const_block`. A lexer never enters or leaves a

@@ -378,7 +378,8 @@ impl<'p> Widths<'p> {
         | ConstInputValue::String(_)
         | ConstInputValue::Float(_)
         | ConstInputValue::Int(_)
-        | ConstInputValue::Null(_) => {}
+        | ConstInputValue::Null(_)
+        | ConstInputValue::Char(_) => {}
       }
     }
   }

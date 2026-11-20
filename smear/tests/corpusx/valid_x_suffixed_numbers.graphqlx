@@ -1,0 +1,7 @@
+input Masks {
+  mask: u32 = 0xFF
+  narrow: N = 1u8
+  joined: N = 1_u8
+  one: [u8!]! = [1u8]
+  two: [u8!]! = [1 u8]
+}

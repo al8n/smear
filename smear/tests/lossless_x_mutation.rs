@@ -598,7 +598,7 @@ const OPEN: &[(&str, usize)] = &[];
 
 /// The `(entry, door)` pairs the law runs over: every hole-free parse of every corpus entry under
 /// each of the three doors that builds that door's container.
-const PAIRS: usize = 358;
+const PAIRS: usize = 363;
 
 /// Of [`PAIRS`], the ones whose unmutated tree already lacks a lenient token — every mutation of
 /// them is compared against a restored text.
@@ -611,32 +611,32 @@ const TRIED: &[((&str, &str), usize)] = &[
   (("executable", "retext"), 1942),
   (("executable", "swap"), 890),
   (("executable", "transplant"), 16_747),
-  (("mixed", "delete"), 4250),
-  (("mixed", "duplicate"), 4250),
-  (("mixed", "retext"), 5701),
-  (("mixed", "swap"), 2178),
-  (("mixed", "transplant"), 45_351),
-  (("type-system", "delete"), 2706),
-  (("type-system", "duplicate"), 2706),
-  (("type-system", "retext"), 3942),
-  (("type-system", "swap"), 1355),
-  (("type-system", "transplant"), 27_820),
+  (("mixed", "delete"), 4512),
+  (("mixed", "duplicate"), 4512),
+  (("mixed", "retext"), 5921),
+  (("mixed", "swap"), 2324),
+  (("mixed", "transplant"), 50_151),
+  (("type-system", "delete"), 2830),
+  (("type-system", "duplicate"), 2830),
+  (("type-system", "retext"), 4042),
+  (("type-system", "swap"), 1423),
+  (("type-system", "transplant"), 29_308),
 ];
 
 /// Mutations tried in total.
-const TRIED_TOTAL: usize = 123_172;
+const TRIED_TOTAL: usize = 130_766;
 
 /// Skeleton-unfaithful: the no-panic obligation only.
-const UNFAITHFUL: usize = 108_406;
+const UNFAITHFUL: usize = 115_112;
 
 /// Skeleton-faithful, nothing lenient missing, and the projection equal to the parse.
-const EQUAL: usize = 10_764;
+const EQUAL: usize = 11_430;
 
 /// Skeleton-faithful, nothing lenient missing, and both refusing.
-const BOTH_REFUSE: usize = 3413;
+const BOTH_REFUSE: usize = 3624;
 
 /// Skeleton-faithful with a lenient token missing, and the projection equal to the restored parse.
-const LENIENT_EQUAL: usize = 459;
+const LENIENT_EQUAL: usize = 470;
 
 /// Skeleton-faithful with a lenient token missing, and both refusing the restored text.
 const LENIENT_BOTH_REFUSE: usize = 130;
@@ -660,7 +660,7 @@ const LENIENT_BOTH_REFUSE: usize = 130;
 /// the tenth's way, by the entries that end on a module, and by every faithful mutation of the one
 /// entry whose module never closes.
 const LENIENT_HITS: [usize; 21] = [
-  98, 96, 10, 6, 6, 89, 15, 12, 0, 9, 0, 66, 2, 34, 0, 0, 0, 0, 0, 0, 64,
+  99, 96, 14, 6, 6, 90, 15, 12, 0, 9, 0, 66, 2, 39, 0, 0, 0, 0, 0, 0, 64,
 ];
 
 /// How many restorations each row contributed to [`LENIENT_BOTH_REFUSE`] — restored texts the

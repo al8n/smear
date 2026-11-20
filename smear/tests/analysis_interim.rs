@@ -1,7 +1,7 @@
-//! A number with a suffix, before the analyzer gives a suffix its meaning: lowering reports it as
-//! an item of a kind it does not know, once for a file and at the number, and lowers it as one
-//! refused node, of which coercion says nothing. A custom scalar keeps a list with one inside it
-//! whole, and the list's refused node is never read.
+//! A number with a suffix and a `char` literal, before the analyzer gives each its meaning:
+//! lowering reports each as an item of a kind it does not know, once for a file and at the form,
+//! and lowers it as one refused node, of which coercion says nothing. A custom scalar keeps a list
+//! with one inside it whole, and the list's refused node is never read.
 #![cfg(all(any(feature = "std", feature = "alloc"), feature = "analysis"))]
 
 use smear::{
@@ -150,7 +150,52 @@ fn a_suffixed_byte_is_reported_once() {
   );
 }
 
-/// The two parser layers lower a suffixed number alike: the same codes at the same places.
+/// One `unknown-item` at the `char` literal, and nothing else: an arm that reported and still
+/// lowered the literal would add `invalid-default-value` from coercion.
+#[test]
+fn a_char_literal_is_an_unknown_item_and_nothing_more() {
+  let text = "input I { c: u8 = 'a' }\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(UNKNOWN_ITEM, after(schema, text, "c: u8 = ", "'a'"))]
+  );
+  assert!(!analysis.is_ok(), "a reported literal is an error");
+}
+
+/// A list of `char` literals is one node for each, so the count lowering charged holds and nothing
+/// panics. A custom scalar keeps the list whole, and its refused nodes are never read.
+#[test]
+fn a_list_of_char_literals_keeps_the_count() {
+  for text in [
+    "input L { cs: [u8] = ['a', 'b'] }\n",
+    "scalar Json\ninput J { s: Json = ['a', 'b'] }\n",
+  ] {
+    let analysis = analyze_text(text);
+    let schema = schema_file(&analysis);
+    assert_eq!(
+      found(&analysis),
+      [(UNKNOWN_ITEM, after(schema, text, "[", "'a'"))],
+      "{text:?}"
+    );
+  }
+}
+
+/// A `char` literal and a suffixed number in one file are one report, at the first.
+#[test]
+fn a_char_and_a_suffixed_number_are_one_report() {
+  let text = "input I {\n  a: u8 = 'a'\n  b: u8 = 1u8\n}\n";
+  let analysis = analyze_text(text);
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(UNKNOWN_ITEM, after(schema, text, "a: u8 = ", "'a'"))]
+  );
+}
+
+/// The two parser layers lower a suffixed number and a `char` literal alike: the same codes at the
+/// same places.
 #[cfg(all(feature = "rowan_0_17", feature = "std"))]
 #[test]
 fn both_layers_agree() {
@@ -161,6 +206,9 @@ fn both_layers_agree() {
     "input I {\n  a: u8 = 1u8\n  b: f32 = 2.5f32\n}\n",
     "input L { xs: [u8] = [1, 2u8, 3] }\n",
     "input I { data: bytes = [1u8] }\n",
+    "input I { c: u8 = 'a' }\n",
+    "input L { cs: [u8] = ['a', 'b'] }\n",
+    "input I {\n  a: u8 = 'a'\n  b: u8 = 1u8\n}\n",
   ] {
     let syntactic = analyze_text(text);
     let root: Package<&str> = Package::new("app", Layout::Flat, Tier::Std)

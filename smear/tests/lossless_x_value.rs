@@ -721,6 +721,7 @@ fn every_named_value_head_actually_opens_a_value() {
     ("1.5", K::FloatValue),
     ("\"s\"", K::StringValue),
     ("\"\"\"b\"\"\"", K::StringValue),
+    ("'c'", K::CharValue),
     ("[]", K::ListValue),
     ("{}", K::ObjectValue),
     ("a", K::EnumValue),

@@ -1851,6 +1851,12 @@ impl Lowering<'_, '_, '_> {
           ))
         }
         ConstInputValue::Null(_) => RawKind::Null,
+        // A `char` literal is a value lowering does not read yet: reported once for the source,
+        // at the literal, and lowered as the one refused node it counts as.
+        ConstInputValue::Char(_) => {
+          self.unknown(source, span);
+          RawKind::Refused
+        }
         ConstInputValue::List(_) => RawKind::List,
         ConstInputValue::Set(_) => RawKind::Set,
         ConstInputValue::Map(_) => RawKind::Map,
@@ -1900,7 +1906,8 @@ impl Lowering<'_, '_, '_> {
         | ConstInputValue::Float(_)
         | ConstInputValue::Int(_)
         | ConstInputValue::Enum(_)
-        | ConstInputValue::Null(_) => {}
+        | ConstInputValue::Null(_)
+        | ConstInputValue::Char(_) => {}
       }
     }
     if let Some(count) = charged {
@@ -2772,7 +2779,8 @@ fn held<S>(value: &ConstInputValue<S>, index: usize) -> Option<&ConstInputValue<
     | ConstInputValue::Float(_)
     | ConstInputValue::Int(_)
     | ConstInputValue::Enum(_)
-    | ConstInputValue::Null(_) => None,
+    | ConstInputValue::Null(_)
+    | ConstInputValue::Char(_) => None,
   }
 }
 

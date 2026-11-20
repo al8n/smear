@@ -1,0 +1,11 @@
+input Glyphs {
+  letter: Char = 'a'
+  newline: Char = '\n'
+  quote: Char = '"'
+  apostrophe: Char = '\''
+  row: [Char!]! = ['a', '\n', '"', '\'']
+}
+
+query Q($c: Char = 'a') {
+  glyph(c: '\'', o: {c: 'b'}, s: set!{'c'}, m: map!{'d' => 'e'})
+}

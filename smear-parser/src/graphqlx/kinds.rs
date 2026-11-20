@@ -40,8 +40,9 @@
 //! whole
 //! `use`, module and generic families,
 //! [`SetValue`](SyntaxKind::SetValue)/[`MapValue`](SyntaxKind::MapValue)/
-//! [`MapEntry`](SyntaxKind::MapEntry), [`Path`](SyntaxKind::Path),
-//! [`TypePath`](SyntaxKind::TypePath) and [`TypeGenerics`](SyntaxKind::TypeGenerics).
+//! [`MapEntry`](SyntaxKind::MapEntry), [`CharValue`](SyntaxKind::CharValue),
+//! [`Path`](SyntaxKind::Path), [`TypePath`](SyntaxKind::TypePath) and
+//! [`TypeGenerics`](SyntaxKind::TypeGenerics).
 //!
 //! And what it *lacks*: GraphQLx has no non-null node. `graphqlx::syntactic::ty` folds a trailing
 //! `!` into the type node it follows — `DefinitionTypePath` and `ListType` each carry their own
@@ -73,7 +74,7 @@ use crate::lossless::KindSpace;
 ///
 /// # Layout
 ///
-/// The discriminants are the default `0..121` and [`ALL`](Self::ALL) is in declaration order, so
+/// The discriminants are the default `0..122` and [`ALL`](Self::ALL) is in declaration order, so
 /// [`raw`](Self::raw) is an index and [`from_raw`](Self::from_raw) is a bounds check. Four blocks,
 /// in this order:
 ///
@@ -81,8 +82,8 @@ use crate::lossless::KindSpace;
 /// |---|---|
 /// | `0..36` | the thirty-six non-trivia images, in `LosslessTokenKind`'s declaration order |
 /// | `36..42` | the six trivia images, in the same order, with the line terminators folded |
-/// | `42..118` | the seventy-six node kinds |
-/// | `118..121` | [`Error`](Self::Error), [`Gap`](Self::Gap), [`Root`](Self::Root) |
+/// | `42..119` | the seventy-seven node kinds |
+/// | `119..122` | [`Error`](Self::Error), [`Gap`](Self::Gap), [`Root`](Self::Root) |
 ///
 /// **Nothing may be appended after [`Root`](Self::Root)** — the shared runner is parameterised over
 /// the last three positions, and the seventeen images GraphQL lacks therefore live *inside* the image
@@ -220,6 +221,8 @@ pub enum SyntaxKind {
   ObjectField,
   /// `= Value`.
   DefaultValue,
+  /// A `'…'` character literal's value — GraphQLx only.
+  CharValue,
 
   // ---- type references, paths, arguments, directives ----
   /// `PathRoot? Name (:: Name)*`, the root being `~ ::`, `^ ::` or `.. ::` repeated, kept as the
@@ -444,7 +447,7 @@ impl SyntaxKind {
     Self::Tab,
     Self::Newline,
     Self::Comment,
-    // values (42..56)
+    // values (42..57)
     Self::IntValue,
     Self::FloatValue,
     Self::StringValue,
@@ -459,7 +462,8 @@ impl SyntaxKind {
     Self::ObjectValue,
     Self::ObjectField,
     Self::DefaultValue,
-    // types, paths, arguments, directives (56..65)
+    Self::CharValue,
+    // types, paths, arguments, directives (57..66)
     Self::Path,
     Self::TypeGenerics,
     Self::DefinitionTypePath,
@@ -469,7 +473,7 @@ impl SyntaxKind {
     Self::Arguments,
     Self::Directive,
     Self::Directives,
-    // selections and executable definitions (65..75)
+    // selections and executable definitions (66..76)
     Self::Alias,
     Self::Field,
     Self::FragmentSpread,
@@ -480,7 +484,7 @@ impl SyntaxKind {
     Self::VariablesDefinition,
     Self::OperationDefinition,
     Self::FragmentDefinition,
-    // SDL definitions (75..95)
+    // SDL definitions (76..96)
     Self::SchemaDefinition,
     Self::RootOperationTypesDefinition,
     Self::RootOperationTypeDefinition,
@@ -501,7 +505,7 @@ impl SyntaxKind {
     Self::EnumValuesDefinition,
     Self::EnumValueDefinition,
     Self::DirectiveLocations,
-    // SDL extensions (95..103)
+    // SDL extensions (96..104)
     Self::SchemaExtension,
     Self::ScalarTypeExtension,
     Self::ObjectTypeExtension,
@@ -510,12 +514,12 @@ impl SyntaxKind {
     Self::EnumTypeExtension,
     Self::InputObjectTypeExtension,
     Self::DirectiveExtension,
-    // `use` items (103..105)
+    // `use` items (104..106)
     Self::UseDefinition,
     Self::UseTree,
-    // inline modules (105..106)
+    // inline modules (106..107)
     Self::ModDefinition,
-    // generics (106..115)
+    // generics (107..116)
     Self::DefinitionTypeParam,
     Self::DefinitionTypeGenerics,
     Self::ExtensionTypeGenerics,
@@ -525,11 +529,11 @@ impl SyntaxKind {
     Self::ExecutableDefinitionName,
     Self::WherePredicate,
     Self::WhereClause,
-    // documents (115..118)
+    // documents (116..119)
     Self::Document,
     Self::ExecutableDocument,
     Self::TypeSystemDocument,
-    // bookkeeping (118..121)
+    // bookkeeping (119..122)
     Self::Error,
     Self::Gap,
     Self::Root,

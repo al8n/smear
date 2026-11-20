@@ -333,6 +333,10 @@ const SOURCES_WITH_NO_KIND: &[(&str, &str)] = &[
     "ModDefinitionComponents",
     "`ModDefinition`'s decomposition, the struct its `into_components` returns; not a production",
   ),
+  (
+    "CharValueComponents",
+    "`CharValue`'s decomposition, the struct its `into_components` returns; not a production",
+  ),
 ];
 
 // ---------------------------------------------------------------------------------------------

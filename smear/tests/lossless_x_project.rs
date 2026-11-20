@@ -2685,7 +2685,7 @@ fn a_stray_token_a_shape_does_not_spell_refuses() {
 
 #[test]
 fn a_name_token_spelled_as_a_number_refuses() {
-  // The leaf table's fourth row. The range comes from a token the *tree* labelled `Name`, so the
+  // The leaf table's `Name` row. The range comes from a token the *tree* labelled `Name`, so the
   // bytes under it are whatever the caller wrote; `Name("1")` is a value no source produces, and
   // `smear_lexer::graphqlx::identifier` — the shipped scanner, whole-slice — is what says so.
   let text = "scalar 1";
@@ -2729,13 +2729,32 @@ fn a_null_value_over_another_identifier_refuses() {
 
 #[test]
 fn a_string_leaf_without_its_quotes_refuses() {
-  // The leaf table's third row, measured rather than assumed: `LitStr::try_from` is the string
+  // The leaf table's string row, measured rather than assumed: `LitStr::try_from` is the string
   // sub-lexer, and an image with no quotes is not a string literal to it.
   let (node, text) = scalar_with_literal(K::StringValue, K::InlineString, "abc");
   assert_eq!(
     refuse_tree(node, &text),
     ProjectErrorKind::MalformedToken(K::InlineString),
     "the decoder refuses a malformed image rather than trusting the node's label"
+  );
+}
+
+#[test]
+fn a_char_leaf_that_spells_two_characters_refuses() {
+  // The leaf table's `Char` row: `LitChar::try_from` is the shipped scanner, whole-slice, and a
+  // literal of two characters is no `char` literal to it, whatever kind the tree labels it.
+  let (node, text) = scalar_with_literal(K::CharValue, K::Char, "'ab'");
+  assert_eq!(
+    refuse_tree(node, &text),
+    ProjectErrorKind::MalformedToken(K::Char),
+    "a char literal is re-cooked through the lexer's own door"
+  );
+
+  // A literal the scanner reads projects to the parse, its escape applied.
+  let src = "scalar S @d(n: '\\n')";
+  assert_eq!(
+    project(&parse_document(src), src).expect("a char argument projects"),
+    oracle(src).expect("and the parser agrees")
   );
 }
 

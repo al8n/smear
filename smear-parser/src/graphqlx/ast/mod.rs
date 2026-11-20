@@ -28,6 +28,8 @@ pub mod selection;
 pub mod type_system;
 /// GraphQLx `use` item AST nodes.
 pub mod use_tree;
+/// GraphQLx value nodes of the dialect's own.
+pub mod value;
 
 pub use argument::*;
 pub use directive::*;
@@ -37,6 +39,7 @@ pub use generic::*;
 pub use selection::*;
 pub use type_system::*;
 pub use use_tree::*;
+pub use value::*;
 
 /// The default collection container used by GraphQLx AST collections.
 pub type DefaultVec<T> = Vec<T>;
@@ -272,6 +275,8 @@ pub enum InputValue<S, Span = SimpleSpan> {
   Map(Map<S, Span>),
   /// An object literal.
   Object(Object<S, Span>),
+  /// A `char` literal.
+  Char(CharValue<S, Span>),
 }
 
 impl<S, Span> AsSpan<Span> for InputValue<S, Span> {
@@ -289,6 +294,7 @@ impl<S, Span> AsSpan<Span> for InputValue<S, Span> {
       Self::Set(value) => value.as_span(),
       Self::Map(value) => value.as_span(),
       Self::Object(value) => value.as_span(),
+      Self::Char(value) => value.as_span(),
     }
   }
 }
@@ -308,6 +314,7 @@ impl<S, Span> IntoSpan<Span> for InputValue<S, Span> {
       Self::Set(value) => value.into_span(),
       Self::Map(value) => value.into_span(),
       Self::Object(value) => value.into_span(),
+      Self::Char(value) => value.into_span(),
     }
   }
 }
@@ -338,7 +345,8 @@ impl<S, Span> Nestable for InputValue<S, Span> {
       | Self::Float(_)
       | Self::Int(_)
       | Self::Enum(_)
-      | Self::Null(_) => {}
+      | Self::Null(_)
+      | Self::Char(_) => {}
       Self::List(list) => worklist.adopt(list.into_values().into_vec()),
       Self::Set(set) => worklist.adopt(set.into_values().into_vec()),
       // A map entry's KEY is an input value too, and it nests exactly as the value does — the one
@@ -380,6 +388,8 @@ pub enum ConstInputValue<S, Span = SimpleSpan> {
   Map(ConstMap<S, Span>),
   /// A constant object literal.
   Object(ConstObject<S, Span>),
+  /// A `char` literal.
+  Char(CharValue<S, Span>),
 }
 
 impl<S, Span> AsSpan<Span> for ConstInputValue<S, Span> {
@@ -396,6 +406,7 @@ impl<S, Span> AsSpan<Span> for ConstInputValue<S, Span> {
       Self::Set(value) => value.as_span(),
       Self::Map(value) => value.as_span(),
       Self::Object(value) => value.as_span(),
+      Self::Char(value) => value.as_span(),
     }
   }
 }
@@ -414,6 +425,7 @@ impl<S, Span> IntoSpan<Span> for ConstInputValue<S, Span> {
       Self::Set(value) => value.into_span(),
       Self::Map(value) => value.into_span(),
       Self::Object(value) => value.into_span(),
+      Self::Char(value) => value.into_span(),
     }
   }
 }
@@ -443,7 +455,8 @@ impl<S, Span> Nestable for ConstInputValue<S, Span> {
       | Self::Float(_)
       | Self::Int(_)
       | Self::Enum(_)
-      | Self::Null(_) => {}
+      | Self::Null(_)
+      | Self::Char(_) => {}
       Self::List(list) => worklist.adopt(list.into_values().into_vec()),
       Self::Set(set) => worklist.adopt(set.into_values().into_vec()),
       // A map entry's KEY is an input value too, and it nests exactly as the value does — the one
