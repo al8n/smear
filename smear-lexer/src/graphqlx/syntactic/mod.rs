@@ -1038,6 +1038,7 @@ where
 {
   /// The loop's instance inside a `const { … }` block.
   #[allow(clippy::type_complexity)]
+  #[cold]
   #[inline(never)]
   fn lex_in_block(
     &mut self,
