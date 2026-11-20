@@ -979,9 +979,11 @@ where
   fn lex(&mut self) -> Option<Result<Self::Token, <Self::Token as tokora::Token<'inp>>::Error>> {
     // The word is the parser's to write, between two calls, so it is read once here and the body
     // asks a constant: the instance outside a block is the one this inlines, and a block's is kept
-    // out of line.
+    // out of line. The block's answer comes back in an `InBlock`, wider than an item, so rustc
+    // cannot give the call `lex`'s own return place, and LLVM's call-slot forwarding gives up when
+    // the copy (72 bytes) is smaller than the temporary (80).
     if self.state.in_const_block() {
-      self.lex_in_block()
+      self.lex_in_block().item
     } else {
       self.lex_body::<false>()
     }
@@ -1007,9 +1009,18 @@ where
   }
 }
 
+/// What the block's instance of the lexing loop answers: its item, in a value wider than an item,
+/// so that the call's answer is never merged with `lex`'s own return place.
+struct InBlock<T> {
+  item: T,
+  /// Never read. It is the width.
+  _wider: u8,
+}
+
 // The lexing loop, with the trait impl's bound set and one constant more. `lex` runs the instance
-// outside a block itself, and the instance inside one through `lex_in_block`, kept out of line so
-// that `lex`'s own code does not double. Both are this one text, so they cannot drift apart.
+// outside a block itself, and the instance inside one through `lex_in_block`, kept out of line and
+// answering in an `InBlock`, so that `lex`'s own code does not double. Both are this one text, so
+// they cannot drift apart.
 //
 // `DelegateStringError`, `NumberLexerToken`, `CharBody` and `ByteStrBody` are crate-internal; they
 // appear here only as bounds on private methods, never as nameable API, so silence
@@ -1042,13 +1053,18 @@ where
   #[inline(never)]
   fn lex_in_block(
     &mut self,
-  ) -> Option<
-    Result<
-      SyntacticToken<S::Slice<'inp>>,
-      LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>,
+  ) -> InBlock<
+    Option<
+      Result<
+        SyntacticToken<S::Slice<'inp>>,
+        LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>,
+      >,
     >,
   > {
-    self.lex_body::<true>()
+    InBlock {
+      item: self.lex_body::<true>(),
+      _wider: 0,
+    }
   }
 
   /// The lexing loop: one item from the cursor. `IN_BLOCK` says whether the state is inside a
