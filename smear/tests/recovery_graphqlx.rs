@@ -1518,6 +1518,35 @@ mod lossless {
     );
   }
 
+  /// A missing operand inside a block leaves the delimiter its production reads next: a map entry
+  /// its `=>`, and the member loop its `,`. So the entries after it are read, and the definition
+  /// goes on.
+  #[test]
+  fn a_missing_operand_in_a_block_leaves_the_delimiter_its_production_owns() {
+    for text in [
+      "input I { a: T = const { map!{ => 1, 2 => 3 } } b: Int }",
+      "input I { a: T = const { map!{ 1 => , 2 => 3 } } b: Int }",
+    ] {
+      let answer = read(text);
+      assert_eq!(
+        answer.reports, 1,
+        "{text}: one report, at the missing operand"
+      );
+      let entries = answer
+        .tree
+        .descendants()
+        .filter(|node: &SyntaxNode| node.kind() == K::MapEntry)
+        .count();
+      assert_eq!(entries, 2, "{text}");
+      let members = answer
+        .tree
+        .descendants()
+        .filter(|node: &SyntaxNode| node.kind() == K::InputValueDefinition)
+        .count();
+      assert_eq!(members, 2, "{text}: `b` stays a field of `I`");
+    }
+  }
+
   // ── Through the analyzer ───────────────────────────────────────────────────────────────────
 
   #[cfg(feature = "analysis")]

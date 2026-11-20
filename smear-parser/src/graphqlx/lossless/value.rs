@@ -731,7 +731,7 @@ lossless_production! {
   /// skipped, so every turn returns or consumes.
   #[inline(always)]
   fn block_body<'inp, Src, Ctx>(inp, open: tokora::SimpleSpan) {
-    block_expression::<Src, Ctx>(inp)?;
+    block_expression::<Src, Ctx>(inp, &[])?;
     loop {
       if eat_if::<Src, Ctx>(inp, Kind::RBrace)? {
         return Ok(());
@@ -753,12 +753,16 @@ lossless_production! {
   /// expression's. What ends the expression is judged after the node has closed: a `,`, a closer,
   /// a `=>` or the end of input ends it, and anything else is reported once, against an operator
   /// or a `,`, and skipped into an `Error` that stands beside the node, in its caller's.
-  fn block_expression<'inp, Src, Ctx>(inp) {
+  ///
+  /// `owns` names the delimiters the production around the expression reads next, a map entry's
+  /// `=>` after its key or a member loop's `,`: a missing operand in front of one is reported and
+  /// leaves it to that production, as it leaves a closer.
+  fn block_expression<'inp, Src, Ctx>(inp, owns: &'static [Kind]) {
     peek_kind::<Src, Ctx>(inp)?;
     node(
       K::Expression.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
-        block_operand::<Src, Ctx>(inp)?;
+        block_operand::<Src, Ctx>(inp, owns)?;
         peek_kind::<Src, Ctx>(inp)?;
         Ok(())
       },
@@ -776,10 +780,11 @@ lossless_production! {
   /// One operand inside a block, read wherever it stands and reported through
   /// [`BLOCK_OPERAND_HEADS`] where none begins.
   ///
-  /// A head that begins no operand is skipped into an `Error`, inside the expression. A closer or
-  /// the end of input is reported and left, as a required value's is, and nothing is built there:
-  /// the expression is then empty. A `$` is reported and still built, as in a constant position.
-  fn block_operand<'inp, Src, Ctx>(inp) {
+  /// A head that begins no operand is skipped into an `Error`, inside the expression. A closer, a
+  /// delimiter in `owns`, or the end of input is reported and left, as a required value's is, and
+  /// nothing is built there: the expression is then empty. A `$` is reported and still built, as in
+  /// a constant position.
+  fn block_operand<'inp, Src, Ctx>(inp, owns: &'static [Kind]) {
     match peek_kind::<Src, Ctx>(inp)? {
       Some(Kind::Dollar) => {
         recover::report_unexpected::<Src, Ctx>(inp, BLOCK_OPERAND_HEADS)?;
@@ -798,7 +803,7 @@ lossless_production! {
       }
       Some(Kind::Identifier) => block_name::<Src, Ctx>(inp),
       None => recover::report_unexpected::<Src, Ctx>(inp, BLOCK_OPERAND_HEADS),
-      Some(head) if is_closer(head) => {
+      Some(head) if is_closer(head) || owns.contains(&head) => {
         recover::report_unexpected::<Src, Ctx>(inp, BLOCK_OPERAND_HEADS)
       }
       Some(_) => recover::unexpected::<Src, Ctx>(inp, BLOCK_OPERAND_HEADS),
@@ -864,7 +869,7 @@ lossless_production! {
     expect::<Src, Ctx>(inp, Kind::LParen)?;
     let open = opener_span(inp.span().end());
     let open_at: usize = inp.state().brace_depth();
-    block_expression::<Src, Ctx>(inp)?;
+    block_expression::<Src, Ctx>(inp, &[])?;
     loop {
       if eat_if::<Src, Ctx>(inp, Kind::RParen)? {
         return Ok(());
@@ -913,7 +918,7 @@ lossless_production! {
               return recover::report_unexpected::<Src, Ctx>(inp, LIST_CLOSER_HEADS);
             }
             Some(_) if at_element => {
-              block_expression::<Src, Ctx>(inp)?;
+              block_expression::<Src, Ctx>(inp, &[Kind::Separator])?;
               at_element = false;
             }
             Some(_) => {
@@ -954,7 +959,7 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         expect::<Src, Ctx>(inp, Kind::Colon)?;
-        block_expression::<Src, Ctx>(inp)
+        block_expression::<Src, Ctx>(inp, &[Kind::Separator])
       },
     )
     .parse_input(inp)
@@ -965,9 +970,9 @@ lossless_production! {
     node(
       K::MapEntry.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
-        block_expression::<Src, Ctx>(inp)?;
+        block_expression::<Src, Ctx>(inp, &[Kind::FatArrow])?;
         expect::<Src, Ctx>(inp, Kind::FatArrow)?;
-        block_expression::<Src, Ctx>(inp)
+        block_expression::<Src, Ctx>(inp, &[Kind::Separator])
       },
     )
     .parse_input(inp)
@@ -1053,7 +1058,7 @@ lossless_production! {
         None => return recover::unclosed_object::<Src, Ctx>(inp, open),
         Some(head) if at_member => {
           match collection {
-            Some(Collection::Set) => block_expression::<Src, Ctx>(inp)?,
+            Some(Collection::Set) => block_expression::<Src, Ctx>(inp, &[Kind::Separator])?,
             Some(Collection::Map) if is_closer(head) => {
               recover::unexpected::<Src, Ctx>(inp, BRACE_CLOSER_HEADS)?;
               continue;
