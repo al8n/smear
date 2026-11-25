@@ -1850,9 +1850,9 @@ mod lossless {
 
   /// The defect rows the falsifier does not reach: junk of two tokens in a map's key, a
   /// parenthesis inside a list that a map entry's value holds, a list in a map's key that never
-  /// closes, type arguments that meet an entry's `=>`, a list type that meets the arguments' `>`,
-  /// and a collection with no `{`. Each keeps the definition and the field after it, and what the
-  /// row names.
+  /// closes, a group in the junk after a set's member, type arguments that meet an entry's `=>`, a
+  /// list type that meets the arguments' `>`, and a collection with no `{`. Each keeps the
+  /// definition and the field after it, and what the row names.
   #[test]
   fn each_defect_inside_a_block_keeps_the_definition_and_what_its_row_names() {
     /// The entries of the first map in `tree`, each as it is written.
@@ -1932,6 +1932,25 @@ mod lossless {
       .find(|node: &SyntaxNode| node.kind() == K::TypedValue)
       .expect("A11: the typed value keeps its body");
     assert_eq!(typed.text().to_string(), "Box<[i32 >(1)", "A11");
+
+    // A8: after a member and the junk behind it, a `{` is read as an object, so its `}` is its own
+    // and the set keeps the member after it.
+    let answer = read("input I { a: T = const { set!{ 1 ! {} , 2 } } b: Int }");
+    assert_eq!(fields(&answer.tree), 2, "A8: `b` stays a field of `I`");
+    let members: Vec<String> = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::SetValue)
+      .expect("A8: the set")
+      .children()
+      .filter(|node: &SyntaxNode| node.kind() == K::Expression)
+      .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
+      .collect();
+    assert_eq!(
+      members.last().map(String::as_str),
+      Some("2"),
+      "A8: {members:?}"
+    );
 
     // A14: `set!` with no `{` is a form with no body, and the block goes on.
     let answer = read("input I { a: T = const { set! 1 } b: Int }");
