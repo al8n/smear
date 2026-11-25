@@ -52,7 +52,7 @@ use super::{
     is_number, opener_span,
   },
   trivia::{eat_if, expect, peek_kind, peek_signed_number},
-  ty::{TypeAt, type_path},
+  ty::type_path,
   value::{Constness, RunAt, expression_run, required_value},
 };
 
@@ -135,11 +135,7 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::At)?;
         // The name's type arguments are read where the document it stands in reads a type.
-        let at = match konst {
-          Constness::Schema => TypeAt::Schema,
-          Constness::Const | Constness::NonConst => TypeAt::Executable,
-        };
-        type_path::<Src, Ctx>(inp, at)?;
+        type_path::<Src, Ctx>(inp, konst.type_at())?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
           arguments::<Src, Ctx>(inp, konst)?;
         }

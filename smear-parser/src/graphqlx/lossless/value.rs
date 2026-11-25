@@ -106,7 +106,8 @@ use crate::lossless::depth::{self, JudgedTurn, RootTurn};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Constness {
   /// A `Value[Const]` position of an executable document: a variable's default and its
-  /// directives. A `VariableValue` here is reported.
+  /// directives, and the constant positions of every definition in a module the executable root
+  /// refuses and still reads. A `VariableValue` here is reported.
   Const,
   /// An ordinary `Value` position. A `VariableValue` here is exactly what the grammar is for.
   NonConst,
@@ -130,6 +131,17 @@ impl Constness {
     match self {
       Self::Const | Self::Schema => CONST_VALUE_HEADS,
       Self::NonConst => VALUE_HEADS,
+    }
+  }
+
+  /// Where a type a definition read in this grammar names is read: a schema position's types are a
+  /// schema's, and a definition an executable document refused reads its types as that document
+  /// reads its own.
+  #[inline]
+  pub(crate) const fn type_at(self) -> TypeAt {
+    match self {
+      Self::Schema => TypeAt::Schema,
+      Self::Const | Self::NonConst => TypeAt::Executable,
     }
   }
 }

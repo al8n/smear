@@ -2207,6 +2207,78 @@ mod lossless {
     }
   }
 
+  /// A module the executable root refuses is still read, in the grammar that root's constant
+  /// positions read, as main read it: no typed form, no block and no run of an expression reaches
+  /// the recovery tree, at a member's default or in a directive's arguments, in a definition, a
+  /// field's arguments, an extension or a module inside the module; a list keeps an enum value
+  /// and an object apart; and a type's arguments at the end of input ask for their first type.
+  #[test]
+  fn a_module_the_executable_root_refuses_reads_as_the_executable_document_does() {
+    for text in [
+      "mod M { input I { a: T = [P { x: 1 }] } }",
+      "mod M { input I { a: T = Url(1) } }",
+      "mod M { input I { a: T = const { 1 } } }",
+      "mod M { type T { f(a: X = [P { x: 1 }]): Int } }",
+      "mod M { scalar S @d(x: Box<i32>(1)) }",
+      "mod M { extend scalar S @d(x: P { x: 1 }) }",
+      "mod M { mod N { input I { a: T = [P { x: 1 }] } } }",
+    ] {
+      let tree: SyntaxNode = parse_executable_document(text).syntax();
+      assert_eq!(
+        tree.text().to_string(),
+        text,
+        "{text}: the tree spells its text"
+      );
+      let schema_only: Vec<String> = tree
+        .descendants()
+        .filter(|node: &SyntaxNode| {
+          matches!(
+            node.kind(),
+            K::TypedObjectValue | K::TypedValue | K::ConstBlock | K::Expression
+          )
+        })
+        .map(|node: SyntaxNode| format!("{:?} {}", node.kind(), node.text()))
+        .collect();
+      assert!(schema_only.is_empty(), "{text}: {schema_only:?}");
+      if let Some(list) = tree
+        .descendants()
+        .find(|node: &SyntaxNode| node.kind() == K::ListValue)
+      {
+        let items: Vec<K> = list
+          .children()
+          .map(|node: SyntaxNode| node.kind())
+          .collect();
+        assert_eq!(items, [K::EnumValue, K::ObjectValue], "{text}");
+      }
+    }
+
+    // No run reads on after a default: the member ends at its value, as main's does.
+    let text = "mod M { input I { a: T = 1 + 2 b: Int } }";
+    let tree: SyntaxNode = parse_executable_document(text).syntax();
+    let fields: Vec<String> = tree
+      .descendants()
+      .filter(|node: &SyntaxNode| node.kind() == K::InputValueDefinition)
+      .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
+      .collect();
+    assert_eq!(fields, ["a: T = 1", "b: Int"], "{text}");
+
+    // The module is refused first, and then the end of input where the first type argument should
+    // stand, before the `<` unclosed.
+    let text = "mod M { type T { f: Box<";
+    let errors: Vec<Range<usize>> = parse_executable_document(text)
+      .diagnostics()
+      .iter()
+      .filter(|diagnostic| diagnostic.severity() == Severity::Error)
+      .map(|diagnostic| diagnostic.span())
+      .collect();
+    assert_eq!(errors.first(), Some(&(0..3)), "{text}: {errors:?}");
+    assert_eq!(
+      errors.get(1),
+      Some(&(text.len()..text.len())),
+      "{text}: {errors:?}"
+    );
+  }
+
   // ── Through the analyzer ───────────────────────────────────────────────────────────────────
 
   #[cfg(feature = "analysis")]
