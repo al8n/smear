@@ -149,7 +149,7 @@ jobs:
         # commit and reports a delta over a range nobody asked about.
         fetch-depth: 0
     - name: Install Rust
-      run: rustup update stable --no-self-update && rustup default stable
+      run: rustup update 1.100.0 --no-self-update && rustup default 1.100.0
     - name: Cache cargo registry and both sides' target directories
       uses: actions/cache@v6
       with:
@@ -202,7 +202,7 @@ jobs:
       with:
         fetch-depth: 0
     - name: Install Rust
-      run: rustup update stable --no-self-update && rustup default stable
+      run: rustup update 1.100.0 --no-self-update && rustup default 1.100.0
     - name: Cache cargo registry and both sides' target directories
       uses: actions/cache@v6
       with:
@@ -239,7 +239,7 @@ jobs:
         # All history, every branch (as `origin/<name>`) and every tag, so `base` can name any.
         fetch-depth: 0
     - name: Install Rust
-      run: rustup update stable --no-self-update && rustup default stable && (lscpu | grep 'Model name' || true)
+      run: rustup update 1.100.0 --no-self-update && rustup default 1.100.0 && (lscpu | grep 'Model name' || true)
     - name: Cache cargo registry and both sides' target directories
       uses: actions/cache@v6
       with:
