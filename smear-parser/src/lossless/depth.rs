@@ -113,11 +113,10 @@
 //! *placement* is the whole verdict and a misplaced one is silent.
 //!
 //! The reading is `judge_turn`, which `root_turn` calls and then records in the root's slot. A
-//! frame below a root that recovers what it holds — a module's body, for each of its items, a
-//! `const { … }` block's expression, for its operand, and a schema position's run of an expression
-//! outside a block, for each operand it reads — calls `judge_turn` and has no slot: it goes on past
-//! an ordinary failure, and **returns** a failure that ends the document, so the root above it
-//! judges that one again and records the stop.
+//! frame below a root that recovers what it holds — a module's body, for each of its items, and a
+//! `const { … }` block's expression, for its operand — calls `judge_turn` and has no slot: it goes
+//! on past an ordinary failure, and **returns** a failure that ends the document, so the root above
+//! it judges that one again and records the stop.
 //!
 //! The trait is still read, and beside rather than under: a **scanner** stop moves no descent
 //! counter, and tokora's scanner-side witness is withdrawn for cause (al8n/tokora#311). Each term
@@ -787,21 +786,20 @@ impl RootStop {
 /// say where it belongs, and the placement is silent when it is wrong. A root that never holds one
 /// cannot hoist one, take it after the attempt it is judging, or carry it into a second loop.
 ///
-/// # Three productions below a root catch, and never a failure that ends the document
+/// # Two productions below a root catch, and never a failure that ends the document
 ///
 /// The granularity floor tokora documents is that a trip *caught inside the attempt* followed by an
 /// ordinary failure in the same attempt is re-raised as the trip. The six roots catch, and so do
-/// three productions below them, in the dialect that has them: a module's body catches the failure
-/// of one of its items so that the module keeps its other items, a `const { … }` block's expression
-/// catches the failure of its operand so that no recoverable error leaves the block, and a schema
-/// position's run of an expression outside a block catches the failure of an operand it reads so
-/// that the member after the run is still its member loop's. Each asks [`judge_turn`] for what it
-/// holds and catches the **recoverable** arm alone. A failure that ends the document is returned,
-/// unwinds to the root, and is judged there a second time by this function, whose baseline spans
-/// the whole top-level entry and therefore sees the same trip. So no trip is caught below a root
-/// and the floor is not reached. It fails **closed** if it ever is: an ordinary failure sharing its
-/// entry with a swallowed refusal ends the document, which is the direction that costs a suffix
-/// rather than the direction that costs the whole amplification back.
+/// two productions below them, in the dialect that has them: a module's body catches the failure
+/// of one of its items so that the module keeps its other items, and a `const { … }` block's
+/// expression catches the failure of its operand so that no recoverable error leaves the block.
+/// Each asks [`judge_turn`] for what it holds and catches the **recoverable** arm alone. A failure
+/// that ends the document is returned, unwinds to the root, and is judged there a second time by
+/// this function, whose baseline spans the whole top-level entry and therefore sees the same trip.
+/// So no trip is caught below a root and the floor is not reached. It fails **closed** if it ever
+/// is: an ordinary failure sharing its entry with a swallowed refusal ends the document, which is
+/// the direction that costs a suffix rather than the direction that costs the whole amplification
+/// back.
 #[inline]
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) fn root_turn<'inp, 'closure, L, Ctx, Lang, T, Entry>(
@@ -847,12 +845,12 @@ pub(crate) struct JudgedTurn<T, E> {
 ///
 /// [`root_turn`] is this and one write, and its notes on the two terms and on where the baseline is
 /// taken are this function's. The other callers are the frames below a root that recover what they
-/// hold — a module's body, a `const { … }` block's expression and a schema position's run of an
-/// expression, none of which has a [`RootStop`]: the slot belongs to the root, and a root lends it
-/// to nothing below itself. Such a frame matches the verdict as a root does, with one difference
-/// that is the whole reason it may hold one: on [`RootTurn::EndsTheDocument`] it **returns the
-/// error** rather than recording a stop. The failure then reaches the root's own turn, whose
-/// baseline was taken before the frame began, and the root records it.
+/// hold — a module's body and a `const { … }` block's expression, neither of which has a
+/// [`RootStop`]: the slot belongs to the root, and a root lends it to nothing below itself. Such a
+/// frame matches the verdict as a root does, with one difference that is the whole reason it may
+/// hold one: on [`RootTurn::EndsTheDocument`] it **returns the error** rather than recording a
+/// stop. The failure then reaches the root's own turn, whose baseline was taken before the frame
+/// began, and the root records it.
 ///
 /// # A baseline inside an open baseline disturbs neither
 ///
@@ -1479,15 +1477,15 @@ where
 ///
 /// The one thing a cell would have bought and this does not is a record for a production that
 /// **catches** the refusal and carries on. No production in either dialect does — the six roots
-/// catch and all six stop on one, and a module's body, a block's expression and a run of an
-/// expression, which catch the ordinary failure of an item and of an operand, return a refusal to
-/// their root instead — but a dialect added later could, and its loop would re-descend and refuse
-/// again rather than reading a latch. That is the residual, and what bounds it has changed:
-/// tokora's resource-trip counter **is** the durable cell this section says smear cannot write,
-/// published read-only, and `root_turn` reads it. A catch site that goes through `root_turn` cannot
-/// reach the residual whatever its `MaybeTerminal` arm says; a catch site that writes its own
-/// predicate still can, which is why the arm is one call and not a pattern to copy — and, since
-/// smear PR #189's round 5, why `root_turn` is the crate's own and not a consumer's.
+/// catch and all six stop on one, and a module's body and a block's expression, which catch the
+/// ordinary failure of an item and of an operand, return a refusal to their root instead — but a
+/// dialect added later could, and its loop would re-descend and refuse again rather than reading a
+/// latch. That is the residual, and what bounds it has changed: tokora's resource-trip counter
+/// **is** the durable cell this section says smear cannot write, published read-only, and
+/// `root_turn` reads it. A catch site that goes through `root_turn` cannot reach the residual
+/// whatever its `MaybeTerminal` arm says; a catch site that writes its own predicate still can,
+/// which is why the arm is one call and not a pattern to copy — and, since smear PR #189's round 5,
+/// why `root_turn` is the crate's own and not a consumer's.
 ///
 /// ## The emitted `Err` is dropped, and this is the one call where that is right
 ///
