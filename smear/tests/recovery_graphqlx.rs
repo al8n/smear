@@ -1536,7 +1536,7 @@ mod lossless {
     let answer = read_with(&Lossless::with_limits(limits), text);
     assert_eq!(
       answer.reports, 2,
-      "two reports, at the `(` and the `)` missing at the `}`"
+      "two reports, at the `(` and the `)` missing at the `}}`"
     );
     let list = answer
       .tree
