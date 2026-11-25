@@ -195,6 +195,26 @@ impl RunAt {
   }
 }
 
+/// Whether `head` goes on with an operand the run took back, where nothing that operand opened is
+/// open and `before` was its last token: a path's `::` and names, a root's sigil, a `$`, a `!`,
+/// and the bracket a typed form or a collection opens after what opens one. See
+/// `run_operand_junk`.
+const fn goes_on_with_an_operand(head: Kind, before: Kind) -> bool {
+  match head {
+    Kind::PathSeparator
+    | Kind::Identifier
+    | Kind::Tilde
+    | Kind::DotDot
+    | Kind::Caret
+    | Kind::Dollar
+    | Kind::Bang => true,
+    Kind::LAngle => matches!(before, Kind::Identifier),
+    Kind::LParen => matches!(before, Kind::Identifier | Kind::RAngle),
+    Kind::LBrace => matches!(before, Kind::Identifier | Kind::RAngle | Kind::Bang),
+    _ => false,
+  }
+}
+
 use crate::lossless::{lossless_drivers, lossless_production};
 
 lossless_production! {
@@ -1492,10 +1512,17 @@ lossless_production! {
   /// field's or member's own, and the run ends in front of it. Telling it apart takes a second
   /// token, and the read happens only there, outside a block, in a run that has already reported.
   ///
-  /// An operand the run reads is judged as a block's expression judges its own: a failure that
-  /// ends the document is returned, and any other, a rooted path missing its `::` or a path
-  /// missing its name after one, has reported itself where it failed and ends the run there. So
-  /// the member after it is still the member loop's, and the definition around it stands.
+  /// An operand is read as the value it is, judged as a block's expression judges its own, in an
+  /// attempt the run takes back whole when the read fails: the operand is then read again from its
+  /// head as the run's junk, by [`run_operand_junk`], into one `Error` reported by no one, since
+  /// the run reported once. So a failure inside what the operand opened leaves none of it to the
+  /// member loop: an object's `}` is the object's, and the definition's `}` stays the
+  /// definition's. At a member position two reads that did not fail are taken back the same way:
+  /// one that took the next member's name, which a `:` then follows, and one that left a list, a
+  /// parenthesis or type arguments open; the junk leaves that name to the member loop. A failure
+  /// that ends the document is returned and nothing is taken back, nor is a read that tripped a
+  /// budget. What is taken back is lexed again, so once #168's scan allowance is spent a read is
+  /// kept as it stands, and a failure kept so ends the run where it left the input.
   fn expression_run<'inp, Src, Ctx>(inp, at: RunAt) {
     let at_key = at.at_key();
     let mut after_value = at.after_value();
@@ -1506,7 +1533,7 @@ lossless_production! {
     } else {
       recover::report_unexpected::<Src, Ctx>(inp, CONST_BLOCK_HEADS)?;
       if leading_group {
-        expression_group::<Src, Ctx>(inp, at_key)?;
+        expression_group::<Src, Ctx>(inp, at_key, false)?;
         after_value = true;
       }
     }
@@ -1521,7 +1548,7 @@ lossless_production! {
           after_value = false;
         }
         Some(Kind::LParen) if !after_value => {
-          expression_group::<Src, Ctx>(inp, at_key)?;
+          expression_group::<Src, Ctx>(inp, at_key, at.at_member())?;
           after_value = true;
         }
         // A number written with a `-` is a value wherever it stands in the run.
@@ -1537,17 +1564,63 @@ lossless_production! {
         {
           return Ok(());
         }
-        // The operand is judged as a block's expression judges its own, through
-        // `depth::judge_turn`: a failure that ends the document is returned, and any other has
-        // reported itself where it failed and ends the run there, so what stands there, the next
-        // member's head among it, is the caller's.
+        // The operand, read as the value it is in an attempt, and taken back to be read again as
+        // junk where the read fails, or at a member position where it took the next member's
+        // name or left a list, a parenthesis or type arguments open.
         Some(head) if !after_value && starts_value(head) => {
-          let JudgedTurn { turn, .. }: JudgedTurn<(), GraphqlxLosslessError<'inp, Src, Ctx>> =
-            depth::judge_turn(inp, |inp| value::<Src, Ctx>(inp, Constness::Schema));
-          match turn {
-            RootTurn::Parsed(()) => after_value = true,
-            RootTurn::EndsTheDocument(error) => return Err(error),
-            RootTurn::Recoverable(_) => return Ok(()),
+          let member = at.at_member();
+          // Only a path or a variable can end with a name.
+          let named = matches!(
+            head,
+            Kind::Identifier | Kind::Tilde | Kind::DotDot | Kind::Caret | Kind::Dollar
+          );
+          let braces_before: usize = inp.state().brace_depth();
+          let open_before: usize = inp.state().depth();
+          let read = inp.attempt(|inp| {
+            let judged: JudgedTurn<(), GraphqlxLosslessError<'inp, Src, Ctx>> =
+              depth::judge_turn(inp, |inp| value::<Src, Ctx>(inp, Constness::Schema));
+            let tripped = judged.tripped;
+            let (parsed, retake) = match judged.turn {
+              RootTurn::EndsTheDocument(error) => return Some(Err(error)),
+              RootTurn::Recoverable(_) => (false, true),
+              RootTurn::Parsed(()) if !member || tripped => (true, false),
+              RootTurn::Parsed(()) => {
+                // Brackets of every kind against braces alone: what is still open past the
+                // braces is a list, a parenthesis or type arguments.
+                let opened = inp.state().depth().saturating_sub(open_before);
+                let braces = inp.state().brace_depth().saturating_sub(braces_before);
+                if opened > braces {
+                  (true, true)
+                } else if named {
+                  match peek_kind::<Src, Ctx>(inp) {
+                    Ok(next) => (true, next == Some(Kind::Colon)),
+                    Err(error) => return Some(Err(error)),
+                  }
+                } else {
+                  (true, false)
+                }
+              }
+            };
+            // #168's allowance, read as the skips read it: what is taken back is lexed again.
+            if retake
+              && !crate::lossless::recover::scan_allowance_exhausted(
+                inp.token_budget().spent(),
+                inp.state().token().tokens(),
+              )
+            {
+              return None;
+            }
+            Some(Ok(parsed))
+          });
+          match read {
+            Some(Ok(true)) => after_value = true,
+            // A failure the spent allowance keeps: the run ends where it left the input.
+            Some(Ok(false)) => return Ok(()),
+            Some(Err(error)) => return Err(error),
+            None => {
+              run_operand_junk::<Src, Ctx>(inp, member)?;
+              after_value = true;
+            }
           }
         }
         _ => return Ok(()),
@@ -1580,8 +1653,11 @@ lossless_production! {
   /// group, so it stops before one, and at the end of input, with the group unclosed: the run that
   /// reads it has reported once, and what the group leaves open is no report of its own. With
   /// `at_key` the group stands in a map entry's key, and a `=>` at the group's own depth, where
-  /// nothing the group opened inside it is open, is the entry's: it stops before that too.
-  fn expression_group<'inp, Src, Ctx>(inp, at_key: bool) {
+  /// nothing the group opened inside it is open, is the entry's: it stops before that too. With
+  /// `member` the run stands at a member position, and the next member's name, which a `:`
+  /// follows, is the member loop's wherever no brace the group opened is open: it stops before
+  /// that name, as [`run_operand_junk`] does.
+  fn expression_group<'inp, Src, Ctx>(inp, at_key: bool, member: bool) {
     let mark = inp.cst_mark();
     // The `(` the caller peeked.
     inp.try_expect_or_stop(|_| true)?;
@@ -1592,6 +1668,13 @@ lossless_production! {
         Some(Kind::RBracket) if brackets == 0 => break,
         Some(Kind::RBrace) if braces == 0 => break,
         Some(Kind::FatArrow) if at_key && parens == 1 && brackets == 0 && braces == 0 => break,
+        Some(Kind::Identifier)
+          if member
+            && braces == 0
+            && peek_second_kind::<Src, Ctx>(inp)? == Some(Kind::Colon) =>
+        {
+          break;
+        }
         Some(head) => {
           inp.try_expect_or_stop(|_| true)?;
           match head {
@@ -1605,6 +1688,59 @@ lossless_production! {
           }
         }
       }
+    }
+    inp.cst_start_at(mark, K::Error.raw());
+    inp.cst_finish(K::Error.raw());
+    Ok(())
+  }
+
+  /// An operand the run took back, read again from its head as the run's junk: one `Error` node,
+  /// built as a skipped token's is and reported by no one, since the run reported once, at its
+  /// first token.
+  ///
+  /// It closes what it opens. A `{`, `[` or `(` is closed by the closer of its own kind, and a `<`
+  /// after a name, a typed form's type arguments, by a `>`. A closer it did not open closes
+  /// something around the run, so it stops in front of one, as [`expression_group`] does; inside a
+  /// brace it opened, a stray `]` or `)` is that brace's junk, and a `>` that closes nothing is an
+  /// operator's. Where nothing it opened is open, it goes on only over what goes on with the
+  /// operand: a path's `::` and names, a root's sigil, a `$`, a `!`, and the bracket a typed form
+  /// or a collection opens after what opens one. With `member` the run stands at a member position,
+  /// and the next member's name, which a `:` follows, is the member loop's wherever no brace the
+  /// operand opened is open: a list, a parenthesis or type arguments left open do not take it.
+  ///
+  /// The head is always taken, so the run's loop makes progress.
+  fn run_operand_junk<'inp, Src, Ctx>(inp, member: bool) {
+    let mark = inp.cst_mark();
+    let (mut braces, mut brackets, mut parens, mut angles) = (0_usize, 0_usize, 0_usize, 0_usize);
+    let mut last: Option<Kind> = None;
+    while let Some(head) = peek_kind::<Src, Ctx>(inp)? {
+      if let Some(before) = last {
+        if member
+          && braces == 0
+          && head == Kind::Identifier
+          && peek_second_kind::<Src, Ctx>(inp)? == Some(Kind::Colon)
+        {
+          break;
+        }
+        if braces + brackets + parens + angles == 0 && !goes_on_with_an_operand(head, before) {
+          break;
+        }
+      }
+      match head {
+        Kind::LBrace => braces += 1,
+        Kind::RBrace if braces > 0 => braces -= 1,
+        Kind::RBrace => break,
+        Kind::LBracket => brackets += 1,
+        Kind::RBracket if brackets > 0 => brackets -= 1,
+        Kind::LParen => parens += 1,
+        Kind::RParen if parens > 0 => parens -= 1,
+        Kind::RBracket | Kind::RParen if braces == 0 => break,
+        Kind::LAngle if last == Some(Kind::Identifier) => angles += 1,
+        Kind::RAngle if angles > 0 => angles -= 1,
+        _ => {}
+      }
+      inp.try_expect_or_stop(|_| true)?;
+      last = Some(head);
     }
     inp.cst_start_at(mark, K::Error.raw());
     inp.cst_finish(K::Error.raw());

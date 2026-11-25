@@ -2076,31 +2076,108 @@ mod lossless {
     }
   }
 
-  /// An operand a run reads that fails, a rooted path whose `::` is missing, ends the run where it
-  /// failed rather than unwinding the definition: the field after it is kept, as main keeps it.
+  /// An operand a run reads at a member position is taken back whole, and read again as the run's
+  /// junk, where its read fails, where it took the next member's name, and where it left a list, a
+  /// parenthesis or type arguments open: the member after the run is kept, the definition closes at
+  /// its own `}`, and the run's report is the only one. After a member's default and at the head
+  /// of one, and after a value in an object and in a directive's arguments.
+  ///
+  /// A list, a typed value or type arguments left open inside an argument list meet the
+  /// arguments' `)` before the next argument's name, and their own recovery takes it, as main's
+  /// list does: there they read as closed, and are kept, so only the group is asked there.
   #[test]
-  fn an_operand_a_run_reads_that_fails_ends_the_run() {
-    let text = "input I { a: T = 1 + ~ b: Int }";
-    let answer = read(text);
-    assert_eq!(
-      answer.reports, 2,
-      "two reports, at the `+` and the `::` the `~` is missing"
-    );
-    let members: Vec<String> = answer
-      .tree
-      .descendants()
-      .find(|node: &SyntaxNode| node.kind() == K::InputFieldsDefinition)
-      .expect("the input's fields")
-      .children()
-      .filter(|node: &SyntaxNode| node.kind() == K::InputValueDefinition)
-      .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
-      .collect();
-    assert_eq!(members.len(), 2, "{text}: {members:?}");
-    assert_eq!(
-      members.last().map(String::as_str),
-      Some("b: Int"),
-      "{text}: {members:?}"
-    );
+  fn a_run_takes_back_an_operand_that_fails_or_takes_the_next_member() {
+    /// The direct children of kind `kind` of the first node of kind `parent`, each as written.
+    fn members(tree: &SyntaxNode, parent: K, kind: K) -> Vec<String> {
+      tree
+        .descendants()
+        .find(|node: &SyntaxNode| node.kind() == parent)
+        .unwrap_or_else(|| panic!("no {parent:?}"))
+        .children()
+        .filter(|node: &SyntaxNode| node.kind() == kind)
+        .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
+        .collect()
+    }
+    // A path or a variable whose name is missing, or the next member's, and a failure inside what
+    // the operand opened.
+    let everywhere = [
+      "~",
+      "~::",
+      "^::",
+      "..::..::",
+      "c::",
+      "$",
+      "{ x: ~ }",
+      "{ x 1 }",
+      "[~ c]",
+      "Url(~)",
+      "P{ x: ~ }",
+      "Box<~>(1)",
+      "map!{ ~ => 1 }",
+      "set!",
+      "(c",
+    ];
+    // A list, a typed value or type arguments left open.
+    let left_open = ["Box<", "[c", "Url(c"];
+    for (operand, in_arguments) in everywhere
+      .iter()
+      .map(|operand| (*operand, true))
+      .chain(left_open.iter().map(|operand| (*operand, false)))
+    {
+      let mut texts = vec![
+        (
+          format!("input I {{ a: T = 1 + {operand} b: Int }}"),
+          K::InputFieldsDefinition,
+          K::InputValueDefinition,
+          "b: Int",
+        ),
+        (
+          format!("input I {{ a: T = + {operand} b: Int }}"),
+          K::InputFieldsDefinition,
+          K::InputValueDefinition,
+          "b: Int",
+        ),
+        (
+          format!("input I {{ a: T = {{ a: 1 + {operand} b: 2 }} zz: Int }}"),
+          K::ObjectValue,
+          K::ObjectField,
+          "b: 2",
+        ),
+      ];
+      if in_arguments {
+        texts.push((
+          format!("input I {{ a: T @d(x: 1 + {operand} y: 2) zz: Int }}"),
+          K::Arguments,
+          K::Argument,
+          "y: 2",
+        ));
+      }
+      for (text, parent, kind, last) in texts {
+        let answer = read(&text);
+        assert_eq!(answer.reports, 1, "{text}: the run's report alone");
+        let kept = members(&answer.tree, parent, kind);
+        assert_eq!(kept.len(), 2, "{text}: {kept:?}");
+        assert_eq!(
+          kept.last().map(String::as_str),
+          Some(last),
+          "{text}: {kept:?}"
+        );
+        let fields = members(
+          &answer.tree,
+          K::InputFieldsDefinition,
+          K::InputValueDefinition,
+        );
+        assert_eq!(
+          fields.last().map(String::as_str),
+          Some(if last == "b: Int" {
+            "b: Int"
+          } else {
+            "zz: Int"
+          }),
+          "{text}: the input closes at its own brace: {fields:?}"
+        );
+      }
+    }
   }
 
   /// A type's arguments that meet the end of input in an executable document ask for their first

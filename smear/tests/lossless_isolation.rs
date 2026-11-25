@@ -447,10 +447,12 @@ fn the_substrate_names_no_dialect() {
 ///   `unused_macros` denials.
 /// - **five in `lossless/recover.rs`**, all added for smear#168's scan allowance and all the same
 ///   shape: `SCAN_ALLOWANCE_FACTOR`, `SCAN_ALLOWANCE_FLOOR`, `scan_allowance_exhausted`, and the
-///   two `pub(super)` recorders in its test-support telemetry. Their only callers are the four
-///   wrappers in the two dialects' own `recover.rs`, so with no dialect in the crate they are dead
-///   and `-Dwarnings` makes `dead_code` an error. `pub` used to hide that — rustc counts a
-///   reachable `pub` item as used — and narrowing them to `pub(crate)` is what armed it.
+///   two `pub(super)` recorders in its test-support telemetry. Their only callers are the
+///   dialects' own: the wrappers in each dialect's `recover.rs`, and GraphQLx's run of an
+///   expression, which reads the allowance before it takes an operand back. So with no dialect in
+///   the crate they are dead and `-Dwarnings` makes `dead_code` an error. `pub` used to hide that —
+///   rustc counts a reachable `pub` item as used — and narrowing them to `pub(crate)` is what armed
+///   it.
 /// - **ten in `lossless/depth.rs`**, nine from smear PR #189's round 5 and one from smear issue
 ///   #193, and every one of them is the
 ///   `recover.rs` shape rather than a new one. Seven are the retracted cluster —

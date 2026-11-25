@@ -158,9 +158,9 @@ type Declared = (&'static str, &'static str, &'static str, usize);
 ///   catch: `mod_body`, a module's body, resynchronises past an item that failed with an ordinary
 ///   error; `block_expression`, the expression a `const { … }` block holds, ends where its operand
 ///   failed with one, so no recoverable error leaves the block; and `expression_run`, a schema
-///   position's run of an expression outside a block, ends where an operand it reads failed with
-///   one, so the member after it is still its member loop's. Each returns a failure that ends the
-///   document to the root above it.
+///   position's run of an expression outside a block, takes back an operand it reads that failed
+///   with one and reads it again as junk, so the member after it is still its member loop's. Each
+///   returns a failure that ends the document to the root above it.
 /// - **The dialect door**, and it is no longer watched by name. It used to be: six `*_entry`
 ///   productions calling `drain_unless_stopped`, then a `document_root` frame taking a token
 ///   (round 4), then one generic `parse_lossless_document` (round 5). Round 7 generates a door per
