@@ -1527,13 +1527,17 @@ mod lossless {
 
   /// A skip inside a block stops at the block's `}`, with its `(` still open, so nothing after the
   /// `}` is lexed in the block's mode and then again outside it: under a produce-event budget of
-  /// one event for each lexeme, and one more, the text reads to its end.
+  /// one event for each lexeme, and one more, the text reads to its end. The `(` is read by its
+  /// own production, which leaves the block's `}` and reports its `)` missing in front of it.
   #[test]
   fn a_skip_inside_a_block_reads_nothing_past_the_blocks_brace() {
     let text = "input I { a: T = [const { 1 (2 } -2] }";
     let limits = LosslessLimits::default().with_max_produce_events(lexemes(text) + 1);
     let answer = read_with(&Lossless::with_limits(limits), text);
-    assert_eq!(answer.reports, 1, "one report, at the `(`");
+    assert_eq!(
+      answer.reports, 2,
+      "two reports, at the `(` and the `)` missing at the `}`"
+    );
     let list = answer
       .tree
       .descendants()
@@ -1596,6 +1600,415 @@ mod lossless {
       .filter(|node: &SyntaxNode| node.kind() == K::InputValueDefinition)
       .count();
     assert_eq!(members, 2, "`b` stays a field of `I`");
+  }
+
+  // ── Recovery inside a block, by what each production owns ─────────────────────────────────
+
+  /// The aggregate a member stands in, the kind of the member's node, and how it is written: the
+  /// member a hole stands in front of, which recovery at the hole must leave to its aggregate.
+  type Later = Option<(K, K, &'static str)>;
+
+  /// The audit's 34 holes inside a block, each written `@`, with the member after the hole where
+  /// one stands. Each stands in `input I { a : T = … }`, see [`at_hole`].
+  const HOLES: &[(&str, Later)] = &[
+    ("const { 1 @ }", None),
+    ("const { @ 1 }", None),
+    ("const { ( 1 @ ) }", None),
+    ("const { ( @ 1 ) }", None),
+    (
+      "const { [ 1 @ , 2 ] }",
+      Some((K::ListValue, K::Expression, "2")),
+    ),
+    ("const { [ 1 , @ 2 ] }", None),
+    (
+      "const { set!{ 1 @ , 2 } }",
+      Some((K::SetValue, K::Expression, "2")),
+    ),
+    ("const { set @ {1} }", None),
+    (
+      "const { map!{ 1 @ => 2 , 3 => 4 } }",
+      Some((K::MapValue, K::MapEntry, "3 => 4")),
+    ),
+    (
+      "const { map!{ @ 1 => 2 , 3 => 4 } }",
+      Some((K::MapValue, K::MapEntry, "3 => 4")),
+    ),
+    (
+      "const { map!{ 1 => 2 @ , 3 => 4 } }",
+      Some((K::MapValue, K::MapEntry, "3 => 4")),
+    ),
+    (
+      "const { map!{ 1 => @ 2 , 3 => 4 } }",
+      Some((K::MapValue, K::MapEntry, "3 => 4")),
+    ),
+    (
+      "const { { a : 1 @ , c : 2 } }",
+      Some((K::ObjectValue, K::ObjectField, "c : 2")),
+    ),
+    (
+      "const { { a @ : 1 , c : 2 } }",
+      Some((K::ObjectValue, K::ObjectField, "c : 2")),
+    ),
+    (
+      "const { { a : @ 1 , c : 2 } }",
+      Some((K::ObjectValue, K::ObjectField, "c : 2")),
+    ),
+    ("const { { @ a : 1 } }", None),
+    ("const { Url ( 1 @ ) }", None),
+    (
+      "const { P { x : 1 @ , y : 2 } }",
+      Some((K::TypedObjectValue, K::ObjectField, "y : 2")),
+    ),
+    ("const { Box < i32 @ > ( 1 ) }", None),
+    ("const { Box < @ i32 > ( 1 ) }", None),
+    ("const { Box < [ i32 @ ] > ( 1 ) }", None),
+    ("const { Box < i32 > @ ( 1 ) }", None),
+    ("const { const { 1 @ } }", None),
+    ("const { a @ :: c }", None),
+    ("const { a :: @ c }", None),
+    (
+      "const { map!{ 1 => [ 2 @ ] , 3 => 4 } }",
+      Some((K::MapValue, K::MapEntry, "3 => 4")),
+    ),
+    (
+      "const { map!{ 1 => ( 2 @ ) , 3 => 4 } }",
+      Some((K::MapValue, K::MapEntry, "3 => 4")),
+    ),
+    (
+      "const { map!{ 1 => { a : 2 @ } , 3 => 4 } }",
+      Some((K::MapValue, K::MapEntry, "3 => 4")),
+    ),
+    (
+      "const { map!{ ( 1 @ ) => 2 , 3 => 4 } }",
+      Some((K::MapValue, K::MapEntry, "3 => 4")),
+    ),
+    (
+      "const { map!{ [ 1 @ ] => 2 , 3 => 4 } }",
+      Some((K::MapValue, K::MapEntry, "3 => 4")),
+    ),
+    (
+      "const { map!{ Box < i32 @ > ( 1 ) => 2 , 3 => 4 } }",
+      Some((K::MapValue, K::MapEntry, "3 => 4")),
+    ),
+    (
+      "const { [ ( 1 @ ) , 2 ] }",
+      Some((K::ListValue, K::Expression, "2")),
+    ),
+    (
+      "const { [ { a : 1 @ } , 2 ] }",
+      Some((K::ListValue, K::Expression, "2")),
+    ),
+    ("const { ( [ 1 @ ] ) }", None),
+  ];
+
+  /// The audit's eighteen tokens a hole is filled with, a `{ }` one of them, so the junk holds a
+  /// `}` only behind its `{`.
+  const JUNK: &[&str] = &[
+    "1", "x", ",", "=>", "(", ")", "[", "]", "{ }", "{", ":", "+", "<", ">", "::", "!", "$", "~",
+  ];
+
+  /// `hole` filled with `junk`, an empty one taking the hole and its space away, as the default of
+  /// a field `zz` follows, and a scalar after the input.
+  ///
+  /// A `,` stands between the block and `zz`: a comma is a separator only to a lexer in a block's
+  /// mode, so a lexer still in the mode after the block's `}` shows as a separator outside it.
+  fn at_hole(hole: &str, junk: &str) -> String {
+    let value = if junk.is_empty() {
+      hole.replacen("@ ", "", 1)
+    } else {
+      hole.replacen('@', junk, 1)
+    };
+    format!("input I {{ a : T = {value} , zz : Int }}\nscalar S")
+  }
+
+  /// Whether `junk` at `hole` closes a bracket the hole stands inside, which it did not open.
+  fn closes_what_it_did_not_open(hole: &str, junk: &str) -> bool {
+    let opener = match junk {
+      ")" => "(",
+      "]" => "[",
+      ">" => "<",
+      _ => return false,
+    };
+    let before = &hole[..hole.find('@').expect("a hole")];
+    let mut open: Vec<&str> = Vec::new();
+    for token in before.split(' ') {
+      match token {
+        "(" | "[" | "<" | "{" | "set!{" | "map!{" => open.push(token),
+        ")" | "]" | ">" | "}" => {
+          open.pop();
+        }
+        _ => {}
+      }
+    }
+    open.contains(&opener)
+  }
+
+  /// The byte of the `}` that balances the `{` at `open`, counting braces alone, if one does.
+  fn balancing_brace(text: &str, open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (at, byte) in text.bytes().enumerate().skip(open) {
+      match byte {
+        b'{' => depth += 1,
+        b'}' => {
+          depth -= 1;
+          if depth == 0 {
+            return Some(at);
+          }
+        }
+        _ => {}
+      }
+    }
+    None
+  }
+
+  /// The falsifier for recovery inside a block, reduced to runs of none or one token: the audit's
+  /// 34 holes, each filled from its alphabet of eighteen.
+  ///
+  /// 1. For every text, each block's node ends at the `}` its own braces give it, counting braces
+  ///    alone from its `{`, and the lexer is out of the block's mode after it: no separator stands
+  ///    outside a block.
+  /// 2. Where the junk's braces balance, which is every token of the alphabet but the lone `{`,
+  ///    `zz` is a field and `S` a scalar.
+  /// 3. At the eighteen holes in front of a later member, for junk that leaves no `[` or `{` open,
+  ///    closes nothing it did not open and holds no `<`, the later member is a node of its
+  ///    aggregate. An unclosed `(` is in the family.
+  #[test]
+  fn recovery_inside_a_block_keeps_the_boundary_and_the_later_member() {
+    let mut texts = 0usize;
+    let mut later = 0usize;
+    for (hole, member) in HOLES {
+      for junk in core::iter::once("").chain(JUNK.iter().copied()) {
+        let text = at_hole(hole, junk);
+        let answer = read(&text);
+        texts += 1;
+        // 1. The block's braces, and the mode after them.
+        for block in answer
+          .tree
+          .descendants()
+          .filter(|node: &SyntaxNode| node.kind() == K::ConstBlock)
+        {
+          let own = block
+            .descendants_with_tokens()
+            .filter_map(|element| element.into_token())
+            .find(|token| token.kind() == K::LBrace)
+            .unwrap_or_else(|| panic!("{text}: a block with no `{{`"));
+          let closer = balancing_brace(&text, usize::from(own.text_range().start()))
+            .unwrap_or_else(|| panic!("{text}: no brace balances the block's"));
+          assert_eq!(
+            usize::from(block.text_range().end()),
+            closer + 1,
+            "{text}: the block at {:?} ends at a `}}` its braces do not give it",
+            block.text_range()
+          );
+        }
+        for token in answer
+          .tree
+          .descendants_with_tokens()
+          .filter_map(|element| element.into_token())
+          .filter(|token| token.kind() == K::Separator)
+        {
+          assert!(
+            token
+              .parent_ancestors()
+              .any(|node: SyntaxNode| node.kind() == K::ConstBlock),
+            "{text}: a separator at {:?} outside every block",
+            token.text_range()
+          );
+        }
+        // 2. What follows the block, where the junk's braces balance.
+        if junk != "{" {
+          assert!(
+            answer.tree.descendants().any(|node: SyntaxNode| {
+              node.kind() == K::InputValueDefinition
+                && node.text().to_string().trim().starts_with("zz")
+            }),
+            "{text}: `zz` is no field"
+          );
+          assert_eq!(scalars(&top(&answer.tree)), ["scalar S"], "{text}");
+        }
+        // 3. The later member, for the family that can keep it.
+        if let Some((aggregate, kind, written)) = member
+          && !matches!(junk, "[" | "{" | "<")
+          && !closes_what_it_did_not_open(hole, junk)
+        {
+          later += 1;
+          assert!(
+            answer.tree.descendants().any(|node: SyntaxNode| {
+              node.kind() == *aggregate
+                && node.children().any(|child: SyntaxNode| {
+                  child.kind() == *kind && child.text().to_string().trim() == *written
+                })
+            }),
+            "{text}: `{written}` is no member of its {aggregate:?}"
+          );
+        }
+      }
+    }
+    assert_eq!(texts, 34 * 19);
+    assert!(later >= 18 * 12, "only {later} texts held the later member");
+  }
+
+  /// The defect rows the falsifier does not reach: junk of two tokens in a map's key, a
+  /// parenthesis inside a list that a map entry's value holds, a list in a map's key that never
+  /// closes, type arguments that meet an entry's `=>`, a list type that meets the arguments' `>`,
+  /// and a collection with no `{`. Each keeps the definition and the field after it, and what the
+  /// row names.
+  #[test]
+  fn each_defect_inside_a_block_keeps_the_definition_and_what_its_row_names() {
+    /// The entries of the first map in `tree`, each as it is written.
+    fn entries(tree: &SyntaxNode) -> Vec<String> {
+      tree
+        .descendants()
+        .find(|node: &SyntaxNode| node.kind() == K::MapValue)
+        .expect("a map")
+        .children()
+        .filter(|node: &SyntaxNode| node.kind() == K::MapEntry)
+        .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
+        .collect()
+    }
+    /// How many fields the input holds.
+    fn fields(tree: &SyntaxNode) -> usize {
+      tree
+        .descendants()
+        .filter(|node: &SyntaxNode| node.kind() == K::InputValueDefinition)
+        .count()
+    }
+    for (row, text, names) in [
+      // A2: `2` is junk after the key, `3` is read on to the `=>`, and the entry keeps both halves.
+      (
+        "A2",
+        "input I { a: T = const { map!{ 1 2 3 => 4 } } b: Int }",
+        &["1 2 3 => 4"][..],
+      ),
+      // A4: the parenthesis leaves the list its `]` and the map its `,`.
+      (
+        "A4",
+        "input I { a: T = const { map!{ 1 => [(2], 3 => 4 } } b: Int }",
+        &["1 => [(2]", "3 => 4"][..],
+      ),
+      // A5: the list leaves the entry its `=>`.
+      (
+        "A5",
+        "input I { a: T = const { map!{ [1 => 2, 3 => 4 } } b: Int }",
+        &["[1 => 2", "3 => 4"][..],
+      ),
+    ] {
+      let answer = read(text);
+      assert_eq!(
+        fields(&answer.tree),
+        2,
+        "{row} {text}: `b` stays a field of `I`"
+      );
+      assert_eq!(entries(&answer.tree), names, "{row} {text}");
+    }
+
+    // A9 and A10: the type arguments, and a type missing in them, leave the entry its `=>`. After
+    // a lone `<` a comma is no separator, so what follows the entry is not read as an entry of its
+    // own, which is the lexer's rule and no row's.
+    let answer = read("input I { a: T = const { map!{ Box< => 1, 2 => 3 } } b: Int }");
+    assert_eq!(fields(&answer.tree), 2, "A9: `b` stays a field of `I`");
+    assert_eq!(
+      entries(&answer.tree).first().map(String::as_str),
+      Some("Box< => 1"),
+      "A9: {:?}",
+      entries(&answer.tree)
+    );
+    let answer = read("input I { a: T = const { map!{ x < 1 => 2, 3 => 4 } } b: Int }");
+    assert_eq!(fields(&answer.tree), 2, "A10: `b` stays a field of `I`");
+    assert!(
+      entries(&answer.tree)
+        .first()
+        .is_some_and(|entry| entry.starts_with("x < 1 => 2")),
+      "A10: {:?}",
+      entries(&answer.tree)
+    );
+
+    // A11: the list type leaves the arguments their `>`, and the typed value its `(1)`.
+    let answer = read("input I { a: T = const { Box<[i32 >(1) } b: Int }");
+    assert_eq!(fields(&answer.tree), 2, "A11: `b` stays a field of `I`");
+    let typed = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::TypedValue)
+      .expect("A11: the typed value keeps its body");
+    assert_eq!(typed.text().to_string(), "Box<[i32 >(1)", "A11");
+
+    // A14: `set!` with no `{` is a form with no body, and the block goes on.
+    let answer = read("input I { a: T = const { set! 1 } b: Int }");
+    assert_eq!(fields(&answer.tree), 2, "A14: `b` stays a field of `I`");
+    let set = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::SetValue)
+      .expect("A14: the set");
+    assert_eq!(set.text().to_string().trim(), "set!", "A14");
+  }
+
+  /// Outside a block, a run after a value at a member position leaves the next member's name,
+  /// which a `:` follows (A25), and a map entry an expression stands in ends where its `=>` is
+  /// missing rather than unwinding the definition (A26), a key's group that never closes stopping
+  /// in front of the entry's `=>` (A27). What main keeps is kept.
+  #[test]
+  fn a_run_outside_a_block_keeps_the_next_member_and_entry() {
+    /// The direct children of kind `kind` of the first node of kind `parent`, each as written.
+    fn members(tree: &SyntaxNode, parent: K, kind: K) -> Vec<String> {
+      tree
+        .descendants()
+        .find(|node: &SyntaxNode| node.kind() == parent)
+        .unwrap_or_else(|| panic!("no {parent:?}"))
+        .children()
+        .filter(|node: &SyntaxNode| node.kind() == kind)
+        .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
+        .collect()
+    }
+    // A25, after a member's default, in an object, and in a directive's arguments.
+    let answer = read("input I { a: T = 1 + b: Int }");
+    assert_eq!(answer.reports, 1, "A25: one report, at the `+`");
+    assert_eq!(
+      members(
+        &answer.tree,
+        K::InputFieldsDefinition,
+        K::InputValueDefinition
+      ),
+      ["a: T = 1 +", "b: Int"]
+    );
+    let answer = read("input I { a: T = { a: 1 + b: 2 } zz: Int }");
+    assert_eq!(answer.reports, 1, "A25: one report, at the `+`");
+    assert_eq!(
+      members(&answer.tree, K::ObjectValue, K::ObjectField),
+      ["a: 1", "b: 2"]
+    );
+    let answer = read("input I { a: T @d(x: 1 + y: 2) zz: Int }");
+    assert_eq!(answer.reports, 1, "A25: one report, at the `+`");
+    assert_eq!(
+      members(&answer.tree, K::Arguments, K::Argument),
+      ["x: 1", "y: 2"]
+    );
+
+    // A26 and A27: the map keeps the entry after the junk, and `b` stays a field.
+    for (row, text) in [
+      ("A26", "input I { a: T = map!{ 1 => 2 () 3 => 4 } b: Int }"),
+      ("A27", "input I { a: T = map!{ (1 => 2 3 => 4 } b: Int }"),
+    ] {
+      let answer = read(text);
+      assert_eq!(answer.reports, 1, "{row} {text}: one report, at the `(`");
+      let entries = members(&answer.tree, K::MapValue, K::MapEntry);
+      assert_eq!(
+        entries.last().map(String::as_str),
+        Some("3 => 4"),
+        "{row} {text}: {entries:?}"
+      );
+      assert_eq!(
+        members(
+          &answer.tree,
+          K::InputFieldsDefinition,
+          K::InputValueDefinition
+        )
+        .len(),
+        2,
+        "{row} {text}: `b` stays a field of `I`"
+      );
+    }
   }
 
   // ── Through the analyzer ───────────────────────────────────────────────────────────────────
