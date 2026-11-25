@@ -2075,6 +2075,33 @@ mod lossless {
     }
   }
 
+  /// An operand a run reads that fails, a rooted path whose `::` is missing, ends the run where it
+  /// failed rather than unwinding the definition: the field after it is kept, as main keeps it.
+  #[test]
+  fn an_operand_a_run_reads_that_fails_ends_the_run() {
+    let text = "input I { a: T = 1 + ~ b: Int }";
+    let answer = read(text);
+    assert_eq!(
+      answer.reports, 2,
+      "two reports, at the `+` and the `::` the `~` is missing"
+    );
+    let members: Vec<String> = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::InputFieldsDefinition)
+      .expect("the input's fields")
+      .children()
+      .filter(|node: &SyntaxNode| node.kind() == K::InputValueDefinition)
+      .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
+      .collect();
+    assert_eq!(members.len(), 2, "{text}: {members:?}");
+    assert_eq!(
+      members.last().map(String::as_str),
+      Some("b: Int"),
+      "{text}: {members:?}"
+    );
+  }
+
   // ── Through the analyzer ───────────────────────────────────────────────────────────────────
 
   #[cfg(feature = "analysis")]

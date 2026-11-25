@@ -1491,6 +1491,11 @@ lossless_production! {
   /// member's head: a name that a `:` follows is not an operand of the run but the next argument's,
   /// field's or member's own, and the run ends in front of it. Telling it apart takes a second
   /// token, and the read happens only there, outside a block, in a run that has already reported.
+  ///
+  /// An operand the run reads is judged as a block's expression judges its own: a failure that
+  /// ends the document is returned, and any other, a rooted path missing its `::` or a path
+  /// missing its name after one, has reported itself where it failed and ends the run there. So
+  /// the member after it is still the member loop's, and the definition around it stands.
   fn expression_run<'inp, Src, Ctx>(inp, at: RunAt) {
     let at_key = at.at_key();
     let mut after_value = at.after_value();
@@ -1532,9 +1537,18 @@ lossless_production! {
         {
           return Ok(());
         }
+        // The operand is judged as a block's expression judges its own, through
+        // `depth::judge_turn`: a failure that ends the document is returned, and any other has
+        // reported itself where it failed and ends the run there, so what stands there, the next
+        // member's head among it, is the caller's.
         Some(head) if !after_value && starts_value(head) => {
-          value::<Src, Ctx>(inp, Constness::Schema)?;
-          after_value = true;
+          let JudgedTurn { turn, .. }: JudgedTurn<(), GraphqlxLosslessError<'inp, Src, Ctx>> =
+            depth::judge_turn(inp, |inp| value::<Src, Ctx>(inp, Constness::Schema));
+          match turn {
+            RootTurn::Parsed(()) => after_value = true,
+            RootTurn::EndsTheDocument(error) => return Err(error),
+            RootTurn::Recoverable(_) => return Ok(()),
+          }
         }
         _ => return Ok(()),
       }
