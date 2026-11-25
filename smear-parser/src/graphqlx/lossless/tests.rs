@@ -174,3 +174,45 @@ fn a_stop_inside_a_block_leaves_the_lexer_in_the_block() {
     );
   }
 }
+
+/// The syntactic layer's texts whose opener stands right behind a typed form's `<`, at a ceiling
+/// the `<` passes and that opener does not: here the read of that opener is the next one, at the
+/// cursor. After the production returns its error, the block's own verdict says it stopped, by the
+/// error's mark, a stop at the cursor or the witness, the lexer is still in the block, and the next
+/// read is refused.
+#[test]
+fn a_stop_behind_a_typed_forms_angle_inside_a_block_stays_one() {
+  for text in [
+    "const { Box<[T]>(1) }",
+    "const { P<[T]> {} }",
+    "const { Box<( }",
+    "const { Box<{ }",
+  ] {
+    let (stopped, in_block, refused) = hold(
+      text,
+      LexerState::new(LosslessLimits::with_max_nesting_depth(2)),
+      |inp| {
+        let since = inp.scanner_trip_snapshot();
+        match value::<str, _>(inp, Constness::Schema) {
+          Ok(()) => (false, inp.state().in_const_block(), false),
+          Err(error) => (
+            error.is_terminal()
+              || inp.at_scanner_stop()
+              || inp.scanner_stopped_during_attempt(since),
+            inp.state().in_const_block(),
+            inp.try_expect_or_stop(|_| true).is_err(),
+          ),
+        }
+      },
+    );
+    assert!(
+      stopped,
+      "{text}: the opener past the ceiling ends the parse"
+    );
+    assert!(
+      in_block,
+      "{text}: the production wrote no state over the stop"
+    );
+    assert!(refused, "{text}: the next read is refused");
+  }
+}

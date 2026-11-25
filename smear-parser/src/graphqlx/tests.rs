@@ -647,6 +647,105 @@ fn a_scanner_stop_inside_a_block_leaves_the_lexer_in_the_block() {
   assert!(refused, "a read at the latched stop is refused");
 }
 
+/// A stop that a read past the staged head meets inside a block stays one, under a fatal emitter
+/// and under one that records and goes on. Each text puts an opener right behind a typed form's
+/// `<`, which a two-token read looks at, at a ceiling the `<` passes and that opener does not: the
+/// block's `{` is the first bracket and the `<` the second.
+///
+/// After the production returns its error, the witness says a stop is latched, the lexer is still
+/// in the block, and once the `<` that was staged is consumed, the next read is refused. A block
+/// whose cleanup asked where a stop stands rather than whether one is latched left the block there
+/// and dropped the stop.
+#[test]
+fn a_stop_a_read_past_the_head_meets_inside_a_block_stays_one_under_either_emitter() {
+  use smear_lexer::limits::SyntacticLimits;
+  use tokora::{ParserContext, cache::DefaultCache, emitter::Verbose};
+
+  type Lx<'inp> = GraphqlxLexer<'inp, str>;
+  /// A context whose emitter records each error and goes on.
+  type Vx<'inp> = ParserContext<
+    'inp,
+    Lx<'inp>,
+    Verbose<GraphqlxErrors<&'inp str>, SimpleSpan, GraphQLx>,
+    DefaultCache<'inp, Lx<'inp>>,
+    GraphQLx,
+  >;
+
+  /// `f` over `src` under the recording emitter, its lexer started in `state`.
+  fn recording<'inp, O>(
+    f: impl for<'c> FnMut(
+      &mut GraphqlxInput<'inp, 'c, str, Vx<'inp>>,
+    ) -> Result<O, GraphqlxErrors<&'inp str>>,
+    src: &'inp str,
+    state: SyntacticState,
+  ) -> Result<O, GraphqlxErrors<&'inp str>> {
+    Parser::with_parser_and_context::<'inp, Lx<'inp>, O, Vx<'inp>, _, GraphQLx>(
+      f,
+      ParserContext::of(Verbose::default()),
+    )
+    .parse_str_with_state(src, state)
+  }
+
+  let ceiling = || SyntacticState::new(SyntacticLimits::with_max_nesting_depth(2));
+  for text in [
+    "const { Box<[T]>(1) }",
+    "const { P<[T]> {} }",
+    "const { Box<( }",
+    "const { Box<{ }",
+  ] {
+    let fatal = drive_str_with_state(
+      |inp| {
+        let since = inp.scanner_trip_snapshot();
+        let read = ast::ConstInputValue::graphqlx_schema(inp);
+        assert!(read.is_err(), "{text}: the opener is past the ceiling");
+        let stopped = inp.scanner_stopped_during_attempt(since);
+        let in_block = inp.state().in_const_block();
+        let staged = inp.next_or_stop().is_ok();
+        let refused = inp.next_or_stop().is_err();
+        Ok::<_, GraphqlxErrors<&str>>((stopped, in_block, staged, refused))
+      },
+      text,
+      ceiling(),
+    )
+    .expect("the cell reads on past the error it caught");
+    let accepting = recording(
+      |inp| {
+        let since = inp.scanner_trip_snapshot();
+        let read = ast::ConstInputValue::graphqlx_schema(inp);
+        assert!(read.is_err(), "{text}: the opener is past the ceiling");
+        let stopped = inp.scanner_stopped_during_attempt(since);
+        let in_block = inp.state().in_const_block();
+        let staged = inp.next_or_stop().is_ok();
+        let refused = inp.next_or_stop().is_err();
+        Ok::<_, GraphqlxErrors<&str>>((stopped, in_block, staged, refused))
+      },
+      text,
+      ceiling(),
+    )
+    .expect("the cell reads on past the error it caught");
+    for (emitter, (stopped, in_block, staged, refused)) in
+      [("fatal", fatal), ("recording", accepting)]
+    {
+      assert!(
+        stopped,
+        "{text} under the {emitter} emitter: the stop is latched"
+      );
+      assert!(
+        in_block,
+        "{text} under the {emitter} emitter: the production wrote no state over the stop"
+      );
+      assert!(
+        staged,
+        "{text} under the {emitter} emitter: the staged `<` is read"
+      );
+      assert!(
+        refused,
+        "{text} under the {emitter} emitter: the read after it is refused"
+      );
+    }
+  }
+}
+
 #[test]
 fn public_value_composition_parsers_and_direct_apis_are_source_generic() {
   fn check_set<S: AsRef<[u8]>>(value: ast::Set<S>) {
