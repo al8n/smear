@@ -4496,6 +4496,41 @@ const SITES: &[Site] = &[
     "Ok",
     Absent::Token(K::ObjectValue, "}"),
   ),
+  // A block reads a field's `:`, a map entry's `=>` and a collection's `{` rather than expects
+  // them: each is reported where it is missing, and the member ends with what it has. And a map's
+  // own `,` at a member's head is a member missing, reported there and taken.
+  (
+    "value.rs",
+    "report",
+    "input I { a: T = const { {b, c: 1} } }",
+    Root::Mixed,
+    "MissingChild ObjectField",
+    Absent::Imaged,
+  ),
+  (
+    "value.rs",
+    "report",
+    "input I { a: T = const { map!{1, 2 => 3} } }",
+    Root::Mixed,
+    "MissingChild MapEntry",
+    Absent::Imaged,
+  ),
+  (
+    "value.rs",
+    "report",
+    "input I { a: T = const { set! } }",
+    Root::Mixed,
+    "MissingChild SetValue",
+    Absent::Imaged,
+  ),
+  (
+    "value.rs",
+    "report",
+    "input I { a: T = const { map!{1 => 2,, 3 => 4} } }",
+    Root::Mixed,
+    "UnexpectedChild MapValue Separator",
+    Absent::Imaged,
+  ),
   // An expression outside a block: the block is offered at its first token, and the run keeps the
   // operator as an `Error`, so the probe leaves a hole.
   (
@@ -4753,7 +4788,7 @@ fn every_report_and_build_site_has_a_measured_answer() {
   };
   assert_eq!(
     (total("report"), total("unclosed")),
-    (74, 22),
+    (78, 22),
     "the two families' populations"
   );
 
