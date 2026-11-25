@@ -30,9 +30,9 @@ Root@0..35
                   Path@25..27
                     Name@25..26 "b"
                     Space@26..27 " "
-              Error@27..30
+              Error@27..31
                 InlineString@27..30 "\"x\""
-              Space@30..31 " "
+                Space@30..31 " "
               RBrace@31..32 "}"
           Space@32..33 " "
         RBrace@33..34 "}"

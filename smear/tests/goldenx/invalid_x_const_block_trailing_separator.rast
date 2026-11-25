@@ -28,9 +28,9 @@ Root@0..32
               Expression@25..26
                 IntValue@25..26
                   Int@25..26 "1"
-              Error@26..27
+              Error@26..28
                 Separator@26..27 ","
-              Space@27..28 " "
+                Space@27..28 " "
               RBrace@28..29 "}"
           Space@29..30 " "
         RBrace@30..31 "}"

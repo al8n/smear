@@ -1903,13 +1903,14 @@ mod lossless {
     }
 
     // A9 and A10: the type arguments, and a type missing in them, leave the entry its `=>`. After
-    // a lone `<` a comma is no separator, so what follows the entry is not read as an entry of its
-    // own, which is the lexer's rule and no row's.
+    // a lone `<` a comma is trivia and no separator, until a `>` or a brace, so what follows the
+    // entry's value up to the next `=>` is the entry's and no entry of its own: the lexer's rule,
+    // and no row's.
     let answer = read("input I { a: T = const { map!{ Box< => 1, 2 => 3 } } b: Int }");
     assert_eq!(fields(&answer.tree), 2, "A9: `b` stays a field of `I`");
     assert_eq!(
       entries(&answer.tree).first().map(String::as_str),
-      Some("Box< => 1"),
+      Some("Box< => 1, 2"),
       "A9: {:?}",
       entries(&answer.tree)
     );
