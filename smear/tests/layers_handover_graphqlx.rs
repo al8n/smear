@@ -589,6 +589,38 @@ mod lossless {
     }
   }
 
+  /// A run's first error is one in both layers, whatever the run reads after it: at each position a
+  /// run stands at, its operand a list left open with a `>>` inside it, the syntactic layer's one
+  /// error is the lossless layer's first, in code and in span, at the run's first token and against
+  /// the block.
+  #[test]
+  fn the_first_error_of_a_run_is_one_in_both_layers() {
+    let code_and_span = |line: &str| line.split(": ").next().unwrap_or_default().to_string();
+    for text in [
+      "input I { a: T = 1 + [1 + 2 >> 3 zz: Int } scalar S",
+      "input I { a: T = + [1 + 2 >> 3 zz: Int } scalar S",
+      "type T { f(a: T = 1 + [1 + 2 >> 3 zz: Int): Int g: Int } scalar S",
+      "input I { a: T = { f: 1 + [1 + 2 >> 3 g: 2 } zz: Int } scalar S",
+      "input I { a: T @d(x: 1 + [1 + 2 >> 3 y: 2) zz: Int } scalar S",
+      "input I { a: T @d(x: 1 + [1 + 2 >> 3) zz: Int } scalar S",
+      "input I { a: T = map!{ 1 + [1 + 2 >> 3 => 2 3 => 4 } zz: Int } scalar S",
+      "input I { a: T = map!{ 1 => + [1 + 2 >> 3 3 => 4 } zz: Int } scalar S",
+      "input I { a: T = [1 + [1 + 2 >> 3 5] zz: Int } scalar S",
+      "input I { a: T = set!{ 1 + [1 + 2 >> 3 5 } zz: Int } scalar S",
+      "input I { a: T = Url(1 + [1 + 2 >> 3) zz: Int } scalar S",
+    ] {
+      let at = text.find('+').expect("the run's first token");
+      let (ours, theirs, _) = said(text);
+      assert_eq!(code_and_span(&ours), code_and_span(&theirs), "{text}");
+      assert_eq!(
+        code_and_span(&ours),
+        format!("smear::syntax::unexpected-token at {at}..{}", at + 1),
+        "{text}"
+      );
+      assert!(ours.contains("`const { … }` block"), "{text}: {ours}");
+    }
+  }
+
   /// A `::` at a block operand's head begins no operand, and both layers refuse it as they refuse
   /// every head that begins none: one code, at one token.
   #[test]
