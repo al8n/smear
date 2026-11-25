@@ -90,7 +90,10 @@ mod lossless {
 
   use smear::{
     diagnostic::Diagnose,
-    lexer::{SyntaxErrorKind, limits::LosslessLimits},
+    lexer::{
+      SyntaxErrorKind,
+      limits::{LosslessLimits, SyntacticLimits},
+    },
     parser::{
       graphqlx::{
         Lossless, Syntactic,
@@ -856,6 +859,53 @@ mod lossless {
         lossless.first().map(String::as_str),
         Some(expected),
         "{text}: {lossless:?}"
+      );
+    }
+  }
+
+  /// A `set!` or a `map!` with no `{` inside a block, under a nesting ceiling the two braces
+  /// around it fill: both layers refuse the missing `{` where it should be, and neither refuses
+  /// the depth, since no body is there to spend a level on.
+  #[test]
+  fn a_collection_with_no_brace_is_refused_at_the_brace_and_not_the_depth_in_both_layers() {
+    fn shown<E: Diagnose>(errors: &[E]) -> Vec<String> {
+      errors
+        .iter()
+        .map(|error| {
+          let span = error.primary().span();
+          format!(
+            "{} at {}..{}",
+            error.code().as_str(),
+            span.map_or(0, |span| span.start()),
+            span.map_or(0, |span| span.end())
+          )
+        })
+        .collect()
+    }
+    for text in [
+      "input I { a: T = const { set! } b: Int }",
+      "input I { a: T = const { map! } b: Int }",
+    ] {
+      let expected = "smear::syntax::unexpected-token at 30..31";
+      let mut lossless: Vec<Lent<'_>> = Vec::new();
+      let _ = Lossless::with_limits(LosslessLimits::with_max_nesting_depth(2))
+        .type_system_document(text, &mut lossless)
+        .expect("a short text is short enough for a tree");
+      let mut syntactic: Vec<GraphqlxError<&str>> = Vec::new();
+      let _ = Syntactic::with_limits(SyntacticLimits::with_max_nesting_depth(2))
+        .type_system_document(text, &mut syntactic);
+      let (ours, theirs) = (shown(&lossless), shown(&syntactic));
+      assert_eq!(theirs, [expected], "{text}");
+      assert_eq!(
+        ours.first().map(String::as_str),
+        Some(expected),
+        "{text}: {ours:?}"
+      );
+      assert!(
+        !ours
+          .iter()
+          .any(|error| error.starts_with("smear::syntax::nesting-limit")),
+        "{text}: {ours:?}"
       );
     }
   }

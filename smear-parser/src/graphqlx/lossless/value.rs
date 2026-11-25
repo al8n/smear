@@ -1190,13 +1190,15 @@ lossless_production! {
   ///
   /// The `{` is read, not expected: where it is missing it is reported where it should be, and the
   /// form ends with no body.
+  ///
+  /// The level of nesting the body costs is taken once its `{` is there, and held through its
+  /// members, as the syntactic layer counts it: a `set!` or a `map!` with no `{` is refused at the
+  /// `{` it is missing, whatever the ceiling, and never at the depth.
   fn block_collection_body<'inp, Src, Ctx>(
     inp,
     mark: tokora::cst::EventMark,
     collection: Collection,
   ) {
-    let mut frame = super::descend::<Src, Ctx>(inp)?;
-    let inp = &mut *frame;
     let kind = match collection {
       Collection::Set => K::SetValue,
       Collection::Map => K::MapValue,
@@ -1207,9 +1209,12 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         // The `!` the caller peeked.
         expect::<Src, Ctx>(inp, Kind::Bang)?;
-        if !eat_if::<Src, Ctx>(inp, Kind::LBrace)? {
+        if peek_kind::<Src, Ctx>(inp)? != Some(Kind::LBrace) {
           return recover::report_unexpected::<Src, Ctx>(inp, COLLECTION_BODY_HEADS);
         }
+        let mut frame = super::descend::<Src, Ctx>(inp)?;
+        let inp = &mut *frame;
+        expect::<Src, Ctx>(inp, Kind::LBrace)?;
         let open = opener_span(inp.span().end());
         // Read once the form's own `{` is committed, so it counts that brace.
         let floor: usize = inp.state().brace_depth();
