@@ -34,6 +34,16 @@ use crate::simd::{
   scan_identifier, scan_number, skip_ws_and_comma,
 };
 
+/// `b`, weighted as rarely true. `core::hint::unlikely` is unstable, and this is the spelling
+/// `cold_path`'s documentation gives for it.
+#[inline(always)]
+const fn unlikely(b: bool) -> bool {
+  if b {
+    core::hint::cold_path();
+  }
+  b
+}
+
 /// Whether the `.` that `bytes` begins with begins a number with no integer part, as the number
 /// grammars read one: `(?&frac)(?&exp)?`, a `.` and a run of digits and `_` that holds a digit, or
 /// `(?&hex_frac)(?&hex_exp)`, a `.`, a run of hexadecimal digits and `_` that holds a digit, and an
@@ -977,14 +987,10 @@ where
 
   #[inline(always)]
   fn lex(&mut self) -> Option<Result<Self::Token, <Self::Token as tokora::Token<'inp>>::Error>> {
-    // The word is the parser's to write, between two calls, so it is read once here and the body
-    // asks a constant: the instance outside a block is the one this inlines, and a block's is kept
-    // out of line.
-    if self.state.in_const_block() {
-      self.lex_in_block()
-    } else {
-      self.lex_body::<false>()
-    }
+    // Every item is built in the loop this inlines. Nothing the loop calls out of line answers an
+    // item or a token: one that comes whole out of a callee's answer brings the seven bytes after
+    // its tag, and tokora's drivers then carry them for every token.
+    self.lex_body()
   }
 
   /// Extend the current token's end by `n`, mirroring `logos::Lexer::bump`:
@@ -1007,9 +1013,8 @@ where
   }
 }
 
-// The lexing loop, with the trait impl's bound set and one constant more. `lex` runs the instance
-// outside a block itself, and the instance inside one through `lex_in_block`, kept out of line so
-// that `lex`'s own code does not double. Both are this one text, so they cannot drift apart.
+// The lexing loop, with the trait impl's bound set. One body serves a block and the rest of the
+// text alike: each place a block lexes otherwise asks the state, and `unlikely` weighs the answer.
 //
 // `DelegateStringError`, `NumberLexerToken`, `CharBody` and `ByteStrBody` are crate-internal; they
 // appear here only as bounds on private methods, never as nameable API, so silence
@@ -1036,28 +1041,13 @@ where
     Token<'inp, Error = LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>>,
   <S::Slice<'inp> as Slice<'inp>>::Char: CharLen + CharBody + ByteStrBody,
 {
-  /// The loop's instance inside a `const { … }` block.
-  #[allow(clippy::type_complexity)]
-  #[cold]
-  #[inline(never)]
-  fn lex_in_block(
-    &mut self,
-  ) -> Option<
-    Result<
-      SyntacticToken<S::Slice<'inp>>,
-      LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>,
-    >,
-  > {
-    self.lex_body::<true>()
-  }
-
-  /// The lexing loop: one item from the cursor. `IN_BLOCK` says whether the state is inside a
-  /// `const { … }` block, and each place the block lexes otherwise asks it, never the state: the
-  /// skip before a token, `-`, `<`, `>`, the braces, a comma, and a name touching a quote. Inside
-  /// a block the count of open `<` is read from the state at each of those places.
+  /// The lexing loop: one item from the cursor. Each place a block lexes otherwise asks the
+  /// state whether it is inside a `const { … }` block: the skip before a token, `-`, `<`, `>`, the
+  /// braces, a comma, and a name touching a quote. Inside a block the count of open `<` is read
+  /// from the state at each of those places.
   #[allow(clippy::type_complexity)]
   #[inline(always)]
-  fn lex_body<const IN_BLOCK: bool>(
+  fn lex_body(
     &mut self,
   ) -> Option<
     Result<
@@ -1130,7 +1120,7 @@ where
 
     loop {
       // Inside a block with no `<` open a comma is a token, so the skip leaves it.
-      if IN_BLOCK && self.state.open_angles() == 0 {
+      if unlikely(self.state.in_const_block() && self.state.open_angles() == 0) {
         self.skip_ws();
       } else {
         self.skip_ws_and_comma();
@@ -1157,8 +1147,11 @@ where
         b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
           let len = scan_identifier(bytes);
           // Inside a block a name touching a quote is a prefix: one byte's peek.
-          if IN_BLOCK && matches!(bytes.get(len), Some(b'"' | b'\'')) {
-            return self.prefixed(token_start, len);
+          if unlikely(self.state.in_const_block()) && matches!(bytes.get(len), Some(b'"' | b'\'')) {
+            return Some(match self.prefixed(token_start, len)? {
+              Ok(literal) => finish!(self, SyntacticToken::LitPrefixedStr(literal)),
+              Err(errors) => Err(errors),
+            });
           }
           self.cursor += len;
           self.last_span = SimpleSpan::new(token_start, self.cursor);
@@ -1175,7 +1168,9 @@ where
         // `NumberToken` returns the correct single token either way (its
         // `#[token("-")] Minus` arm covers the bare operator).
         // Inside a block no number carries a sign: `-` is always the operator.
-        b'-' if IN_BLOCK => return Some(emit_punct!(self: token_start, SyntacticToken::Minus)),
+        b'-' if unlikely(self.state.in_const_block()) => {
+          return Some(emit_punct!(self: token_start, SyntacticToken::Minus));
+        }
         b'0'..=b'9' | b'-' => match scan_number(bytes) {
           // Valid *decimal* int/float: emit inline, byte-identical to what the
           // delegated grammar produces (`NumberToken::Decimal`/`Float` map to
@@ -1209,7 +1204,7 @@ where
               SyntacticToken::LitFloat(LitFloat::Decimal(slice))
             ));
           }
-          None => return self.delegate_number_to_logos(token_start, IN_BLOCK),
+          None => return self.delegate_number_to_logos(token_start, self.state.in_const_block()),
         },
         b'*' => return Some(emit_punct!(self: token_start, SyntacticToken::Asterisk)),
         b'&' => return Some(emit_punct!(self: token_start, SyntacticToken::Ampersand)),
@@ -1226,7 +1221,7 @@ where
         b'[' => return Some(increase_recursion!(self: token_start, SyntacticToken::LBracket)),
         b'{' => {
           // A brace clears the count of open `<`, inside a block.
-          if IN_BLOCK {
+          if unlikely(self.state.in_const_block()) {
             self.state.clear_angles();
           }
           return Some(increase_recursion!(self: token_start, SyntacticToken::LBrace));
@@ -1237,7 +1232,7 @@ where
         }
         b'<' => {
           // Inside a block a lone `<` is counted as it steps the tally, before the tally's check.
-          if IN_BLOCK {
+          if unlikely(self.state.in_const_block()) {
             self.state.open_angle();
           }
           return Some(increase_recursion!(self: token_start, SyntacticToken::LAngle));
@@ -1245,13 +1240,13 @@ where
         b')' => return Some(decrease_recursion!(self: token_start, SyntacticToken::RParen)),
         b']' => return Some(decrease_recursion!(self: token_start, SyntacticToken::RBracket)),
         b'}' => {
-          if IN_BLOCK {
+          if unlikely(self.state.in_const_block()) {
             self.state.clear_angles();
           }
           return Some(decrease_recursion!(self: token_start, SyntacticToken::RBrace));
         }
         b'>' => {
-          if IN_BLOCK {
+          if unlikely(self.state.in_const_block()) {
             // With no `<` open, `>>` is a shift, which steps no tally; a `>` alone is the stray
             // closer it is outside a block. With one open, the `>` closes it.
             if self.state.open_angles() == 0 {
@@ -1265,7 +1260,9 @@ where
           return Some(decrease_recursion!(self: token_start, SyntacticToken::RAngle));
         }
         // Inside a block with no `<` open the skip left the comma: it is the token `Separator`.
-        b',' if IN_BLOCK => return Some(emit_punct!(self: token_start, SyntacticToken::Separator)),
+        b',' if unlikely(self.state.in_const_block()) => {
+          return Some(emit_punct!(self: token_start, SyntacticToken::Separator));
+        }
         // Two-byte punctuation: peek one byte so `::`/`=>` win over the
         // single-byte `:`/`=`, replicating Logos's longest match.
         b':' => {
@@ -1303,7 +1300,7 @@ where
           // whose first digit is not the byte after the `.`, inside a block and outside one alike:
           // the dispatch follows it in both.
           if matches!(bytes.get(1), Some(b'0'..=b'9')) || dot_begins_a_fraction(bytes) {
-            return self.delegate_number_to_logos(token_start, IN_BLOCK);
+            return self.delegate_number_to_logos(token_start, self.state.in_const_block());
           }
           // A lone `.` (or `.` before any non-digit) is an unterminated spread
           // operator — the same error the full grammar's `#[token(".")]` arm
@@ -1480,6 +1477,7 @@ where
   /// prefix's refusal, whose record holds the literal's own errors after its own when the literal
   /// is refused too. Kept out of line: it is the block's alone, and a name is the commonest token.
   #[allow(clippy::type_complexity)]
+  #[cold]
   #[inline(never)]
   fn prefixed(
     &mut self,
@@ -1487,7 +1485,7 @@ where
     name_len: usize,
   ) -> Option<
     Result<
-      SyntacticToken<S::Slice<'inp>>,
+      LitPrefixedStr<S::Slice<'inp>>,
       LexerErrors<<S::Slice<'inp> as Slice<'inp>>::Char, RecursionLimitExceeded>,
     >,
   > {
@@ -1528,11 +1526,7 @@ where
     match (prefix, char_literal, refused) {
       (Some(prefix), false, None) => {
         let slice = self.src.slice(&quote..&end)?;
-        let token = SyntacticToken::LitPrefixedStr(LitPrefixedStr::new(prefix, block, slice));
-        Some(match self.state.limits().check() {
-          Ok(()) => Ok(token),
-          Err(e) => Err(self.over_recursion_limit(e)),
-        })
+        Some(Ok(LitPrefixedStr::new(prefix, block, slice)))
       }
       (prefix, char_literal, refused) => {
         self.last_error_span = Some(span);
