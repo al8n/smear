@@ -342,17 +342,36 @@ impl<S: AsRef<[u8]>> LitFloat<S> {
 ///
 /// The escapes are a string's, and `\'`; `"` may stand as it is. The literal spells exactly one
 /// Unicode scalar value, which [`value`](Self::value) answers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LitChar<S> {
   source: S,
-  value: char,
+  /// The character, widened to a word. A `char` would leave the rest of its word as padding, and
+  /// where a token is carried as separate values such a word is carried in pieces, cut and joined
+  /// again at every copy. The word compares and orders as the `char` it is made from.
+  value: usize,
 }
+
+// A word holds every `char`: on a target where it did not, the widening would lose characters.
+const _: () = assert!(
+  core::mem::size_of::<usize>() >= core::mem::size_of::<char>(),
+  "LitChar keeps its char in a usize, so a usize must hold every char."
+);
+
+// The literal is its slice and one word: 24 bytes over a `&str` on a 64-bit target.
+const _: () = assert!(
+  core::mem::size_of::<LitChar<&str>>()
+    == core::mem::size_of::<&str>() + core::mem::size_of::<usize>(),
+  "LitChar must stay its slice and one word: widening its char must not grow it."
+);
 
 impl<S> LitChar<S> {
   /// A literal over `source`, whose character the lexer read as `value`.
   #[inline(always)]
   pub(crate) const fn new(source: S, value: char) -> Self {
-    Self { source, value }
+    Self {
+      source,
+      value: value as usize,
+    }
   }
 
   /// The literal's slice, both quotes included.
@@ -364,7 +383,17 @@ impl<S> LitChar<S> {
   /// The character the literal spells, its escape applied.
   #[inline(always)]
   pub const fn value(&self) -> char {
-    self.value
+    char::from_u32(self.value as u32).expect("the word holds the char the literal was made from")
+  }
+}
+
+// By hand, so that `value` prints as the character and not as its word.
+impl<S: core::fmt::Debug> core::fmt::Debug for LitChar<S> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    f.debug_struct("LitChar")
+      .field("source", &self.source)
+      .field("value", &self.value())
+      .finish()
   }
 }
 
@@ -383,20 +412,47 @@ pub enum StrPrefix {
 ///
 /// The token's span begins at the prefix's letter. What the token keeps begins at the string's
 /// quote: the literal's own slice.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LitPrefixedStr<S> {
-  prefix: StrPrefix,
-  block: bool,
+  /// The prefix and whether the string is a block string, in one word for the reason `LitChar`
+  /// widens its character to one: `ID` is set for `i`, and `BLOCK` for a block string. Declared
+  /// before the slice, with the prefix in the higher bit, the word orders as the prefix and then
+  /// the flag do.
+  prefix_and_block: usize,
   source: S,
 }
 
+// The literal is one word and its slice: 24 bytes over a `&str` on a 64-bit target.
+const _: () = assert!(
+  core::mem::size_of::<LitPrefixedStr<&str>>()
+    == core::mem::size_of::<&str>() + core::mem::size_of::<usize>(),
+  "LitPrefixedStr must stay one word and its slice: packing its prefix and flag must not grow it."
+);
+
+// The token is the size of its largest payload, a block string literal, which neither literal above
+// outgrows: 72 bytes over a `&str` on a 64-bit target.
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(
+  core::mem::size_of::<syntactic::SyntacticToken<&str>>() == 72,
+  "SyntacticToken<&str> must stay 72 bytes: the size of its largest payload."
+);
+
 impl<S> LitPrefixedStr<S> {
+  /// `prefix_and_block`'s higher bit: set for the prefix `i`, clear for `b`.
+  const ID: usize = 0b10;
+  /// `prefix_and_block`'s lower bit: set for a block string.
+  const BLOCK: usize = 0b01;
+
   /// A prefixed string whose literal, a block string when `block`, is `source`.
   #[inline(always)]
   pub(crate) const fn new(prefix: StrPrefix, block: bool, source: S) -> Self {
+    let prefix = match prefix {
+      StrPrefix::Bytes => 0,
+      StrPrefix::Id => Self::ID,
+    };
+    let block = if block { Self::BLOCK } else { 0 };
     Self {
-      prefix,
-      block,
+      prefix_and_block: prefix | block,
       source,
     }
   }
@@ -404,19 +460,35 @@ impl<S> LitPrefixedStr<S> {
   /// The string's prefix.
   #[inline(always)]
   pub const fn prefix(&self) -> StrPrefix {
-    self.prefix
+    if self.prefix_and_block & Self::ID != 0 {
+      StrPrefix::Id
+    } else {
+      StrPrefix::Bytes
+    }
   }
 
   /// Whether the string is a block string.
   #[inline(always)]
   pub(crate) const fn is_block(&self) -> bool {
-    self.block
+    self.prefix_and_block & Self::BLOCK != 0
   }
 
   /// The string's slice, from its opening quote.
   #[inline(always)]
   pub(crate) const fn source_ref(&self) -> &S {
     &self.source
+  }
+}
+
+// By hand, so that the prefix and the flag print as the fields `prefix` and `block`, and not as
+// their word.
+impl<S: core::fmt::Debug> core::fmt::Debug for LitPrefixedStr<S> {
+  fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+    f.debug_struct("LitPrefixedStr")
+      .field("prefix", &self.prefix())
+      .field("block", &self.is_block())
+      .field("source", &self.source)
+      .finish()
   }
 }
 
@@ -431,7 +503,7 @@ impl<S: Clone + AsRef<[u8]>> LitPrefixedStr<S> {
   /// is the four characters it shows.
   pub fn literal(&self) -> LitStr<S> {
     let bytes = self.source.as_ref();
-    if self.block {
+    if self.is_block() {
       let block = match skip_block_str_from_bytes::<true>(bytes.get(3..).unwrap_or_default()) {
         Ok(LitBlockStr::Complex(c)) => LitBlockStr::Complex(LitComplexBlockStr::new(
           self.source.clone(),
@@ -452,7 +524,7 @@ impl<S: Clone + AsRef<[u8]>> LitPrefixedStr<S> {
     }
 
     let body = bytes.get(1..).unwrap_or_default();
-    let capacity = match self.prefix {
+    let capacity = match self.prefix() {
       StrPrefix::Bytes => <u8 as ByteStrBody>::read_byte_str(body, 0)
         .read
         .ok()
