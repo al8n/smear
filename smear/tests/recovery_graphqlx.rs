@@ -2971,6 +2971,47 @@ mod lossless {
     assert_eq!(scalars(&top(&answer.tree)), ["scalar S"], "{text}");
   }
 
+  /// A group the text closes, in a member list that closes with `)`, is read whole: a name inside
+  /// it is the group's, and its own `)` closes it, so the list closes at its own `)` and what
+  /// follows the list is its owner's. Round 7's text: the directive keeps its one argument, with
+  /// the run's two `Error`s behind it, and the field after the header is a field of `T`.
+  #[test]
+  fn a_group_that_closes_is_read_whole_where_the_list_closes_with_a_parenthesis() {
+    let text = "type T @d(x: 1 + (a: 2)) { f: Int }";
+    let answer = read(text);
+    assert_eq!(answer.reports, 1, "{text}: the run's report alone");
+    let at = text.find('+').expect("the run's first token");
+    let report = at..at + 1;
+    assert_eq!(
+      error_spans(text),
+      [report],
+      "{text}: at the run's first token"
+    );
+    let arguments = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::Arguments)
+      .expect("the directive's arguments");
+    assert_eq!(
+      child_nodes(&arguments),
+      [
+        (K::Argument, String::from("x: 1")),
+        (K::Error, String::from("+")),
+        (K::Error, String::from("(a: 2)")),
+      ],
+      "{text}"
+    );
+    assert_eq!(
+      members_of(&answer.tree, K::FieldsDefinition, K::FieldDefinition),
+      ["f: Int"],
+      "{text}"
+    );
+    assert!(
+      closes_at_the_end(&answer.tree, K::FieldsDefinition, text),
+      "{text}: `T` ends at its own `}}`"
+    );
+  }
+
   /// A type's arguments that meet the end of input in an executable document ask for their first
   /// type there, as main's do: the first error is the end of input, where that type should stand,
   /// and not the `<` unclosed that a schema's type reports first. A variable's type, a type
