@@ -350,9 +350,14 @@ pub(crate) const COLON_HEADS: &[Kind] = &[Kind::Colon];
 pub(crate) const FAT_ARROW_HEADS: &[Kind] = &[Kind::FatArrow];
 
 /// The `{` a set's or a map's members open with after its `!`: what one inside a block reports
-/// where the `{` is missing. Its contents are three other sets' too, so a report through it renders
-/// as theirs does, with no expectation of its own.
-pub(crate) const COLLECTION_BODY_HEADS: &[Kind] = &[Kind::LBrace];
+/// where the `{` is missing, since the form reads it rather than expects it. A report through this
+/// set renders as [`LBrace`](crate::graphqlx::error::Expectation::LBrace), as a declined `expect` of
+/// the `{` does.
+///
+/// The `{` is named twice so that no other set of this module has these contents. A set is read by
+/// what it holds, and three others hold the `{` alone and render with no expectation: a module's
+/// body, a schema's operation types and a definition's fields, whose messages stay as they are.
+pub(crate) const COLLECTION_BODY_HEADS: &[Kind] = &[Kind::LBrace, Kind::LBrace];
 
 /// What the productions around one inside a `const { … }` block read next, as far out as the
 /// nearest production delimited by braces: a set over `,`, `=>`, `)`, `]`, `>` and `:`.

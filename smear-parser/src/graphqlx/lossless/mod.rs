@@ -259,13 +259,13 @@ crate::lossless::lossless_error_impls! {
 /// other seven, `/`, `%`, `<<`, `>>`, a separating `,`, a character literal and a prefixed string,
 /// so they have no row.
 ///
-/// A report through a head set answers [`Expectation::Unspecified`], whatever the set, but for four
+/// A report through a head set answers [`Expectation::Unspecified`], whatever the set, but for five
 /// sets read by their contents: inside a `const { … }` block, what may follow an operand, which
 /// answers [`Expectation::OperatorOrSeparator`]; the two tokens a block opens with, offered where a
 /// schema position's value would be an expression, which answers [`Expectation::ConstBlock`]; and
-/// the `:` and the `=>` a block's field and map entry read rather than expect, which answer
-/// [`Expectation::Colon`] and [`Expectation::FatArrow`] as a declined `expect` of either does.
-/// Each is what the syntactic layer's refusal there says.
+/// the `:`, the `=>` and the `{` a block's field, map entry and collection read rather than expect,
+/// which answer [`Expectation::Colon`], [`Expectation::FatArrow`] and [`Expectation::LBrace`] as a
+/// declined `expect` of each does. Each is what the syntactic layer's refusal there says.
 fn expectation_of(expected: Option<Expected<'_, LosslessTokenKind>>) -> Expectation {
   match expected {
     Some(Expected::OneOf(set)) if set.as_slice() == recover::OPERATOR_OR_SEPARATOR_HEADS => {
@@ -277,6 +277,9 @@ fn expectation_of(expected: Option<Expected<'_, LosslessTokenKind>>) -> Expectat
     Some(Expected::OneOf(set)) if set.as_slice() == recover::COLON_HEADS => Expectation::Colon,
     Some(Expected::OneOf(set)) if set.as_slice() == recover::FAT_ARROW_HEADS => {
       Expectation::FatArrow
+    }
+    Some(Expected::OneOf(set)) if set.as_slice() == recover::COLLECTION_BODY_HEADS => {
+      Expectation::LBrace
     }
     Some(Expected::One(kind)) => match kind {
       LosslessTokenKind::Identifier => Expectation::Name,
