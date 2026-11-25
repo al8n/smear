@@ -104,8 +104,11 @@ lossless_production! {
   /// `< Type (Type)* >` — the arguments applied to a path.
   ///
   /// Nonempty: `graphqlx/syntactic/ty.rs:86` is `.at_least(1)`, so `Foo<>` is an error rather than
-  /// a path with no arguments. The first element is parsed unconditionally and the loop handles the
-  /// rest, which is what makes the emptiness a diagnostic instead of a silently accepted shape.
+  /// a path with no arguments. The first element is parsed wherever a token stands and the loop
+  /// handles the rest, which is what makes the emptiness a diagnostic instead of a silently accepted
+  /// shape. At the end of input the loop meets the end and reports the `<` unclosed, which is what
+  /// the syntactic driver reports there, at every depth: a type asked for at the end of input
+  /// would report the end first, and the two layers' first errors would part.
   ///
   /// A `}` of a block around the list ends it unclosed, by [`closes_enclosing_block`]:
   /// `type T { f: Box<Int }` keeps the fields' brace for the fields, and the definitions after
@@ -125,9 +128,12 @@ lossless_production! {
         let open = opener_span(inp.span().end());
         let open_at: usize = inp.state().brace_depth();
         let inside = block.map(|owners| owners.with(Kind::RAngle));
-        // The mandatory first argument. `type_ref` reports a closer that stands where a type
-        // should and leaves it, so an empty `<>` reports here and the list closes on its own `>`.
-        type_ref::<Src, Ctx>(inp, inside)?;
+        // The mandatory first argument, where a token stands. `type_ref` reports a closer that
+        // stands where a type should and leaves it, so an empty `<>` reports here and the list
+        // closes on its own `>`.
+        if peek_kind::<Src, Ctx>(inp)?.is_some() {
+          type_ref::<Src, Ctx>(inp, inside)?;
+        }
         loop {
           if eat_if::<Src, Ctx>(inp, Kind::RAngle)? {
             return Ok(());

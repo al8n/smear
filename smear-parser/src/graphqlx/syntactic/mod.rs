@@ -260,12 +260,16 @@ where
 }
 
 /// The `::` that ends a root's sigil, and where it ends.
+///
+/// The end of input is asked first and refused through [`unexpected_here`], whose anchor is the
+/// block's where the lexer is in one: the committed atom would anchor its own refusal at the last
+/// token. At a token nothing changes, and the atom refuses what is not a `::`.
 fn root_separator<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<usize, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
   GraphqlxLexer<'inp, Src>: Lexer<
       'inp,
       Source = Src,
@@ -275,7 +279,11 @@ where
       State = smear_lexer::graphqlx::syntactic::SyntacticState,
     >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
+  if peek_kind(inp)?.is_none() {
+    return unexpected_here(inp, Expectation::PathSeparator);
+  }
   double_colon(inp).map(|separator| separator.span().end())
 }
 
@@ -404,6 +412,12 @@ where
 }
 
 /// Produces a typed GraphQLx unexpected-token error at the current input head.
+///
+/// At the end of input the refusal stands at the last token's end, and inside a `const { … }`
+/// block, where the lexer's state says it is, at the source's end instead: past the trivia after
+/// the last token, where the lossless layer, having read across that trivia, meets the end. So a
+/// helper main has refuses the end of input where a block's own productions do, when a block
+/// reaches it, and nothing changes outside a block. The state is read on that arm alone.
 pub(crate) fn unexpected_here<'inp, Src, Ctx, T>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
   expected: Expectation,
@@ -431,8 +445,12 @@ where
   Err(match found {
     Some((span, kind)) => DialectGraphqlxError::unexpected_token(kind, expected, span).into(),
     None => {
-      DialectGraphqlxError::maybe_unexpected_token(None, expected, SimpleSpan::new(offset, offset))
-        .into()
+      let end = if inp.state().in_const_block() {
+        inp.source().len()
+      } else {
+        offset
+      };
+      DialectGraphqlxError::maybe_unexpected_token(None, expected, SimpleSpan::new(end, end)).into()
     }
   })
 }
