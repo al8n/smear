@@ -2180,6 +2180,48 @@ mod lossless {
     }
   }
 
+  /// The direct children of kind `kind` of the first node of kind `parent` in `tree`, each as it
+  /// is written.
+  fn members_of(tree: &SyntaxNode, parent: K, kind: K) -> Vec<String> {
+    tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == parent)
+      .unwrap_or_else(|| panic!("no {parent:?}"))
+      .children()
+      .filter(|node: &SyntaxNode| node.kind() == kind)
+      .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
+      .collect()
+  }
+
+  /// A `(` a run reads as an operand is closed by its `)` through a brace it opened after it, and
+  /// the read goes on to that brace's own `}`: in `( { x: 1 ) }` the group ends with the brace. So
+  /// the definition's `}` stays the definition's and the member after the run is a member of `I`,
+  /// as main keeps it, whose skip counts every pair in one depth.
+  #[test]
+  fn a_group_closed_inside_its_brace_ends_with_the_brace() {
+    let text = "input I { a: T = 1 + ( { x: 1 ) } b: Int }";
+    let answer = read(text);
+    assert_eq!(answer.reports, 1, "one report, at the `+`");
+    assert_eq!(
+      members_of(
+        &answer.tree,
+        K::InputFieldsDefinition,
+        K::InputValueDefinition
+      ),
+      ["a: T = 1 + ( { x: 1 ) }", "b: Int"]
+    );
+    let fields = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::InputFieldsDefinition)
+      .expect("the input's fields");
+    assert_eq!(
+      fields.text().to_string(),
+      &text["input I ".len()..],
+      "`I` ends at its own `}}`"
+    );
+  }
+
   /// A type's arguments that meet the end of input in an executable document ask for their first
   /// type there, as main's do: the first error is the end of input, where that type should stand,
   /// and not the `<` unclosed that a schema's type reports first. A variable's type, a type
