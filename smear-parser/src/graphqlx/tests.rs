@@ -250,6 +250,28 @@ fn every_path_root_is_read_and_a_leading_separator_is_refused() {
   }
 }
 
+/// A root's sigil that meets the end of input outside a `const { … }` block is refused by the
+/// committed `::` atom, as the end of input with no `::` named: in an executable document's
+/// variable default, and in a path on its own after each sigil. Only a block names the `::`, where
+/// its refusal stands at the source's end.
+#[test]
+fn a_roots_sigil_at_the_end_outside_a_block_is_refused_by_the_separator_atom() {
+  assert_unexpected(
+    |inp| ast::ExecutableDocument::graphqlx(inp).map(|_| ()),
+    "query Q($v: T = ~",
+    Expectation::Unspecified,
+    None,
+  );
+  for src in ["~", "^", ".."] {
+    assert_unexpected(
+      |inp| syntactic::path(inp).map(|_| ()),
+      src,
+      Expectation::Unspecified,
+      None,
+    );
+  }
+}
+
 #[test]
 fn path_try_api_declines_without_consuming_a_non_path_head() {
   let (declined, leftover) = drive_str(

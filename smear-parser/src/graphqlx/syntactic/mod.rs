@@ -261,9 +261,11 @@ where
 
 /// The `::` that ends a root's sigil, and where it ends.
 ///
-/// The end of input is asked first and refused through [`unexpected_here`], whose anchor is the
-/// block's where the lexer is in one: the committed atom would anchor its own refusal at the last
-/// token. At a token nothing changes, and the atom refuses what is not a `::`.
+/// Inside a `const { … }` block, where the lexer's state says it is, the end of input is asked
+/// first and refused through [`unexpected_here`], whose anchor there is the block's: the committed
+/// atom would anchor its own refusal at the last token. Outside a block, and at a token, the atom
+/// refuses what is not a `::`, the end of input among it, so a refusal outside a block is the
+/// atom's own and names no `::`.
 fn root_separator<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<usize, GraphqlxError<'inp, Src, Ctx>>
@@ -281,7 +283,7 @@ where
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
-  if peek_kind(inp)?.is_none() {
+  if inp.state().in_const_block() && peek_kind(inp)?.is_none() {
     return unexpected_here(inp, Expectation::PathSeparator);
   }
   double_colon(inp).map(|separator| separator.span().end())
