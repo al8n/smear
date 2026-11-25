@@ -164,6 +164,9 @@ pub(crate) enum Opener {
 pub(crate) enum RunAt {
   /// At a value's head, in the value's place.
   Value,
+  /// At the head of a member's value, in the value's place: an argument's, an object field's, or a
+  /// member's default. The next member's name, which a `:` follows, is the member loop's.
+  MemberValue,
   /// At a map entry's key, in the key's place.
   Key,
   /// After a map entry's key, from which the run reads on to the entry's `=>`.
@@ -178,12 +181,17 @@ pub(crate) enum RunAt {
 impl RunAt {
   /// Whether the run's first token directly follows a value.
   const fn after_value(self) -> bool {
-    !matches!(self, Self::Value | Self::Key)
+    !matches!(self, Self::Value | Self::MemberValue | Self::Key)
   }
 
   /// Whether the run stands in a map entry's key, whose `=>` is the entry's.
   const fn at_key(self) -> bool {
     matches!(self, Self::Key | Self::AfterKey)
+  }
+
+  /// Whether the run stands in a list of members, whose next member's `name :` it leaves.
+  const fn at_member(self) -> bool {
+    matches!(self, Self::MemberValue | Self::AfterMember)
   }
 }
 
@@ -414,7 +422,7 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         expect::<Src, Ctx>(inp, Kind::Colon)?;
-        required_value::<Src, Ctx>(inp, konst)
+        required_value::<Src, Ctx>(inp, konst, true)
       },
     )
     .parse_input(inp)
@@ -465,7 +473,7 @@ lossless_production! {
         } else {
           expect::<Src, Ctx>(inp, Kind::FatArrow)?;
         }
-        required_value::<Src, Ctx>(inp, konst)
+        required_value::<Src, Ctx>(inp, konst, false)
       },
     )
     .parse_input(inp)
@@ -716,7 +724,7 @@ lossless_production! {
         expect::<Src, Ctx>(inp, Kind::LParen)?;
         let open = opener_span(inp.span().end());
         let open_at: usize = inp.state().brace_depth();
-        required_value::<Src, Ctx>(inp, konst)?;
+        required_value::<Src, Ctx>(inp, konst, false)?;
         loop {
           if eat_if::<Src, Ctx>(inp, Kind::RParen)? {
             return Ok(());
@@ -1361,7 +1369,7 @@ lossless_production! {
       K::DefaultValue.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Equal)?;
-        required_value::<Src, Ctx>(inp, konst)
+        required_value::<Src, Ctx>(inp, konst, true)
       },
     )
     .parse_input(inp)
@@ -1371,15 +1379,28 @@ lossless_production! {
   /// field, after a map entry's `=>`, after a default's `=`. Opens no node of its own.
   ///
   /// A closing delimiter at the head is the closer of the block this position stands in: it is
-  /// reported and left, and the block closes on it. Every other head is [`value`]'s.
+  /// reported and left, and the block closes on it. Every other head is [`value`]'s, but for one:
+  /// with `member` the value is a member's, an argument's, an object field's or a member's default,
+  /// and in a schema position the run of an expression at its head stands in a list of members, so
+  /// it leaves the next member's `name :` to the member loop. Outside a schema position no run
+  /// reads anything, and `member` changes nothing.
   ///
   /// A list and a set call [`value`] itself and must: their loops end only because its recovery
   /// consumes, so a member position that left its head would never end.
-  fn required_value<'inp, Src, Ctx>(inp, konst: Constness) {
-    if peek_kind::<Src, Ctx>(inp)?.is_some_and(is_closer) {
-      return recover::report_unexpected::<Src, Ctx>(inp, konst.value_heads());
+  fn required_value<'inp, Src, Ctx>(inp, konst: Constness, member: bool) {
+    match peek_kind::<Src, Ctx>(inp)? {
+      Some(head) if is_closer(head) => {
+        recover::report_unexpected::<Src, Ctx>(inp, konst.value_heads())
+      }
+      Some(head)
+        if member
+          && konst == Constness::Schema
+          && (is_operator(head) || head == Kind::LParen) =>
+      {
+        expression_run::<Src, Ctx>(inp, RunAt::MemberValue)
+      }
+      _ => value::<Src, Ctx>(inp, konst),
     }
-    value::<Src, Ctx>(inp, konst)
   }
 
   /// Dispatch on the value head. Opens **no** node of its own; the chosen production opens its own.
@@ -1466,10 +1487,10 @@ lossless_production! {
   /// wherever it stands, as in `HOUR-1`. Any other value that follows a value ends the run, a `(`
   /// among them, so in a list it is the next element.
   ///
-  /// After a value at a member position the run leaves the next member's head: a name that a `:`
-  /// follows is not an operand of the run but the next argument's, field's or member's own, and the
-  /// run ends in front of it. Telling it apart takes a second token, and the read happens only
-  /// there, outside a block, in a run that has already reported.
+  /// At a member position, at the head of a member's value or after it, the run leaves the next
+  /// member's head: a name that a `:` follows is not an operand of the run but the next argument's,
+  /// field's or member's own, and the run ends in front of it. Telling it apart takes a second
+  /// token, and the read happens only there, outside a block, in a run that has already reported.
   fn expression_run<'inp, Src, Ctx>(inp, at: RunAt) {
     let at_key = at.at_key();
     let mut after_value = at.after_value();
@@ -1506,7 +1527,7 @@ lossless_production! {
         // The next member's name, which a `:` follows, is the member loop's.
         Some(Kind::Identifier)
           if !after_value
-            && at == RunAt::AfterMember
+            && at.at_member()
             && peek_second_kind::<Src, Ctx>(inp)? == Some(Kind::Colon) =>
         {
           return Ok(());

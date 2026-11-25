@@ -2031,6 +2031,50 @@ mod lossless {
     }
   }
 
+  /// A run in place of a member's value, an operator's token where the value would be, leaves the
+  /// next member's name to the member loop, as a run after the value does: after a member's `=`,
+  /// in an object and in a directive's arguments. The member after it is kept, as main keeps it.
+  #[test]
+  fn a_run_in_place_of_a_members_value_leaves_the_next_member() {
+    for (text, parent, kind, written) in [
+      (
+        "input I { a: T = + b: Int }",
+        K::InputFieldsDefinition,
+        K::InputValueDefinition,
+        "b: Int",
+      ),
+      (
+        "input I { a: T = { a: + b: 2 } zz: Int }",
+        K::ObjectValue,
+        K::ObjectField,
+        "b: 2",
+      ),
+      (
+        "input I { a: T @d(x: + y: 2) zz: Int }",
+        K::Arguments,
+        K::Argument,
+        "y: 2",
+      ),
+    ] {
+      let answer = read(text);
+      assert_eq!(answer.reports, 1, "{text}: one report, at the `+`");
+      let members: Vec<String> = answer
+        .tree
+        .descendants()
+        .find(|node: &SyntaxNode| node.kind() == parent)
+        .unwrap_or_else(|| panic!("{text}: no {parent:?}"))
+        .children()
+        .filter(|node: &SyntaxNode| node.kind() == kind)
+        .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
+        .collect();
+      assert_eq!(
+        members.last().map(String::as_str),
+        Some(written),
+        "{text}: {members:?}"
+      );
+    }
+  }
+
   // ── Through the analyzer ───────────────────────────────────────────────────────────────────
 
   #[cfg(feature = "analysis")]

@@ -73,7 +73,7 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         expect::<Src, Ctx>(inp, Kind::Colon)?;
-        required_value::<Src, Ctx>(inp, konst)
+        required_value::<Src, Ctx>(inp, konst, true)
       },
     )
     .parse_input(inp)
