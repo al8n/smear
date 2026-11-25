@@ -2760,7 +2760,8 @@ mod lossless {
     ];
     for (text, (parent, kind, members)) in texts.iter().zip(expected) {
       let at = text.find('+').expect("the run's first token");
-      assert_eq!(error_spans(text), [at..at + 1], "{text}: one report");
+      let report = at..at + 1;
+      assert_eq!(error_spans(text), [report], "{text}: one report");
       let answer = read(text);
       assert_eq!(members_of(&answer.tree, parent, kind), members, "{text}");
       assert!(
