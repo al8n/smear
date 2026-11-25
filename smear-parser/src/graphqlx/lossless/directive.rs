@@ -53,7 +53,7 @@ use super::{
   },
   trivia::{eat_if, expect, peek_kind, peek_signed_number},
   ty::type_path,
-  value::{Constness, expression_run, required_value},
+  value::{Constness, RunAt, expression_run, required_value},
 };
 
 use crate::lossless::{lossless_drivers, lossless_production};
@@ -114,7 +114,7 @@ lossless_production! {
                 && (continues_an_expression(head)
                   || (is_number(head) && peek_signed_number::<Src, Ctx>(inp)?)) =>
             {
-              expression_run::<Src, Ctx>(inp, true, false)?
+              expression_run::<Src, Ctx>(inp, RunAt::AfterMember)?
             }
             Some(_) => recover::unexpected::<Src, Ctx>(inp, ARGUMENT_HEADS)?,
           }

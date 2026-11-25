@@ -87,7 +87,7 @@ use super::{
   },
   trivia::{eat_if, expect, peek_as, peek_kind, peek_signed_number},
   ty::{type_path, type_ref},
-  value::{Constness, default_value, expression_run},
+  value::{Constness, RunAt, default_value, expression_run},
 };
 
 // The twenty directive-location spellings, from Task 7's macro. Written out per dialect
@@ -127,7 +127,7 @@ lossless_production! {
             && (continues_an_expression(head)
               || (is_number(head) && peek_signed_number::<Src, Ctx>(inp)?))
           {
-            expression_run::<Src, Ctx>(inp, true, false)?;
+            expression_run::<Src, Ctx>(inp, RunAt::AfterMember)?;
           }
         }
         directives::<Src, Ctx>(inp, Constness::Schema)

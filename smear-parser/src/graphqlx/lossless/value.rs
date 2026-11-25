@@ -91,7 +91,7 @@ use super::{
     begins_block_operand, closes_enclosing_block, continues_an_expression, is_closer, is_number,
     is_operator, opener_span, starts_value,
   },
-  trivia::{eat_if, expect, peek_as, peek_kind, peek_signed_number},
+  trivia::{eat_if, expect, peek_as, peek_kind, peek_second_kind, peek_signed_number},
   ty::{path, path_root, path_tail, type_generics},
 };
 
@@ -156,6 +156,35 @@ pub(crate) enum Opener {
   Collection(Collection),
   /// `const`, which opens a block.
   Block,
+}
+
+/// Where a schema position's run of an expression outside a block begins, which decides what the
+/// run reads first and what it leaves: see `expression_run`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RunAt {
+  /// At a value's head, in the value's place.
+  Value,
+  /// At a map entry's key, in the key's place.
+  Key,
+  /// After a map entry's key, from which the run reads on to the entry's `=>`.
+  AfterKey,
+  /// After a value at a member position: an argument's, an object field's, or a member's default.
+  /// The next member's name, which a `:` follows, is the member loop's.
+  AfterMember,
+  /// After the one value a typed value holds, in front of its `)`.
+  AfterValue,
+}
+
+impl RunAt {
+  /// Whether the run's first token directly follows a value.
+  const fn after_value(self) -> bool {
+    !matches!(self, Self::Value | Self::Key)
+  }
+
+  /// Whether the run stands in a map entry's key, whose `=>` is the entry's.
+  const fn at_key(self) -> bool {
+    matches!(self, Self::Key | Self::AfterKey)
+  }
 }
 
 use crate::lossless::{lossless_drivers, lossless_production};
@@ -357,13 +386,13 @@ lossless_production! {
         None => return recover::unclosed_object::<Src, Ctx>(inp, open),
         Some(Kind::Identifier) => object_field::<Src, Ctx>(inp, konst)?,
         // At a schema position's member position, what goes on with an expression offers a block,
-        // and the run consumes.
+        // and the run consumes, up to the next field's name.
         Some(head)
           if konst == Constness::Schema
             && (continues_an_expression(head)
               || (is_number(head) && peek_signed_number::<Src, Ctx>(inp)?)) =>
         {
-          expression_run::<Src, Ctx>(inp, true, false)?
+          expression_run::<Src, Ctx>(inp, RunAt::AfterMember)?
         }
         // The head is checked here rather than left to `object_field`'s own `expect`, because
         // that `expect` would return `Err` and abort the whole value — the list's recovery
@@ -395,14 +424,27 @@ lossless_production! {
   ///
   /// GraphQLx only; there is no GraphQL production to port. The key is not restricted to a name, so
   /// `map!{ [1] => "a" }` is well-formed.
+  ///
+  /// # An entry an expression stands in does not raise
+  ///
+  /// In a schema position a key that begins with an operator's token or a `(`, and a key that an
+  /// operator's token follows, is an expression the block is offered for, and its run has reported
+  /// it. A `=>` that run does not reach then ends the entry with what it has, rather than returning
+  /// `Err` for the `=>` and costing the definition around the map: the refusal is already the
+  /// run's, and the map's loop reads on. Any other key whose `=>` is missing returns `Err` from the
+  /// `expect`, as main's entry does.
   fn map_entry<'inp, Src, Ctx>(inp, konst: Constness) {
     node(
       K::MapEntry.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
-        // A schema key that begins with `(` is an expression the block is offered for, and its run
-        // reads that `(` to its own `)`, so the entry keeps its `=>` and its value.
-        if konst == Constness::Schema && peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
-          expression_run::<Src, Ctx>(inp, false, true)?;
+        // A schema key that begins with an operator's token or a `(` is an expression the block is
+        // offered for, and its run reads a `(` to its own `)`, so the entry keeps its `=>` and its
+        // value.
+        let mut ran = konst == Constness::Schema
+          && peek_kind::<Src, Ctx>(inp)?
+            .is_some_and(|head| is_operator(head) || head == Kind::LParen);
+        if ran {
+          expression_run::<Src, Ctx>(inp, RunAt::Key)?;
         } else {
           value::<Src, Ctx>(inp, konst)?;
         }
@@ -413,9 +455,16 @@ lossless_production! {
           && (continues_an_expression(head)
             || (is_number(head) && peek_signed_number::<Src, Ctx>(inp)?))
         {
-          expression_run::<Src, Ctx>(inp, true, true)?;
+          expression_run::<Src, Ctx>(inp, RunAt::AfterKey)?;
+          ran = true;
         }
-        expect::<Src, Ctx>(inp, Kind::FatArrow)?;
+        if ran {
+          if !eat_if::<Src, Ctx>(inp, Kind::FatArrow)? {
+            return Ok(());
+          }
+        } else {
+          expect::<Src, Ctx>(inp, Kind::FatArrow)?;
+        }
         required_value::<Src, Ctx>(inp, konst)
       },
     )
@@ -464,7 +513,8 @@ lossless_production! {
             },
             // A member in a schema position: an operator's token or a `(` begins an expression,
             // which `value` offers a block for, and its run consumes. A map's member is an entry
-            // whose key the expression is, so the entry keeps its `=>` and its value.
+            // whose key the expression is, so the entry keeps its `=>` and its value, and a `=>`
+            // the run does not reach ends the entry: see `map_entry`.
             Some(head)
               if konst == Constness::Schema && (is_operator(head) || head == Kind::LParen) =>
             {
@@ -683,7 +733,7 @@ lossless_production! {
                 && (continues_an_expression(head)
                   || (is_number(head) && peek_signed_number::<Src, Ctx>(inp)?)) =>
             {
-              expression_run::<Src, Ctx>(inp, true, false)?
+              expression_run::<Src, Ctx>(inp, RunAt::AfterValue)?
             }
             // `unexpected` reports and consumes, so every turn returns or consumes.
             Some(_) => recover::unexpected::<Src, Ctx>(inp, PARENS_CLOSER_HEADS)?,
@@ -1378,7 +1428,7 @@ lossless_production! {
       // In a schema position an operator's token or a `(` at a value's head begins an expression,
       // which only a `const { … }` block reads: the block is offered, and the run reads on.
       Some(head) if konst == Constness::Schema && (is_operator(head) || head == Kind::LParen) => {
-        expression_run::<Src, Ctx>(inp, false, false)
+        expression_run::<Src, Ctx>(inp, RunAt::Value)
       }
       _ => recover::unexpected::<Src, Ctx>(inp, konst.value_heads()),
     }
@@ -1388,19 +1438,26 @@ lossless_production! {
   /// of a value or of what follows one: reported once there, against a `const { … }` block, and read
   /// on, into the node its caller has open, for as long as the text goes on being an expression.
   ///
-  /// `after_value` says whether that token directly follows a value. The run takes an expression's
-  /// tokens, an operator's, a `>`, and a `^` after a value, into one `Error` with no report of its
-  /// own, and a value that follows them, read as the value it is. A `(` where the run would read an
-  /// operand is skipped to its own `)` into an `Error` of its own, and counts as a value (R3′), so
-  /// a map entry's `=>` after it is the entry's. A `(` that begins the run counts as a value too,
-  /// and how it is skipped is the position's: in a map entry's key, where `at_key` holds, to its own
-  /// `)` the same way, so the entry keeps its `=>`; anywhere else by the shared balanced skip, as
-  /// junk at those positions was taken before the block was offered, so a member list keeps the
-  /// members and the `)` that skip leaves it. A number whose token begins with `-` is a value
+  /// `at` says where the run began, and whether that token directly follows a value. The run takes
+  /// an expression's tokens, an operator's, a `>`, and a `^` after a value, into one `Error` with
+  /// no report of its own, and a value that follows them, read as the value it is. A `(` where the
+  /// run would read an operand is skipped to its own `)` into an `Error` of its own, and counts as
+  /// a value (R3′), so a map entry's `=>` after it is the entry's. A `(` that begins the run counts
+  /// as a value too, and how it is skipped is the position's: in a map entry's key, to its own `)`
+  /// the same way, so the entry keeps its `=>`; anywhere else by the shared balanced skip, as junk
+  /// at those positions was taken before the block was offered, so a member list keeps the members
+  /// and the `)` that skip leaves it. In a key, a group that is never closed stops in front of a
+  /// `=>` at its own depth, which is the entry's. A number whose token begins with `-` is a value
   /// wherever it stands, as in `HOUR-1`. Any other value that follows a value ends the run, a `(`
   /// among them, so in a list it is the next element.
-  fn expression_run<'inp, Src, Ctx>(inp, after_value: bool, at_key: bool) {
-    let mut after_value = after_value;
+  ///
+  /// After a value at a member position the run leaves the next member's head: a name that a `:`
+  /// follows is not an operand of the run but the next argument's, field's or member's own, and the
+  /// run ends in front of it. Telling it apart takes a second token, and the read happens only
+  /// there, outside a block, in a run that has already reported.
+  fn expression_run<'inp, Src, Ctx>(inp, at: RunAt) {
+    let at_key = at.at_key();
+    let mut after_value = at.after_value();
     let leading_group = peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen);
     if leading_group && !at_key {
       recover::unexpected::<Src, Ctx>(inp, CONST_BLOCK_HEADS)?;
@@ -1408,7 +1465,7 @@ lossless_production! {
     } else {
       recover::report_unexpected::<Src, Ctx>(inp, CONST_BLOCK_HEADS)?;
       if leading_group {
-        expression_group::<Src, Ctx>(inp)?;
+        expression_group::<Src, Ctx>(inp, at_key)?;
         after_value = true;
       }
     }
@@ -1423,13 +1480,21 @@ lossless_production! {
           after_value = false;
         }
         Some(Kind::LParen) if !after_value => {
-          expression_group::<Src, Ctx>(inp)?;
+          expression_group::<Src, Ctx>(inp, at_key)?;
           after_value = true;
         }
         // A number written with a `-` is a value wherever it stands in the run.
         Some(head) if is_number(head) && peek_signed_number::<Src, Ctx>(inp)? => {
           value::<Src, Ctx>(inp, Constness::Schema)?;
           after_value = true;
+        }
+        // The next member's name, which a `:` follows, is the member loop's.
+        Some(Kind::Identifier)
+          if !after_value
+            && at == RunAt::AfterMember
+            && peek_second_kind::<Src, Ctx>(inp)? == Some(Kind::Colon) =>
+        {
+          return Ok(());
         }
         Some(head) if !after_value && starts_value(head) => {
           value::<Src, Ctx>(inp, Constness::Schema)?;
@@ -1463,8 +1528,10 @@ lossless_production! {
   /// The `)` is the last token it takes, so the trivia after it is its caller's, and a map entry's
   /// `=>` after it is the entry's. A `]` or a `}` it did not open closes something around the
   /// group, so it stops before one, and at the end of input, with the group unclosed: the run that
-  /// reads it has reported once, and what the group leaves open is no report of its own.
-  fn expression_group<'inp, Src, Ctx>(inp) {
+  /// reads it has reported once, and what the group leaves open is no report of its own. With
+  /// `at_key` the group stands in a map entry's key, and a `=>` at the group's own depth, where
+  /// nothing the group opened inside it is open, is the entry's: it stops before that too.
+  fn expression_group<'inp, Src, Ctx>(inp, at_key: bool) {
     let mark = inp.cst_mark();
     // The `(` the caller peeked.
     inp.try_expect_or_stop(|_| true)?;
@@ -1474,6 +1541,7 @@ lossless_production! {
         None => break,
         Some(Kind::RBracket) if brackets == 0 => break,
         Some(Kind::RBrace) if braces == 0 => break,
+        Some(Kind::FatArrow) if at_key && parens == 1 && brackets == 0 && braces == 0 => break,
         Some(head) => {
           inp.try_expect_or_stop(|_| true)?;
           match head {
