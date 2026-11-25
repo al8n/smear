@@ -153,10 +153,12 @@ type Declared = (&'static str, &'static str, &'static str, usize);
 
 /// Every caller of [`WATCHED`], in five families.
 ///
-/// - **The slot-less turn** has two callers. `root_turn` is one: it is `judge_turn` and the write
-///   to the root's slot. GraphQLx's `mod_body` is the other, and the only frame below a root
-///   that catches: a module's body resynchronises past an item that failed with an ordinary
-///   error, and returns a failure that ends the document to the root above it.
+/// - **The slot-less turn** has three callers. `root_turn` is one: it is `judge_turn` and the write
+///   to the root's slot. The other two are GraphQLx's, and the only frames below a root that
+///   catch: `mod_body`, a module's body, resynchronises past an item that failed with an ordinary
+///   error, and `block_expression`, the expression a `const { … }` block holds, ends where its
+///   operand failed with one, so no recoverable error leaves the block. Each returns a failure
+///   that ends the document to the root above it.
 /// - **The dialect door**, and it is no longer watched by name. It used to be: six `*_entry`
 ///   productions calling `drain_unless_stopped`, then a `document_root` frame taking a token
 ///   (round 4), then one generic `parse_lossless_document` (round 5). Round 7 generates a door per
@@ -187,7 +189,7 @@ type Declared = (&'static str, &'static str, &'static str, usize);
 /// Note the four distinct `drive` functions: same name, four different tests, three different
 /// counts. That is why the key is a path and not a bare function name.
 const DECLARED: &[Declared] = &[
-  // the slot-less turn: the root's own, and the one catch below a root
+  // the slot-less turn: the root's own, and the two catches below a root
   (
     "judge_turn",
     "smear-parser/src/lossless/depth.rs",
@@ -198,6 +200,12 @@ const DECLARED: &[Declared] = &[
     "judge_turn",
     "smear-parser/src/graphqlx/lossless/document.rs",
     "mod_body",
+    1,
+  ),
+  (
+    "judge_turn",
+    "smear-parser/src/graphqlx/lossless/value.rs",
+    "block_expression",
     1,
   ),
   // the six `*_entry` productions

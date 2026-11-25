@@ -550,9 +550,10 @@ fn the_substrate_names_no_dialect() {
 /// **23 with the module body's recovery**: `lossless/depth.rs`'s `judge_turn`, the verdict
 /// `root_turn` records, split out of it so that a block which recovers its own items can ask for
 /// the verdict without a root's slot. It is the retracted cluster's shape and belongs to that
-/// family: `pub(crate)`, with `root_turn` and one dialect's module body as its only callers, so
-/// with no dialect in the crate `root_turn` is gated away and it is dead. It names no dialect —
-/// the block that calls it is the dialect's — which is why it can be here at all.
+/// family: `pub(crate)`, with `root_turn` and two of one dialect's productions, a module's body
+/// and a block's expression, as its only callers, so with no dialect in the crate `root_turn` is
+/// gated away and it is dead. It names no dialect — the productions that call it are the
+/// dialect's — which is why it can be here at all.
 ///
 /// **24 with `JudgedTurn`**: the struct `judge_turn` answers instead of a `(RootTurn, bool)`. It is
 /// the same cluster as `judge_turn` and carries the same gate, for the same reason — with no
