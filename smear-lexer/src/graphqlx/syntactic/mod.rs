@@ -977,14 +977,7 @@ where
 
   #[inline(always)]
   fn lex(&mut self) -> Option<Result<Self::Token, <Self::Token as tokora::Token<'inp>>::Error>> {
-    // The word is the parser's to write, between two calls, so it is read once here and the body
-    // asks a constant: the instance outside a block is the one this inlines, and a block's is kept
-    // out of line.
-    if self.state.in_const_block() {
-      self.lex_in_block()
-    } else {
-      self.lex_body::<false>()
-    }
+    self.lex_body::<false>()
   }
 
   /// Extend the current token's end by `n`, mirroring `logos::Lexer::bump`:
@@ -1038,6 +1031,7 @@ where
 {
   /// The loop's instance inside a `const { … }` block.
   #[allow(clippy::type_complexity)]
+  #[allow(dead_code)]
   #[cold]
   #[inline(never)]
   fn lex_in_block(
