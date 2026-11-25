@@ -756,6 +756,16 @@ lossless_production! {
   /// first thing lexed out of the mode; and the node is the mark's. A terminal stop writes no
   /// state, so the stop stays one.
   ///
+  /// # Whether a stop is latched, not where
+  ///
+  /// An error is judged a stop by its own mark, by a stop on record at the cursor, or by the
+  /// witness: a trip recorded while the body ran with a stop still latched, wherever it latched.
+  /// `state_mut` re-keys the input, which drops a latched stop, and `at_scanner_stop` is blind to
+  /// one latched ahead of the cursor by a read past the staged head; the witness, its baseline
+  /// taken before the body, is not, so a read of any width inside the block can never have its
+  /// stop cleared by the leave. Under a rejecting emitter it still answers: the trip is counted
+  /// and its boundary latched before the diagnostic is offered.
+  ///
   /// Under the emitter every door installs, which records a report and goes on, nothing but a
   /// terminal error leaves the body: its expression catches every recoverable error its operand
   /// raises, and every other recovery inside it reports and reads on. So the mode is left at the
@@ -779,11 +789,16 @@ lossless_production! {
         if switch {
           inp.state_mut().enter_const_block();
         }
+        let scan = inp.scanner_trip_snapshot();
         let body = block_body::<Src, Ctx>(inp, open, floor);
         if switch {
           let stopped = match &body {
             Ok(()) => false,
-            Err(error) => error.is_terminal() || inp.at_scanner_stop(),
+            Err(error) => {
+              error.is_terminal()
+                || inp.at_scanner_stop()
+                || inp.scanner_stopped_during_attempt(scan)
+            }
           };
           if !stopped {
             inp.state_mut().leave_const_block();

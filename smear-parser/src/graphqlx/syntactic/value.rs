@@ -1652,6 +1652,18 @@ where
 /// block before the error is returned, so nothing after it is lexed in the mode. On a scanner's
 /// stop it writes no state: the state the stop latched stays as it is.
 ///
+/// # Whether a stop is latched, not where
+///
+/// An error is judged a stop by a stop on record at the cursor, or by the witness: a trip recorded
+/// while the block's inside ran with a stop still latched, wherever it latched. A read inside the
+/// block may look past the staged head, as a typed form's two-token look at its `<` does, and a
+/// stop that read meets latches ahead of the cursor, where `at_scanner_stop` does not see it, and
+/// where the leave's re-key would drop it. The witness, its baseline taken before the inside, sees
+/// it under either emitter, since the trip is counted and its boundary latched before the
+/// diagnostic is offered. The error's own terminal mark is not read here, as the lossless twin
+/// reads it: no syntactic production bounds its error by `MaybeTerminal`, and every terminal error
+/// this layer raises inside a block is a scanner's stop, which the witness answers.
+///
 /// Never inlined, and not cold, so a schema value that is no block carries none of this frame.
 #[inline(never)]
 fn const_block_after_keyword<'inp, Src, Ctx>(
@@ -1676,13 +1688,14 @@ where
 {
   let open = *lbrace(inp)?.span();
   inp.state_mut().enter_const_block();
+  let scan = inp.scanner_trip_snapshot();
   match block_inside(inp, open) {
     Ok((value, end)) => {
       inp.state_mut().leave_const_block();
       Ok(ConstBlock::new(SimpleSpan::new(start, end), value))
     }
     Err(error) => {
-      if !inp.at_scanner_stop() {
+      if !(inp.at_scanner_stop() || inp.scanner_stopped_during_attempt(scan)) {
         inp.state_mut().leave_const_block();
       }
       Err(error)
