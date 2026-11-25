@@ -86,7 +86,7 @@ use super::{
   selection::{selection_set, type_condition},
   trivia::{eat_if, expect, peek_as, peek_kind},
   ty::{TypeAt, type_ref},
-  value::{Constness, default_value, variable},
+  value::{Constness, Member, default_value, variable},
 };
 
 /// Whether `keyword` opens an executable definition — the three operation spellings and
@@ -157,9 +157,11 @@ lossless_production! {
         expect::<Src, Ctx>(inp, Kind::Colon)?;
         type_ref::<Src, Ctx>(inp, TypeAt::Executable)?;
         // Dispatched on a peek rather than attempted, so the `=` is consumed *inside* the
-        // `DefaultValue` node and an absent default opens nothing.
+        // `DefaultValue` node and an absent default opens nothing. A variable's definitions close
+        // with `)`, which is what the member says; a `Const` position begins no run, so nothing
+        // reads it.
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Equal) {
-          default_value::<Src, Ctx>(inp, Constness::Const)?;
+          default_value::<Src, Ctx>(inp, Constness::Const, Member::InParens)?;
         }
         directives::<Src, Ctx>(inp, Constness::Const)
       },

@@ -87,7 +87,7 @@ use super::{
   },
   trivia::{eat_if, expect, peek_as, peek_kind, peek_signed_number},
   ty::{type_path, type_ref},
-  value::{Constness, RunAt, default_value, expression_run},
+  value::{Constness, Member, RunAt, default_value, expression_run},
 };
 
 // The twenty directive-location spellings, from Task 7's macro. Written out per dialect
@@ -109,8 +109,9 @@ lossless_production! {
   ///
   /// `konst` is the grammar its default and its directives read, and its type is read where
   /// `konst` says: see [`type_system_definition_at`]. Only a schema position's default offers a
-  /// block for an expression after it.
-  fn input_value_definition<'inp, Src, Ctx>(inp, konst: Constness) {
+  /// block for an expression after it. `member` is what closes the list the member stands in,
+  /// which its caller states and a run in or after its default leaves to that list.
+  fn input_value_definition<'inp, Src, Ctx>(inp, konst: Constness, member: Member) {
     node(
       K::InputValueDefinition.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
@@ -123,7 +124,7 @@ lossless_production! {
         // Dispatched on a peek rather than attempted, so the `=` is consumed *inside* the
         // `DefaultValue` node and an absent default opens nothing.
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Equal) {
-          default_value::<Src, Ctx>(inp, konst)?;
+          default_value::<Src, Ctx>(inp, konst, member)?;
           // After a written default, what goes on with an expression offers a block, and the run
           // reads on beside the `DefaultValue`, in the member's node. The read crosses what the
           // directives' own probe crosses there, in the same node.
@@ -132,7 +133,7 @@ lossless_production! {
             && (continues_an_expression(head)
               || (is_number(head) && peek_signed_number::<Src, Ctx>(inp)?))
           {
-            expression_run::<Src, Ctx>(inp, RunAt::AfterMember)?;
+            expression_run::<Src, Ctx>(inp, RunAt::AfterMember(member))?;
           }
         }
         directives::<Src, Ctx>(inp, konst)
@@ -167,8 +168,9 @@ lossless_production! {
             Some(Kind::RBrace) if closes_enclosing_block(open_at, inp.state().brace_depth()) => {
               return recover::report_unexpected::<Src, Ctx>(inp, PARENS_CLOSER_HEADS);
             }
+            // A member of a list that closes with `)`.
             Some(Kind::Identifier | Kind::InlineString | Kind::BlockString) => {
-              input_value_definition::<Src, Ctx>(inp, konst)?
+              input_value_definition::<Src, Ctx>(inp, konst, Member::InParens)?
             }
             // The head is checked here rather than left to the member's own `expect`, because that
             // `expect` would return `Err` and abort the whole list.
@@ -251,8 +253,9 @@ lossless_production! {
           }
           match peek_kind::<Src, Ctx>(inp)? {
             None => return recover::unclosed_object::<Src, Ctx>(inp, open),
+            // A member of a list that closes with `}`.
             Some(Kind::Identifier | Kind::InlineString | Kind::BlockString) => {
-              input_value_definition::<Src, Ctx>(inp, konst)?
+              input_value_definition::<Src, Ctx>(inp, konst, Member::InBraces)?
             }
             Some(_) => recover::unexpected::<Src, Ctx>(inp, DESCRIBED_MEMBER_HEADS)?,
           }
@@ -797,8 +800,12 @@ lossless_drivers! {
   /// for `tests/lossless_x_definition.rs`.
   mod test_support;
 
-  /// `super::input_value_definition` over `src`.
-  fn parse_input_value_definition => input_value_definition [Constness::Schema];
+  /// `super::input_value_definition` over `src`, as an input object's field, whose list closes
+  /// with `}`.
+  fn parse_input_value_definition => input_value_definition [
+    Constness::Schema,
+    crate::graphqlx::lossless::value::Member::InBraces,
+  ];
 
   /// `super::arguments_definition` over `src`.
   fn parse_arguments_definition => arguments_definition [Constness::Schema];

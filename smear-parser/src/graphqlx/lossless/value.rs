@@ -61,7 +61,9 @@
 //! builds a value only where one read can finish it and cannot be wrong, a scalar, a complete path
 //! or a block, and one `Error` for every other operand; it matches its brackets by kind, on a stack
 //! of its own; and it leaves the next member's `name :`, a closer it did not open and a map entry's
-//! `=>` to the productions that read them. Nothing it reads is read again.
+//! `=>` to the productions that read them. In a list of members that closes with `)` the next
+//! member's name ends a `(` of the run only once the run has taken a closer that answers nothing,
+//! so a group the text closes is read to its own `)`. Nothing it reads is read again.
 //!
 //! What did **not** widen: an `ObjectField`'s key is still a plain `Name` (`object_field` in
 //! `graphqlx/syntactic/value.rs`, `name then_ignore(colon) then(value)`). Only the value side
@@ -174,6 +176,25 @@ pub(crate) enum Opener {
   Block,
 }
 
+/// Whether a value is a member's, and what closes the list of members it stands in: what a run of
+/// an expression at the value leaves to that list, and where the next member's name ends a `(` the
+/// run has open (see `run_group`).
+///
+/// No variant is a default, and there is no `Default`: every production that reads a value at a
+/// member position states what closes its own list, and one that is added has to choose.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Member {
+  /// No member's: a list's element, a set's member, a map entry's key or value, or the one value a
+  /// typed value holds.
+  No,
+  /// A member of a list that closes with `}`: an object's field, or an input object's field and its
+  /// default.
+  InBraces,
+  /// A member of a list that closes with `)`: a directive's argument, or an argument definition and
+  /// its default.
+  InParens,
+}
+
 /// Where a schema position's run of an expression outside a block begins, which decides what the
 /// run reads first and what it leaves: see `expression_run`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -181,15 +202,17 @@ pub(crate) enum RunAt {
   /// At a value's head, in the value's place.
   Value,
   /// At the head of a member's value, in the value's place: an argument's, an object field's, or a
-  /// member's default. The next member's name, which a `:` follows, is the member loop's.
-  MemberValue,
+  /// member's default, in the list of members the [`Member`] names. The next member's name, which
+  /// a `:` follows, is the member loop's, and where it ends a `(` of the run is `run_group`'s.
+  MemberValue(Member),
   /// At a map entry's key, in the key's place.
   Key,
   /// After a map entry's key, from which the run reads on to the entry's `=>`.
   AfterKey,
-  /// After a value at a member position: an argument's, an object field's, or a member's default.
-  /// The next member's name, which a `:` follows, is the member loop's.
-  AfterMember,
+  /// After a value at a member position: an argument's, an object field's, or a member's default,
+  /// in the list of members the [`Member`] names. The next member's name, which a `:` follows, is
+  /// the member loop's, and where it ends a `(` of the run is `run_group`'s.
+  AfterMember(Member),
   /// After the one value a typed value holds, in front of its `)`.
   AfterValue,
 }
@@ -197,7 +220,7 @@ pub(crate) enum RunAt {
 impl RunAt {
   /// Whether the run's first token directly follows a value.
   const fn after_value(self) -> bool {
-    !matches!(self, Self::Value | Self::MemberValue | Self::Key)
+    !matches!(self, Self::Value | Self::MemberValue(_) | Self::Key)
   }
 
   /// Whether the run stands in a map entry's key, whose `=>` is the entry's.
@@ -205,9 +228,13 @@ impl RunAt {
     matches!(self, Self::Key | Self::AfterKey)
   }
 
-  /// Whether the run stands in a list of members, whose next member's `name :` it leaves.
-  const fn at_member(self) -> bool {
-    matches!(self, Self::MemberValue | Self::AfterMember)
+  /// Whether the run stands in a list of members, whose next member's `name :` it leaves, and what
+  /// closes that list.
+  const fn at_member(self) -> Member {
+    match self {
+      Self::MemberValue(member) | Self::AfterMember(member) => member,
+      Self::Value | Self::Key | Self::AfterKey | Self::AfterValue => Member::No,
+    }
   }
 }
 
@@ -220,7 +247,8 @@ impl RunAt {
 pub(crate) enum Left {
   /// Nothing: the read ended where its operand ends, and the run goes on.
   Nothing,
-  /// The next member's name, which a `:` follows, outside every brace the read has open.
+  /// The next member's name, which a `:` follows, where it ends the read: outside every brace the
+  /// read has open, and inside a `(` of it only where `run_group` says.
   Member,
   /// A map entry's `=>`, in its key, outside every brace the read has open.
   Arrow,
@@ -281,18 +309,20 @@ impl OpenBrackets {
   }
 
   /// What `closer`, a `)` or a `]`, closes: the nearest open entry of its kind, and every entry
-  /// opened after it. Where none of its kind is open it closes nothing.
-  fn close(&mut self, closer: Kind) {
+  /// opened after it. Answers whether it closed anything: where none of its kind is open, it closes
+  /// nothing.
+  fn close(&mut self, closer: Kind) -> bool {
     let opener = match closer {
       Kind::RParen if self.parens > 0 => Kind::LParen,
       Kind::RBracket if self.brackets > 0 => Kind::LBracket,
-      _ => return,
+      _ => return false,
     };
     while let Some(closed) = self.close_innermost() {
       if closed == opener {
-        return;
+        break;
       }
     }
+    true
   }
 
   /// What a `}` that leaves `braces` of the group's braces open closes: every entry opened with
@@ -303,15 +333,17 @@ impl OpenBrackets {
     }
   }
 
-  /// What a `>` closes: the innermost entry, where it is a `<`, and nothing else.
-  fn close_angle(&mut self) {
-    if self
+  /// What a `>` closes: the innermost entry, where it is a `<`, and nothing else. Answers whether
+  /// it closed one.
+  fn close_angle(&mut self) -> bool {
+    let closes = self
       .stack
       .last()
-      .is_some_and(|&(opener, _)| opener == Kind::LAngle)
-    {
+      .is_some_and(|&(opener, _)| opener == Kind::LAngle);
+    if closes {
       self.close_innermost();
     }
+    closes
   }
 
   /// Whether nothing is open.
@@ -519,13 +551,13 @@ lossless_production! {
         None => return recover::unclosed_object::<Src, Ctx>(inp, open),
         Some(Kind::Identifier) => object_field::<Src, Ctx>(inp, konst)?,
         // At a schema position's member position, what goes on with an expression offers a block,
-        // and the run consumes, up to the next field's name.
+        // and the run consumes, up to the next field's name. The fields close with `}`.
         Some(head)
           if konst == Constness::Schema
             && (continues_an_expression(head)
               || (is_number(head) && peek_signed_number::<Src, Ctx>(inp)?)) =>
         {
-          expression_run::<Src, Ctx>(inp, RunAt::AfterMember)?
+          expression_run::<Src, Ctx>(inp, RunAt::AfterMember(Member::InBraces))?
         }
         // The head is checked here rather than left to `object_field`'s own `expect`, because
         // that `expect` would return `Err` and abort the whole value — the list's recovery
@@ -547,7 +579,7 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         expect::<Src, Ctx>(inp, Kind::Colon)?;
-        required_value::<Src, Ctx>(inp, konst, true)
+        required_value::<Src, Ctx>(inp, konst, Member::InBraces)
       },
     )
     .parse_input(inp)
@@ -598,7 +630,7 @@ lossless_production! {
         } else {
           expect::<Src, Ctx>(inp, Kind::FatArrow)?;
         }
-        required_value::<Src, Ctx>(inp, konst, false)
+        required_value::<Src, Ctx>(inp, konst, Member::No)
       },
     )
     .parse_input(inp)
@@ -849,7 +881,7 @@ lossless_production! {
         expect::<Src, Ctx>(inp, Kind::LParen)?;
         let open = opener_span(inp.span().end());
         let open_at: usize = inp.state().brace_depth();
-        required_value::<Src, Ctx>(inp, konst, false)?;
+        required_value::<Src, Ctx>(inp, konst, Member::No)?;
         loop {
           if eat_if::<Src, Ctx>(inp, Kind::RParen)? {
             return Ok(());
@@ -1493,13 +1525,14 @@ lossless_production! {
   /// A default is constant in both positions the grammar puts it in, and the two read different
   /// value grammars: a member's default is a [`Schema`](Constness::Schema) position, and a
   /// variable's an executable document's [`Const`](Constness::Const) one. So the flavour is the
-  /// call site's, as every other value position's is.
-  fn default_value<'inp, Src, Ctx>(inp, konst: Constness) {
+  /// call site's, as every other value position's is, and so is `member`, what closes the list of
+  /// members the default's member stands in.
+  fn default_value<'inp, Src, Ctx>(inp, konst: Constness, member: Member) {
     node(
       K::DefaultValue.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Equal)?;
-        required_value::<Src, Ctx>(inp, konst, true)
+        required_value::<Src, Ctx>(inp, konst, member)
       },
     )
     .parse_input(inp)
@@ -1510,24 +1543,25 @@ lossless_production! {
   ///
   /// A closing delimiter at the head is the closer of the block this position stands in: it is
   /// reported and left, and the block closes on it. Every other head is [`value`]'s, but for one:
-  /// with `member` the value is a member's, an argument's, an object field's or a member's default,
-  /// and in a schema position the run of an expression at its head stands in a list of members, so
-  /// it leaves the next member's `name :` to the member loop. Outside a schema position no run
-  /// reads anything, and `member` changes nothing.
+  /// where `member` says the value is a member's, an argument's, an object field's or a member's
+  /// default, in a schema position the run of an expression at its head stands in a list of
+  /// members, so it leaves the next member's `name :` to the member loop, and `member` tells it
+  /// what closes that list. Outside a schema position no run reads anything, and `member` changes
+  /// nothing.
   ///
   /// A list and a set call [`value`] itself and must: their loops end only because its recovery
   /// consumes, so a member position that left its head would never end.
-  fn required_value<'inp, Src, Ctx>(inp, konst: Constness, member: bool) {
+  fn required_value<'inp, Src, Ctx>(inp, konst: Constness, member: Member) {
     match peek_kind::<Src, Ctx>(inp)? {
       Some(head) if is_closer(head) => {
         recover::report_unexpected::<Src, Ctx>(inp, konst.value_heads())
       }
       Some(head)
-        if member
+        if member != Member::No
           && konst == Constness::Schema
           && (is_operator(head) || head == Kind::LParen) =>
       {
-        expression_run::<Src, Ctx>(inp, RunAt::MemberValue)
+        expression_run::<Src, Ctx>(inp, RunAt::MemberValue(member))
       }
       _ => value::<Src, Ctx>(inp, konst),
     }
@@ -1620,10 +1654,13 @@ lossless_production! {
   ///
   /// What the run stops in front of is the production's that reads it next, and the run takes none
   /// of it: at a member position, at the head of a member's value or after it, the next member's
-  /// name, which a `:` follows, wherever no brace the run opened is open; a closer it did not open;
-  /// in a map entry's key, the entry's `=>`, wherever no brace the run opened is open; and the end
-  /// of input. Telling the next member's name apart takes a second token, and that read happens
-  /// only there, outside a block, in a run that has already reported, once for each name.
+  /// name, which a `:` follows, wherever no brace the run opened is open, and inside a `(` it
+  /// opened where `run_group` says; a closer it did not open; in a map entry's key, the entry's
+  /// `=>`, wherever no brace the run opened is open; and the end of input. `at` says what closes
+  /// the list of members, which decides the name inside a `(`: in a list that closes with `)`, a
+  /// group the text closes is read to its own `)`, which the list would otherwise take for its
+  /// own. Telling the next member's name apart takes a second token, and that read happens only
+  /// there, outside a block, in a run that has already reported, once for each name.
   ///
   /// Nothing the run reads fails in a way the parse survives: a scalar's production expects the
   /// kind just peeked, a block ends at its own `}` with every recoverable failure caught inside it,
@@ -1669,7 +1706,7 @@ lossless_production! {
         Some(_) if after_value => return Ok(()),
         // The next member's name, which a `:` follows, is the member loop's.
         Some(Kind::Identifier)
-          if member && peek_second_kind::<Src, Ctx>(inp)? == Some(Kind::Colon) =>
+          if member != Member::No && peek_second_kind::<Src, Ctx>(inp)? == Some(Kind::Colon) =>
         {
           return Ok(());
         }
@@ -1716,16 +1753,17 @@ lossless_production! {
   ///   where it has one; a typed form, its type arguments and its body read the same way; and a
   ///   path that broke, which is still the operand, so the next value ends the run.
   ///
-  /// At a member position a name that a `:` follows is never taken outside every brace the operand
-  /// opened: a `$`'s name is asked here, a path's in [`run_path`] and a group's in [`run_group`],
-  /// and the operand ends in front of it, its `left` [`Left::Member`]. `left` names whatever ended
-  /// a group before its own end, and stays [`Left::Nothing`] where the operand ends where it does.
+  /// At a member position the next member's name, which a `:` follows, ends the operand, its `left`
+  /// [`Left::Member`]: a `$`'s name is asked here, a path's in [`run_path`], and a group's in
+  /// [`run_group`], which asks it outside its braces and, inside a `(` in a list that closes with
+  /// `)`, only once it has taken a closer that answers nothing. `left` names whatever ended a group
+  /// before its own end, and stays [`Left::Nothing`] where the operand ends where it does.
   ///
   /// The order is [`value`]'s, so a well-formed operand has the extent `value` gives it: the three
   /// reserved spellings first, `set` and `map` before their `!`, which is the operand's and not an
   /// operator's, `const` before its `{`, and a path that `<`, `{` or `(` makes a typed form's type.
   /// The head is always taken, so the run makes progress.
-  fn run_operand<'inp, Src, Ctx>(inp, member: bool, at_key: bool, left: &mut Left) {
+  fn run_operand<'inp, Src, Ctx>(inp, member: Member, at_key: bool, left: &mut Left) {
     let Some(head) = peek_kind::<Src, Ctx>(inp)? else {
       *left = Left::End;
       return Ok(());
@@ -1753,7 +1791,7 @@ lossless_production! {
         (Kind::Dollar, _) => {
           expect::<Src, Ctx>(inp, Kind::Dollar)?;
           if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Identifier) {
-            if member && peek_second_kind::<Src, Ctx>(inp)? == Some(Kind::Colon) {
+            if member != Member::No && peek_second_kind::<Src, Ctx>(inp)? == Some(Kind::Colon) {
               *left = Left::Member;
             } else {
               expect::<Src, Ctx>(inp, Kind::Identifier)?;
@@ -1848,7 +1886,7 @@ lossless_production! {
   /// complete path is read here, inside it.
   fn run_path<'inp, Src, Ctx>(
     inp,
-    member: bool,
+    member: Member,
     first_taken: bool,
     complete: &mut bool,
     left: &mut Left,
@@ -1871,7 +1909,10 @@ lossless_production! {
       if peek_kind::<Src, Ctx>(inp)? != Some(Kind::Identifier) {
         return Ok(());
       }
-      if rooted && member && peek_second_kind::<Src, Ctx>(inp)? == Some(Kind::Colon) {
+      if rooted
+        && member != Member::No
+        && peek_second_kind::<Src, Ctx>(inp)? == Some(Kind::Colon)
+      {
         *left = Left::Member;
         return Ok(());
       }
@@ -1881,7 +1922,7 @@ lossless_production! {
       if peek_kind::<Src, Ctx>(inp)? != Some(Kind::Identifier) {
         return Ok(());
       }
-      if member && peek_second_kind::<Src, Ctx>(inp)? == Some(Kind::Colon) {
+      if member != Member::No && peek_second_kind::<Src, Ctx>(inp)? == Some(Kind::Colon) {
         *left = Left::Member;
         return Ok(());
       }
@@ -1907,15 +1948,23 @@ lossless_production! {
   /// - **A `<` opens type arguments only behind a name,** and a `>` closes them only where they are
   ///   the innermost thing open. Every other `>`, `<` and operator's token is taken and moves
   ///   nothing.
-  /// - **Outside every brace,** with `member` the next member's name, which a `:` follows, is the
-  ///   member loop's, and with `at_key` a `=>` is the map entry's: the group ends in front of each.
+  /// - **Outside every brace,** with `at_key` a `=>` is the map entry's, and the group ends in
+  ///   front of it. At a member position the next member's name, which a `:` follows, is the
+  ///   member loop's, and the group ends in front of it too, with one exception, which `member`
+  ///   decides. Where the list of members closes with `)`, a name inside a `(` of the group is the
+  ///   group's until the group has taken a closer that answers nothing: a `>` that closes no `<`,
+  ///   or a `)` or a `]` that is its brace's junk. So a group that is well formed so far is read to
+  ///   its own `)`, which the list would otherwise take for its own, ending one `)` early. A closer
+  ///   astray is evidence against the group, and once one is taken the name ends the group as
+  ///   anywhere else. Where the list closes with `}`, a `)` the group leaves behind is a stray to
+  ///   it, and the name ends the group inside a `(` too.
   ///
   /// What it has open is counted by kind beside its stack, [`OpenBrackets`], so no closer searches
   /// the stack and the read is linear in what it takes. It is a loop and not a recursion, so it
   /// takes no level of nesting, and every turn takes a token or returns.
   fn run_group<'inp, Src, Ctx>(
     inp,
-    member: bool,
+    member: Member,
     at_key: bool,
     angle: bool,
     left: &mut Left,
@@ -1925,17 +1974,29 @@ lossless_production! {
     let mut braces = 0_usize;
     // Whether the token taken last is a name, behind which a `<` opens type arguments.
     let mut behind_name = angle;
+    // Whether the group has taken a closer that answers nothing: a `>` that closes no `<`, or a `)`
+    // or a `]` that is its brace's junk. Set by a token the group takes, and never cleared.
+    let mut astray = false;
     loop {
       let Some(head) = peek_kind::<Src, Ctx>(inp)? else {
         *left = Left::End;
         return Ok(());
       };
+      // Whether the next member's name may end the group here, asked before the probe so that a
+      // name that cannot is not probed: outside its braces, at a member position, and inside a
+      // `(` only where the list closes with `}` or the group has taken a closer astray.
+      let a_name_ends_it = braces == 0
+        && match member {
+          Member::No => false,
+          Member::InBraces => true,
+          Member::InParens => astray || !stack.answers(Kind::RParen),
+        };
       let stop = match head {
         Kind::RBrace if braces == 0 => Some(Left::Closer),
         Kind::RParen | Kind::RBracket if braces == 0 && !stack.answers(head) => Some(Left::Closer),
         Kind::FatArrow if at_key && braces == 0 => Some(Left::Arrow),
         Kind::Identifier
-          if member && braces == 0 && peek_second_kind::<Src, Ctx>(inp)? == Some(Kind::Colon) =>
+          if a_name_ends_it && peek_second_kind::<Src, Ctx>(inp)? == Some(Kind::Colon) =>
         {
           Some(Left::Member)
         }
@@ -1959,8 +2020,18 @@ lossless_production! {
         }
         Kind::LParen | Kind::LBracket => stack.open(head, braces),
         Kind::LAngle if behind_name => stack.open(head, braces),
-        Kind::RParen | Kind::RBracket => stack.close(head),
-        Kind::RAngle => stack.close_angle(),
+        // One that closes nothing came this far only inside a brace of the group: that brace's
+        // junk, and a closer astray.
+        Kind::RParen | Kind::RBracket => {
+          if !stack.close(head) {
+            astray = true;
+          }
+        }
+        Kind::RAngle => {
+          if !stack.close_angle() {
+            astray = true;
+          }
+        }
         _ => {}
       }
       behind_name = head == Kind::Identifier;
@@ -1991,8 +2062,11 @@ lossless_drivers! {
   fn parse_schema_value => value [Constness::Schema];
 
   /// `super::default_value` over `src`, in a const position — the one value production `value`
-  /// cannot reach.
-  fn parse_default_value => default_value [Constness::Const];
+  /// cannot reach — as a variable's default, whose list of definitions closes with `)`.
+  fn parse_default_value => default_value [
+    Constness::Const,
+    crate::graphqlx::lossless::value::Member::InParens,
+  ];
 
   /// `super::map_entry` over `src`, on its own: the production a malformed `map` body would
   /// otherwise only be observable through.

@@ -2121,12 +2121,22 @@ mod lossless {
   /// Whether the first node of kind `kind` in `tree` runs to the end of `text` and ends on a `}`:
   /// the definition whose members it holds closes at its own brace.
   fn closes_at_the_end(tree: &SyntaxNode, kind: K, text: &str) -> bool {
+    closes_in_front_of(tree, kind, text, "")
+  }
+
+  /// Whether the first node of kind `kind` in `tree` ends on a `}` with nothing behind it in
+  /// `text` but `after`: the definition whose members it holds closes at its own brace, in front
+  /// of what `after` writes.
+  fn closes_in_front_of(tree: &SyntaxNode, kind: K, text: &str, after: &str) -> bool {
     tree
       .descendants()
       .find(|node: &SyntaxNode| node.kind() == kind)
       .is_some_and(|node: SyntaxNode| {
         let written = node.text().to_string();
-        written.ends_with('}') && text.ends_with(written.as_str())
+        written.ends_with('}')
+          && text
+            .strip_suffix(after)
+            .is_some_and(|text: &str| text.ends_with(written.as_str()))
       })
   }
 
@@ -2169,13 +2179,13 @@ mod lossless {
 
   /// A member position of a run, `OPERAND` standing where its operand does: the node of the list
   /// the run stands in, the kind of that list's members and how the member written after the run
-  /// reads, and the node of the definition's members, which runs to the end of the text where the
-  /// definition closes at its own brace.
-  type AtAMember = (&'static str, K, K, &'static str, K);
+  /// reads, and the node of the definition's members and what the text writes after it, in front
+  /// of which the definition closes at its own brace.
+  type AtAMember = (&'static str, K, K, &'static str, K, &'static str);
 
   /// The five member positions of a run: after a member's default and in its place, after a
   /// default between a field's parentheses, after an object field's value, and after a directive
-  /// argument's.
+  /// argument's. The lists of the third and the fifth close with `)`.
   const AT_A_MEMBER: [AtAMember; 5] = [
     (
       "input I { a: T = 1 + OPERAND b: Int }",
@@ -2183,6 +2193,7 @@ mod lossless {
       K::InputValueDefinition,
       "b: Int",
       K::InputFieldsDefinition,
+      "",
     ),
     (
       "input I { a: T = + OPERAND b: Int }",
@@ -2190,6 +2201,7 @@ mod lossless {
       K::InputValueDefinition,
       "b: Int",
       K::InputFieldsDefinition,
+      "",
     ),
     (
       "type T { f(a: T = 1 + OPERAND b: Int): Int g: Int }",
@@ -2197,6 +2209,7 @@ mod lossless {
       K::InputValueDefinition,
       "b: Int",
       K::FieldsDefinition,
+      "",
     ),
     (
       "input I { a: T = { a: 1 + OPERAND b: 2 } zz: Int }",
@@ -2204,6 +2217,7 @@ mod lossless {
       K::ObjectField,
       "b: 2",
       K::InputFieldsDefinition,
+      "",
     ),
     (
       "input I { a: T @d(x: 1 + OPERAND y: 2) zz: Int }",
@@ -2211,14 +2225,45 @@ mod lossless {
       K::Argument,
       "y: 2",
       K::InputFieldsDefinition,
+      "",
     ),
   ];
 
-  /// `operand` at each of [`AT_A_MEMBER`]'s positions: the run's report is the only one, the list
-  /// the run stands in holds two members, the second of them the one written after the run, and
-  /// the definition closes at its own brace.
-  fn leaves_the_next_member(operand: &str) {
-    for (template, list, kind, next, closes) in AT_A_MEMBER {
+  /// Three member positions whose list closes with `)`: after a default between a field's
+  /// parentheses, after a directive argument's value inside a definition, and after one on a
+  /// definition's header, where the definition after it is kept as well.
+  const IN_PARENTHESES: [AtAMember; 3] = [
+    (
+      "type T { f(a: T = 1 + OPERAND zz: Int): Int g: Int }",
+      K::ArgumentsDefinition,
+      K::InputValueDefinition,
+      "zz: Int",
+      K::FieldsDefinition,
+      "",
+    ),
+    (
+      "input I { a: T @d(x: 1 + OPERAND y: 2) zz: Int }",
+      K::Arguments,
+      K::Argument,
+      "y: 2",
+      K::InputFieldsDefinition,
+      "",
+    ),
+    (
+      "type T @d(x: 1 + OPERAND y: 2) { f: Int } scalar S",
+      K::Arguments,
+      K::Argument,
+      "y: 2",
+      K::FieldsDefinition,
+      " scalar S",
+    ),
+  ];
+
+  /// `operand` at each of `positions`: the run's report is the only one, the list the run stands
+  /// in holds two members, the second of them the one written after the run, and the definition
+  /// closes at its own brace.
+  fn leaves_the_next_member_at(operand: &str, positions: &[AtAMember]) {
+    for &(template, list, kind, next, closes, after) in positions {
       let text = template.replace("OPERAND", operand);
       let answer = read(&text);
       assert_eq!(answer.reports, 1, "{text}: the run's report alone");
@@ -2230,19 +2275,27 @@ mod lossless {
         "{text}: {kept:?}"
       );
       assert!(
-        closes_at_the_end(&answer.tree, closes, &text),
+        closes_in_front_of(&answer.tree, closes, &text, after),
         "{text}: the definition closes at its own brace"
       );
     }
   }
 
+  /// `operand` at each of [`AT_A_MEMBER`]'s positions, as [`leaves_the_next_member_at`] reads it.
+  fn leaves_the_next_member(operand: &str) {
+    leaves_the_next_member_at(operand, &AT_A_MEMBER);
+  }
+
   /// An operand a run reads at a member position leaves the member after the run to the member
   /// loop, whatever the operand is, and the definition closes at its own brace: a path or a
-  /// variable whose name is missing or is the next member's; a failure inside a bracket; a list, a
-  /// typed value or type arguments left open; an operator's `>` inside a list; a `)` that closes
-  /// its `(` through a brace; nested runs; and a block. At all five member positions: a list, a
-  /// typed value or type arguments left open inside an argument list stop at the next argument's
-  /// name, as they do everywhere else.
+  /// variable whose name is missing or is the next member's; a failure inside a bracket; a list or
+  /// type arguments left open; an operator's `>` inside a list; a `)` that closes its `(` through a
+  /// brace; nested runs; and a block. At all five member positions: a list or type arguments left
+  /// open inside an argument list stop at the next argument's name, as they do everywhere else.
+  ///
+  /// A `(` left open, alone or as a typed value's, stops at the next member's name only where the
+  /// list closes with `}`. Where it closes with `)` the `(` reads on to the list's own `)`, as
+  /// main's skip reads a `(` (R21): `a_parenthesis_left_open_reads_on_to_the_lists_own_closer`.
   #[test]
   fn a_run_leaves_the_next_member() {
     for operand in [
@@ -2260,10 +2313,8 @@ mod lossless {
       "Box<~>(1)",
       "map!{ ~ => 1 }",
       "set!",
-      "(c",
       "Box<",
       "[c",
-      "Url(c",
       "[1 + 2 >> 3",
       "( { x: 1 ) }",
       "{ x: 1 + { q: ~ } bad: ~ }",
@@ -2273,11 +2324,16 @@ mod lossless {
     ] {
       leaves_the_next_member(operand);
     }
+    let in_braces = [AT_A_MEMBER[0], AT_A_MEMBER[1], AT_A_MEMBER[3]];
+    for operand in ["(c", "Url(c"] {
+      leaves_the_next_member_at(operand, &in_braces);
+    }
   }
 
   /// No operator's token closes a bracket a run opened: a `>`, alone or half of a `>>`, closes only
   /// type arguments that are the innermost thing open. So a list, a parenthesis or type arguments
-  /// left open still stop at the next member's name.
+  /// left open still stop at the next member's name, a parenthesis in a list that closes with `)`
+  /// too, since a `>` that closes nothing is a closer astray (R21).
   #[test]
   fn no_operators_token_closes_a_bracket_of_a_run() {
     for operand in ["[1 + 2 >> 3", "(1 >> 2", "[c > d", "Box<[i32 >> 2"] {
@@ -2973,8 +3029,12 @@ mod lossless {
 
   /// A group the text closes, in a member list that closes with `)`, is read whole: a name inside
   /// it is the group's, and its own `)` closes it, so the list closes at its own `)` and what
-  /// follows the list is its owner's. Round 7's text: the directive keeps its one argument, with
-  /// the run's two `Error`s behind it, and the field after the header is a field of `T`.
+  /// follows the list is its owner's (R21). Round 7's text: the directive keeps its one argument,
+  /// with the run's two `Error`s behind it, and the field after the header is a field of `T`. And
+  /// six such groups, one in a typed value, one inside another and two with a list around or
+  /// inside, each in front of the next member of three lists that close with `)`: the member is
+  /// the list's second, and the definition closes at its own brace. A typed value's group between
+  /// a field's parentheses keeps the argument definition after it and the field after the field.
   #[test]
   fn a_group_that_closes_is_read_whole_where_the_list_closes_with_a_parenthesis() {
     let text = "type T @d(x: 1 + (a: 2)) { f: Int }";
@@ -3009,6 +3069,97 @@ mod lossless {
     assert!(
       closes_at_the_end(&answer.tree, K::FieldsDefinition, text),
       "{text}: `T` ends at its own `}}`"
+    );
+
+    for operand in [
+      "(a: 2)",
+      "(1 a: 2)",
+      "Url(a: 2)",
+      "(a: (b: 2))",
+      "[(a: 2)]",
+      "([a: 2])",
+    ] {
+      leaves_the_next_member_at(operand, &IN_PARENTHESES);
+    }
+
+    let text = "type T { f(a: T = 1 + P(k: 2) zz: Int): Int g: Int }";
+    leaves_the_next_member_at("P(k: 2)", &IN_PARENTHESES[..1]);
+    assert_eq!(
+      members_of(&read(text).tree, K::FieldsDefinition, K::FieldDefinition)
+        .last()
+        .map(String::as_str),
+      Some("g: Int"),
+      "{text}: `g` is a field of `T`"
+    );
+  }
+
+  /// Where the list of members closes with `)`, a `(` the run's junk never closes, with no closer
+  /// astray in it, reads on to the list's own `)`, as main's skip reads a `(` (R21). Inside a
+  /// definition's braces main's skip finds no end there and falls back a token at a time, so main
+  /// keeps the next argument and the field behind the list. The run keeps neither: `y` is inside
+  /// the group, and `zz` is read as an argument of the list, which then meets the definition's `}`.
+  #[test]
+  fn a_parenthesis_left_open_reads_on_to_the_lists_own_closer() {
+    let text = "input I { a: T @d(x: 1 + ( [ [ y: 2) zz: Int }";
+    let answer = read(text);
+    assert_eq!(
+      answer.reports, 2,
+      "{text}: the run's report, and the list's `)` missing at the `}}`"
+    );
+    assert_eq!(
+      members_of(&answer.tree, K::Arguments, K::Argument),
+      ["x: 1", "zz: Int"],
+      "{text}"
+    );
+    assert_eq!(
+      members_of(
+        &answer.tree,
+        K::InputFieldsDefinition,
+        K::InputValueDefinition
+      )
+      .len(),
+      1,
+      "{text}: `zz` is no field of `I`"
+    );
+    assert!(
+      closes_at_the_end(&answer.tree, K::InputFieldsDefinition, text),
+      "{text}: `I` ends at its own `}}`"
+    );
+  }
+
+  /// Where the list of members closes with `}`, the next member's name still ends a `(` of the run,
+  /// closed or not: a `)` the run leaves behind is a stray to such a list and costs it no member,
+  /// and the stop is what keeps the member behind a `(` left open (R21). So a group the text closes
+  /// is cut at the name inside it: what follows is a field `a` with no type and a stray `)`, three
+  /// reports where main makes one, and `b` and `I` are kept.
+  #[test]
+  fn a_name_inside_a_parenthesis_still_ends_it_where_the_list_closes_with_a_brace() {
+    let text = "input I { a: T = 1 + (a: 2) b: Int }";
+    let answer = read(text);
+    assert_eq!(answer.reports, 3, "{text}");
+    let fields = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::InputFieldsDefinition)
+      .expect("the input's fields");
+    assert_eq!(
+      child_nodes(&fields),
+      [
+        (K::InputValueDefinition, String::from("a: T = 1 + (")),
+        (K::InputValueDefinition, String::from("a: 2")),
+        (K::Error, String::from(")")),
+        (K::InputValueDefinition, String::from("b: Int")),
+      ],
+      "{text}"
+    );
+    let typeless = fields.children().nth(1).expect("the field `a: 2`");
+    assert!(
+      !kinds(&typeless).contains(&K::DefinitionTypePath),
+      "{text}: the field `a` has no type"
+    );
+    assert!(
+      closes_at_the_end(&answer.tree, K::InputFieldsDefinition, text),
+      "{text}: `I` ends at its own `}}`"
     );
   }
 

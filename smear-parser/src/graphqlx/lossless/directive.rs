@@ -53,7 +53,7 @@ use super::{
   },
   trivia::{eat_if, expect, peek_kind, peek_signed_number},
   ty::type_path,
-  value::{Constness, RunAt, expression_run, required_value},
+  value::{Constness, Member, RunAt, expression_run, required_value},
 };
 
 use crate::lossless::{lossless_drivers, lossless_production};
@@ -73,7 +73,8 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         expect::<Src, Ctx>(inp, Kind::Colon)?;
-        required_value::<Src, Ctx>(inp, konst, true)
+        // A member of a list that closes with `)`.
+        required_value::<Src, Ctx>(inp, konst, Member::InParens)
       },
     )
     .parse_input(inp)
@@ -108,13 +109,13 @@ lossless_production! {
             }
             Some(Kind::Identifier) => argument::<Src, Ctx>(inp, konst)?,
             // At a schema position's member position, what goes on with an expression offers a
-            // block, and the run consumes.
+            // block, and the run consumes. The arguments close with `)`.
             Some(head)
               if konst == Constness::Schema
                 && (continues_an_expression(head)
                   || (is_number(head) && peek_signed_number::<Src, Ctx>(inp)?)) =>
             {
-              expression_run::<Src, Ctx>(inp, RunAt::AfterMember)?
+              expression_run::<Src, Ctx>(inp, RunAt::AfterMember(Member::InParens))?
             }
             Some(_) => recover::unexpected::<Src, Ctx>(inp, ARGUMENT_HEADS)?,
           }
