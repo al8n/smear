@@ -2022,16 +2022,8 @@ lossless_production! {
         Kind::LAngle if behind_name => stack.open(head, braces),
         // One that closes nothing came this far only inside a brace of the group: that brace's
         // junk, and a closer astray.
-        Kind::RParen | Kind::RBracket => {
-          if !stack.close(head) {
-            astray = true;
-          }
-        }
-        Kind::RAngle => {
-          if !stack.close_angle() {
-            astray = true;
-          }
-        }
+        Kind::RParen | Kind::RBracket => astray |= !stack.close(head),
+        Kind::RAngle => astray |= !stack.close_angle(),
         _ => {}
       }
       behind_name = head == Kind::Identifier;
