@@ -48,7 +48,8 @@ mod lossless {
       kinds::SyntaxKind as K,
       lossless::{
         GraphqlxLosslessErrorValue, Parse, SyntaxNode, parse_document, parse_document_with_limits,
-        parse_type_system_document, parse_type_system_document_with_limits,
+        parse_executable_document, parse_type_system_document,
+        parse_type_system_document_with_limits,
       },
     },
   };
@@ -2100,6 +2101,33 @@ mod lossless {
       Some("b: Int"),
       "{text}: {members:?}"
     );
+  }
+
+  /// A type's arguments that meet the end of input in an executable document ask for their first
+  /// type there, as main's do: the first error is the end of input, where that type should stand,
+  /// and not the `<` unclosed that a schema's type reports first. A variable's type, a type
+  /// condition, a directive's name, an operation's parameter and its `where` clause.
+  #[test]
+  fn an_executable_documents_type_arguments_at_the_end_are_read_as_mains() {
+    for text in [
+      "query Q($v: Box<",
+      "query Q { ... on Box<",
+      "query Q @d<",
+      "query Q<T = Box<",
+      "query Q<T> where T: Box<",
+    ] {
+      let errors: Vec<Range<usize>> = parse_executable_document(text)
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.severity() == Severity::Error)
+        .map(|diagnostic| diagnostic.span())
+        .collect();
+      assert_eq!(
+        errors.first(),
+        Some(&(text.len()..text.len())),
+        "{text}: {errors:?}"
+      );
+    }
   }
 
   // ── Through the analyzer ───────────────────────────────────────────────────────────────────

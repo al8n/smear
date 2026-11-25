@@ -53,7 +53,7 @@ use super::{
   recover,
   recover::{SELECTION_HEADS, SPREAD_TAIL_HEADS, TYPE_CONDITION_HEADS, opener_span},
   trivia::{eat_if, expect, peek_as, peek_kind, try_eat},
-  ty::type_path,
+  ty::{TypeAt, type_path},
   value::Constness,
 };
 
@@ -95,7 +95,7 @@ lossless_production! {
         }
         match peek_kind::<Src, Ctx>(inp)? {
           Some(Kind::Identifier | Kind::Tilde | Kind::DotDot | Kind::Caret) => {
-            type_path::<Src, Ctx>(inp)
+            type_path::<Src, Ctx>(inp, TypeAt::Executable)
           }
           // `on` with nothing after it. Reported, and again nothing is consumed: whatever is here
           // is the next component's, not this one's.
@@ -215,7 +215,7 @@ lossless_production! {
       mark,
       K::FragmentSpread.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
-        type_path::<Src, Ctx>(inp)?;
+        type_path::<Src, Ctx>(inp, TypeAt::Executable)?;
         directives::<Src, Ctx>(inp, Constness::NonConst)
       },
     )

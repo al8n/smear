@@ -67,7 +67,7 @@ use super::{
   GraphqlxLosslessInput, Keyword, recover,
   recover::{ANGLE_CLOSER_HEADS, NAME_HEADS, PATH_HEADS, closes_enclosing_block, opener_span},
   trivia::{eat_if, expect, peek_as, peek_kind, peek_second_kind},
-  ty::{path, type_path, type_ref},
+  ty::{TypeAt, path, type_path, type_ref},
 };
 
 use crate::lossless::{lossless_drivers, lossless_production};
@@ -82,14 +82,15 @@ lossless_production! {
   ///
   /// The default is `= Type`, **not** a [`DefaultValue`](K::DefaultValue): the `=` here introduces
   /// a type reference, and reusing `default_value` would put a value node where a type belongs.
-  /// The two spell the same token and mean different things.
-  fn definition_type_param<'inp, Src, Ctx>(inp) {
+  /// The two spell the same token and mean different things. `at` is where the type is read: an
+  /// operation's parameter is an executable document's, a definition's a schema's.
+  fn definition_type_param<'inp, Src, Ctx>(inp, at: TypeAt) {
     node(
       K::DefinitionTypeParam.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         if eat_if::<Src, Ctx>(inp, Kind::Equal)? {
-          type_ref::<Src, Ctx>(inp, None)?;
+          type_ref::<Src, Ctx>(inp, at)?;
         }
         Ok(())
       },
@@ -107,8 +108,9 @@ lossless_production! {
   /// of input hunting a closer it had already swallowed.
   ///
   /// A `}` of a block around the list ends it unclosed, by [`closes_enclosing_block`]: a
-  /// definition inside a module leaves the module's brace to the module.
-  fn definition_type_generics<'inp, Src, Ctx>(inp) {
+  /// definition inside a module leaves the module's brace to the module. `at` is
+  /// [`definition_type_param`]'s.
+  fn definition_type_generics<'inp, Src, Ctx>(inp, at: TypeAt) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;
     node(
@@ -131,7 +133,7 @@ lossless_production! {
             Some(Kind::RBrace) if closes_enclosing_block(open_at, inp.state().brace_depth()) => {
               return recover::report_unexpected::<Src, Ctx>(inp, ANGLE_CLOSER_HEADS);
             }
-            Some(Kind::Identifier) => definition_type_param::<Src, Ctx>(inp)?,
+            Some(Kind::Identifier) => definition_type_param::<Src, Ctx>(inp, at)?,
             Some(_) => recover::unexpected::<Src, Ctx>(inp, NAME_HEADS)?,
           }
         }
@@ -143,15 +145,16 @@ lossless_production! {
   /// `Name DefinitionTypeGenerics?` — a definition's name, and an operation's.
   ///
   /// **Precondition: the head is an `Identifier`.** Every caller dispatches on it, and that peek
-  /// is what commits the leading trivia so the node starts at its own first token.
-  fn definition_name<'inp, Src, Ctx>(inp) {
+  /// is what commits the leading trivia so the node starts at its own first token. `at` is
+  /// [`definition_type_param`]'s: an operation's is an executable document's.
+  fn definition_name<'inp, Src, Ctx>(inp, at: TypeAt) {
     peek_kind::<Src, Ctx>(inp)?;
     node(
       K::DefinitionName.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LAngle) {
-          definition_type_generics::<Src, Ctx>(inp)?;
+          definition_type_generics::<Src, Ctx>(inp, at)?;
         }
         Ok(())
       },
@@ -295,16 +298,19 @@ lossless_production! {
   /// The loop's `report_unexpected` consumes nothing, which is normally unsafe inside a loop that
   /// continues; here the only path back round is through an `eat_if` that consumed an `&`, so the
   /// iteration cannot starve.
-  fn where_predicate<'inp, Src, Ctx>(inp) {
+  ///
+  /// `at` is where the paths' type arguments are read: an operation's clause is an executable
+  /// document's, a definition's a schema's.
+  fn where_predicate<'inp, Src, Ctx>(inp, at: TypeAt) {
     node(
       K::WherePredicate.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
-        type_path::<Src, Ctx>(inp)?;
+        type_path::<Src, Ctx>(inp, at)?;
         expect::<Src, Ctx>(inp, Kind::Colon)?;
         loop {
           match peek_kind::<Src, Ctx>(inp)? {
             Some(Kind::Identifier | Kind::Tilde | Kind::DotDot | Kind::Caret) => {
-              type_path::<Src, Ctx>(inp)?
+              type_path::<Src, Ctx>(inp, at)?
             }
             // A `:` or an `&` with nothing after it. Reported without consuming: whatever is
             // here belongs to the next component, and `type_path` above already made this
@@ -328,8 +334,8 @@ lossless_production! {
   ///
   /// The continuation test is the syntactic parser's two-token window, reproduced through
   /// [`peek_second_kind`](super::trivia::peek_second_kind); the module docs give the position that
-  /// makes the second token load-bearing.
-  fn where_clause<'inp, Src, Ctx>(inp) {
+  /// makes the second token load-bearing. `at` is [`where_predicate`]'s.
+  fn where_clause<'inp, Src, Ctx>(inp, at: TypeAt) {
     peek_kind::<Src, Ctx>(inp)?;
     node(
       K::WhereClause.raw(),
@@ -339,7 +345,7 @@ lossless_production! {
         // after it costs one diagnostic instead of the enclosing definition.
         match peek_kind::<Src, Ctx>(inp)? {
           Some(Kind::Identifier | Kind::Tilde | Kind::DotDot | Kind::Caret) => {
-            where_predicate::<Src, Ctx>(inp)?
+            where_predicate::<Src, Ctx>(inp, at)?
           }
           _ => return recover::report_unexpected::<Src, Ctx>(inp, PATH_HEADS),
         }
@@ -360,7 +366,7 @@ lossless_production! {
           if !another {
             return Ok(());
           }
-          where_predicate::<Src, Ctx>(inp)?;
+          where_predicate::<Src, Ctx>(inp, at)?;
         }
       },
     )
@@ -372,10 +378,11 @@ lossless_production! {
   /// The spelling test is the atom that reads it — `where` is an ordinary identifier token to the
   /// lexer — and it happens **outside** any node this opens, so a definition with no clause keeps
   /// the trivia the peek crossed in its own node rather than in a `WhereClause` that should not
-  /// exist. `Directives`' absent-run rule, applied to the other undelimited optional shape.
-  fn optional_where_clause<'inp, Src, Ctx>(inp) {
+  /// exist. `Directives`' absent-run rule, applied to the other undelimited optional shape. `at`
+  /// is [`where_predicate`]'s.
+  fn optional_where_clause<'inp, Src, Ctx>(inp, at: TypeAt) {
     if peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Where) {
-      return where_clause::<Src, Ctx>(inp);
+      return where_clause::<Src, Ctx>(inp, at);
     }
     Ok(())
   }
@@ -385,15 +392,16 @@ lossless_drivers! {
   dialect = graphqlx::lossless;
 
   /// Drivers that run one generic or `where` production over a `&str` and hand back the tree it
-  /// built, for `tests/lossless_x_selection.rs`.
+  /// built, for `tests/lossless_x_selection.rs`. Each reads a type where an executable document
+  /// reads one.
   mod test_support;
 
   /// `super::definition_type_generics` over `src` — the list whose members are nodes.
-  fn parse_definition_type_generics => definition_type_generics;
+  fn parse_definition_type_generics => definition_type_generics [super::TypeAt::Executable];
 
   /// `super::definition_name` over `src` — the name an operation and (from Task 12) every SDL
   /// definition reaches.
-  fn parse_definition_name => definition_name;
+  fn parse_definition_name => definition_name [super::TypeAt::Executable];
 
   /// `super::executable_definition_type_generics` over `src` — the list whose members are bare
   /// name tokens.
@@ -410,9 +418,9 @@ lossless_drivers! {
 
   /// `super::where_predicate` over `src`, on its own — the production a malformed clause would
   /// otherwise only be observable through.
-  fn parse_where_predicate => where_predicate;
+  fn parse_where_predicate => where_predicate [super::TypeAt::Executable];
 
   /// `super::where_clause` over `src` — the committed form, whose `where` is already known to be
   /// there.
-  fn parse_where_clause => where_clause;
+  fn parse_where_clause => where_clause [super::TypeAt::Executable];
 }

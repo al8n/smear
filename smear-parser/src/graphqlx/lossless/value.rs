@@ -92,7 +92,7 @@ use super::{
     is_operator, opener_span, starts_value,
   },
   trivia::{eat_if, expect, peek_as, peek_kind, peek_second_kind, peek_signed_number},
-  ty::{path, path_root, path_tail, type_generics},
+  ty::{TypeAt, path, path_root, path_tail, type_generics},
 };
 
 use crate::lossless::depth::{self, JudgedTurn, RootTurn};
@@ -671,7 +671,7 @@ lossless_production! {
       K::TypePath.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         if has_arguments {
-          type_generics::<Src, Ctx>(inp, block)
+          type_generics::<Src, Ctx>(inp, block.map_or(TypeAt::Schema, TypeAt::Block))
         } else {
           Ok(())
         }

@@ -46,6 +46,41 @@ use super::{
 
 use crate::lossless::{lossless_drivers, lossless_production};
 
+/// Where a type is read. The three readings part in two places only: at the end of input, where an
+/// executable document's type arguments still ask for their first type, and inside a block, where
+/// what the productions around a typed form read next is left to them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TypeAt {
+  /// An executable document's type: type arguments ask for their first type at the end of input
+  /// too, so the end is reported where that type should stand, before the `<` unclosed.
+  Executable,
+  /// A type-system definition's type, or a schema value's typed form outside a block: type
+  /// arguments ask for their first type only where a token stands.
+  Schema,
+  /// A typed form's type inside a `const { … }` block, as [`Schema`](Self::Schema) reads one, with
+  /// what the productions around the form read next.
+  Block(Owners),
+}
+
+impl TypeAt {
+  /// What the productions around a typed form inside a block read next, inside one.
+  const fn owners(self) -> Option<Owners> {
+    match self {
+      Self::Block(owners) => Some(owners),
+      Self::Executable | Self::Schema => None,
+    }
+  }
+
+  /// This position for what a production reading `kind` next holds: inside a block, the owners
+  /// with `kind` beside them.
+  const fn with(self, kind: Kind) -> Self {
+    match self {
+      Self::Block(owners) => Self::Block(owners.with(kind)),
+      other => other,
+    }
+  }
+}
+
 lossless_production! {
   dialect = graphqlx::lossless;
 
@@ -104,21 +139,26 @@ lossless_production! {
   /// `< Type (Type)* >` — the arguments applied to a path.
   ///
   /// Nonempty: `graphqlx/syntactic/ty.rs:86` is `.at_least(1)`, so `Foo<>` is an error rather than
-  /// a path with no arguments. The first element is parsed wherever a token stands and the loop
-  /// handles the rest, which is what makes the emptiness a diagnostic instead of a silently accepted
-  /// shape. At the end of input the loop meets the end and reports the `<` unclosed, which is what
-  /// the syntactic driver reports there, at every depth: a type asked for at the end of input
-  /// would report the end first, and the two layers' first errors would part.
+  /// a path with no arguments. The first element is parsed first and the loop handles the rest,
+  /// which is what makes the emptiness a diagnostic instead of a silently accepted shape.
+  ///
+  /// Where `at` is a schema's or a block's, the first element is asked for only where a token
+  /// stands. At the end of input the loop then meets the end and reports the `<` unclosed, which
+  /// is what the syntactic driver reports there, at every depth: a type asked for at the end of
+  /// input would report the end first, and the two layers' first errors would part. An executable
+  /// document's type asks for it at the end too and reports the end first, so the executable
+  /// grammar's first error there does not move with the schema's.
   ///
   /// A `}` of a block around the list ends it unclosed, by [`closes_enclosing_block`]:
   /// `type T { f: Box<Int }` keeps the fields' brace for the fields, and the definitions after
   /// `T` with it.
   ///
-  /// With `block` the list is a typed form's inside a `const { … }` block, and `block` names what
-  /// the productions around the form read next. The list is not delimited by braces, so it leaves
-  /// those as it leaves a `}`, with its `>` reported missing, and its junk is the block's, read by
-  /// `value.rs`'s `block_junk` with the `>` beside them. Outside a block, `None`, it is main's.
-  fn type_generics<'inp, Src, Ctx>(inp, block: Option<Owners>) {
+  /// Inside a `const { … }` block, where `at` is [`TypeAt::Block`], the list is a typed form's, and
+  /// `at` names what the productions around the form read next. The list is not delimited by
+  /// braces, so it leaves those as it leaves a `}`, with its `>` reported missing, and its junk is
+  /// the block's, read by `value.rs`'s `block_junk` with the `>` beside them. Outside a block it is
+  /// main's.
+  fn type_generics<'inp, Src, Ctx>(inp, at: TypeAt) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;
     node(
@@ -127,11 +167,11 @@ lossless_production! {
         expect::<Src, Ctx>(inp, Kind::LAngle)?;
         let open = opener_span(inp.span().end());
         let open_at: usize = inp.state().brace_depth();
-        let inside = block.map(|owners| owners.with(Kind::RAngle));
-        // The mandatory first argument, where a token stands. `type_ref` reports a closer that
-        // stands where a type should and leaves it, so an empty `<>` reports here and the list
-        // closes on its own `>`.
-        if peek_kind::<Src, Ctx>(inp)?.is_some() {
+        let block = at.owners();
+        let inside = at.with(Kind::RAngle);
+        // The mandatory first argument. `type_ref` reports a closer that stands where a type
+        // should and leaves it, so an empty `<>` reports here and the list closes on its own `>`.
+        if at == TypeAt::Executable || peek_kind::<Src, Ctx>(inp)?.is_some() {
           type_ref::<Src, Ctx>(inp, inside)?;
         }
         loop {
@@ -148,7 +188,7 @@ lossless_production! {
               return recover::report_unexpected::<Src, Ctx>(inp, ANGLE_CLOSER_HEADS);
             }
             Some(head) if starts_type(head) => type_ref::<Src, Ctx>(inp, inside)?,
-            Some(_) => match inside {
+            Some(_) => match inside.owners() {
               None => recover::unexpected::<Src, Ctx>(inp, TYPE_HEADS)?,
               Some(inside) => block_junk::<Src, Ctx>(inp, TYPE_HEADS, inside)?,
             },
@@ -164,15 +204,16 @@ lossless_production! {
   /// A directive's name, an interface, a union member, a type condition, a fragment spread's
   /// target, a `where` bound — every place GraphQL would write a `NamedType`. It carries no `!`,
   /// which is the whole difference from [`definition_type_path`]: none of those positions admits
-  /// one, so a `!` after a `TypePath` is left for the caller to recover.
-  fn type_path<'inp, Src, Ctx>(inp) {
+  /// one, so a `!` after a `TypePath` is left for the caller to recover. `at` is
+  /// [`type_generics`]'s, an executable document's or a schema's: no block reads one.
+  fn type_path<'inp, Src, Ctx>(inp, at: TypeAt) {
     peek_kind::<Src, Ctx>(inp)?;
     node(
       K::TypePath.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         path::<Src, Ctx>(inp)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LAngle) {
-          type_generics::<Src, Ctx>(inp, None)?;
+          type_generics::<Src, Ctx>(inp, at)?;
         }
         Ok(())
       },
@@ -183,16 +224,16 @@ lossless_production! {
   /// `Path TypeGenerics? '!'?` — a type reference's path head.
   ///
   /// The `!` is consumed **inside** the node, so it is a child of the type it modifies. See the
-  /// module docs for why there is no wrapper node to put it under instead. `block` is
+  /// module docs for why there is no wrapper node to put it under instead. `at` is
   /// [`type_generics`]'s.
-  fn definition_type_path<'inp, Src, Ctx>(inp, block: Option<Owners>) {
+  fn definition_type_path<'inp, Src, Ctx>(inp, at: TypeAt) {
     peek_kind::<Src, Ctx>(inp)?;
     node(
       K::DefinitionTypePath.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         path::<Src, Ctx>(inp)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LAngle) {
-          type_generics::<Src, Ctx>(inp, block)?;
+          type_generics::<Src, Ctx>(inp, at)?;
         }
         eat_if::<Src, Ctx>(inp, Kind::Bang)?;
         Ok(())
@@ -210,9 +251,10 @@ lossless_production! {
   /// returns or reaches a skip that consumes at least one token whenever input remains: that is
   /// this loop's whole termination argument.
   ///
-  /// With `block` it leaves what the productions `block` names read next, as [`type_generics`]
-  /// does, with its `]` reported missing, and its junk is the block's, with the `]` beside them.
-  fn list_type<'inp, Src, Ctx>(inp, block: Option<Owners>) {
+  /// Inside a block, where `at` is [`TypeAt::Block`], it leaves what the productions `at` names
+  /// read next, as [`type_generics`] does, with its `]` reported missing, and its junk is the
+  /// block's, with the `]` beside them.
+  fn list_type<'inp, Src, Ctx>(inp, at: TypeAt) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;
     node(
@@ -221,7 +263,8 @@ lossless_production! {
         expect::<Src, Ctx>(inp, Kind::LBracket)?;
         let open = opener_span(inp.span().end());
         let open_at: usize = inp.state().brace_depth();
-        let inside = block.map(|owners| owners.with(Kind::RBracket));
+        let block = at.owners();
+        let inside = at.with(Kind::RBracket);
         type_ref::<Src, Ctx>(inp, inside)?;
         loop {
           if eat_if::<Src, Ctx>(inp, Kind::RBracket)? {
@@ -237,7 +280,7 @@ lossless_production! {
             {
               return recover::report_unexpected::<Src, Ctx>(inp, LIST_CLOSER_HEADS);
             }
-            Some(_) => match inside {
+            Some(_) => match inside.owners() {
               None => recover::unexpected::<Src, Ctx>(inp, TYPE_HEADS)?,
               Some(inside) => block_junk::<Src, Ctx>(inp, TYPE_HEADS, inside)?,
             },
@@ -254,17 +297,18 @@ lossless_production! {
   /// its three root sigils `~`, `..` and `^`, or a list's `[`. Opens no node of its own — the chosen
   /// production opens, and closes, its own, `!` included.
   ///
-  /// With `block` the type stands in a typed form's arguments inside a `const { … }` block: what
-  /// `block` names is left as a closer is, and junk is the block's. Every caller main has passes
-  /// `None`.
-  fn type_ref<'inp, Src, Ctx>(inp, block: Option<Owners>) {
+  /// `at` says where the type is read: an executable document's, a schema's, or, as
+  /// [`TypeAt::Block`], a typed form's arguments inside a `const { … }` block, where what `at`
+  /// names is left as a closer is, and junk is the block's.
+  fn type_ref<'inp, Src, Ctx>(inp, at: TypeAt) {
+    let block = at.owners();
     // The head peek first, so the leading trivia it crosses is committed BEFORE any node opens and
     // therefore lands outside it.
     match peek_kind::<Src, Ctx>(inp)? {
       Some(Kind::Identifier | Kind::Tilde | Kind::DotDot | Kind::Caret) => {
-        definition_type_path::<Src, Ctx>(inp, block)
+        definition_type_path::<Src, Ctx>(inp, at)
       }
-      Some(Kind::LBracket) => list_type::<Src, Ctx>(inp, block),
+      Some(Kind::LBracket) => list_type::<Src, Ctx>(inp, at),
       // No type starts here, and the head closes a block: the block this position stands in.
       // Reported and left, so that block closes on it and what follows the block is still parsed.
       // Every caller has consumed a token of its own before it asks for a type, and goes on to a
@@ -302,22 +346,22 @@ lossless_drivers! {
   dialect = graphqlx::lossless;
 
   /// Drivers that run one path or type production over a `&str` and hand back the tree it built,
-  /// for `tests/lossless_x_value.rs`.
+  /// for `tests/lossless_x_value.rs`. Each reads its type where an executable document reads one.
   mod test_support;
 
   /// `super::type_ref` over `src` — the entry every type position uses, and the only door to
   /// `definition_type_path` and `list_type`.
-  fn parse_type_ref => type_ref [None];
+  fn parse_type_ref => type_ref [super::TypeAt::Executable];
 
   /// `super::type_path` over `src` — the non-type path position, which carries no `!`.
-  fn parse_type_path => type_path;
+  fn parse_type_path => type_path [super::TypeAt::Executable];
 
   /// `super::path` over `src` — the bare path, with no generics and no `!`.
   fn parse_path => path;
 
   /// `super::type_generics` over `src` — the `<…>` argument list on its own, which no valid
   /// document ever starts with and which therefore has no other entry point.
-  fn parse_type_generics => type_generics [None];
+  fn parse_type_generics => type_generics [super::TypeAt::Executable];
 
   /// `super::path_or_recover` over `src` — the recovering path door a list of paths uses.
   fn parse_path_or_recover => path_or_recover;

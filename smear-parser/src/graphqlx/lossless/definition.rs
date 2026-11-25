@@ -86,7 +86,7 @@ use super::{
     starts_description,
   },
   trivia::{eat_if, expect, peek_as, peek_kind, peek_signed_number},
-  ty::{type_path, type_ref},
+  ty::{TypeAt, type_path, type_ref},
   value::{Constness, RunAt, default_value, expression_run},
 };
 
@@ -115,7 +115,7 @@ lossless_production! {
         }
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         expect::<Src, Ctx>(inp, Kind::Colon)?;
-        type_ref::<Src, Ctx>(inp, None)?;
+        type_ref::<Src, Ctx>(inp, TypeAt::Schema)?;
         // Dispatched on a peek rather than attempted, so the `=` is consumed *inside* the
         // `DefaultValue` node and an absent default opens nothing.
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Equal) {
@@ -188,7 +188,7 @@ lossless_production! {
           arguments_definition::<Src, Ctx>(inp)?;
         }
         expect::<Src, Ctx>(inp, Kind::Colon)?;
-        type_ref::<Src, Ctx>(inp, None)?;
+        type_ref::<Src, Ctx>(inp, TypeAt::Schema)?;
         directives::<Src, Ctx>(inp, Constness::Schema)
       },
     )
@@ -283,7 +283,7 @@ lossless_production! {
             // whatever is here belongs to the next component.
             return recover::report_unexpected::<Src, Ctx>(inp, PATH_HEADS);
           }
-          type_path::<Src, Ctx>(inp)?;
+          type_path::<Src, Ctx>(inp, TypeAt::Schema)?;
           // Each turn consumes an `&` before it can loop again, which is the termination argument.
           if !eat_if::<Src, Ctx>(inp, Kind::Ampersand)? {
             return Ok(());
@@ -311,7 +311,7 @@ lossless_production! {
           ) {
             return recover::report_unexpected::<Src, Ctx>(inp, PATH_HEADS);
           }
-          type_path::<Src, Ctx>(inp)?;
+          type_path::<Src, Ctx>(inp, TypeAt::Schema)?;
           if !eat_if::<Src, Ctx>(inp, Kind::Pipe)? {
             return Ok(());
           }
@@ -444,7 +444,7 @@ lossless_production! {
         }
         operation_type::<Src, Ctx>(inp)?;
         expect::<Src, Ctx>(inp, Kind::Colon)?;
-        type_path::<Src, Ctx>(inp)
+        type_path::<Src, Ctx>(inp, TypeAt::Schema)
       },
     )
     .parse_input(inp)
@@ -486,7 +486,7 @@ lossless_production! {
   /// which is why the two share this function rather than a copy each.
   fn constrained_fields<'inp, Src, Ctx>(inp, input_object: bool) {
     let constrained = peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Where);
-    optional_where_clause::<Src, Ctx>(inp)?;
+    optional_where_clause::<Src, Ctx>(inp, TypeAt::Schema)?;
     if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
       return if input_object {
         input_fields_definition::<Src, Ctx>(inp)
@@ -516,10 +516,10 @@ lossless_production! {
       K::ScalarTypeDefinition.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        definition_name::<Src, Ctx>(inp)?;
+        definition_name::<Src, Ctx>(inp, TypeAt::Schema)?;
         optional_implements::<Src, Ctx>(inp)?;
         directives::<Src, Ctx>(inp, Constness::Schema)?;
-        optional_where_clause::<Src, Ctx>(inp)
+        optional_where_clause::<Src, Ctx>(inp, TypeAt::Schema)
       },
     )
     .parse_input(inp)
@@ -533,7 +533,7 @@ lossless_production! {
       K::ObjectTypeDefinition.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        definition_name::<Src, Ctx>(inp)?;
+        definition_name::<Src, Ctx>(inp, TypeAt::Schema)?;
         object_body::<Src, Ctx>(inp)
       },
     )
@@ -550,7 +550,7 @@ lossless_production! {
       K::InterfaceTypeDefinition.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        definition_name::<Src, Ctx>(inp)?;
+        definition_name::<Src, Ctx>(inp, TypeAt::Schema)?;
         object_body::<Src, Ctx>(inp)
       },
     )
@@ -592,7 +592,7 @@ lossless_production! {
       K::UnionTypeDefinition.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        definition_name::<Src, Ctx>(inp)?;
+        definition_name::<Src, Ctx>(inp, TypeAt::Schema)?;
         optional_implements::<Src, Ctx>(inp)?;
         directives::<Src, Ctx>(inp, Constness::Schema)?;
         constrained_union_members::<Src, Ctx>(inp)
@@ -620,7 +620,7 @@ lossless_production! {
       if !members {
         recover::report_unexpected::<Src, Ctx>(inp, UNION_MEMBERS_HEADS)?;
       }
-      optional_where_clause::<Src, Ctx>(inp)?;
+      optional_where_clause::<Src, Ctx>(inp, TypeAt::Schema)?;
     }
     Ok(())
   }
@@ -635,7 +635,7 @@ lossless_production! {
       K::EnumTypeDefinition.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        definition_name::<Src, Ctx>(inp)?;
+        definition_name::<Src, Ctx>(inp, TypeAt::Schema)?;
         optional_implements::<Src, Ctx>(inp)?;
         directives::<Src, Ctx>(inp, Constness::Schema)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
@@ -658,7 +658,7 @@ lossless_production! {
       K::InputObjectTypeDefinition.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        definition_name::<Src, Ctx>(inp)?;
+        definition_name::<Src, Ctx>(inp, TypeAt::Schema)?;
         optional_implements::<Src, Ctx>(inp)?;
         directives::<Src, Ctx>(inp, Constness::Schema)?;
         constrained_fields::<Src, Ctx>(inp, true)
@@ -685,7 +685,7 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         expect::<Src, Ctx>(inp, Kind::At)?;
-        definition_name::<Src, Ctx>(inp)?;
+        definition_name::<Src, Ctx>(inp, TypeAt::Schema)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
           arguments_definition::<Src, Ctx>(inp)?;
         }
@@ -710,7 +710,7 @@ lossless_production! {
           Some(Kind::Pipe | Kind::Identifier) => directive_locations::<Src, Ctx>(inp)?,
           _ => recover::report_unexpected::<Src, Ctx>(inp, NAME_HEADS)?,
         }
-        optional_where_clause::<Src, Ctx>(inp)
+        optional_where_clause::<Src, Ctx>(inp, TypeAt::Schema)
       },
     )
     .parse_input(inp)
