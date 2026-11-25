@@ -626,7 +626,7 @@ mod lossless {
   }
 
   /// A block, a parenthesis, a list and a typed form left unfinished at the end of input: the
-  /// syntactic layer's one error is the lossless layer's at the same place. After an operand the
+  /// syntactic layer's one error is the lossless layer's first emitted error. After an operand the
   /// opener is unclosed; a part missing at the end is refused where the input ends.
   #[test]
   fn an_unfinished_block_is_one_error_in_both_layers() {
@@ -654,9 +654,10 @@ mod lossless {
     ] {
       let (lossless, syntactic) = lent(text);
       assert_eq!(syntactic, [expected], "{text}");
-      assert!(
-        lossless.iter().any(|seen| seen == expected),
-        "{text}: {lossless:?}"
+      assert_eq!(
+        lossless.first().map(String::as_str),
+        Some(expected),
+        "{text}: the lossless layer's first emitted error: {lossless:?}"
       );
     }
   }
@@ -683,7 +684,8 @@ mod lossless {
   }
 
   /// A block object field's `:`, a block map entry's `=>` and a typed value's value, each missing at
-  /// the end of input behind trivia: both layers refuse it where the input ends.
+  /// the end of input behind trivia: both layers refuse it where the input ends, and it is the
+  /// lossless layer's first emitted error.
   #[test]
   fn a_part_missing_at_the_end_is_refused_where_the_input_ends_in_both_layers() {
     for (text, expected) in [
@@ -702,8 +704,157 @@ mod lossless {
     ] {
       let (lossless, syntactic) = lent(text);
       assert_eq!(syntactic, [expected], "{text}");
-      assert!(
-        lossless.iter().any(|seen| seen == expected),
+      assert_eq!(
+        lossless.first().map(String::as_str),
+        Some(expected),
+        "{text}: the lossless layer's first emitted error: {lossless:?}"
+      );
+    }
+  }
+
+  /// Errors as their codes and their primary spans, in the order lent.
+  type Spans = Vec<(String, usize, usize)>;
+
+  /// Every error `errors` holds, in the order lent, as its code and its primary span.
+  fn spanned<E: Diagnose>(errors: &[E]) -> Spans {
+    errors
+      .iter()
+      .map(|error| {
+        let span = error.primary().span();
+        (
+          String::from(error.code().as_str()),
+          span.map_or(0, |span| span.start()),
+          span.map_or(0, |span| span.end()),
+        )
+      })
+      .collect()
+  }
+
+  /// What each layer lends for `text`, read as a type-system document, each error as its code and
+  /// its primary span: the lossless layer's in the order it emits them, and the syntactic layer's.
+  fn spans_of(text: &str) -> (Spans, Spans) {
+    let mut lossless: Vec<Lent<'_>> = Vec::new();
+    let _ = Lossless::new()
+      .type_system_document(text, &mut lossless)
+      .expect("a short text is short enough for a tree");
+    let mut syntactic: Vec<GraphqlxError<&str>> = Vec::new();
+    let _ = Syntactic::new().type_system_document(text, &mut syntactic);
+    (spanned(&lossless), spanned(&syntactic))
+  }
+
+  /// The valid texts behind the audit's table of truncations inside a block, one for each form a
+  /// block holds, their tokens a space apart.
+  const BLOCK_FORMS: &[&str] = &[
+    "const { 1 }",
+    "const { ( 1 ) }",
+    "const { [ 1 , 2 ] }",
+    "const { { a : 1 , b : 2 } }",
+    "const { set ! { 1 , 2 } }",
+    "const { map ! { 1 => 2 , 3 => 4 } }",
+    "const { Box < i32 [ u8 ] > ( 1 ) }",
+    "const { P < T > { x : 1 , y : 2 } }",
+    "const { Url ( 1 ) }",
+    "const { P { x : 1 } }",
+    "const { const { 1 } }",
+    "const { ~ :: a :: b }",
+    "const { a :: b }",
+    "const { .. :: .. :: a }",
+    "const { ^ :: a < b :: c > ( 1 ) }",
+  ];
+
+  /// The bytes at which the openers `text` leaves unclosed stand. The text's tokens are a space
+  /// apart, and its closers answer its openers in order, as a prefix of a valid text's do.
+  fn unclosed_openers(text: &str) -> Vec<usize> {
+    let mut open: Vec<usize> = Vec::new();
+    let mut at = 0usize;
+    for token in text.split(' ') {
+      match token {
+        "{" | "[" | "(" | "<" => open.push(at),
+        "}" | "]" | ")" | ">" => {
+          open.pop();
+        }
+        _ => {}
+      }
+      at += token.len() + 1;
+    }
+    open
+  }
+
+  /// Every valid text a block holds in the audit's table, cut after each of its tokens from its
+  /// `const` to the one before the block's own `}`, bare and behind a comment:
+  ///
+  /// - T1: both layers refuse;
+  /// - T2: the syntactic layer's one error is the lossless layer's first emitted error, in code
+  ///   and span, which is the one a ceiling of one kept diagnostic keeps;
+  /// - T3: every later lossless error is an opener around the cut left unclosed, at that opener,
+  ///   or the end of input refused where the text ends.
+  ///
+  /// The bare cuts are the table's 98 points.
+  #[test]
+  fn every_cut_inside_a_block_is_one_first_error_in_both_layers() {
+    const HEAD: &str = "input I { a : T = ";
+    let mut points: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for form in BLOCK_FORMS {
+      let whole = format!("{HEAD}{form} }}");
+      assert_eq!(
+        spans_of(&whole),
+        (Vec::new(), Vec::new()),
+        "{whole} is a valid text"
+      );
+      let tokens: Vec<&str> = form.split(' ').collect();
+      for cut in 1..tokens.len() {
+        let bare = format!("{HEAD}{}", tokens[..cut].join(" "));
+        points.insert(bare.clone());
+        for text in [bare.clone(), format!("{bare} # c")] {
+          let (ours, theirs) = spans_of(&text);
+          assert_eq!(theirs.len(), 1, "{text}: {theirs:?}");
+          assert_eq!(ours.first(), theirs.first(), "{text}: T2, {ours:?}");
+          let openers = unclosed_openers(&text);
+          for (code, start, end) in ours.iter().skip(1) {
+            let at_an_opener = code == "smear::syntax::unclosed-delimiter"
+              && *end == start + 1
+              && openers.contains(start);
+            let at_the_end = code == "smear::syntax::unexpected-end-of-input"
+              && *start == text.len()
+              && *end == text.len();
+            assert!(
+              at_an_opener || at_the_end,
+              "{text}: T3, {code} at {start}..{end}: {ours:?}"
+            );
+          }
+        }
+      }
+    }
+    assert_eq!(points.len(), 98, "the table's points");
+  }
+
+  /// A typed form's `<` at the end of input, out of a block and in one, and one level down: the
+  /// `<` unclosed is both layers' first error, as it is where a type's arguments meet the end.
+  #[test]
+  fn type_arguments_at_the_end_are_the_angle_unclosed_in_both_layers() {
+    for (text, expected) in [
+      (
+        "input I { a: T = Box<",
+        "smear::syntax::unclosed-delimiter at 20..21",
+      ),
+      (
+        "input I { a: T = Box<Vec<",
+        "smear::syntax::unclosed-delimiter at 24..25",
+      ),
+      (
+        "input I { a: T = const { Box<Vec<",
+        "smear::syntax::unclosed-delimiter at 32..33",
+      ),
+      (
+        "input I { a: Box<",
+        "smear::syntax::unclosed-delimiter at 16..17",
+      ),
+    ] {
+      let (lossless, syntactic) = lent(text);
+      assert_eq!(syntactic, [expected], "{text}");
+      assert_eq!(
+        lossless.first().map(String::as_str),
+        Some(expected),
         "{text}: {lossless:?}"
       );
     }
