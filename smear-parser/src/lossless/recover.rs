@@ -128,11 +128,14 @@
 //! sources are enumerable. smear calls one cache-clearing door, `InputRef::state_mut`, and only
 //! from a dialect's `const { … }` block production, at most twice for a block: once to enter the
 //! block's mode, right after its `{` with nothing cached, and once to leave it, right after its `}`
-//! with nothing cached, or in that step's place on an error the parse may survive, with at most
-//! one token staged, which is then lexed again. A terminal error writes nothing. So
-//! `spent == committed` still holds for a parse in which no block fails, and a failed block costs
-//! the allowance at most one item. `set_state`, `restore` and `rollback_*` appear nowhere, and the
-//! lexer crate's own `state_mut` calls are a lexer touching its own bracket counter. The lossless
+//! with nothing cached, or at the end of input. A terminal error writes nothing. The block's own
+//! expression catches every error its operand raises that the parse may survive, so under the
+//! emitter every door installs, which records a report and goes on, no such error leaves a block,
+//! and `spent == committed` holds for a parse in which a block fails too. Only an emitter that
+//! refuses a report sends an error out of a block, and the leave in that step's place, with at
+//! most one token staged, costs the allowance at most one item. `set_state`, `restore` and
+//! `rollback_*` appear nowhere, and the lexer crate's own `state_mut` calls are a lexer touching
+//! its own bracket counter. The lossless
 //! tree's only speculation is four single-token probes and the attempt [`unexpected`] runs its skip
 //! in, and the remainder is the failed scan this guard exists to bound. That attempt is declined only
 //! where what the skip committed holds a `}` the skip did not open, and a declined one is a failed

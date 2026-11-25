@@ -145,7 +145,7 @@
 //! without the token — and the cell derives the missing-token table below from exactly that and
 //! asserts the two are the same set.
 //!
-//! **Twenty-nine project; sixty-seven refuse.** The twenty-nine are the lenient rows a site can leave
+//! **Twenty-nine project; seventy-one refuse.** The twenty-nine are the lenient rows a site can leave
 //! with a well-formed value. The others refuse either the shape the site built, or — for the
 //! unclosed sites whose definition the parser cannot finish at end of input — the rubble the
 //! document is left holding, or, for the two rows above, the hole.
@@ -245,6 +245,10 @@
 //! | `value.rs` | report | `input I { a: T = const { [1 } }` | `]` of `ListValue` — **no image** | **projects** |
 //! | `value.rs` | unclosed | `input I { a: T = const { [1` | `]` of `ListValue` — **no image** | **projects** |
 //! | `value.rs` | unclosed | `input I { a: T = const { {b: 1` | `}` of `ObjectValue` — **no image** | **projects** |
+//! | `value.rs` | report | `input I { a: T = const { {b, c: 1} } }` | a constituent with an image — the value, behind the `:` | `MissingChild(ObjectField)` |
+//! | `value.rs` | report | `input I { a: T = const { map!{1, 2 => 3} } }` | a constituent with an image — the value, behind the `=>` | `MissingChild(MapEntry)` |
+//! | `value.rs` | report | `input I { a: T = const { set! } }` | a constituent with an image — the body | `MissingChild(SetValue)` |
+//! | `value.rs` | report | `input I { a: T = const { map!{1 => 2,, 3 => 4} } }` | a constituent with an image — a member | `UnexpectedChild(MapValue, Separator)` |
 //! | `value.rs` | report | `input I { a: u32 = HOUR - 1 }` | nothing — a present token is refused | **a hole** — the run keeps the `-` as an `Error` |
 //! | `directive.rs` | unclosed | `{ f(a: 1` | `)` of `Arguments` — **no image** | **projects** |
 //! | `directive.rs` | report | `{ f(a: 1 }` | `)` of `Arguments` — **no image** | **projects** |

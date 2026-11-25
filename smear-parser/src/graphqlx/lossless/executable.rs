@@ -155,7 +155,7 @@ lossless_production! {
         // for it would be paying for a distinction the grammar does not make.
         variable::<Src, Ctx>(inp)?;
         expect::<Src, Ctx>(inp, Kind::Colon)?;
-        type_ref::<Src, Ctx>(inp)?;
+        type_ref::<Src, Ctx>(inp, None)?;
         // Dispatched on a peek rather than attempted, so the `=` is consumed *inside* the
         // `DefaultValue` node and an absent default opens nothing.
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Equal) {

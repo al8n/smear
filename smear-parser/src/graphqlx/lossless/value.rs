@@ -85,14 +85,17 @@ use super::coverage::{node, node_at};
 use super::{
   GraphqlxLosslessError, GraphqlxLosslessInput, Keyword, recover,
   recover::{
-    BLOCK_OPERAND_HEADS, BRACE_CLOSER_HEADS, CONST_BLOCK_HEADS, CONST_VALUE_HEADS,
-    LIST_CLOSER_HEADS, OBJECT_FIELD_HEADS, OPERATOR_OR_SEPARATOR_HEADS, PARENS_CLOSER_HEADS,
-    TYPED_FORM_HEADS, VALUE_HEADS, closes_enclosing_block, continues_an_expression, is_closer,
-    is_number, is_operator, opener_span, starts_value,
+    BLOCK_OPERAND_HEADS, BRACE_CLOSER_HEADS, COLLECTION_BODY_HEADS, COLON_HEADS, CONST_BLOCK_HEADS,
+    CONST_VALUE_HEADS, FAT_ARROW_HEADS, LIST_CLOSER_HEADS, OBJECT_FIELD_HEADS,
+    OPERATOR_OR_SEPARATOR_HEADS, Owners, PARENS_CLOSER_HEADS, TYPED_FORM_HEADS, VALUE_HEADS,
+    begins_block_operand, closes_enclosing_block, continues_an_expression, is_closer, is_number,
+    is_operator, opener_span, starts_value,
   },
   trivia::{eat_if, expect, peek_as, peek_kind, peek_signed_number},
   ty::{path, path_root, path_tail, type_generics},
 };
+
+use crate::lossless::depth::{self, JudgedTurn, RootTurn};
 
 /// The spec's `[Const]` grammar parameter, as an argument, and the schema position beside it.
 ///
@@ -484,10 +487,10 @@ lossless_production! {
   /// `opener` names the keyword at the head, when the head is `set`, `map` or `const`; with none,
   /// the head is a name or a root's sigil, which the path production reads.
   ///
-  /// With `in_block` the head is an operand's inside a `const { … }` block, and what it opens is the
-  /// block's own: a set's and a map's members are expressions and a `,` separates them, a typed
-  /// form holds the block's members, and a block after `const` is a block inside the block, which
-  /// switches nothing.
+  /// With `block` the head is an operand's inside a `const { … }` block, which the productions it
+  /// names read next, and what it opens is the block's own: a set's and a map's members are
+  /// expressions and a `,` separates them, a typed form holds the block's members, and a block
+  /// after `const` is a block inside the block, which switches nothing.
   ///
   /// # Why this needs a retro-wrap and not a two-token peek
   ///
@@ -519,7 +522,7 @@ lossless_production! {
     inp,
     konst: Constness,
     opener: Option<Opener>,
-    in_block: bool,
+    block: Option<Owners>,
   ) {
     // Before the head: the enclosing node is still the innermost one open, so the leading trivia
     // the peek in `value` already crossed sits outside whatever this opens.
@@ -532,7 +535,7 @@ lossless_production! {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         match (opener, peek_kind::<Src, Ctx>(inp)?) {
           (Opener::Collection(collection), Some(Kind::Bang)) => {
-            return if in_block {
+            return if block.is_some() {
               block_collection_body::<Src, Ctx>(inp, outer, collection)
             } else {
               collection_body::<Src, Ctx>(inp, outer, konst, collection)
@@ -542,7 +545,7 @@ lossless_production! {
           // just crossed are the block's own first children. Only a block outside a block
           // switches the lexer's mode.
           (Opener::Block, Some(Kind::LBrace)) => {
-            return block_braces::<Src, Ctx>(inp, outer, !in_block);
+            return block_braces::<Src, Ctx>(inp, outer, block.is_none());
           }
           _ => {}
         }
@@ -579,7 +582,7 @@ lossless_production! {
       Constness::Const | Constness::NonConst => false,
     };
     if opens_a_typed_form {
-      return typed_form::<Src, Ctx>(inp, outer, typed, konst, in_block);
+      return typed_form::<Src, Ctx>(inp, outer, typed, konst, block);
     }
     node_at(
       outer,
@@ -595,13 +598,14 @@ lossless_production! {
   /// The [`TypePath`](K::TypePath) is always there, with type arguments or without, since the
   /// form's type is one. `<` and then neither bracket is reported where the bracket should be, and
   /// the form is built as a typed object with no body: the type was written, and what is missing is
-  /// the rest. With `in_block` the form's members are a block's.
+  /// the rest. With `block` the form's members are a block's, and its type arguments and its
+  /// parenthesis leave what the productions `block` names read next.
   fn typed_form<'inp, Src, Ctx>(
     inp,
     value: tokora::cst::EventMark,
     ty: tokora::cst::EventMark,
     konst: Constness,
-    in_block: bool,
+    block: Option<Owners>,
   ) {
     let has_arguments = peek_kind::<Src, Ctx>(inp)? == Some(Kind::LAngle);
     node_at(
@@ -609,18 +613,20 @@ lossless_production! {
       K::TypePath.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         if has_arguments {
-          type_generics::<Src, Ctx>(inp)
+          type_generics::<Src, Ctx>(inp, block)
         } else {
           Ok(())
         }
       },
     )
     .parse_input(inp)?;
-    match peek_kind::<Src, Ctx>(inp)? {
-      Some(Kind::LBrace) if in_block => block_typed_object_body::<Src, Ctx>(inp, value),
-      Some(Kind::LParen) if in_block => block_typed_value_body::<Src, Ctx>(inp, value),
-      Some(Kind::LBrace) => typed_object_body::<Src, Ctx>(inp, value, konst),
-      Some(Kind::LParen) => typed_value_body::<Src, Ctx>(inp, value, konst),
+    match (peek_kind::<Src, Ctx>(inp)?, block) {
+      (Some(Kind::LBrace), Some(_)) => block_typed_object_body::<Src, Ctx>(inp, value),
+      (Some(Kind::LParen), Some(owners)) => {
+        block_typed_value_body::<Src, Ctx>(inp, value, owners)
+      }
+      (Some(Kind::LBrace), None) => typed_object_body::<Src, Ctx>(inp, value, konst),
+      (Some(Kind::LParen), None) => typed_value_body::<Src, Ctx>(inp, value, konst),
       _ => {
         recover::report_unexpected::<Src, Ctx>(inp, TYPED_FORM_HEADS)?;
         node_at(
@@ -697,9 +703,15 @@ lossless_production! {
   /// The `{` is taken by `expect`, with nothing cached behind it; the lexer enters the block; the
   /// expression's first peek is the first lex in the mode, so the trivia after the `{` is lexed in
   /// it; the body runs to its `}`; the lexer leaves the block, so the trivia after the `}` is the
-  /// first thing lexed out of the mode; and the node is the mark's. An error the parse may go on
-  /// from leaves the block before it is returned. A terminal stop writes no state, so the stop
-  /// stays one.
+  /// first thing lexed out of the mode; and the node is the mark's. A terminal stop writes no
+  /// state, so the stop stays one.
+  ///
+  /// Under the emitter every door installs, which records a report and goes on, nothing but a
+  /// terminal error leaves the body: its expression catches every recoverable error its operand
+  /// raises, and every other recovery inside it reports and reads on. So the mode is left at the
+  /// block's `}` or at the end of input, with nothing staged. An emitter that refused a report
+  /// would send that report's `Err` out of the body, and the lexer leaves the block before it is
+  /// returned, so nothing after it is lexed in the mode.
   ///
   /// Without `switch` it is a block inside a block, whose lexer is in the mode already: it reads
   /// the same tokens and touches no state.
@@ -712,10 +724,12 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::LBrace)?;
         let open = opener_span(inp.span().end());
+        // Read once the block's own `{` is committed, so it counts that brace.
+        let floor: usize = inp.state().brace_depth();
         if switch {
           inp.state_mut().enter_const_block();
         }
-        let body = block_body::<Src, Ctx>(inp, open);
+        let body = block_body::<Src, Ctx>(inp, open, floor);
         if switch {
           let stopped = match &body {
             Ok(()) => false,
@@ -732,21 +746,51 @@ lossless_production! {
   }
 
   /// A block's inside, from the expression to its `}`: an object value's loop around the one
-  /// expression. A `}` ends it; the end of input leaves it unclosed at the `{`; and anything else,
-  /// what ended the expression without being the block's, is reported against the `}` and
-  /// skipped, so every turn returns or consumes.
+  /// expression.
+  ///
+  /// # Where the body ends
+  ///
+  /// `floor` is the lexer's count of open braces once the block's `{` is committed, and a `}` at
+  /// the head with exactly `floor` open is the block's own: the head is only peeked, so it is not
+  /// in the count yet. That is a module's body's rule, and every production of a block delimited by
+  /// braces ends by it, an object, a typed object, a set and a map too: at its own `}` or at the
+  /// end of input, and at nothing else. Two arms guard it, and no text reaches either, since inside
+  /// a block no production takes a `}` it does not own: a bracket is read by the production that
+  /// looks for its closer, and any other junk is a token at a time. With more braces open, a `}`
+  /// closes one that something inside left open, and is one junk token; with fewer, the block's
+  /// own was taken, and the block ends where it stands.
+  ///
+  /// The end of input leaves the block unclosed at its `{`. Anything else, what ended the
+  /// expression without being the block's, is reported against the `}` and skipped as
+  /// [`block_junk`] skips, so every turn returns or consumes.
   #[inline(always)]
-  fn block_body<'inp, Src, Ctx>(inp, open: tokora::SimpleSpan) {
-    block_expression::<Src, Ctx>(inp, &[])?;
+  fn block_body<'inp, Src, Ctx>(inp, open: tokora::SimpleSpan, floor: usize) {
+    block_expression::<Src, Ctx>(inp, Owners::NONE)?;
     loop {
-      if eat_if::<Src, Ctx>(inp, Kind::RBrace)? {
-        return Ok(());
-      }
       match peek_kind::<Src, Ctx>(inp)? {
         None => return recover::unclosed_object::<Src, Ctx>(inp, open),
-        Some(_) => recover::unexpected::<Src, Ctx>(inp, BRACE_CLOSER_HEADS)?,
+        Some(Kind::RBrace) => {
+          let now: usize = inp.state().brace_depth();
+          if now == floor {
+            return expect::<Src, Ctx>(inp, Kind::RBrace);
+          }
+          if now < floor {
+            return Ok(());
+          }
+          block_stray_brace::<Src, Ctx>(inp)?;
+        }
+        Some(_) => block_junk::<Src, Ctx>(inp, BRACE_CLOSER_HEADS, Owners::NONE)?,
       }
     }
+  }
+
+  /// A `}` at the head of a production of a block delimited by braces, with more braces open than
+  /// the production's own count: it closes one that something inside left open, and is one junk
+  /// token, reported and taken into an `Error`. No text reaches it: see [`block_body`].
+  fn block_stray_brace<'inp, Src, Ctx>(inp) {
+    // Through the substrate's door, as every skip's report is: what is skipped is a hole.
+    crate::lossless::recover::report_unexpected(inp, &[])?;
+    recover::skip_one::<Src, Ctx>(inp)
   }
 
   /// The expression a block, a parenthesis or a block's member holds: one
@@ -757,18 +801,34 @@ lossless_production! {
   /// node opens, so it is the caller's. The trailing trivia is crossed by the peek made inside the
   /// node after the operand, the read that finds whether the expression goes on, so it is the
   /// expression's. What ends the expression is judged after the node has closed: a `,`, a closer,
-  /// a `=>` or the end of input ends it, and anything else is reported once, against an operator
-  /// or a `,`, and skipped into an `Error` that stands beside the node, in its caller's.
+  /// a `=>`, a token `owners` holds or the end of input ends it, and anything else is reported
+  /// once, against an operator or a `,`, and skipped as [`block_junk`] skips, beside the node, in
+  /// its caller's.
   ///
-  /// `owns` names the delimiters the production around the expression reads next, a map entry's
-  /// `=>` after its key or a member loop's `,`: a missing operand in front of one is reported and
-  /// leaves it to that production, as it leaves a closer.
-  fn block_expression<'inp, Src, Ctx>(inp, owns: &'static [Kind]) {
+  /// `owners` names what the productions around the expression read next, as far out as the
+  /// nearest one delimited by braces: a missing operand in front of one is reported and leaves it
+  /// to that production, as it leaves a closer.
+  ///
+  /// # The expression is the net
+  ///
+  /// The operand is judged as a module's body judges an item, through `depth::judge_turn`. A
+  /// failure that ends the document is returned, and nothing is written. Any other has reported
+  /// itself where it failed, and only the productions a constant position has raise one: a path's
+  /// `::` or name, or a variable's name, each under an operand. The expression then ends where the
+  /// failure left the input, and what stands there is judged as anything else that follows an
+  /// operand is. So no recoverable error leaves a block, and no definition is lost to a mistake
+  /// between a block's braces.
+  fn block_expression<'inp, Src, Ctx>(inp, owners: Owners) {
     peek_kind::<Src, Ctx>(inp)?;
     node(
       K::Expression.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
-        block_operand::<Src, Ctx>(inp, owns)?;
+        let JudgedTurn { turn, .. }: JudgedTurn<(), GraphqlxLosslessError<'inp, Src, Ctx>> =
+          depth::judge_turn(inp, |inp| block_operand::<Src, Ctx>(inp, owners));
+        // A recoverable failure has reported itself, and the expression ends where it stands.
+        if let RootTurn::EndsTheDocument(error) = turn {
+          return Err(error);
+        }
         peek_kind::<Src, Ctx>(inp)?;
         Ok(())
       },
@@ -779,18 +839,19 @@ lossless_production! {
       | Some(
         Kind::Separator | Kind::RBrace | Kind::RBracket | Kind::RParen | Kind::FatArrow,
       ) => Ok(()),
-      Some(_) => recover::unexpected::<Src, Ctx>(inp, OPERATOR_OR_SEPARATOR_HEADS),
+      Some(head) if owners.owns(head) => Ok(()),
+      Some(_) => block_junk::<Src, Ctx>(inp, OPERATOR_OR_SEPARATOR_HEADS, owners),
     }
   }
 
   /// One operand inside a block, read wherever it stands and reported through
   /// [`BLOCK_OPERAND_HEADS`] where none begins.
   ///
-  /// A head that begins no operand is skipped into an `Error`, inside the expression. A closer, a
-  /// delimiter in `owns`, or the end of input is reported and left, as a required value's is, and
-  /// nothing is built there: the expression is then empty. A `$` is reported and still built, as in
-  /// a constant position.
-  fn block_operand<'inp, Src, Ctx>(inp, owns: &'static [Kind]) {
+  /// A closer, a token `owners` holds, or the end of input is reported and left, as a required
+  /// value's is, and nothing is built there: the expression is then empty. Any other head that
+  /// begins no operand is [`block_junk`]'s, inside the expression. A `$` is reported and still
+  /// built, as in a constant position.
+  fn block_operand<'inp, Src, Ctx>(inp, owners: Owners) {
     match peek_kind::<Src, Ctx>(inp)? {
       Some(Kind::Dollar) => {
         recover::report_unexpected::<Src, Ctx>(inp, BLOCK_OPERAND_HEADS)?;
@@ -801,26 +862,26 @@ lossless_production! {
       Some(Kind::InlineString | Kind::BlockString) => string_value::<Src, Ctx>(inp),
       Some(Kind::Char) => char_value::<Src, Ctx>(inp),
       Some(Kind::PrefixedString) => prefixed_string_value::<Src, Ctx>(inp),
-      Some(Kind::LParen) => paren_value::<Src, Ctx>(inp),
-      Some(Kind::LBracket) => block_list_value::<Src, Ctx>(inp),
+      Some(Kind::LParen) => paren_value::<Src, Ctx>(inp, owners),
+      Some(Kind::LBracket) => block_list_value::<Src, Ctx>(inp, owners),
       Some(Kind::LBrace) => block_object_value::<Src, Ctx>(inp),
       Some(Kind::Tilde | Kind::DotDot | Kind::Caret) => {
-        collection_or_enum::<Src, Ctx>(inp, Constness::Schema, None, true)
+        collection_or_enum::<Src, Ctx>(inp, Constness::Schema, None, Some(owners))
       }
-      Some(Kind::Identifier) => block_name::<Src, Ctx>(inp),
+      Some(Kind::Identifier) => block_name::<Src, Ctx>(inp, owners),
       None => recover::report_unexpected::<Src, Ctx>(inp, BLOCK_OPERAND_HEADS),
-      Some(head) if is_closer(head) || owns.contains(&head) => {
+      Some(head) if is_closer(head) || owners.owns(head) => {
         recover::report_unexpected::<Src, Ctx>(inp, BLOCK_OPERAND_HEADS)
       }
-      Some(_) => recover::unexpected::<Src, Ctx>(inp, BLOCK_OPERAND_HEADS),
+      Some(_) => block_junk::<Src, Ctx>(inp, BLOCK_OPERAND_HEADS, owners),
     }
   }
 
   /// A name at an operand's head inside a block: `true`, `false`, `null`, a block inside the
   /// block when `const` is followed by `{`, a set or a map when `set` or `map` is followed by `!`,
   /// and otherwise a path, which `<`, `{` or `(` after it makes the type of a typed form. All but
-  /// the first three are [`collection_or_enum`]'s, as at a schema value's head.
-  fn block_name<'inp, Src, Ctx>(inp) {
+  /// the first three are [`collection_or_enum`]'s, as at a schema value's head, with `owners`.
+  fn block_name<'inp, Src, Ctx>(inp, owners: Owners) {
     let opener = match peek_as::<Src, Ctx, Keyword>(inp)? {
       Some(Keyword::True | Keyword::False) => return boolean_value::<Src, Ctx>(inp),
       Some(Keyword::Null) => return null_value::<Src, Ctx>(inp),
@@ -829,7 +890,7 @@ lossless_production! {
       Some(Keyword::Const) => Some(Opener::Block),
       _ => None,
     };
-    collection_or_enum::<Src, Ctx>(inp, Constness::Schema, opener, true)
+    collection_or_enum::<Src, Ctx>(inp, Constness::Schema, opener, Some(owners))
   }
 
   /// `b"…"` or `i"…"`: one token, whose node is [`BytesValue`](K::BytesValue) or
@@ -855,12 +916,14 @@ lossless_production! {
 
   /// `( Expression )` inside a block: one expression, and its closer tested as a list's is. A
   /// separator is not its own, so `(1,)` is one report, at the comma, against the `)`.
-  fn paren_value<'inp, Src, Ctx>(inp) {
+  fn paren_value<'inp, Src, Ctx>(inp, owners: Owners) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;
     node(
       K::ParenValue.raw(),
-      |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| parenthesized::<Src, Ctx>(inp),
+      |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
+        parenthesized::<Src, Ctx>(inp, owners)
+      },
     )
     .parse_input(inp)
   }
@@ -868,25 +931,28 @@ lossless_production! {
   /// `( Expression )` inside whichever node its caller opened: a parenthesis's, and a typed value's
   /// inside a block. Opens no node, and is always inlined.
   ///
-  /// A `}` of a block around it ends it unclosed, by [`closes_enclosing_block`], and anything else
-  /// before the `)` is reported once, against the `)`, and skipped.
+  /// A parenthesis is not delimited by braces, so it leaves what the productions around it read
+  /// next: a `}`, which is never a parenthesis's own inside a block, and a token `owners` holds.
+  /// In front of either it reports its `)` missing and returns. Anything else before the `)` is
+  /// reported once, against the `)`, and skipped as [`block_junk`] skips.
   #[inline(always)]
-  fn parenthesized<'inp, Src, Ctx>(inp) {
+  fn parenthesized<'inp, Src, Ctx>(inp, owners: Owners) {
     expect::<Src, Ctx>(inp, Kind::LParen)?;
     let open = opener_span(inp.span().end());
-    let open_at: usize = inp.state().brace_depth();
-    block_expression::<Src, Ctx>(inp, &[])?;
+    let inside = owners.with(Kind::RParen);
+    block_expression::<Src, Ctx>(inp, inside)?;
     loop {
       if eat_if::<Src, Ctx>(inp, Kind::RParen)? {
         return Ok(());
       }
       match peek_kind::<Src, Ctx>(inp)? {
         None => return recover::unclosed_parens::<Src, Ctx>(inp, open),
-        Some(Kind::RBrace) if closes_enclosing_block(open_at, inp.state().brace_depth()) => {
+        Some(head) if head == Kind::RBrace || owners.owns(head) => {
           return recover::report_unexpected::<Src, Ctx>(inp, PARENS_CLOSER_HEADS);
         }
-        // `unexpected` reports and consumes, so every turn returns or consumes.
-        Some(_) => recover::unexpected::<Src, Ctx>(inp, PARENS_CLOSER_HEADS)?,
+        // The head is none of what the skip leaves, so it consumes, and every turn returns or
+        // consumes.
+        Some(_) => block_junk::<Src, Ctx>(inp, PARENS_CLOSER_HEADS, inside)?,
       }
     }
   }
@@ -894,13 +960,13 @@ lossless_production! {
   /// `[ Expression (, Expression)* ,? ]` inside a block: each element one expression, and a `,`
   /// between two.
   ///
-  /// A `}` of the block around the list ends it unclosed, by [`closes_enclosing_block`], as it ends
-  /// a list outside one. After an element a `,` goes on and the `]` ends the list; anything else
-  /// ended the element's expression without being the list's own, and is reported once, against
-  /// the `]`, and skipped. An element's head is the expression's own, so a missing element is the
-  /// operand's report. A turn that reads an element at a stray closer consumes nothing, and the turn
-  /// after it skips that closer, so the loop ends.
-  fn block_list_value<'inp, Src, Ctx>(inp) {
+  /// A list is not delimited by braces: in front of a `}` and of a token `owners` holds it reports
+  /// its `]` missing and returns, as a parenthesis does. Its own `,` and `]` are asked first, so a
+  /// `,` at an element's head is an element missing, which the operand reports, and the turn after
+  /// takes the `,`. After an element a `,` goes on and the `]` ends the list; anything else ended
+  /// the element's expression without being the list's own, and is reported once, against the
+  /// `]`, and skipped as [`block_junk`] skips. So every turn returns or consumes.
+  fn block_list_value<'inp, Src, Ctx>(inp, owners: Owners) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;
     node(
@@ -908,7 +974,7 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::LBracket)?;
         let open = opener_span(inp.span().end());
-        let open_at: usize = inp.state().brace_depth();
+        let inside = owners.with(Kind::Separator).with(Kind::RBracket);
         let mut at_element = true;
         loop {
           if eat_if::<Src, Ctx>(inp, Kind::RBracket)? {
@@ -920,15 +986,17 @@ lossless_production! {
           }
           match peek_kind::<Src, Ctx>(inp)? {
             None => return recover::unclosed_list::<Src, Ctx>(inp, open),
-            Some(Kind::RBrace) if closes_enclosing_block(open_at, inp.state().brace_depth()) => {
+            Some(head)
+              if head == Kind::RBrace || (head != Kind::Separator && owners.owns(head)) =>
+            {
               return recover::report_unexpected::<Src, Ctx>(inp, LIST_CLOSER_HEADS);
             }
             Some(_) if at_element => {
-              block_expression::<Src, Ctx>(inp, &[Kind::Separator])?;
+              block_expression::<Src, Ctx>(inp, inside)?;
               at_element = false;
             }
             Some(_) => {
-              recover::unexpected::<Src, Ctx>(inp, LIST_CLOSER_HEADS)?;
+              block_junk::<Src, Ctx>(inp, LIST_CLOSER_HEADS, inside)?;
               at_element = true;
             }
           }
@@ -955,38 +1023,80 @@ lossless_production! {
   fn block_object_fields<'inp, Src, Ctx>(inp) {
     expect::<Src, Ctx>(inp, Kind::LBrace)?;
     let open = opener_span(inp.span().end());
-    block_brace_members::<Src, Ctx>(inp, open, None)
+    // Read once the object's own `{` is committed, so it counts that brace.
+    let floor: usize = inp.state().brace_depth();
+    block_brace_members::<Src, Ctx>(inp, open, floor, None)
   }
 
   /// `Name : Expression` — an object field inside a block, its value an expression.
+  ///
+  /// The `:` is read, not expected. Where it stands it is taken; elsewhere it is reported once, and
+  /// what stands in front of it is skipped as [`block_junk`] skips, with no report more, up to the
+  /// `:`, or up to what the object reads next, its `,` or its `}`, or the end of input. There the
+  /// field ends with what it has: a `:` that is missing costs the field its value, and never the
+  /// object or the definition around it.
   fn block_object_field<'inp, Src, Ctx>(inp) {
     node(
       K::ObjectField.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        expect::<Src, Ctx>(inp, Kind::Colon)?;
-        block_expression::<Src, Ctx>(inp, &[Kind::Separator])
+        if !eat_if::<Src, Ctx>(inp, Kind::Colon)? {
+          recover::report_unexpected::<Src, Ctx>(inp, COLON_HEADS)?;
+          block_skip_to::<Src, Ctx>(inp, Kind::Colon, Owners::MEMBERS)?;
+          if !eat_if::<Src, Ctx>(inp, Kind::Colon)? {
+            return Ok(());
+          }
+        }
+        block_expression::<Src, Ctx>(inp, Owners::MEMBERS)
       },
     )
     .parse_input(inp)
   }
 
   /// `Expression => Expression` — a map entry inside a block, both halves expressions.
+  ///
+  /// The key leaves the `=>` and the map's `,`. The `=>` is read as a field's `:` is, see
+  /// [`block_object_field`]: where it is missing the entry ends with its key.
   fn block_map_entry<'inp, Src, Ctx>(inp) {
     node(
       K::MapEntry.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
-        block_expression::<Src, Ctx>(inp, &[Kind::FatArrow])?;
-        expect::<Src, Ctx>(inp, Kind::FatArrow)?;
-        block_expression::<Src, Ctx>(inp, &[Kind::Separator])
+        block_expression::<Src, Ctx>(inp, Owners::MEMBERS.with(Kind::FatArrow))?;
+        if !eat_if::<Src, Ctx>(inp, Kind::FatArrow)? {
+          recover::report_unexpected::<Src, Ctx>(inp, FAT_ARROW_HEADS)?;
+          block_skip_to::<Src, Ctx>(inp, Kind::FatArrow, Owners::MEMBERS)?;
+          if !eat_if::<Src, Ctx>(inp, Kind::FatArrow)? {
+            return Ok(());
+          }
+        }
+        block_expression::<Src, Ctx>(inp, Owners::MEMBERS)
       },
     )
     .parse_input(inp)
   }
 
+  /// What stands in front of a part a production inside a block reads, `part`, skipped as
+  /// [`block_junk`] skips and reported by no one: the production has reported the part missing
+  /// once. It stops in front of the part, and in front of what it must leave, the end of input, a
+  /// `}` and a token `owners` holds, so every turn consumes or returns; a bracket it reads leaves
+  /// the part too.
+  fn block_skip_to<'inp, Src, Ctx>(inp, part: Kind, owners: Owners) {
+    let leaves = owners.with(part);
+    loop {
+      match peek_kind::<Src, Ctx>(inp)? {
+        None => return Ok(()),
+        Some(head) if head == Kind::RBrace || leaves.owns(head) => return Ok(()),
+        Some(_) => block_skip::<Src, Ctx>(inp, leaves)?,
+      }
+    }
+  }
+
   /// The `! { … }` body of a `set` or a `map` inside a block, retro-wrapped from the mark
   /// [`collection_or_enum`] minted before the keyword, as [`collection_body`] is: a set's members
   /// are expressions and a map's are entries, and a `,` separates two.
+  ///
+  /// The `{` is read, not expected: where it is missing it is reported where it should be, and the
+  /// form ends with no body.
   fn block_collection_body<'inp, Src, Ctx>(
     inp,
     mark: tokora::cst::EventMark,
@@ -1002,10 +1112,15 @@ lossless_production! {
       mark,
       kind.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
+        // The `!` the caller peeked.
         expect::<Src, Ctx>(inp, Kind::Bang)?;
-        expect::<Src, Ctx>(inp, Kind::LBrace)?;
+        if !eat_if::<Src, Ctx>(inp, Kind::LBrace)? {
+          return recover::report_unexpected::<Src, Ctx>(inp, COLLECTION_BODY_HEADS);
+        }
         let open = opener_span(inp.span().end());
-        block_brace_members::<Src, Ctx>(inp, open, Some(collection))
+        // Read once the form's own `{` is committed, so it counts that brace.
+        let floor: usize = inp.state().brace_depth();
+        block_brace_members::<Src, Ctx>(inp, open, floor, Some(collection))
       },
     )
     .parse_input(inp)
@@ -1024,14 +1139,20 @@ lossless_production! {
   }
 
   /// `( Expression )` after a typed value's type path inside a block: one expression, as a
-  /// parenthesis holds.
-  fn block_typed_value_body<'inp, Src, Ctx>(inp, mark: tokora::cst::EventMark) {
+  /// parenthesis holds, and what `owners` holds left as a parenthesis leaves it.
+  fn block_typed_value_body<'inp, Src, Ctx>(
+    inp,
+    mark: tokora::cst::EventMark,
+    owners: Owners,
+  ) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;
     node_at(
       mark,
       K::TypedValue.raw(),
-      |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| parenthesized::<Src, Ctx>(inp),
+      |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
+        parenthesized::<Src, Ctx>(inp, owners)
+      },
     )
     .parse_input(inp)
   }
@@ -1040,50 +1161,128 @@ lossless_production! {
   /// up to its `}`: a set's expressions or a map's entries, as `collection` names, or with none an
   /// object's fields, and a `,` between two.
   ///
-  /// After a member a `,` goes on and the `}` ends the members; anything else ended the member
-  /// without being the aggregate's own, and is reported once, against the `}`, and skipped. The end
-  /// of input leaves the aggregate unclosed at its `{`. A field's head is a name and anything else
-  /// there is skipped, as an object's is outside a block, and a map entry's head is never a closer,
-  /// whose report would otherwise end the whole block at the entry's `=>`.
+  /// The `}` is the one the lexer's count gives the aggregate, by `floor`, as [`block_body`] reads
+  /// the block's. After a member a `,` goes on; anything else ended the member without being the
+  /// aggregate's own, and is reported once, against the `}`, and skipped as [`block_junk`] skips.
+  /// The end of input leaves the aggregate unclosed at its `{`. A `,` at a member's head is the
+  /// aggregate's own: a set's missing member is its operand's report, and a map's or an object's
+  /// is reported here, and the `,` is taken, so the next member is read. A field's head is a name
+  /// and a map entry's is never a closer: anything else there is skipped, as an object's is outside
+  /// a block. So every turn returns or consumes.
   #[inline(always)]
   fn block_brace_members<'inp, Src, Ctx>(
     inp,
     open: tokora::SimpleSpan,
+    floor: usize,
     collection: Option<Collection>,
   ) {
     let mut at_member = true;
     loop {
-      if eat_if::<Src, Ctx>(inp, Kind::RBrace)? {
-        return Ok(());
-      }
-      if !at_member && eat_if::<Src, Ctx>(inp, Kind::Separator)? {
-        at_member = true;
-        continue;
-      }
-      match peek_kind::<Src, Ctx>(inp)? {
-        None => return recover::unclosed_object::<Src, Ctx>(inp, open),
-        Some(head) if at_member => {
+      let Some(head) = peek_kind::<Src, Ctx>(inp)? else {
+        return recover::unclosed_object::<Src, Ctx>(inp, open);
+      };
+      match head {
+        Kind::RBrace => {
+          let now: usize = inp.state().brace_depth();
+          if now == floor {
+            return expect::<Src, Ctx>(inp, Kind::RBrace);
+          }
+          if now < floor {
+            return Ok(());
+          }
+          block_stray_brace::<Src, Ctx>(inp)?;
+        }
+        Kind::Separator if !at_member => {
+          expect::<Src, Ctx>(inp, Kind::Separator)?;
+          at_member = true;
+        }
+        Kind::Separator if collection != Some(Collection::Set) => {
+          let heads = match collection {
+            Some(_) => BLOCK_OPERAND_HEADS,
+            None => OBJECT_FIELD_HEADS,
+          };
+          recover::report_unexpected::<Src, Ctx>(inp, heads)?;
+          expect::<Src, Ctx>(inp, Kind::Separator)?;
+        }
+        _ if at_member => {
           match collection {
-            Some(Collection::Set) => block_expression::<Src, Ctx>(inp, &[Kind::Separator])?,
+            Some(Collection::Set) => block_expression::<Src, Ctx>(inp, Owners::MEMBERS)?,
             Some(Collection::Map) if is_closer(head) => {
-              recover::unexpected::<Src, Ctx>(inp, BRACE_CLOSER_HEADS)?;
+              block_junk::<Src, Ctx>(inp, BRACE_CLOSER_HEADS, Owners::MEMBERS)?;
               continue;
             }
             Some(Collection::Map) => block_map_entry::<Src, Ctx>(inp)?,
             None if head == Kind::Identifier => block_object_field::<Src, Ctx>(inp)?,
             None => {
-              recover::unexpected::<Src, Ctx>(inp, OBJECT_FIELD_HEADS)?;
+              block_junk::<Src, Ctx>(inp, OBJECT_FIELD_HEADS, Owners::MEMBERS)?;
               continue;
             }
           }
           at_member = false;
         }
-        Some(_) => {
-          recover::unexpected::<Src, Ctx>(inp, BRACE_CLOSER_HEADS)?;
+        _ => {
+          block_junk::<Src, Ctx>(inp, BRACE_CLOSER_HEADS, Owners::MEMBERS)?;
           at_member = true;
         }
       }
     }
+  }
+
+  /// A token nobody asked for, inside a `const { … }` block: the one recovery a production makes
+  /// while the lexer is in the block's mode. Reported once, against `expected`, at the first token
+  /// of the run, and then skipped as [`block_skip`] skips, with `owners`.
+  ///
+  /// Every caller has asked about what the skip leaves before it calls, the end of input, a `}`
+  /// and a token `owners` holds, so here the skip consumes: a caller's loop turns once for each
+  /// run or group it is handed, and returns at what it leaves. Nothing is counted and nothing is
+  /// read twice.
+  fn block_junk<'inp, Src, Ctx>(inp, expected: &'static [Kind], owners: Owners) {
+    // Through the substrate's door, as every skip's report is: what is skipped is a hole.
+    crate::lossless::recover::report_unexpected(inp, expected)?;
+    block_skip::<Src, Ctx>(inp, owners)
+  }
+
+  /// One run of junk inside a block, into an `Error` node, reported by no one.
+  ///
+  /// It takes nothing at the end of input, at a `}`, or at a token `owners` holds, which a
+  /// production around it reads next. A `(`, `[` or `{` is read by that bracket's own production,
+  /// [`paren_value`], [`block_list_value`] or [`block_object_value`], with `owners`, so a group is
+  /// closed by the production that looks for its closer, and that production leaves an owned token
+  /// as every other does. Any other token is taken, and after it every token that neither begins an
+  /// operand nor closes or separates anything, nor is held by `owners`: an operator, a `:`, a lone
+  /// `<`. So a run of operators is one node and one report.
+  ///
+  /// The `Error` node may hold a node, a parenthesis, a list or an object read as junk. It is
+  /// opened from a mark once the run is in hand, as a skipped token's is.
+  fn block_skip<'inp, Src, Ctx>(inp, owners: Owners) {
+    let Some(head) = peek_kind::<Src, Ctx>(inp)? else {
+      return Ok(());
+    };
+    if head == Kind::RBrace || owners.owns(head) {
+      return Ok(());
+    }
+    let mark = inp.cst_mark();
+    match head {
+      Kind::LParen => paren_value::<Src, Ctx>(inp, owners)?,
+      Kind::LBracket => block_list_value::<Src, Ctx>(inp, owners)?,
+      Kind::LBrace => block_object_value::<Src, Ctx>(inp)?,
+      _ => {
+        inp.try_expect_or_stop(|_| true)?;
+        while let Some(next) = peek_kind::<Src, Ctx>(inp)? {
+          if begins_block_operand(next)
+            || is_closer(next)
+            || matches!(next, Kind::Separator | Kind::FatArrow)
+            || owners.owns(next)
+          {
+            break;
+          }
+          inp.try_expect_or_stop(|_| true)?;
+        }
+      }
+    }
+    inp.cst_start_at(mark, K::Error.raw());
+    inp.cst_finish(K::Error.raw());
+    Ok(())
   }
 
   /// `= Value[Const]`, in the flavour `konst` names.
@@ -1143,7 +1342,7 @@ lossless_production! {
       // GraphQLx only: a root's sigil opens a rooted enum value, or in a schema position a typed
       // form's type as well. A `::` opens nothing and falls to the recovery below.
       Some(Kind::Tilde | Kind::DotDot | Kind::Caret) => match konst {
-        Constness::Schema => collection_or_enum::<Src, Ctx>(inp, konst, None, false),
+        Constness::Schema => collection_or_enum::<Src, Ctx>(inp, konst, None, None),
         Constness::Const | Constness::NonConst => enum_value::<Src, Ctx>(inp),
       },
       Some(Kind::Identifier) => match peek_as::<Src, Ctx, Keyword>(inp)? {
@@ -1153,18 +1352,18 @@ lossless_production! {
           inp,
           konst,
           Some(Opener::Collection(Collection::Set)),
-          false,
+          None,
         ),
         Some(Keyword::Map) => collection_or_enum::<Src, Ctx>(
           inp,
           konst,
           Some(Opener::Collection(Collection::Map)),
-          false,
+          None,
         ),
         // A schema position's block, before `{`; everywhere else `const` is a name.
         Some(Keyword::Const) => match konst {
           Constness::Schema => {
-            collection_or_enum::<Src, Ctx>(inp, konst, Some(Opener::Block), false)
+            collection_or_enum::<Src, Ctx>(inp, konst, Some(Opener::Block), None)
           }
           Constness::Const | Constness::NonConst => enum_value::<Src, Ctx>(inp),
         },
@@ -1172,7 +1371,7 @@ lossless_production! {
         // `ContextualKeyword` also carries — is a perfectly good first path segment, and in a
         // schema position the type a typed form may name.
         _ => match konst {
-          Constness::Schema => collection_or_enum::<Src, Ctx>(inp, konst, None, false),
+          Constness::Schema => collection_or_enum::<Src, Ctx>(inp, konst, None, None),
           Constness::Const | Constness::NonConst => enum_value::<Src, Ctx>(inp),
         },
       },

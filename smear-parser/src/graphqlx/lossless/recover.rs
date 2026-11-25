@@ -339,6 +339,98 @@ pub(crate) const OPERATOR_OR_SEPARATOR_HEADS: &[Kind] = &[
 /// has the contents of.
 pub(crate) const CONST_BLOCK_HEADS: &[Kind] = &[Kind::Identifier, Kind::LBrace];
 
+/// The `:` between an object field's name and its value: what a field inside a block reports where
+/// the `:` is missing, since the field reads it rather than expects it. A report through this set
+/// renders as [`Colon`](crate::graphqlx::error::Expectation::Colon), as a declined `expect` of the
+/// `:` does, and no other set of this module has the contents of.
+pub(crate) const COLON_HEADS: &[Kind] = &[Kind::Colon];
+
+/// The `=>` between a map entry's key and its value, reported as [`COLON_HEADS`] is, and rendering
+/// as [`FatArrow`](crate::graphqlx::error::Expectation::FatArrow).
+pub(crate) const FAT_ARROW_HEADS: &[Kind] = &[Kind::FatArrow];
+
+/// The `{` a set's or a map's members open with after its `!`: what one inside a block reports
+/// where the `{` is missing. Its contents are three other sets' too, so a report through it renders
+/// as theirs does, with no expectation of its own.
+pub(crate) const COLLECTION_BODY_HEADS: &[Kind] = &[Kind::LBrace];
+
+/// What the productions around one inside a `const { … }` block read next, as far out as the
+/// nearest production delimited by braces: a set over `,`, `=>`, `)`, `]`, `>` and `:`.
+///
+/// Inside a block every token is an operand's, a delimiter, or junk, and each delimiter is the
+/// next read of exactly one production. A brace-delimited production — the block, an object, a
+/// typed object, a set and a map — ends at its own `}` or at the end of input, so nothing outside
+/// it reads past it, and the set its inside is handed starts again: [`Owners::MEMBERS`], the `,`
+/// its members are separated by, with the `=>` beside it while a map entry's key is read. Every
+/// other production adds what it reads itself: a parenthesis and a typed value their `)`, a list
+/// its `]` and its `,`, type arguments their `>`, and a list type its `]`. A field reading on to
+/// its `:` adds that `:`. A production that is not brace-delimited leaves a token of the set it was
+/// handed to the production that reads it, and reports its own closer missing in front of it; the
+/// innermost production that reads a token takes it, so a list reads its own `,` and `]` before it
+/// asks the set.
+///
+/// `Copy` and passed by value, one byte, so handing it down costs what the `&'static [Kind]` it
+/// replaces did, which held the caller's delimiter and no one else's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Owners(u8);
+
+impl Owners {
+  /// What the expression a block holds is handed: nothing, since the block's `}` ends it and it has
+  /// no members.
+  pub(crate) const NONE: Self = Self(0);
+
+  /// What a member of an object, a typed object, a set or a map is handed: the `,` between two.
+  pub(crate) const MEMBERS: Self = Self(Self::bit(Kind::Separator));
+
+  /// The one bit `kind` has in the set, or none for a kind no production around another reads.
+  const fn bit(kind: Kind) -> u8 {
+    match kind {
+      Kind::Separator => 1,
+      Kind::FatArrow => 1 << 1,
+      Kind::RParen => 1 << 2,
+      Kind::RBracket => 1 << 3,
+      Kind::RAngle => 1 << 4,
+      Kind::Colon => 1 << 5,
+      _ => 0,
+    }
+  }
+
+  /// This set and `kind`, which the production handing the set down reads next.
+  #[inline]
+  pub(crate) const fn with(self, kind: Kind) -> Self {
+    Self(self.0 | Self::bit(kind))
+  }
+
+  /// Whether a production around the one holding this set reads `kind` next.
+  #[inline]
+  pub(crate) const fn owns(self, kind: Kind) -> bool {
+    self.0 & Self::bit(kind) != 0
+  }
+}
+
+/// Whether `kind` begins an operand inside a `const { … }` block: [`BLOCK_OPERAND_HEADS`], and the
+/// `$` of a variable, which a block reports and still builds.
+#[inline]
+pub(crate) const fn begins_block_operand(kind: Kind) -> bool {
+  matches!(
+    kind,
+    Kind::Dollar
+      | Kind::Int
+      | Kind::Float
+      | Kind::InlineString
+      | Kind::BlockString
+      | Kind::Char
+      | Kind::PrefixedString
+      | Kind::Identifier
+      | Kind::Tilde
+      | Kind::DotDot
+      | Kind::Caret
+      | Kind::LParen
+      | Kind::LBracket
+      | Kind::LBrace
+  )
+}
+
 /// Whether `kind` is one of the nine tokens an expression's operator is written with outside a
 /// block: `+`, `-`, `*`, `/`, `%`, `<<`, `&`, `|` and `!`.
 #[inline]
@@ -686,68 +778,19 @@ lossless_production! {
     crate::lossless::recover::report_unexpected(inp, expected)
   }
 
-  /// [`unexpected`] inside a `const { … }` block: report once, then skip with a scan that never
-  /// reads past a `}` it did not open, whatever else it left open.
-  ///
-  /// The shared skip balances one depth over every pair, so behind an unmatched `(` or `[` it reads
-  /// on past the block's `}`, in the block's mode, before its look-ahead for a `}` it did not open
-  /// takes that back, and what it read is paid for again under the produce-event budget. This one
-  /// reads forward once: it takes the head, then stops at the end of input, in front of a `}` none
-  /// of its own braces is open for, which it leaves staged for the block or the aggregate that owns
-  /// it, or in front of a restart point or a `=>` where its depth over every pair is zero: a `=>`
-  /// inside a block is a map entry's, read by the entry, so a skip in front of it never takes it.
-  /// A restart point at the head is taken alone, as the shared skip's fallback takes it. The caller
-  /// has asked about a `}` at the head before it calls, as every caller of the shared skip does.
-  fn unexpected_in_block<'inp, Src, Ctx>(inp, expected: &'static [Kind]) {
-    crate::lossless::recover::report_unexpected(inp, expected)?;
-    let Some(head) = super::trivia::peek_kind::<Src, Ctx>(inp)? else {
-      return Ok(());
-    };
-    let mark = inp.cst_mark();
-    let (mut depth, mut braces) = (0_usize, 0_usize);
-    let mut next = Some(head);
-    let mut first = true;
-    while let Some(kind) = next {
-      if !first
-        && ((kind == Kind::RBrace && braces == 0)
-          || (depth == 0 && (is_sync_point(kind) || kind == Kind::FatArrow)))
-      {
-        break;
-      }
-      inp.try_expect_or_stop(|_| true)?;
-      match delimiters(&kind) {
-        Balance::Open(pair) => {
-          depth += 1;
-          if pair == b'{' {
-            braces += 1;
-          }
-        }
-        Balance::Close(pair) => {
-          depth = depth.saturating_sub(1);
-          if pair == b'{' {
-            braces = braces.saturating_sub(1);
-          }
-        }
-        Balance::Neutral => {}
-      }
-      if first && is_sync_point(kind) {
-        break;
-      }
-      first = false;
-      next = super::trivia::peek_kind::<Src, Ctx>(inp)?;
-    }
-    inp.cst_start_at(mark, K::Error.raw());
-    inp.cst_finish(K::Error.raw());
-    Ok(())
-  }
-
   /// Nothing that could start one of `expected` is here, and there is still input.
   /// [`crate::lossless::recover::unexpected`] with this dialect's four pairs and its restart
-  /// predicate, and inside a `const { … }` block, where the lexer's state says it is,
-  /// [`unexpected_in_block`], which reads nothing past the block's `}`.
+  /// predicate.
+  ///
+  /// Inside a `const { … }` block, where the lexer's state says it is, this is a guard that no
+  /// text reaches: every production there recovers through `value.rs`'s `block_junk`, which reads
+  /// a bracket through the production that owns its closer. Here it reports and takes one token,
+  /// so the shared scan, whose one depth over every pair reads past what a block's productions
+  /// read next, never runs in the block's mode.
   fn unexpected<'inp, Src, Ctx>(inp, expected: &'static [Kind]) {
     if inp.state().in_const_block() {
-      return unexpected_in_block::<Src, Ctx>(inp, expected);
+      crate::lossless::recover::report_unexpected(inp, expected)?;
+      return skip_one::<Src, Ctx>(inp);
     }
     // #168's scan allowance. Read here rather than inside the substrate helper because the
     // committed side is `smear-lexer`'s token tally and `crate::lossless::recover` may not name

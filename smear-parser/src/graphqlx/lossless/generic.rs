@@ -89,7 +89,7 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         if eat_if::<Src, Ctx>(inp, Kind::Equal)? {
-          type_ref::<Src, Ctx>(inp)?;
+          type_ref::<Src, Ctx>(inp, None)?;
         }
         Ok(())
       },

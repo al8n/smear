@@ -115,7 +115,7 @@ lossless_production! {
         }
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         expect::<Src, Ctx>(inp, Kind::Colon)?;
-        type_ref::<Src, Ctx>(inp)?;
+        type_ref::<Src, Ctx>(inp, None)?;
         // Dispatched on a peek rather than attempted, so the `=` is consumed *inside* the
         // `DefaultValue` node and an absent default opens nothing.
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Equal) {
@@ -188,7 +188,7 @@ lossless_production! {
           arguments_definition::<Src, Ctx>(inp)?;
         }
         expect::<Src, Ctx>(inp, Kind::Colon)?;
-        type_ref::<Src, Ctx>(inp)?;
+        type_ref::<Src, Ctx>(inp, None)?;
         directives::<Src, Ctx>(inp, Constness::Schema)
       },
     )

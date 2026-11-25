@@ -37,10 +37,11 @@ use super::coverage::node;
 use super::{
   GraphqlxLosslessInput, recover,
   recover::{
-    ANGLE_CLOSER_HEADS, LIST_CLOSER_HEADS, PATH_HEADS, TYPE_HEADS, closes_enclosing_block,
+    ANGLE_CLOSER_HEADS, LIST_CLOSER_HEADS, Owners, PATH_HEADS, TYPE_HEADS, closes_enclosing_block,
     is_closer, opener_span, starts_type,
   },
   trivia::{eat_if, expect, peek_kind},
+  value::block_junk,
 };
 
 use crate::lossless::{lossless_drivers, lossless_production};
@@ -109,7 +110,12 @@ lossless_production! {
   /// A `}` of a block around the list ends it unclosed, by [`closes_enclosing_block`]:
   /// `type T { f: Box<Int }` keeps the fields' brace for the fields, and the definitions after
   /// `T` with it.
-  fn type_generics<'inp, Src, Ctx>(inp) {
+  ///
+  /// With `block` the list is a typed form's inside a `const { … }` block, and `block` names what
+  /// the productions around the form read next. The list is not delimited by braces, so it leaves
+  /// those as it leaves a `}`, with its `>` reported missing, and its junk is the block's, read by
+  /// `value.rs`'s `block_junk` with the `>` beside them. Outside a block, `None`, it is main's.
+  fn type_generics<'inp, Src, Ctx>(inp, block: Option<Owners>) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;
     node(
@@ -118,20 +124,28 @@ lossless_production! {
         expect::<Src, Ctx>(inp, Kind::LAngle)?;
         let open = opener_span(inp.span().end());
         let open_at: usize = inp.state().brace_depth();
+        let inside = block.map(|owners| owners.with(Kind::RAngle));
         // The mandatory first argument. `type_ref` reports a closer that stands where a type
         // should and leaves it, so an empty `<>` reports here and the list closes on its own `>`.
-        type_ref::<Src, Ctx>(inp)?;
+        type_ref::<Src, Ctx>(inp, inside)?;
         loop {
           if eat_if::<Src, Ctx>(inp, Kind::RAngle)? {
             return Ok(());
           }
           match peek_kind::<Src, Ctx>(inp)? {
             None => return recover::unclosed_angle::<Src, Ctx>(inp, open),
-            Some(Kind::RBrace) if closes_enclosing_block(open_at, inp.state().brace_depth()) => {
+            Some(head)
+              if (head == Kind::RBrace
+                && closes_enclosing_block(open_at, inp.state().brace_depth()))
+                || block.is_some_and(|owners| owners.owns(head)) =>
+            {
               return recover::report_unexpected::<Src, Ctx>(inp, ANGLE_CLOSER_HEADS);
             }
-            Some(head) if starts_type(head) => type_ref::<Src, Ctx>(inp)?,
-            Some(_) => recover::unexpected::<Src, Ctx>(inp, TYPE_HEADS)?,
+            Some(head) if starts_type(head) => type_ref::<Src, Ctx>(inp, inside)?,
+            Some(_) => match inside {
+              None => recover::unexpected::<Src, Ctx>(inp, TYPE_HEADS)?,
+              Some(inside) => block_junk::<Src, Ctx>(inp, TYPE_HEADS, inside)?,
+            },
           }
         }
       },
@@ -152,7 +166,7 @@ lossless_production! {
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         path::<Src, Ctx>(inp)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LAngle) {
-          type_generics::<Src, Ctx>(inp)?;
+          type_generics::<Src, Ctx>(inp, None)?;
         }
         Ok(())
       },
@@ -163,15 +177,16 @@ lossless_production! {
   /// `Path TypeGenerics? '!'?` — a type reference's path head.
   ///
   /// The `!` is consumed **inside** the node, so it is a child of the type it modifies. See the
-  /// module docs for why there is no wrapper node to put it under instead.
-  fn definition_type_path<'inp, Src, Ctx>(inp) {
+  /// module docs for why there is no wrapper node to put it under instead. `block` is
+  /// [`type_generics`]'s.
+  fn definition_type_path<'inp, Src, Ctx>(inp, block: Option<Owners>) {
     peek_kind::<Src, Ctx>(inp)?;
     node(
       K::DefinitionTypePath.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         path::<Src, Ctx>(inp)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LAngle) {
-          type_generics::<Src, Ctx>(inp)?;
+          type_generics::<Src, Ctx>(inp, block)?;
         }
         eat_if::<Src, Ctx>(inp, Kind::Bang)?;
         Ok(())
@@ -186,9 +201,12 @@ lossless_production! {
   /// may sit *between* the element and the closer: it consumes nothing on the well-formed path, and
   /// on the malformed one it attributes each junk region to an `Error` node until the `]`, a `}`
   /// of a block around the list ([`closes_enclosing_block`]) or end of input arrives. Every turn
-  /// returns or reaches `unexpected`, which consumes at least one token whenever input remains:
-  /// that is this loop's whole termination argument.
-  fn list_type<'inp, Src, Ctx>(inp) {
+  /// returns or reaches a skip that consumes at least one token whenever input remains: that is
+  /// this loop's whole termination argument.
+  ///
+  /// With `block` it leaves what the productions `block` names read next, as [`type_generics`]
+  /// does, with its `]` reported missing, and its junk is the block's, with the `]` beside them.
+  fn list_type<'inp, Src, Ctx>(inp, block: Option<Owners>) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;
     node(
@@ -197,7 +215,8 @@ lossless_production! {
         expect::<Src, Ctx>(inp, Kind::LBracket)?;
         let open = opener_span(inp.span().end());
         let open_at: usize = inp.state().brace_depth();
-        type_ref::<Src, Ctx>(inp)?;
+        let inside = block.map(|owners| owners.with(Kind::RBracket));
+        type_ref::<Src, Ctx>(inp, inside)?;
         loop {
           if eat_if::<Src, Ctx>(inp, Kind::RBracket)? {
             eat_if::<Src, Ctx>(inp, Kind::Bang)?;
@@ -205,10 +224,17 @@ lossless_production! {
           }
           match peek_kind::<Src, Ctx>(inp)? {
             None => return recover::unclosed_list::<Src, Ctx>(inp, open),
-            Some(Kind::RBrace) if closes_enclosing_block(open_at, inp.state().brace_depth()) => {
+            Some(head)
+              if (head == Kind::RBrace
+                && closes_enclosing_block(open_at, inp.state().brace_depth()))
+                || block.is_some_and(|owners| owners.owns(head)) =>
+            {
               return recover::report_unexpected::<Src, Ctx>(inp, LIST_CLOSER_HEADS);
             }
-            Some(_) => recover::unexpected::<Src, Ctx>(inp, TYPE_HEADS)?,
+            Some(_) => match inside {
+              None => recover::unexpected::<Src, Ctx>(inp, TYPE_HEADS)?,
+              Some(inside) => block_junk::<Src, Ctx>(inp, TYPE_HEADS, inside)?,
+            },
           }
         }
       },
@@ -221,22 +247,32 @@ lossless_production! {
   /// **Five heads, against GraphQL's two** (`graphqlx/syntactic/ty.rs:38-49`): a path's name, one of
   /// its three root sigils `~`, `..` and `^`, or a list's `[`. Opens no node of its own — the chosen
   /// production opens, and closes, its own, `!` included.
-  fn type_ref<'inp, Src, Ctx>(inp) {
+  ///
+  /// With `block` the type stands in a typed form's arguments inside a `const { … }` block: what
+  /// `block` names is left as a closer is, and junk is the block's. Every caller main has passes
+  /// `None`.
+  fn type_ref<'inp, Src, Ctx>(inp, block: Option<Owners>) {
     // The head peek first, so the leading trivia it crosses is committed BEFORE any node opens and
     // therefore lands outside it.
     match peek_kind::<Src, Ctx>(inp)? {
       Some(Kind::Identifier | Kind::Tilde | Kind::DotDot | Kind::Caret) => {
-        definition_type_path::<Src, Ctx>(inp)
+        definition_type_path::<Src, Ctx>(inp, block)
       }
-      Some(Kind::LBracket) => list_type::<Src, Ctx>(inp),
+      Some(Kind::LBracket) => list_type::<Src, Ctx>(inp, block),
       // No type starts here, and the head closes a block: the block this position stands in.
       // Reported and left, so that block closes on it and what follows the block is still parsed.
       // Every caller has consumed a token of its own before it asks for a type, and goes on to a
-      // loop that tests its closer first, so leaving the head costs no progress.
-      Some(head) if is_closer(head) => recover::report_unexpected::<Src, Ctx>(inp, TYPE_HEADS),
+      // loop that tests its closer first, so leaving the head costs no progress. Inside a block,
+      // what the productions around the form read next is left the same way.
+      Some(head) if is_closer(head) || block.is_some_and(|owners| owners.owns(head)) => {
+        recover::report_unexpected::<Src, Ctx>(inp, TYPE_HEADS)
+      }
       // No type starts here. Report and consume, exactly as `value`'s dispatcher does: an `Err`
       // would abort every enclosing production.
-      _ => recover::unexpected::<Src, Ctx>(inp, TYPE_HEADS),
+      _ => match block {
+        None => recover::unexpected::<Src, Ctx>(inp, TYPE_HEADS),
+        Some(owners) => block_junk::<Src, Ctx>(inp, TYPE_HEADS, owners),
+      },
     }
   }
 
@@ -265,7 +301,7 @@ lossless_drivers! {
 
   /// `super::type_ref` over `src` — the entry every type position uses, and the only door to
   /// `definition_type_path` and `list_type`.
-  fn parse_type_ref => type_ref;
+  fn parse_type_ref => type_ref [None];
 
   /// `super::type_path` over `src` — the non-type path position, which carries no `!`.
   fn parse_type_path => type_path;
@@ -275,7 +311,7 @@ lossless_drivers! {
 
   /// `super::type_generics` over `src` — the `<…>` argument list on its own, which no valid
   /// document ever starts with and which therefore has no other entry point.
-  fn parse_type_generics => type_generics;
+  fn parse_type_generics => type_generics [None];
 
   /// `super::path_or_recover` over `src` — the recovering path door a list of paths uses.
   fn parse_path_or_recover => path_or_recover;
