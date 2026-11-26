@@ -468,16 +468,20 @@ All notable changes to Smear are documented in this file.
   definition's body and the next definition as its members. It ends, unclosed, in front of what the
   definition reads next: its body, where the `}` that balances the `{` is written and the end of
   input, a `}` closing a block around the list or the start of a definition stands behind it; its
-  next directive and a union's members, on the same evidence; GraphQLx's `where`, and a directive
-  definition's `repeatable` and `on`, with neither a `:` nor a definition's keyword behind the
-  word; and the start of a definition, a keyword a root restarts at with neither behind it,
-  `extend` and what it extends counting as one, its description's string in front of it or not.
-  The report there is the one the list made first at that head: the unexpected token at a `{`, an
-  `@`, an `=` or a string, or the `:` a member named like the keyword misses. A directive
-  definition reads no location where a definition starts. A list inside a definition's braces
-  reads as it did, and so does every valid document, though under a produce-event budget a
-  directive definition's described argument named like a definition's keyword costs one or two
-  events more. The trees and the diagnostics of broken documents change accordingly.
+  next directive and a union's members, on the same evidence, and on none where the last directive
+  or member is a name spelled like a definition's keyword with a name behind it; GraphQLx's
+  `where`, and a directive definition's `repeatable` and `on`, with neither a `:` nor a
+  definition's keyword behind the word; and the start of a definition, a keyword a root restarts at
+  with neither behind it, `extend` and what it extends counting as one, its description's string
+  in front of it or not. The report there is the one the list made first at that head: the
+  unexpected token at a `{`, an `@`, an `=` or a string, or the `:` a member named like the
+  keyword misses. A directive definition reads no location where a definition starts: a location
+  spelled like a definition's keyword is reported at once, and a look-ahead behind that report
+  decides whether a definition starts there, across any trivia. A list inside a definition's
+  braces reads as it did, and so does every valid document, though under a produce-event budget a
+  directive definition's described argument named like a definition's keyword, as in
+  `directive @d("doc" type: Int)`, costs one event more, and never more than one; no other valid
+  document costs more. The trees and the diagnostics of broken documents change accordingly.
 - `smear-parser`: `lossless::recover::skip_unexpected`, `unexpected` behind its report, for a
   caller that reads ahead between the two, and `lossless::trivia::expected_at`, the failure
   `expect` reports, built from a token a production has read through the peek window.
