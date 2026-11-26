@@ -67,11 +67,12 @@ use super::coverage::{node, node_at};
 
 use super::{
   GraphqlLosslessInput,
-  directive::directives,
+  directive::{directives, header_directives},
   recover,
   recover::{
-    DESCRIBED_MEMBER_HEADS, NAME_HEADS, OPERATION_TYPE_HEADS, PARENS_CLOSER_HEADS,
-    ROOT_OPERATION_TYPES_HEADS, TYPE_SYSTEM_DEFINITION_HEADS, closes_enclosing_block, opener_span,
+    BareHeader, BodyHeader, DESCRIBED_MEMBER_HEADS, DirectiveHeader, Header, NAME_HEADS,
+    OPERATION_TYPE_HEADS, PARENS_CLOSER_HEADS, ROOT_OPERATION_TYPES_HEADS,
+    TYPE_SYSTEM_DEFINITION_HEADS, UnionHeader, closes_enclosing_block, opener_span,
   },
   trivia::{eat_if, expect, peek_as, peek_kind},
   ty::{named_type, type_ref},
@@ -163,6 +164,71 @@ lossless_production! {
             // The head is checked here rather than left to the member's own `expect`, because
             // that `expect` would return `Err` and abort the whole list — the ruling
             // `arguments` and `object_value` both record.
+            Some(_) => recover::unexpected::<Src, Ctx>(inp, DESCRIBED_MEMBER_HEADS)?,
+          }
+        }
+      },
+    )
+    .parse_input(inp)
+  }
+
+  /// [`arguments_definition`] on `owner`'s header, a directive definition's own list, which ends
+  /// unclosed in front of what `owner` reads next and in front of the start of a definition:
+  /// `directive.rs`'s `header_arguments`, with an input value for the member.
+  ///
+  /// A description's string is that member's head as well as a name, so its question stands in
+  /// front of the member as the name's does, decided through the peek window by
+  /// [`recover::description_ends_header`]: the description of a definition that starts behind it
+  /// ends the list. Every other arm is [`arguments_definition`]'s own, in its order.
+  fn header_arguments_definition<'inp, Src, Ctx>(inp, owner: impl Header) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
+    node(
+      K::ArgumentsDefinition.raw(),
+      |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
+        expect::<Src, Ctx>(inp, Kind::LParen)?;
+        let open = opener_span(inp.span().end());
+        let open_at: usize = inp.state().brace_depth();
+        // The report consumes nothing, so the `)` is still the loop's to eat.
+        if peek_kind::<Src, Ctx>(inp)? == Some(Kind::RParen) {
+          recover::report_unexpected::<Src, Ctx>(inp, DESCRIBED_MEMBER_HEADS)?;
+        }
+        loop {
+          if eat_if::<Src, Ctx>(inp, Kind::RParen)? {
+            return Ok(());
+          }
+          match peek_kind::<Src, Ctx>(inp)? {
+            None => return recover::unclosed_parens::<Src, Ctx>(inp, open),
+            Some(Kind::RBrace) if closes_enclosing_block(open_at, inp.state().brace_depth()) => {
+              return recover::report_unexpected::<Src, Ctx>(inp, PARENS_CLOSER_HEADS);
+            }
+            Some(head @ (Kind::Identifier | Kind::InlineString | Kind::BlockString)) => {
+              let mut ends = false;
+              if head == Kind::Identifier {
+                recover::name_ends_header::<Src, Ctx>(inp, open_at, owner, &mut ends)?;
+              } else {
+                recover::description_ends_header::<Src, Ctx>(inp, open_at, &mut ends)?;
+              }
+              if ends {
+                return Ok(());
+              }
+              input_value_definition::<Src, Ctx>(inp)?
+            }
+            Some(head @ (Kind::LBrace | Kind::At | Kind::Equal))
+              if recover::asks(owner, head) && inp.state().brace_depth() == open_at =>
+            {
+              let mut ends = false;
+              recover::unexpected_or_ends::<Src, Ctx>(
+                inp,
+                DESCRIBED_MEMBER_HEADS,
+                open_at,
+                owner,
+                &mut ends,
+              )?;
+              if ends {
+                return Ok(());
+              }
+            }
             Some(_) => recover::unexpected::<Src, Ctx>(inp, DESCRIBED_MEMBER_HEADS)?,
           }
         }
@@ -316,18 +382,31 @@ lossless_production! {
     .parse_input(inp)
   }
 
+  /// At a name where a directive definition reads a location: its report, made at once where its
+  /// spelling is no location's and so in front of anything read ahead, and whether the locations
+  /// end in front of it, which [`recover::location_ends`] decides of such a name. Nothing is
+  /// consumed.
+  ///
+  /// **Precondition: the head is an `Identifier`.** A location is spelled in upper case and every
+  /// keyword a root restarts at in lower, so a valid location costs one test of its spelling.
+  fn location_name<'inp, Src, Ctx>(inp, ends: &mut bool) {
+    let keyword = peek_as::<Src, Ctx, ContextualKeyword>(inp)?;
+    if keyword.is_some_and(is_directive_location) {
+      return Ok(());
+    }
+    recover::report_unexpected::<Src, Ctx>(inp, NAME_HEADS)?;
+    recover::location_ends::<Src, Ctx>(inp, keyword, ends)
+  }
+
   /// One `DirectiveLocation` — **no node**, the kind space having no image for one.
   ///
   /// A location is a bare `Name` token inside the enclosing `DirectiveLocations`, which is the
   /// same ruling `type_condition` records for its `on NamedType`: a node kind that does not
   /// exist is not invented, and the token survives for a formatter either way.
   ///
-  /// **Precondition: the head is an `Identifier`.** The spelling is checked here rather than by
-  /// the caller, because the check is the production's whole content.
+  /// **Precondition: the head is a name [`location_name`] has asked, at which the locations do not
+  /// end.** The spelling is checked there.
   fn directive_location<'inp, Src, Ctx>(inp) {
-    if !peek_as::<Src, Ctx, ContextualKeyword>(inp)?.is_some_and(is_directive_location) {
-      recover::report_unexpected::<Src, Ctx>(inp, NAME_HEADS)?;
-    }
     // Consumed either way. The name that is there is still what the author meant by a
     // location, and eating the diagnostic's own subject would leave nothing to point at.
     expect::<Src, Ctx>(inp, Kind::Identifier)
@@ -335,23 +414,38 @@ lossless_production! {
 
   /// `|? DirectiveLocation (| DirectiveLocation)*`
   ///
-  /// **Precondition: the head is `|` or an `Identifier`.** [`directive_definition`] decides
-  /// that, so this production never opens a zero-width node — the shape `directive_locations`
-  /// would otherwise build for `directive @d on` with nothing after it.
+  /// **Precondition: the head is `|`, or a name [`location_name`] has asked, at which the
+  /// locations do not end.** [`directive_definition`] decides that, so this production never opens
+  /// a zero-width node — the shape `directive_locations` would otherwise build for `directive @d
+  /// on` with nothing after it.
   ///
   /// A leading `|` is accepted: `syntactic/`'s `directive_locations` calls `allow_leading()`.
+  ///
+  /// Behind a `|` each name is asked the same, and where the locations end in front of one, the
+  /// node ends holding the `|` it read.
   fn directive_locations<'inp, Src, Ctx>(inp) {
     node(
       K::DirectiveLocations.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
-        eat_if::<Src, Ctx>(inp, Kind::Pipe)?;
-        if peek_kind::<Src, Ctx>(inp)? != Some(Kind::Identifier) {
-          return recover::report_unexpected::<Src, Ctx>(inp, NAME_HEADS);
+        if eat_if::<Src, Ctx>(inp, Kind::Pipe)? {
+          if peek_kind::<Src, Ctx>(inp)? != Some(Kind::Identifier) {
+            return recover::report_unexpected::<Src, Ctx>(inp, NAME_HEADS);
+          }
+          let mut ends = false;
+          location_name::<Src, Ctx>(inp, &mut ends)?;
+          if ends {
+            return Ok(());
+          }
         }
         directive_location::<Src, Ctx>(inp)?;
         while eat_if::<Src, Ctx>(inp, Kind::Pipe)? {
           if peek_kind::<Src, Ctx>(inp)? != Some(Kind::Identifier) {
             return recover::report_unexpected::<Src, Ctx>(inp, NAME_HEADS);
+          }
+          let mut ends = false;
+          location_name::<Src, Ctx>(inp, &mut ends)?;
+          if ends {
+            return Ok(());
           }
           directive_location::<Src, Ctx>(inp)?;
         }
@@ -504,7 +598,7 @@ lossless_production! {
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        directives::<Src, Ctx>(inp, Constness::Const)
+        header_directives::<Src, Ctx>(inp, Constness::Const, BareHeader)
       },
     )
     .parse_input(inp)
@@ -552,7 +646,7 @@ lossless_production! {
     if peek_as::<Src, Ctx, ContextualKeyword>(inp)? == Some(ContextualKeyword::Implements) {
       implements_interfaces::<Src, Ctx>(inp)?;
     }
-    directives::<Src, Ctx>(inp, Constness::Const)?;
+    header_directives::<Src, Ctx>(inp, Constness::Const, BodyHeader)?;
     if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
       fields_definition::<Src, Ctx>(inp)?;
     }
@@ -567,7 +661,7 @@ lossless_production! {
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        directives::<Src, Ctx>(inp, Constness::Const)?;
+        header_directives::<Src, Ctx>(inp, Constness::Const, UnionHeader)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Equal) {
           union_member_types::<Src, Ctx>(inp)?;
         }
@@ -585,7 +679,7 @@ lossless_production! {
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        directives::<Src, Ctx>(inp, Constness::Const)?;
+        header_directives::<Src, Ctx>(inp, Constness::Const, BodyHeader)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
           enum_values_definition::<Src, Ctx>(inp)?;
         }
@@ -603,7 +697,7 @@ lossless_production! {
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        directives::<Src, Ctx>(inp, Constness::Const)?;
+        header_directives::<Src, Ctx>(inp, Constness::Const, BodyHeader)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
           input_fields_definition::<Src, Ctx>(inp)?;
         }
@@ -627,11 +721,11 @@ lossless_production! {
         expect::<Src, Ctx>(inp, Kind::At)?;
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
-          arguments_definition::<Src, Ctx>(inp)?;
+          header_arguments_definition::<Src, Ctx>(inp, DirectiveHeader)?;
         }
         // The definition's own directives, after its arguments and before `repeatable` (draft
         // §3.13). No `@` opens no node.
-        directives::<Src, Ctx>(inp, Constness::Const)?;
+        header_directives::<Src, Ctx>(inp, Constness::Const, DirectiveHeader)?;
         // `repeatable` is a contextual keyword and a flag, not a node: the token is in the tree
         // and the kind space has no image for it.
         if peek_as::<Src, Ctx, ContextualKeyword>(inp)? == Some(ContextualKeyword::Repeatable) {
@@ -645,9 +739,21 @@ lossless_production! {
           recover::report_unexpected::<Src, Ctx>(inp, NAME_HEADS)?;
         }
         // The head check keeps `directive_locations` from opening a zero-width node for
-        // `directive @d on` — and it is what makes the empty form report exactly once.
+        // `directive @d on` — and it is what makes the empty form report exactly once. A name
+        // there is asked first: one whose spelling is no location's is reported at once, and
+        // where the locations end in front of it nothing is consumed and the item loop reads the
+        // definition that starts there.
         match peek_kind::<Src, Ctx>(inp)? {
-          Some(Kind::Pipe | Kind::Identifier) => directive_locations::<Src, Ctx>(inp),
+          Some(Kind::Pipe) => directive_locations::<Src, Ctx>(inp),
+          Some(Kind::Identifier) => {
+            let mut ends = false;
+            location_name::<Src, Ctx>(inp, &mut ends)?;
+            if ends {
+              Ok(())
+            } else {
+              directive_locations::<Src, Ctx>(inp)
+            }
+          }
           _ => recover::report_unexpected::<Src, Ctx>(inp, NAME_HEADS),
         }
       },
@@ -666,7 +772,7 @@ lossless_production! {
       K::SchemaDefinition.raw(),
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        directives::<Src, Ctx>(inp, Constness::Const)?;
+        header_directives::<Src, Ctx>(inp, Constness::Const, BodyHeader)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
           root_operation_type_definitions::<Src, Ctx>(inp)
         } else {

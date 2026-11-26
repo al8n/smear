@@ -165,17 +165,38 @@ where
   // `From` bound a long way from here.
   Ok(
     match inp.peek_head_map(|t| Spanned::new(*t.span, Clone::clone(t.data)))? {
-      Some(found) => Spanned::new(
-        found.span,
-        UnexpectedToken::<_, _, _, Lang>::expected_one(found.span, kind)
-          .with_found(found.data)
-          .into(),
-      ),
+      Some(found) => expected_at::<L, Ctx, Lang>(found, kind),
       None => {
         let end = inp.span().end();
         Spanned::new(SimpleSpan::new(end, end), UnexpectedEot::eot_of(end).into())
       }
     },
+  )
+}
+
+/// The diagnostic a failed [`expect`] for `kind` carries where `found` stands at the head: an
+/// unexpected-token error naming `kind`, at `found`'s span and with `found` as what was found.
+///
+/// [`expect`] builds it from the head. A production that has read a token further on through the
+/// peek window builds it from that token, to make the report an `expect` would make there
+/// without consuming anything in front of it.
+pub fn expected_at<'inp, L, Ctx, Lang>(
+  found: Spanned<L::Token, SimpleSpan>,
+  kind: <L::Token as Token<'inp>>::Kind,
+) -> Spanned<ErrorOf<'inp, L, Ctx, Lang>, SimpleSpan>
+where
+  Lang: ?Sized,
+  L: Lexer<'inp, Span = SimpleSpan, Offset = usize>,
+  L::Token: FromLogos<'inp>,
+  Ctx: tokora::ParseContext<'inp, L, Lang>,
+  ErrorOf<'inp, L, Ctx, Lang>:
+    From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, SimpleSpan, Lang>>,
+{
+  Spanned::new(
+    found.span,
+    UnexpectedToken::<_, _, _, Lang>::expected_one(found.span, kind)
+      .with_found(found.data)
+      .into(),
   )
 }
 

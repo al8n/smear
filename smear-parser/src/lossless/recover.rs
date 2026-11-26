@@ -136,11 +136,30 @@
 //! most one token staged, costs the allowance at most one item. `set_state`, `restore` and
 //! `rollback_*` appear nowhere, and the lexer crate's own `state_mut` calls are a lexer touching
 //! its own bracket counter. The lossless
-//! tree's only speculation is four single-token probes and the attempt [`unexpected`] runs its skip
-//! in, and the remainder is the failed scan this guard exists to bound. That attempt is declined only
-//! where what the skip committed holds a `}` the skip did not open, and a declined one is a failed
-//! scan in all but name: it gives back what the skip crossed, to be lexed again, and the guard
-//! charges it as one. This exception is the mechanism, not a leak in it.
+//! tree's only speculation is four single-token probes, the attempt [`unexpected`] runs its skip
+//! in, and two look-aheads behind a report: the one a list on a definition's header makes at a
+//! head no valid list holds, and the one a directive definition makes at a location spelled like
+//! a definition's keyword. The remainder is the failed scan this guard exists to bound. That
+//! attempt is declined only where what the skip committed holds a `}` the skip did not open, and
+//! a declined one is a failed scan in all but name: it gives back what the skip crossed, to be
+//! lexed again, and the guard charges it as one. The look-aheads are always declined, are made
+//! only where the allowance is open, and are charged the same way. Each takes at most its
+//! dialect's `LOOK_AHEAD_CAP` tokens, trivia among them, and the one it stops at, and runs only
+//! at a head or a location the parse has just reported, once at each: so what the look-aheads
+//! lex and give back is a constant at each such head, but for the runs of lexer errors they
+//! cross, which tokora lexes whole inside one read and the cap cannot count. The durable
+//! produce-event budget sees all of it, as the real cost it is. This exception is the mechanism,
+//! not a leak in it.
+//!
+//! The one leak is in the peek windows a header's list opens: they read no further than the cache
+//! retains, but a window that meets the end of input across a run of lexer errors leaves the run
+//! behind the newest token tokora retains, and the parse lexes the run a second time, charged
+//! twice to `spent`, once a parse. Without a durable ceiling only the test-support counters see
+//! it; under a produce-event ceiling within the run's length of what the parse needs, the
+//! budget's refusal is lent in front of the report the parse would make at the end of input. It
+//! is a ruled exception, which al8n/tokora#380 tracks: the run is the document's tail and its
+//! first lexer error is the first error on both readings, so no definition is lost, and only the
+//! reports behind that error can differ.
 //!
 //! **Exception 2 — lexer errors. Closed, and named here because the arithmetic it drove is still
 //! quoted below.** tokora charges `spent` for *every* item the lexer hands back, errors included
@@ -456,8 +475,10 @@ where
 
 /// Nothing that could start one of `expected` is here, and there is still input.
 ///
-/// Reports once through [`report_unexpected`], then makes progress — in that order, because the
-/// diagnostic names the token that is about to be skipped.
+/// Reports once through [`report_unexpected`], then makes progress through [`skip_unexpected`] — in
+/// that order, because the diagnostic names the token that is about to be skipped. The two halves
+/// are functions of their own for a caller that reads ahead between them: see
+/// [`skip_unexpected`].
 ///
 /// # Why this cannot be `sync_balanced` alone
 ///
@@ -569,7 +590,45 @@ where
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, SimpleSpan, Lang>>,
 {
   report_unexpected(inp, expected)?;
+  skip_unexpected(
+    inp,
+    delimiters,
+    is_sync_point,
+    error_kind,
+    allowance_exhausted,
+  )
+}
 
+/// [`unexpected`] behind its report: the skip, its second scan and its one-token fallback, as
+/// [`unexpected`]'s docs give them, with the same progress whenever input remains.
+///
+/// # Why the skip is a function of its own
+///
+/// A caller that must read ahead before it knows whether the head is junk makes the report first,
+/// through [`report_unexpected`], so that nothing its read-ahead spends of a budget can stop the
+/// parse in front of that report; it then reads ahead, and where the head is junk after all it
+/// calls this, so the head is reported once whichever way the read-ahead went. A list on a
+/// definition's header is that caller, in each dialect's lossless layer.
+///
+/// `allowance_exhausted` is read where [`unexpected`]'s caller reads it: in front of the report,
+/// and so in front of anything read ahead behind it. A read-ahead lexes, and a flag read after it
+/// could refuse the scan that [`unexpected`] would have made at the same head.
+pub fn skip_unexpected<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+  delimiters: fn(&<L::Token as Token<'inp>>::Kind) -> Balance<u8>,
+  is_sync_point: fn(&L::Token) -> bool,
+  error_kind: u16,
+  allowance_exhausted: bool,
+) -> Result<(), ErrorOf<'inp, L, Ctx, Lang>>
+where
+  Lang: ?Sized,
+  L: Lexer<'inp, Span = SimpleSpan, Offset = usize>,
+  L::Token: FromLogos<'inp> + Clone,
+  Ctx: ParseContext<'inp, L, Lang>,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<usize, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, SimpleSpan, Lang>>,
+{
   // #168's guard, computed by the dialect wrapper — see `scan_allowance_exhausted` for why the
   // number arrives rather than being read here. `None` is safe to substitute *at this site* —
   // unlike in [`resync_to`], which needs a peek in its place — because the test below folds `None`
@@ -769,11 +828,13 @@ pub(crate) const SCAN_ALLOWANCE_FLOOR: usize = 4_096;
 /// # If the premise under it ever breaks, it breaks safe
 ///
 /// Both readings are monotone at these call sites because no recovery call is inside a speculative
-/// attempt — the lossless tree's only `attempt`/`try_parse_input` bodies are single-token probes
-/// and the skip [`unexpected`] runs, which holds no recovery call and is declined back to its own
-/// start, never below a reading taken before it. Should that stop being true, a rollback lowers
-/// `committed` and never lowers `spent`, so the guard engages *earlier*: recovery coarsens, the
-/// bound holds, and nothing becomes unsound.
+/// attempt — the lossless tree's only `attempt`/`try_parse_input` bodies are single-token probes,
+/// the skip [`unexpected`] runs, which holds no recovery call and is declined back to its own
+/// start, and the look-aheads a list on a definition's header and a directive definition's
+/// location make, which hold none either and are always declined back to their start: none goes
+/// below a reading taken before it. Should that stop being true, a rollback lowers `committed` and
+/// never lowers `spent`, so the guard engages *earlier*: recovery coarsens, the bound holds, and
+/// nothing becomes unsound.
 #[inline]
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) fn scan_allowance_exhausted(spent: usize, committed: usize) -> bool {

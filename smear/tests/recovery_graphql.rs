@@ -533,4 +533,660 @@ mod lossless {
       }
     }
   }
+
+  // ── A list on a definition's header that has lost its `)`: smear issue #295 ─────────────────
+
+  /// The errors `layer` lends a sink for `text`, in the order it lends them, each as its code and
+  /// its primary span.
+  fn lent(layer: &Lossless, text: &str) -> Vec<(String, Range<usize>)> {
+    let mut errors: Vec<GraphqlLosslessErrorValue<&str>> = Vec::new();
+    let _ = layer
+      .type_system_document(text, &mut errors)
+      .expect("short enough for a tree");
+    errors
+      .iter()
+      .map(|error| {
+        let span = error.primary().span();
+        (
+          error.code().as_str().to_string(),
+          span.map_or(0, |span| span.start())..span.map_or(0, |span| span.end()),
+        )
+      })
+      .collect()
+  }
+
+  /// The definitions and extensions that are direct children of the document, each as it is
+  /// written.
+  fn definitions(tree: &SyntaxNode) -> Vec<String> {
+    tree
+      .children()
+      .find(|node: &SyntaxNode| node.kind() == K::TypeSystemDocument)
+      .expect("the document's node")
+      .children()
+      .filter(|node: &SyntaxNode| {
+        matches!(
+          node.kind(),
+          K::ScalarTypeDefinition
+            | K::ObjectTypeDefinition
+            | K::InterfaceTypeDefinition
+            | K::UnionTypeDefinition
+            | K::EnumTypeDefinition
+            | K::InputObjectTypeDefinition
+            | K::SchemaDefinition
+            | K::DirectiveDefinition
+            | K::ScalarTypeExtension
+            | K::ObjectTypeExtension
+        )
+      })
+      .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
+      .collect()
+  }
+
+  /// How many lexemes `text` is, each byte of trivia one of them: the tokens of its tree.
+  fn lexemes(text: &str) -> usize {
+    parse_document(text)
+      .syntax()
+      .descendants_with_tokens()
+      .filter(|element| element.as_token().is_some())
+      .count()
+  }
+
+  /// GraphQLx's twin: a list on a header that has lost its `)` ends in front of its owner's body,
+  /// where the `}` that balances the body's `{` is written and the end of input or the start of a
+  /// definition stands behind it. One report, at the `{`; the definition is built with its member
+  /// and the next one read. On each owner that reads a body.
+  #[test]
+  fn a_headers_list_that_lost_its_closer_leaves_the_owners_body() {
+    for (text, kept) in [
+      (
+        "type T @d(x: 1 { f: Int } scalar S",
+        &["type T @d(x: 1 { f: Int }", "scalar S"][..],
+      ),
+      (
+        "interface N @d(x: 1 { f: Int } scalar S",
+        &["interface N @d(x: 1 { f: Int }", "scalar S"][..],
+      ),
+      (
+        "input I @d(x: 1 { zz: Int } scalar S",
+        &["input I @d(x: 1 { zz: Int }", "scalar S"][..],
+      ),
+      (
+        "enum E @d(x: 1 { A B } scalar S",
+        &["enum E @d(x: 1 { A B }", "scalar S"][..],
+      ),
+      (
+        "schema @d(x: 1 { query: Q } scalar S",
+        &["schema @d(x: 1 { query: Q }", "scalar S"][..],
+      ),
+      (
+        "extend type T @d(x: 1 { f: Int } scalar S",
+        &["extend type T @d(x: 1 { f: Int }", "scalar S"][..],
+      ),
+      (
+        "type T @d(x: 1 { f: Int }",
+        &["type T @d(x: 1 { f: Int }"][..],
+      ),
+    ] {
+      let at = text.rfind('{').expect("the body's brace");
+      assert_eq!(
+        lent(&Lossless::new(), text),
+        [(String::from("smear::syntax::unexpected-token"), at..at + 1)],
+        "{text}: one report, at the body's brace"
+      );
+      let answer = read(text);
+      assert_eq!(written(&answer.tree, K::Argument), ["x: 1"], "{text}");
+      assert_eq!(definitions(&answer.tree), kept, "{text}");
+    }
+  }
+
+  /// Where the owner reads no body a `{` on its header is never its own, and the list reads it as
+  /// it always did, as junk: the members inside the group are the list's, and the reports are the
+  /// ones the list always made.
+  #[test]
+  fn an_owner_that_reads_no_body_reads_a_brace_on_its_header_as_before() {
+    for (text, member, members, reports) in [
+      (
+        "scalar A @d(x: 1 { a: 1 }",
+        K::Argument,
+        &["x: 1", "a: 1"][..],
+        3,
+      ),
+      (
+        "union U @d(x: 1 { a: 1 }",
+        K::Argument,
+        &["x: 1", "a: 1"][..],
+        3,
+      ),
+      (
+        "extend scalar A @d(x: 1 { a: 1 }",
+        K::Argument,
+        &["x: 1", "a: 1"][..],
+        3,
+      ),
+      (
+        "directive @d(a: Int { b: Int }",
+        K::InputValueDefinition,
+        &["a: Int", "b: Int"][..],
+        5,
+      ),
+    ] {
+      assert_eq!(written(&read(text).tree, member), members, "{text}");
+      assert_eq!(lent(&Lossless::new(), text).len(), reports, "{text}");
+    }
+  }
+
+  /// A list on a header that has lost its `)` ends in front of the start of a definition, of
+  /// `repeatable` and `on` on a directive definition, of a union's members and of the owner's next
+  /// directive, each on its test; one report, the definition kept and the next read. `extend` with
+  /// the keyword of what it extends is one start.
+  #[test]
+  fn a_headers_list_that_lost_its_closer_leaves_what_its_owner_reads_next() {
+    for (text, kept, reports) in [
+      (
+        "type T @d(x: 1 scalar S",
+        &["type T @d(x: 1", "scalar S"][..],
+        1,
+      ),
+      (
+        "scalar A @d(x: 1 scalar S",
+        &["scalar A @d(x: 1", "scalar S"][..],
+        1,
+      ),
+      (
+        "type T @d(x: 1 \"doc\" scalar S",
+        &["type T @d(x: 1", "\"doc\" scalar S"][..],
+        1,
+      ),
+      (
+        "type T @d(x: 1 extend type U { g: Int } scalar S",
+        &["type T @d(x: 1", "extend type U { g: Int }", "scalar S"][..],
+        1,
+      ),
+      (
+        "directive @d(a: Int on FIELD scalar S",
+        &["directive @d(a: Int on FIELD", "scalar S"][..],
+        1,
+      ),
+      (
+        "directive @d(a: Int = 1 repeatable on FIELD scalar S",
+        &["directive @d(a: Int = 1 repeatable on FIELD", "scalar S"][..],
+        1,
+      ),
+      (
+        "directive @d(a: Int) @x(y: 1 on FIELD scalar S",
+        &["directive @d(a: Int) @x(y: 1 on FIELD", "scalar S"][..],
+        1,
+      ),
+      (
+        "union U @d(x: 1 = A | B scalar S",
+        &["union U @d(x: 1 = A | B", "scalar S"][..],
+        1,
+      ),
+      (
+        "type T @d(x: 1 @e { f: Int } scalar S",
+        &["type T @d(x: 1 @e { f: Int }", "scalar S"][..],
+        1,
+      ),
+    ] {
+      assert_eq!(lent(&Lossless::new(), text).len(), reports, "{text}");
+      assert_eq!(definitions(&read(text).tree), kept, "{text}");
+    }
+  }
+
+  /// Where a test says nothing the list reads its head as it always did: the list's `)` behind an
+  /// `@` or an `=`, a keyword at the end of input, a body with junk behind it, a keyword behind a
+  /// keyword, and a described keyword whose token behind stands past the cache, which the window
+  /// does not read; and a list in a member reads as it did.
+  #[test]
+  fn a_headers_list_reads_as_before_where_no_test_holds() {
+    for (text, kept, reports) in [
+      (
+        "type T @d(x: 1 @e) { f: Int } scalar S",
+        &["scalar S"][..],
+        2,
+      ),
+      (
+        "union U @d(x: 1 = 2) = A | B",
+        &["union U @d(x: 1 = 2) = A | B"][..],
+        2,
+      ),
+      ("type T @d(x: 1 scalar", &[][..], 1),
+      (
+        "type T @d(x: 1 { f: Int } junk scalar S",
+        &["scalar S"][..],
+        3,
+      ),
+      ("scalar A @d(x: 1 type scalar S", &["scalar S"][..], 1),
+      ("directive @d(a: Int \"doc\" scalar S", &[][..], 1),
+      ("directive @d(a: Int \"doc\"scalar S", &[][..], 1),
+      ("type T { f: Int @d(x: 1 scalar S", &[][..], 1),
+    ] {
+      assert_eq!(lent(&Lossless::new(), text).len(), reports, "{text}");
+      assert_eq!(definitions(&read(text).tree), kept, "{text}");
+    }
+  }
+
+  /// A member, or a directive's name, spelled like a keyword a root restarts at with a token
+  /// behind it that may begin that definition is no evidence, wherever the chain reaches it: the
+  /// keyword may be a definition's. The list skips its junk as it always did, the owner is lost at
+  /// the `:` its next argument misses, and the root reads the definition whole, where the evidence
+  /// would have made its keyword a member or a directive, and its name and what follows the
+  /// owner's.
+  #[test]
+  fn a_member_spelled_like_a_definitions_keyword_is_no_evidence() {
+    for (text, kind, kept) in [
+      (
+        "union U @d(x: 1 = A | enum query { VALUE }",
+        K::EnumTypeDefinition,
+        "enum query { VALUE }",
+      ),
+      (
+        "type T @d(x: 1 @a @enum query { VALUE }",
+        K::EnumTypeDefinition,
+        "enum query { VALUE }",
+      ),
+      // `directive` stands in the middle of the chain, and `on FIELD` behind its last directive.
+      (
+        "directive @a(@e @\ndirective @b on FIELD",
+        K::DirectiveDefinition,
+        "directive @b on FIELD",
+      ),
+    ] {
+      assert_eq!(
+        written(&read(text).tree, kind),
+        [kept],
+        "{text} at the type-system root"
+      );
+      assert_eq!(
+        written(&parse_document(text).syntax(), kind),
+        [kept],
+        "{text} at the mixed root"
+      );
+    }
+  }
+
+  /// GraphQLx's twin: what a look-ahead crosses on its way to its evidence is asked a token at a
+  /// time, at every depth, so a definition that begins inside it is no evidence: a keyword inside
+  /// a directive's arguments and inside the body at the head; and a `)` inside a directive's
+  /// arguments with a `[` still open in front of it. The list skips its junk as it always did, and
+  /// the root reads the definition, where the evidence would have made it a value or a member. In
+  /// the first the owner is itself a scalar, so `S` stands beside it.
+  #[test]
+  fn a_definition_inside_what_a_look_ahead_crosses_is_no_evidence() {
+    let text = "scalar A @d(@e(x:[\nscalar S\n])";
+    for (root, tree) in [
+      ("type-system", read(text).tree),
+      ("mixed", parse_document(text).syntax()),
+    ] {
+      let scalars = written(&tree, K::ScalarTypeDefinition);
+      assert!(
+        scalars.iter().any(|scalar| scalar == "scalar S"),
+        "{text} at the {root} root: {scalars:?}"
+      );
+    }
+
+    for text in [
+      "type T @d(x: 1 { f: Int @deprecated scalar S }",
+      "type T @d(x: 1 @e(y: [1) scalar S ])",
+    ] {
+      for (root, tree) in [
+        ("type-system", read(text).tree),
+        ("mixed", parse_document(text).syntax()),
+      ] {
+        assert_eq!(
+          written(&tree, K::ScalarTypeDefinition),
+          ["scalar S"],
+          "{text} at the {root} root"
+        );
+      }
+    }
+
+    let text = "enum E @d(x: 1 { A B scalar S } type T { f: Int }";
+    for (root, tree) in [
+      ("type-system", read(text).tree),
+      ("mixed", parse_document(text).syntax()),
+    ] {
+      assert_eq!(
+        written(&tree, K::ScalarTypeDefinition),
+        ["scalar S"],
+        "{text} at the {root} root"
+      );
+      assert_eq!(
+        written(&tree, K::ObjectTypeDefinition),
+        ["type T { f: Int }"],
+        "{text} at the {root} root"
+      );
+    }
+  }
+
+  /// GraphQLx's twin: a mixed root reads as an operation a `{` its scan leaves at the root, so a
+  /// look-ahead finds nothing where main would read one: at a `{` inside a directive's arguments,
+  /// at the end of input behind a body reached through a directive, and behind a body that leaves
+  /// a bracket open at its `}`, which hides from main's scan, blind to which closer answers which
+  /// opener, the definition behind it. The root reads the operation main reads, and the
+  /// definition after it.
+  #[test]
+  fn an_operation_main_reads_behind_a_header_is_no_evidence() {
+    for (text, operation) in [
+      ("type T @d(@e(x: [\n{ me }\n])", "{ me }"),
+      ("type T @d(x: 1 @e @g\n{ me }", "{ me }"),
+      ("type T @d(x: 1 @e @g { f(b: 1 } scalar S", "{ f(b: 1 }"),
+    ] {
+      assert_eq!(
+        written(&parse_document(text).syntax(), K::OperationDefinition),
+        [operation],
+        "{text}"
+      );
+    }
+
+    let text = "type T @d(x: 1 @e @g { f(b: 1 } scalar S";
+    for (root, tree) in [
+      ("type-system", read(text).tree),
+      ("mixed", parse_document(text).syntax()),
+    ] {
+      assert_eq!(
+        written(&tree, K::ScalarTypeDefinition),
+        ["scalar S"],
+        "{text} at the {root} root"
+      );
+    }
+  }
+
+  /// GraphQLx's twin: a look-ahead crosses brackets only as deep as the parse has left, and only
+  /// where each closes the one open last: the reading that would take its evidence descends a
+  /// frame for each, where main scans them flat, and a refusal there ends the document. Inside a
+  /// directive's arguments, `}` answers no `[` under the default ceiling, and under a raised one
+  /// 300 `[` nest past what a crossing holds; inside a body, `)` answers no `[`. The type-system
+  /// root lends no refusal, and both roots read the definition behind as main does, which a
+  /// refusal would have ended the document in front of.
+  #[test]
+  fn a_look_ahead_crosses_no_deeper_than_the_parse_reads() {
+    let unpaired = format!("type T @d(x: 1 @e(y: {}1) scalar S", "[ } ".repeat(30));
+    let deep = format!(
+      "type T @d(x: 1 @e(y: {}1{}) scalar S",
+      "[".repeat(300),
+      "]".repeat(300)
+    );
+    let body = format!(
+      "type T @d(x: 1 {{ f: Int @x(a: {}1) }} scalar S",
+      "[ ) ".repeat(30)
+    );
+    for (text, limits) in [
+      (unpaired, LosslessLimits::default()),
+      (deep, LosslessLimits::with_max_nesting_depth(1000)),
+      (body, LosslessLimits::default()),
+    ] {
+      let errors = lent(&Lossless::with_limits(limits), &text);
+      assert!(
+        !errors
+          .iter()
+          .any(|(code, _)| code == "smear::syntax::nesting-limit"),
+        "{text}: {errors:?}"
+      );
+      for (root, parse) in [
+        ("mixed", parse_document_with_limits(&text, limits)),
+        (
+          "type-system",
+          parse_type_system_document_with_limits(&text, limits),
+        ),
+      ] {
+        assert_eq!(
+          written(&parse.syntax(), K::ScalarTypeDefinition),
+          ["scalar S"],
+          "{text} at the {root} root"
+        );
+      }
+    }
+  }
+
+  /// GraphQLx's twin: a look-ahead takes at most 256 tokens, trivia among them, from the head it
+  /// is made at. Codex's witness stands five thousand blanks inside the body it would cross: a
+  /// look-ahead that crossed them all spent the scan allowance with what it gave back, so that the
+  /// list's next skip took one token and `T` was lost. Here it stops at the cap, the list skips
+  /// its junk as main does, and `T` keeps its field.
+  #[test]
+  fn a_look_ahead_takes_no_more_than_its_cap() {
+    let text = ["type T @d({(x y)", &" ".repeat(5000), "}) { f: Int }"].concat();
+    assert_eq!(
+      written(&read(&text).tree, K::FieldDefinition),
+      ["f: Int"],
+      "{text}"
+    );
+  }
+
+  /// GraphQLx's twin: with 246 blanks in front of `f` the look-ahead takes 256 tokens, to the
+  /// blank in front of `S`, and the list ends in front of the body; with 247 it would take a
+  /// 257th, finds nothing, and the list reads its junk as main reads it, `f: Int` among its
+  /// arguments. `S` is a definition either way.
+  #[test]
+  fn a_look_ahead_finds_its_evidence_up_to_its_cap_and_none_past_it() {
+    for (blanks, kept) in [(246, true), (247, false)] {
+      let text = ["type T @d(x: 1 {", &" ".repeat(blanks), "f: Int } scalar S"].concat();
+      let tree = read(&text).tree;
+      let fields = written(&tree, K::FieldDefinition);
+      assert_eq!(
+        fields.len(),
+        usize::from(kept),
+        "{blanks} blanks: {fields:?}"
+      );
+      let arguments = written(&tree, K::Argument);
+      assert_eq!(
+        arguments.iter().any(|argument| argument == "f: Int"),
+        !kept,
+        "{blanks} blanks: {arguments:?}"
+      );
+      assert_eq!(top_level_scalars(&tree), ["scalar S"], "{blanks} blanks");
+    }
+  }
+
+  /// The least produce-event budget under which the parse of `text` is not refused.
+  fn least_budget(text: &str) -> usize {
+    (0..=4 * lexemes(text))
+      .find(|&max| {
+        let limits = LosslessLimits::default().with_max_produce_events(max);
+        lent(&Lossless::with_limits(limits), text)
+          .iter()
+          .all(|(code, _)| code.as_str() != "smear::syntax::token-budget")
+      })
+      .unwrap_or_else(|| panic!("{text} reads under no budget"))
+  }
+
+  /// No valid document makes a stop, and in one the peek window lexes nothing twice: a header's
+  /// argument named like a definition's keyword reads under one produce-event for each lexeme and
+  /// one more, the least budget the same text reads under with a name that spells nothing, and so
+  /// does a described member of a directive definition, whose name's token behind stands past the
+  /// cache and is not read. With lexer errors in front of that token the window would have lexed
+  /// them all to fill its one slot, and each again where the member reads them. A window lexes
+  /// twice only a run of lexer errors it meets the end of input across, a ruled exception that
+  /// al8n/tokora#380 tracks, and a valid document holds no lexer error.
+  #[test]
+  fn a_valid_header_reads_as_before() {
+    for text in [
+      "type T @d(type: 1 input: 2) { f: Int }",
+      "directive @d(on: Int repeatable: Int) on FIELD",
+      "directive @d(\"doc\" type: Int) on FIELD",
+    ] {
+      assert!(!read(text).errors, "{text}");
+    }
+    let text = "type T @d(type: 1 input: 2) { f: Int }";
+    let limits = LosslessLimits::default().with_max_produce_events(lexemes(text) + 1);
+    assert!(
+      lent(&Lossless::with_limits(limits), text).is_empty(),
+      "{text}"
+    );
+    for (text, plain, more) in [
+      (
+        "type T @d(type: 1 input: 2) { f: Int }",
+        "type T @d(tipe: 1 inpot: 2) { f: Int }",
+        0,
+      ),
+      (
+        "directive @d(\"doc\" type: Int) on FIELD",
+        "directive @d(\"doc\" tipe: Int) on FIELD",
+        0,
+      ),
+      (
+        "directive @d(\"doc\" type : Int) on FIELD",
+        "directive @d(\"doc\" tipe : Int) on FIELD",
+        0,
+      ),
+      (
+        "directive @d(\"doc\" type??: Int) on FIELD scalar S",
+        "directive @d(\"doc\" tipe??: Int) on FIELD scalar S",
+        0,
+      ),
+    ] {
+      assert_eq!(least_budget(text), least_budget(plain) + more, "{text}");
+    }
+  }
+
+  /// A directive definition reads no location at the start of a definition: at the head of its
+  /// locations and behind a `|` such a keyword is reported as a location missing, at the keyword
+  /// and before anything behind it is read, and left to the root where a look-ahead behind that
+  /// report finds a definition starting there, across any trivia: the root reads the definition
+  /// behind. The first error is where it was, and a valid directive definition makes no report.
+  #[test]
+  fn a_directive_definition_reads_no_location_at_the_start_of_a_definition() {
+    // Each with the token its first error stands at: the `:` its member misses behind the list,
+    // and the `on` or the location missing at the keyword.
+    for (text, kept, first) in [
+      (
+        "directive @d(a: Int scalar S",
+        &["directive @d(a: Int", "scalar S"][..],
+        "S",
+      ),
+      (
+        "directive @d scalar S",
+        &["directive @d", "scalar S"][..],
+        "scalar",
+      ),
+      (
+        "directive @d on scalar S",
+        &["directive @d on", "scalar S"][..],
+        "scalar",
+      ),
+      (
+        "directive @d on scalar  S",
+        &["directive @d on", "scalar  S"][..],
+        "scalar",
+      ),
+      (
+        "directive @d(a: Int repeatable on scalar  S",
+        &["directive @d(a: Int repeatable on", "scalar  S"][..],
+        "on",
+      ),
+      (
+        "directive @d on FIELD | type U { g: Int }",
+        &["directive @d on FIELD |", "type U { g: Int }"][..],
+        "type",
+      ),
+    ] {
+      assert_eq!(definitions(&read(text).tree), kept, "{text}");
+      let at = text.rfind(first).expect("the first error's token");
+      assert_eq!(
+        lent(&Lossless::new(), text).first(),
+        Some(&(
+          String::from("smear::syntax::unexpected-token"),
+          at..at + first.len()
+        )),
+        "{text}"
+      );
+    }
+
+    // The keyword's report is made before the look-ahead lexes the character behind it, at the
+    // head of the locations and behind a `|` alike.
+    for text in [
+      "directive @d on scalar?S",
+      "directive @d on FIELD | scalar?S",
+    ] {
+      let at = text.find("scalar").expect("the keyword");
+      assert_eq!(
+        lent(&Lossless::new(), text).first(),
+        Some(&(
+          String::from("smear::syntax::unexpected-token"),
+          at..at + "scalar".len()
+        )),
+        "{text}"
+      );
+    }
+
+    let text = "directive @d on FIELD | OBJECT scalar S";
+    assert!(lent(&Lossless::new(), text).is_empty(), "{text}");
+    assert_eq!(
+      definitions(&read(text).tree),
+      ["directive @d on FIELD | OBJECT", "scalar S"],
+      "{text}"
+    );
+  }
+
+  /// The report at a head no valid list holds is made before the look-ahead behind it, so no
+  /// produce-event budget can stop the parse in front of it: under every budget the parse either
+  /// stops before it reaches the `{`, with the budget's refusal its one error, or lends the
+  /// unexpected token at the `{` first. And a lexer's error in front of a keyword's report keeps
+  /// its place: the window lexes no further than the member there reads to its `:`.
+  #[test]
+  fn a_headers_first_report_keeps_its_place() {
+    let text = "type T @d(x: 1 { f: Int } scalar S";
+    let at = text.find('{').expect("the body's brace");
+    let brace = (String::from("smear::syntax::unexpected-token"), at..at + 1);
+    let mut reached = 0usize;
+    for max in 0..=4 * lexemes(text) {
+      let limits = LosslessLimits::default().with_max_produce_events(max);
+      let errors = lent(&Lossless::with_limits(limits), text);
+      if errors.len() == 1 && errors[0].0 == "smear::syntax::token-budget" {
+        continue;
+      }
+      reached += 1;
+      assert_eq!(
+        errors.first(),
+        Some(&brace),
+        "max_produce_events({max}): {errors:?}"
+      );
+    }
+    assert!(reached > 0, "no budget let the parse reach the brace");
+
+    let text = "type T @d(x: 1 scalar ? S";
+    let at = text.find('?').expect("the unknown character");
+    assert_eq!(
+      lent(&Lossless::new(), text).first(),
+      Some(&(String::from("smear::syntax::unknown-character"), at..at + 1)),
+      "{text}"
+    );
+  }
+
+  /// A stop's report is built from the token the window found, so no budget spent behind that
+  /// window can leave the stop without it: under every produce-event budget the parse either stops
+  /// before the report, with the budget's refusal its one error, or lends the `:` missing at `S`
+  /// first. A window the refusal cuts short is no answer, and the member's own read meets the
+  /// refusal. In the last two texts the token behind `scalar` stands past the cache, no stop is
+  /// made, and the member misses its `:` there itself.
+  #[test]
+  fn a_stops_report_comes_from_the_window_that_found_it() {
+    for text in [
+      "type T @d(x: 1 scalar S",
+      "directive @d(\"d\"scalar S",
+      "directive @d(\"d\" scalar S",
+    ] {
+      let at = text.rfind('S').expect("the name behind the keyword");
+      let colon = (String::from("smear::syntax::unexpected-token"), at..at + 1);
+      let mut reached = 0usize;
+      for max in 0..=4 * lexemes(text) {
+        let limits = LosslessLimits::default().with_max_produce_events(max);
+        let errors = lent(&Lossless::with_limits(limits), text);
+        if errors.len() == 1 && errors[0].0 == "smear::syntax::token-budget" {
+          continue;
+        }
+        reached += 1;
+        assert_eq!(
+          errors.first(),
+          Some(&colon),
+          "{text} under max_produce_events({max}): {errors:?}"
+        );
+      }
+      assert!(
+        reached > 0,
+        "{text}: no budget let the parse reach the report"
+      );
+    }
+  }
 }
