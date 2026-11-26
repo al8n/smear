@@ -46,7 +46,7 @@ fn the_states_enter_and_leave_a_block() {
   let mut moved = state;
   moved.enter_const_block();
   assert!(moved.in_const_block() && moved.open_angles() == 0);
-  assert_eq!(moved.limits(), &limits);
+  assert_eq!(moved.limits(), limits);
   moved.leave_const_block();
   assert_eq!(moved, state);
   moved.enter_const_block();

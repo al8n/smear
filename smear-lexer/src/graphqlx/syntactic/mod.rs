@@ -949,7 +949,7 @@ where
 
   #[inline(always)]
   fn check(&self) -> Result<(), <Self::Token as tokora::Token<'inp>>::Error> {
-    self.state.limits().check().map_err(Into::into)
+    self.state.check().map_err(Into::into)
   }
 
   #[inline(always)]
@@ -1065,7 +1065,7 @@ where
     // check always passes, so every existing stream is unchanged.
     macro_rules! finish {
       ($this:ident, $token:expr) => {
-        match $this.state.limits().check() {
+        match $this.state.check() {
           Ok(()) => Ok($token),
           Err(e) => Err($this.over_recursion_limit(e)),
         }
@@ -1095,7 +1095,7 @@ where
       ($this:ident: $token_start:expr, $expr:expr) => {{
         $this.cursor += 1;
         $this.last_span = SimpleSpan::new($token_start, $this.cursor);
-        $this.state.limits_mut().decrease();
+        $this.state.decrease_depth();
         finish!($this, $expr)
       }};
     }
@@ -1104,8 +1104,8 @@ where
       ($this:ident: $token_start:expr, $expr:expr) => {{
         $this.cursor += 1;
         let span = SimpleSpan::new($token_start, $this.cursor);
-        $this.state.limits_mut().increase();
-        match $this.state.limits().check() {
+        $this.state.increase_depth();
+        match $this.state.check() {
           Ok(()) => {
             $this.last_span = span;
             Ok($expr)
@@ -1658,7 +1658,8 @@ where
   /// fraction/exponent, a `.`-led float missing its integer part, ...) returns
   /// the exact error. `NumberLexerToken`'s `Error` is this lexer's error type,
   /// so the [`Delegated::Error`] arm needs no conversion. The sub-lexer is lent the limits and
-  /// `in_block`, a flag, never the block's word, and only the limits are folded back.
+  /// `in_block`, a flag, never the block's word, and only the limits' depth is folded back: nothing
+  /// it runs moves the ceiling.
   // The return type mirrors `Lexer::lex`'s own `Option<Result<Token, Error>>`
   // shape; clippy can't see through the associated-type projections, so silence
   // its type-complexity lint here.
@@ -1677,14 +1678,14 @@ where
     match crate::simd::delegate_to_logos::<NumberLexerToken<<S::Slice<'inp> as Slice<'inp>>::Char>>(
       self.src.as_ref(),
       self.cursor,
-      NumberState::new(*self.state.limits(), in_block),
+      NumberState::new(self.state.limits(), in_block),
     )? {
       Delegated::Token(LexedToken { token, end, state }) => {
         let number = token.into_number_token();
         let slice = self.src.slice(&token_start..&end)?;
         self.cursor = end;
         self.last_span = SimpleSpan::new(token_start, end);
-        *self.state.limits_mut() = state.limits();
+        self.state.set_depth(state.limits().depth());
         Some(Ok(number.into_syntactic_token(slice)))
       }
       Delegated::Error(LexFailure { error, span }) => {

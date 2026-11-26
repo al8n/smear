@@ -29,7 +29,7 @@
 //! tokora's type.
 //!
 //! So these two newtypes are the decision: they are what [`Lexer::State`](tokora::Lexer::State)
-//! resolves to for GraphQL's two lexers, each GraphQLx lexer's state holds one, and their
+//! resolves to for GraphQL's two lexers, each GraphQLx lexer's state is built from one, and their
 //! `Default` is [`MAX_NESTING_DEPTH`]. Every existing call site — `parse_str`, `Lexer::new`, each
 //! `parse_lossless` — picks the ceiling up without being edited. A caller who wants a different
 //! one hands a different value to `with_state` / `parse_*_with_state`, inside the state
@@ -467,7 +467,7 @@ const DEFAULT_MAX_DIAGNOSTICS: usize = 1 << 15;
 ///
 /// This is [`Lexer::State`](tokora::Lexer::State) for
 /// [`graphql::syntactic::SyntacticLexer`](crate::graphql::syntactic::SyntacticLexer), and its
-/// GraphQLx twin's state, `SyntacticState`, holds one. So [`Default`] is what
+/// GraphQLx twin's state, `SyntacticState`, is built from one. So [`Default`] is what
 /// `Parser::with_parser(…).parse_str(src)` seeds a parse with — which is the whole reason the
 /// type exists rather than a bare [`RecursionLimiter`]. See the module header.
 ///
@@ -512,6 +512,9 @@ impl SyntacticLimits {
   /// this removes the last check smear applies, so nothing then stands between a deeply nested
   /// document and the native stack: it is for a parse whose input is trusted or whose depth is
   /// bounded before it arrives.
+  ///
+  /// GraphQLx's syntactic lexer is the exception: its state holds a ceiling in 32 bits and holds
+  /// this one as 4,294,967,295, so there the tally trips past that many open brackets.
   ///
   /// It is deliberately not spelled "unbounded". See [`MAX_NESTING_DEPTH`] for the second counter
   /// and where it does and does not still apply.

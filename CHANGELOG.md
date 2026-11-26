@@ -158,6 +158,11 @@ All notable changes to Smear are documented in this file.
   - **What does not change.** `SyntacticLimits` and `LosslessLimits` are as they were, and each
     is still the state of GraphQL's lexers. Every door takes the parameter it took: the layers
     their limits, and each lossless `*_with_limits` door a `LosslessLimits`.
+- `smear-lexer`: `graphqlx::syntactic::SyntacticState` is two words on a 64-bit target, where it
+  was three, because its nesting ceiling shares a word with the block's state. So it holds the
+  ceiling in 32 bits: a state built from one above 4,294,967,295, `SyntacticLimits::unlimited()`'s
+  among them, refuses past 4,294,967,295 open brackets, and its `limits()`, which now answers the
+  limits by value, reads back 4,294,967,295 as the ceiling.
 - `smear-compiler`! and `smear`: `smear-schema`, `smear-semantics` and `smear-analysis` are folded
   into `smear-compiler`, and the set is five crates from this release. Under `smear` no path and no
   feature changes: `smear::diagnostic`, `smear::validator`, `smear::validator::schema` and
