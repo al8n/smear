@@ -199,9 +199,10 @@ def main():
 
   # WHERE the cost is, said by the harness rather than left for the reader to work out. The parse
   # family is the control: `parse_type_system` and `schema_real` prepare the same fixtures and
-  # differ only in whether `Schema::build` is inside the measured region.
+  # differ only in whether `Schema::build` is inside the measured region. It places a schema or a
+  # validate row and nothing else, so the note speaks of those two families alone.
   if failed:
-    families = {row["family"] for row in failed}
+    families = {row["family"] for row in failed} & {"schema", "validate"}
     control_moved = any(
       row["family"] == "parse" and row["worst"] > args.threshold for row in rows
     )
