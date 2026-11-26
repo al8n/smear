@@ -325,9 +325,11 @@ jobs:
     - uses: actions/checkout@v7
       with:
         fetch-depth: 0
-    # The half of the gate that decides, over synthetic readings, before anything is built: a
-    # comparator that passed everything would leave this job green with the gate off.
-    - name: compare.py self-test, before anything is built
+    # The half of the gate that decides, over synthetic readings, and `icount.py`'s reader of
+    # callgrind's files, over lines real runs wrote, before anything is built: a comparator that
+    # passed everything would leave this job green with the gate off, and a reader stricter than
+    # callgrind leaves every row NOT MEASURED.
+    - name: compare.py and the callgrind reader, self-test before anything is built
       run: bash ci/perf/compare_selftest.sh
     - name: Install Rust
       run: rustup update stable --no-self-update && rustup default stable

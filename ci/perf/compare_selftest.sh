@@ -12,6 +12,10 @@
 # known, and each note is watched from both sides: present where it belongs, absent where it does
 # not. It needs neither valgrind nor a build and runs in a few seconds.
 #
+# One part of `icount.py` is checked here too: its reader of callgrind's files, against files built
+# from the lines real runs wrote. A reader stricter than callgrind refuses every row of every run,
+# and one laxer than it reads a file that was cut short; both are watched.
+#
 #     ci/perf/compare_selftest.sh            # PYTHON=/usr/bin/python3 to run it under another one
 
 set -euo pipefail
@@ -264,6 +268,81 @@ check_absent "and claims no missing sample" 0 "no drift sample" -- $(count base 
 check "an ARM table says it has no drift sample" 0 "This image has no drift sample" -- \
   $(count arm_base arm)
 check_absent "and says nothing of AVX2" 0 "AVX2" -- $(count arm_base arm)
+
+# ── `icount.py`'s reader of callgrind's files ─────────────────────────────────────────────────
+#
+# `callgrind_file <file> <summary numbers> <totals numbers, or "none">`: the lines the reader looks
+# at, in the order callgrind writes them, with a cost line between.
+callgrind_file() {
+  {
+    printf '# callgrind format\nversion: 1\ncreator: callgrind-3.26.0\n'
+    printf 'events: Ir Dr Dw I1mr D1mr D1mw ILmr DLmr DLmw\n'
+    printf 'summary: %s\n\n\nfn=(1) main\n16 %s\n' "$2" "$2"
+    if [ "$3" != none ]; then
+      printf 'totals: %s\n' "$3"
+    fi
+  } > "$1"
+}
+
+# `read_check <name> <the Ir it reads, or "refused"> <file>`
+read_check() {
+  local name="$1" want="$2" got
+  set +e
+  got="$("$python" -I -B -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import icount
+try:
+    print(icount.parse_callgrind(sys.argv[2])["Ir"])
+except ValueError as error:
+    print(f"refused: {error}")
+' "$here" "$3" 2>&1)"
+  set -e
+  case "$want:$got" in
+    "refused:refused: "* | "$got:$got") echo "ok   $name" ;;
+    *)
+      echo "FAIL $name: read $got, expected $want"
+      failures=$((failures + 1))
+      ;;
+  esac
+}
+
+# Two real runs' lines, `schema_valid` at `lo` and n=10 on the head side: x86-64 under valgrind
+# 3.26.0, whose `totals:` stands 2 Ir from its `summary:`, and aarch64, whose stands 10 Ir, 1 Dr,
+# 2 Dw and three misses from it. The reading is `summary:`'s Ir.
+x86_small="63499790 17351860 10981110 247175 477544 123896 5647 2729 25054"
+x86_large="63499792 17351860 10981110 247175 477544 123896 5647 2729 25054"
+arm_small="58698820 15700261 10322629 625841 605466 175858 21029 418552 109501"
+arm_large="58698830 15700262 10322631 625843 605466 175858 21031 418552 109501"
+callgrind_file "$tmp/x86.out" "$x86_small" "$x86_large"
+callgrind_file "$tmp/arm.out" "$arm_small" "$arm_large"
+# Which of each pair was `summary:` that run's log did not record, so both orders must read.
+callgrind_file "$tmp/x86_reversed.out" "$x86_large" "$x86_small"
+callgrind_file "$tmp/arm_reversed.out" "$arm_large" "$arm_small"
+callgrind_file "$tmp/cut.out" "$x86_small" none
+callgrind_file "$tmp/far.out" "$x86_small" \
+  "63500790 17351860 10981110 247175 477544 123896 5647 2729 25054"
+callgrind_file "$tmp/edge.out" "$x86_small" \
+  "63499854 17351924 10981174 247239 477608 123960 5711 2793 25118"
+callgrind_file "$tmp/garbled.out" "$x86_small" \
+  "6349x792 17351860 10981110 247175 477544 123896 5647 2729 25054"
+callgrind_file "$tmp/long.out" "$x86_small" "$x86_large 7"
+callgrind_file "$tmp/short.out" "63499790 17351860" "63499792 17351860"
+{ cat "$tmp/x86.out"; printf 'summary: %s\n' "$x86_small"; } > "$tmp/twice.out"
+printf 'events: Ir\ntotals: 5\n' > "$tmp/nosummary.out"
+
+read_check "x86's lines, 2 Ir apart, read as summary:" 63499790 "$tmp/x86.out"
+read_check "aarch64's, apart on several events, read as summary:" 58698820 "$tmp/arm.out"
+read_check "x86's the other way round read too" 63499792 "$tmp/x86_reversed.out"
+read_check "and aarch64's" 58698830 "$tmp/arm_reversed.out"
+read_check "a gap of the slack exactly reads" 63499790 "$tmp/edge.out"
+read_check "trailing events left out read as zero" 63499790 "$tmp/short.out"
+read_check "a file with no totals: line was cut short" refused "$tmp/cut.out"
+read_check "a totals: line far from summary: is refused" refused "$tmp/far.out"
+read_check "a number that is not one is refused" refused "$tmp/garbled.out"
+read_check "more numbers than events are refused" refused "$tmp/long.out"
+read_check "a second summary: line is refused" refused "$tmp/twice.out"
+read_check "no summary: line is refused" refused "$tmp/nosummary.out"
 
 if [ "$failures" -ne 0 ]; then
   echo "::error::compare.py self-test: $failures case(s) failed"
