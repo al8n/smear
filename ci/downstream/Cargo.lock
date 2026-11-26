@@ -319,7 +319,7 @@ dependencies = [
 [[package]]
 name = "tokora"
 version = "0.13.2"
-source = "git+https://github.com/al8n/tokora?rev=ac79b11121b437d460946301f9c1518ff83d1285#ac79b11121b437d460946301f9c1518ff83d1285"
+source = "git+https://github.com/al8n/tokora?rev=57c989938a1d6ca72aba8ffe9baa46e2e224f8c4#57c989938a1d6ca72aba8ffe9baa46e2e224f8c4"
 dependencies = [
  "ascii",
  "cower",
