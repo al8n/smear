@@ -629,6 +629,24 @@ mod lossless {
     assert_eq!(operations, ["query R { g }"]);
   }
 
+  /// A field's arguments definition that meets the `}` of the type around it reports its `)` as
+  /// missing and leaves the brace. The field then fails for want of its `:`, and the type with it,
+  /// and the root takes the brace as a stray and reads the next definition whole. It refuses the
+  /// removal of that arm in `arguments_definition`, without which the list takes the brace as junk
+  /// and reads `type` as an argument's name, which fails at `R`.
+  #[test]
+  fn an_unclosed_arguments_definition_leaves_the_definition_after_the_brace() {
+    let text = "type T { f(a: Int } type R { g: Int }";
+    let answer = read(text);
+    assert!(answer.errors, "{text}");
+    let types: Vec<String> = top(&answer.tree)
+      .children()
+      .filter(|node: &SyntaxNode| node.kind() == K::ObjectTypeDefinition)
+      .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
+      .collect();
+    assert_eq!(types, ["type R { g: Int }"], "{text}");
+  }
+
   // ── A string its line ends ─────────────────────────────────────────────────────────────────
 
   /// A type whose first field's deprecation reason has no closing quote on its line, and two

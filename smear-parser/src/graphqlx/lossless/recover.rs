@@ -27,16 +27,25 @@
 //! resync, one call where the body would write two, and `skip_one` is the one-token step every
 //! helper there falls back to, spelled where a loop can take it by itself.
 
-use smear_lexer::graphqlx::lossless::LosslessTokenKind as Kind;
+use smear_lexer::graphqlx::lossless::{LosslessToken, LosslessTokenKind as Kind};
 use tokora::{
   SimpleSpan,
+  cache::PeekedTokenExt as _,
   error::{UnclosedAngle, UnclosedBrace, UnclosedBracket, UnclosedParen},
   input::Balance,
+  span::Spanned,
+  utils::{
+    DowncastRef,
+    typenum::{U2, U3, U4, U5},
+  },
 };
 
 use crate::graphqlx::{GraphQLx, kinds::SyntaxKind as K};
 
-use super::{Keyword, trivia::kind_of};
+use super::{
+  GraphqlxLosslessLexer, Keyword,
+  trivia::{kind_of, peek_as, peek_kind},
+};
 use crate::lossless::recover::keyword_of;
 
 /// The token kinds a `Value` may begin with — what an "expected a value" diagnostic names.
@@ -622,28 +631,37 @@ fn is_sync_point(kind: Kind) -> bool {
 fn is_definition_start(kind: Kind, keyword: Option<Keyword>) -> bool {
   match kind {
     Kind::InlineString | Kind::BlockString => true,
-    Kind::Identifier => matches!(
-      keyword,
-      Some(
-        Keyword::Query
-          | Keyword::Mutation
-          | Keyword::Subscription
-          | Keyword::Fragment
-          | Keyword::Schema
-          | Keyword::Directive
-          | Keyword::Scalar
-          | Keyword::Type
-          | Keyword::Interface
-          | Keyword::Union
-          | Keyword::Enum
-          | Keyword::Input
-          | Keyword::Extend
-          | Keyword::Use
-          | Keyword::Mod
-      )
-    ),
+    Kind::Identifier => restarts_a_root(keyword),
     _ => false,
   }
+}
+
+/// Whether `keyword` is one of the fifteen spellings [`is_definition_start`] restarts a root at.
+///
+/// One table for the two: a list on a header ends in front of no keyword a root would not restart
+/// at.
+#[inline]
+const fn restarts_a_root(keyword: Option<Keyword>) -> bool {
+  matches!(
+    keyword,
+    Some(
+      Keyword::Query
+        | Keyword::Mutation
+        | Keyword::Subscription
+        | Keyword::Fragment
+        | Keyword::Schema
+        | Keyword::Directive
+        | Keyword::Scalar
+        | Keyword::Type
+        | Keyword::Interface
+        | Keyword::Union
+        | Keyword::Enum
+        | Keyword::Input
+        | Keyword::Extend
+        | Keyword::Use
+        | Keyword::Mod
+    )
+  )
 }
 
 /// GraphQLx's **four** delimiter pairs, for the recovery scans' depth counting.
@@ -724,6 +742,209 @@ fn braces(kind: &Kind) -> Balance<u8> {
     Kind::LBrace => Balance::Open(b'{'),
     Kind::RBrace => Balance::Close(b'{'),
     _ => Balance::Neutral,
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// A list on a definition's header, and what it ends in front of.
+//
+// A list between parentheses stands in a member where a member's production calls it, and on a
+// header where a definition's own production does. A member's list ends at the `}` of the braces it
+// stands in. A header's has no such `}`, since no brace of its definition is open, so one that has
+// lost its `)` read the definition's body as members and the next definition's keyword as a
+// member's name, and lost both definitions at the `:` it then missed: smear issue #295. The
+// header's entries, `directive.rs`'s `header_directives` and `definition.rs`'s
+// `header_arguments_definition`, take their owner as one of the markers below. Such a list ends,
+// unclosed, in front of what its owner reads next and in front of the start of a definition, where
+// a test below finds that to be what stands at its head, and it reads as before everywhere else. A
+// member's entries are not touched.
+//
+// A head a valid list can hold, a name or a description's string, is decided through the peek
+// window, read no further than the member there would read, and a stop reports the `:` that
+// member would miss. A head no valid list holds is reported first, as `unexpected` reports it, and
+// decided behind that report by a look-ahead that is given back.
+// ---------------------------------------------------------------------------------------------
+
+/// Whether `keyword` names what an `extend` extends: the eight `extension.rs`'s
+/// `type_system_extension` dispatches on.
+#[inline]
+const fn is_extendable(keyword: Option<Keyword>) -> bool {
+  matches!(
+    keyword,
+    Some(
+      Keyword::Schema
+        | Keyword::Directive
+        | Keyword::Scalar
+        | Keyword::Type
+        | Keyword::Interface
+        | Keyword::Union
+        | Keyword::Enum
+        | Keyword::Input
+    )
+  )
+}
+
+/// Whether a definition starts at a name spelled `keyword` that a token of `kind`, spelled
+/// `spelled`, stands behind: the name is one a root restarts at, and the token behind it is
+/// neither a `:`, which makes the name a member's, nor a second such keyword, at which a root
+/// would restart instead. `extend` and the keyword of what it extends are one start.
+#[inline]
+const fn starts_with(keyword: Option<Keyword>, kind: Kind, spelled: Option<Keyword>) -> bool {
+  if !restarts_a_root(keyword) {
+    return false;
+  }
+  match kind {
+    Kind::Colon => false,
+    Kind::Identifier if restarts_a_root(spelled) => {
+      matches!(keyword, Some(Keyword::Extend)) && is_extendable(spelled)
+    }
+    _ => true,
+  }
+}
+
+/// Whether `where`, `repeatable` or `on` is the word its owner reads next where a token of `kind`,
+/// spelled `spelled`, stands behind it: [`starts_with`]'s test of what stands behind, a `:` making
+/// the word a member's name and a keyword a root restarts at the start of a definition.
+#[inline]
+const fn word_goes_on(kind: Kind, spelled: Option<Keyword>) -> bool {
+  match kind {
+    Kind::Colon => false,
+    Kind::Identifier => !restarts_a_root(spelled),
+    _ => true,
+  }
+}
+
+/// The owner of a list on a definition's header, as a type: what the owner's production reads
+/// behind the list, in front of which the list ends.
+///
+/// A marker has no size, so a call passes nothing for one, and each constant is folded into the
+/// loop compiled for its owner. Every marker states all four.
+pub(crate) trait Header: Copy {
+  /// A body, `{ … }`, behind the owner's directives: an object, an interface, an input object, an
+  /// enum, a schema, and the extension of each.
+  const BODY: bool;
+  /// A union's members, `= …`: a union and its extension.
+  const MEMBERS: bool;
+  /// A `where` clause behind the owner's directives: a scalar, an object, an interface, an input
+  /// object, a union, and the extensions of the last four.
+  const WHERE: bool;
+  /// `repeatable` and `on`: a directive definition, behind its own list and behind its
+  /// directives.
+  const TAIL: bool;
+}
+
+/// A scalar definition's header: a `where` clause.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ScalarHeader;
+
+impl Header for ScalarHeader {
+  const BODY: bool = false;
+  const MEMBERS: bool = false;
+  const WHERE: bool = true;
+  const TAIL: bool = false;
+}
+
+/// An object's, an interface's and an input object's header, and their extensions': a `where`
+/// clause, then a body.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FieldsHeader;
+
+impl Header for FieldsHeader {
+  const BODY: bool = true;
+  const MEMBERS: bool = false;
+  const WHERE: bool = true;
+  const TAIL: bool = false;
+}
+
+/// An enum's and a schema's header, and their extensions': a body.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct BodyHeader;
+
+impl Header for BodyHeader {
+  const BODY: bool = true;
+  const MEMBERS: bool = false;
+  const WHERE: bool = false;
+  const TAIL: bool = false;
+}
+
+/// A union's header and its extension's: the members, then a `where` clause.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct UnionHeader;
+
+impl Header for UnionHeader {
+  const BODY: bool = false;
+  const MEMBERS: bool = true;
+  const WHERE: bool = true;
+  const TAIL: bool = false;
+}
+
+/// A directive definition's header, behind its own list and behind its directives: `repeatable`,
+/// then `on`.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DirectiveHeader;
+
+impl Header for DirectiveHeader {
+  const BODY: bool = false;
+  const MEMBERS: bool = false;
+  const WHERE: bool = false;
+  const TAIL: bool = true;
+}
+
+/// A scalar extension's header and a directive extension's: nothing behind the directives.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct BareHeader;
+
+impl Header for BareHeader {
+  const BODY: bool = false;
+  const MEMBERS: bool = false;
+  const WHERE: bool = false;
+  const TAIL: bool = false;
+}
+
+/// Whether a list on `owner`'s header asks at a head of `kind` that no valid list holds: at a `{`
+/// where the owner reads a body, at an `=` where it reads a union's members, and at each other
+/// such head its caller hands it.
+#[inline]
+pub(crate) fn asks<O: Header>(_: O, kind: Kind) -> bool {
+  match kind {
+    Kind::LBrace => O::BODY,
+    Kind::Equal => O::MEMBERS,
+    _ => true,
+  }
+}
+
+/// Whether `keyword` is a word `owner` reads next: `where` where the owner reads one, and
+/// `repeatable` and `on` on a directive definition.
+#[inline]
+fn ends_at_word<O: Header>(_: O, keyword: Option<Keyword>) -> bool {
+  match keyword {
+    Some(Keyword::Where) => O::WHERE,
+    Some(Keyword::Repeatable | Keyword::On) => O::TAIL,
+    _ => false,
+  }
+}
+
+/// One token of the peek window, as a header's tests read it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Seen {
+  /// The window came back short of it: the input ends in front of it, or the scanner stopped.
+  Short,
+  /// A trivia token.
+  Trivia,
+  /// A significant token: its kind, and the keyword it spells where it spells one.
+  Token(Kind, Option<Keyword>),
+}
+
+/// What a header's tests read of `token`, the window's entry where it holds one.
+#[inline]
+fn seen<S>(token: Option<&LosslessToken<S>>) -> Seen
+where
+  LosslessToken<S>: DowncastRef<Keyword>,
+{
+  match token {
+    None => Seen::Short,
+    Some(token) if token.is_trivia() => Seen::Trivia,
+    Some(token) => Seen::Token(token.kind(), keyword_of(token)),
   }
 }
 
@@ -909,6 +1130,453 @@ lossless_production! {
       inp.cst_start_at(mark, K::Error.raw());
       inp.cst_finish(K::Error.raw());
     }
+    Ok(())
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// What a list on a definition's header reads at its head before it ends there. The window reads
+// are for a head a valid list can hold and make no report but the stop's own; the look-ahead is for
+// a head no valid list holds, is made behind that head's report, and is given back.
+// ---------------------------------------------------------------------------------------------
+
+lossless_production! {
+  dialect = graphqlx::lossless;
+
+  /// The token at `at` of the peek window, the head at 0, read through the narrowest window that
+  /// holds it: [`Seen::Short`] where the window comes back short of it, whether the input ends in
+  /// front of it or the scanner stopped, since a short window cannot tell the two apart and the
+  /// parse's own read meets the stop where it stands.
+  ///
+  /// The cache holds three tokens, so a window of up to three is served from it and lexes nothing
+  /// the parse does not lex next in any case. A wider one lexes the tokens past the cache, and
+  /// they are lexed again where the parse reads them.
+  fn window_at<'inp, Src, Ctx>(inp, at: usize, out: &mut Seen) {
+    *out = match at {
+      1 => seen(inp.peek::<U2>()?.get(1).map(|entry| entry.token())),
+      2 => seen(inp.peek::<U3>()?.get(2).map(|entry| entry.token())),
+      3 => seen(inp.peek::<U4>()?.get(3).map(|entry| entry.token())),
+      4 => seen(inp.peek::<U5>()?.get(4).map(|entry| entry.token())),
+      _ => Seen::Short,
+    };
+    Ok(())
+  }
+
+  /// The first token behind the peek window's `at` that is no trivia, where at most one trivia
+  /// token stands between: where it stands, its kind and the keyword it spells. `None` where the
+  /// window comes back short of it, or where two trivia tokens stand between, since each blank is
+  /// a token of its own and the window sees past one.
+  fn token_behind<'inp, Src, Ctx>(
+    inp,
+    at: usize,
+    out: &mut Option<(usize, Kind, Option<Keyword>)>,
+  ) {
+    let mut behind = at + 1;
+    let mut token = Seen::Short;
+    window_at::<Src, Ctx>(inp, behind, &mut token)?;
+    if matches!(token, Seen::Trivia) {
+      behind += 1;
+      window_at::<Src, Ctx>(inp, behind, &mut token)?;
+    }
+    *out = match token {
+      Seen::Token(kind, spelled) => Some((behind, kind, spelled)),
+      Seen::Short | Seen::Trivia => None,
+    };
+    Ok(())
+  }
+
+  /// The report a member's `expect` makes where the token at `at` of the peek window stands in
+  /// place of its `:`, made without consuming anything in front of that token: the same code, the
+  /// same span and the same token found.
+  fn colon_missing_at<'inp, Src, Ctx>(inp, at: usize) {
+    let found = match at {
+      1 => inp
+        .peek::<U2>()?
+        .get(1)
+        .map(|entry| Spanned::new(*entry.span(), Clone::clone(entry.token()))),
+      2 => inp
+        .peek::<U3>()?
+        .get(2)
+        .map(|entry| Spanned::new(*entry.span(), Clone::clone(entry.token()))),
+      3 => inp
+        .peek::<U4>()?
+        .get(3)
+        .map(|entry| Spanned::new(*entry.span(), Clone::clone(entry.token()))),
+      4 => inp
+        .peek::<U5>()?
+        .get(4)
+        .map(|entry| Spanned::new(*entry.span(), Clone::clone(entry.token()))),
+      _ => None,
+    };
+    if let Some(found) = found {
+      inp.emit_error(crate::lossless::trivia::expected_at::<
+        GraphqlxLosslessLexer<'inp, Src>,
+        Ctx,
+        GraphQLx,
+      >(found, Kind::Colon))?;
+    }
+    Ok(())
+  }
+
+  /// At a name at a member position of a list on `owner`'s header: whether the list ends in front
+  /// of it, which it does at the start of a definition and at `where`, `repeatable` or `on` where
+  /// the owner reads the word, each by what stands behind the name; and where it ends, the report
+  /// the member there would make first, the `:` it misses at the token behind the name.
+  ///
+  /// The spelling is asked first, so a member named like none of those words costs one test of
+  /// it. Only behind a spelling that matches are the brace count, which must be what it was behind
+  /// the list's `(`, and the peek window read. The window reads no further than that member reads
+  /// to its `:`, so every lexer error in front of the report is reported where the member would
+  /// report it.
+  fn name_ends_header<'inp, Src, Ctx>(inp, open_at: usize, owner: impl Header, ends: &mut bool) {
+    let keyword = peek_as::<Src, Ctx, Keyword>(inp)?;
+    let start = restarts_a_root(keyword);
+    if !start && !ends_at_word(owner, keyword) {
+      return Ok(());
+    }
+    if inp.state().brace_depth() != open_at {
+      return Ok(());
+    }
+    let mut behind = None;
+    token_behind::<Src, Ctx>(inp, 0, &mut behind)?;
+    let Some((at, kind, spelled)) = behind else {
+      return Ok(());
+    };
+    let stops = if start {
+      starts_with(keyword, kind, spelled)
+    } else {
+      word_goes_on(kind, spelled)
+    };
+    if stops {
+      colon_missing_at::<Src, Ctx>(inp, at)?;
+      *ends = true;
+    }
+    Ok(())
+  }
+
+  /// At a description's string at a member position of a directive definition's own list: whether
+  /// the list ends in front of it, the description of a definition that starts behind it; and
+  /// where it ends, the report the member there would make first, the `:` its name misses at the
+  /// token behind that name.
+  ///
+  /// The brace count must be what it was behind the list's `(`. The window is then read in two
+  /// stages. The string and up to two tokens behind it are in the cache, and where the first of
+  /// them that is no trivia is not a name spelled like a keyword a root restarts at, nothing more
+  /// is asked. Where it is, the token behind that name can stand past the cache, and is then lexed
+  /// there and again where the parse reads it: `directive @d("doc" type: Int)` is valid, and
+  /// spends a produce-event or two more than it would without this test.
+  fn description_ends_header<'inp, Src, Ctx>(inp, open_at: usize, ends: &mut bool) {
+    if inp.state().brace_depth() != open_at {
+      return Ok(());
+    }
+    let mut name = None;
+    token_behind::<Src, Ctx>(inp, 0, &mut name)?;
+    let Some((at, Kind::Identifier, keyword)) = name else {
+      return Ok(());
+    };
+    if !restarts_a_root(keyword) {
+      return Ok(());
+    }
+    let mut behind = None;
+    token_behind::<Src, Ctx>(inp, at, &mut behind)?;
+    let Some((at, kind, spelled)) = behind else {
+      return Ok(());
+    };
+    if starts_with(keyword, kind, spelled) {
+      colon_missing_at::<Src, Ctx>(inp, at)?;
+      *ends = true;
+    }
+    Ok(())
+  }
+
+  /// Whether the start of a definition stands at the head, a name: [`starts_with`]'s test of it
+  /// and of the token behind it, read through the peek window. Where a directive definition reads
+  /// a location, such a name is none.
+  ///
+  /// The spelling is asked first. A location is spelled in upper case and these keywords in lower,
+  /// so a valid location costs one test of its spelling and opens no window.
+  fn starts_definition<'inp, Src, Ctx>(inp, starts: &mut bool) {
+    let keyword = peek_as::<Src, Ctx, Keyword>(inp)?;
+    if !restarts_a_root(keyword) {
+      return Ok(());
+    }
+    let mut behind = None;
+    token_behind::<Src, Ctx>(inp, 0, &mut behind)?;
+    if let Some((_, kind, spelled)) = behind {
+      *starts = starts_with(keyword, kind, spelled);
+    }
+    Ok(())
+  }
+
+  /// [`unexpected`] behind its report: [`crate::lossless::recover::skip_unexpected`] with this
+  /// dialect's four pairs and its restart predicate, under the allowance `exhausted` that its
+  /// caller read where [`unexpected`] reads it. In a `const { … }` block it takes one token, as
+  /// [`unexpected`] does there.
+  fn skip_unexpected<'inp, Src, Ctx>(inp, exhausted: bool) {
+    if inp.state().in_const_block() {
+      return skip_one::<Src, Ctx>(inp);
+    }
+    crate::lossless::recover::skip_unexpected(
+      inp,
+      delimiters,
+      |t| is_sync_point(kind_of(t)),
+      K::Error.raw(),
+      exhausted,
+    )
+  }
+
+  /// [`unexpected`] at a head no valid list holds, at a member position of a list on `owner`'s
+  /// header in which nothing the list has read leaves a brace open: its report first, then a
+  /// look-ahead, given back, for what the owner reads next, and its skip only where the look-ahead
+  /// finds nothing. Where it finds something the list ends in front of the head, which the report
+  /// has named.
+  ///
+  /// The report goes first so that nothing the look-ahead spends of a durable budget can stop the
+  /// parse in front of it, and the head is reported once whichever way the look-ahead goes. The
+  /// allowance is read where [`unexpected`] reads it, in front of the report, and governs the
+  /// look-ahead and the skip alike: where it is spent no look-ahead is made, and the skip takes
+  /// what [`unexpected`]'s would.
+  fn unexpected_or_ends<'inp, Src, Ctx>(
+    inp,
+    expected: &'static [Kind],
+    open_at: usize,
+    owner: impl Header,
+    ends: &mut bool,
+  ) {
+    if inp.state().in_const_block() {
+      return unexpected::<Src, Ctx>(inp, expected);
+    }
+    // `unexpected`'s guard, read where it reads it; `scan_allowance_exhausted` says what it is.
+    let exhausted = crate::lossless::recover::scan_allowance_exhausted(
+      inp.token_budget().spent(),
+      inp.state().token().tokens(),
+    );
+    crate::lossless::recover::report_unexpected(inp, expected)?;
+    if !exhausted {
+      // Declined always, so every token the look-ahead reads, every report a lexer makes inside it
+      // and any stop it meets are taken back with it. A stop or an error is no evidence, and the
+      // skip below then meets it for real.
+      let mut found = false;
+      inp.attempt(|inp| {
+        let mut read = false;
+        if ahead::<Src, Ctx>(inp, open_at, owner, &mut read).is_ok() {
+          found = read;
+        }
+        None::<()>
+      });
+      if found {
+        *ends = true;
+        return Ok(());
+      }
+    }
+    skip_unexpected::<Src, Ctx>(inp, exhausted)
+  }
+
+  /// What a look-ahead reads at a head no valid list holds, on `owner`'s header: whether what the
+  /// owner reads next stands there.
+  ///
+  /// - **A `{`:** the owner's body. The `}` that balances it is written, read by braces alone, and
+  ///   behind it stands the end of input, a `}` that closes a block around the list, or the start
+  ///   of a definition.
+  /// - **An `@`:** the owner's next directive. One or more, each an `@`, its path and the `)` that
+  ///   balances its `(` where one follows, and behind them what may stand behind a body, or what
+  ///   the owner reads next by its own test.
+  /// - **An `=`:** a union's members. A `|` or none, paths between `|`, and behind them what may
+  ///   stand behind a body, or a `where` by its test.
+  /// - **A string:** the description of a definition that starts behind it.
+  ///
+  /// Where it meets the end of input in place of what it asks about, it finds nothing.
+  fn ahead<'inp, Src, Ctx>(inp, open_at: usize, owner: impl Header, found: &mut bool) {
+    match peek_kind::<Src, Ctx>(inp)? {
+      Some(Kind::LBrace) => body_ahead::<Src, Ctx>(inp, open_at, found),
+      Some(Kind::At) => directives_ahead::<Src, Ctx>(inp, open_at, owner, found),
+      Some(Kind::Equal) => members_ahead::<Src, Ctx>(inp, open_at, owner, found),
+      Some(Kind::InlineString | Kind::BlockString) => {
+        inp.try_expect_or_stop(|_| true)?;
+        starts_ahead::<Src, Ctx>(inp, found)
+      }
+      _ => Ok(()),
+    }
+  }
+
+  /// A body ahead, at its `{`: the `}` that balances it, by braces alone, and behind it what
+  /// [`behind_ahead`] finds. A `(` or a `[` left open inside hides nothing, as in a module's body:
+  /// the braces as written are the body's.
+  fn body_ahead<'inp, Src, Ctx>(inp, open_at: usize, found: &mut bool) {
+    let mut closed = false;
+    balanced_ahead::<Src, Ctx>(inp, Kind::LBrace, Kind::RBrace, &mut closed)?;
+    if closed {
+      behind_ahead::<Src, Ctx>(inp, open_at, found)?;
+    }
+    Ok(())
+  }
+
+  /// A group ahead, at its `open`: every token to the `close` that balances it, those two kinds
+  /// counted and no other, and that `close` taken. `closed` says whether it is written.
+  fn balanced_ahead<'inp, Src, Ctx>(inp, open: Kind, close: Kind, closed: &mut bool) {
+    inp.try_expect_or_stop(|_| true)?;
+    let mut depth = 1usize;
+    while depth > 0 {
+      let Some(kind) = peek_kind::<Src, Ctx>(inp)? else {
+        return Ok(());
+      };
+      if kind == open {
+        depth += 1;
+      } else if kind == close {
+        depth -= 1;
+      }
+      inp.try_expect_or_stop(|_| true)?;
+    }
+    *closed = true;
+    Ok(())
+  }
+
+  /// What may stand behind a body, the owner's directives or a union's members, ahead: the end of
+  /// input, a `}` that closes a block around the list, by the brace count at that `}`, or the start
+  /// of a definition, a description's string in front of it or not.
+  fn behind_ahead<'inp, Src, Ctx>(inp, open_at: usize, found: &mut bool) {
+    match peek_kind::<Src, Ctx>(inp)? {
+      None => *found = true,
+      Some(Kind::RBrace) => *found = closes_enclosing_block(open_at, inp.state().brace_depth()),
+      Some(Kind::InlineString | Kind::BlockString) => {
+        inp.try_expect_or_stop(|_| true)?;
+        starts_ahead::<Src, Ctx>(inp, found)?;
+      }
+      Some(Kind::Identifier) => starts_ahead::<Src, Ctx>(inp, found)?,
+      Some(_) => {}
+    }
+    Ok(())
+  }
+
+  /// The start of a definition ahead, at a name: [`starts_with`]'s test of it and of the token
+  /// behind it, read across any trivia. The end of input behind the name is no evidence.
+  fn starts_ahead<'inp, Src, Ctx>(inp, found: &mut bool) {
+    let keyword = peek_as::<Src, Ctx, Keyword>(inp)?;
+    if !restarts_a_root(keyword) {
+      return Ok(());
+    }
+    inp.try_expect_or_stop(|_| true)?;
+    if let Some(kind) = peek_kind::<Src, Ctx>(inp)? {
+      *found = starts_with(keyword, kind, peek_as::<Src, Ctx, Keyword>(inp)?);
+    }
+    Ok(())
+  }
+
+  /// The owner's next directive ahead, at its `@`: each `@`, its path and, where a `(` follows the
+  /// path, the `)` that balances it, again while an `@` follows; and behind them what
+  /// [`next_ahead`] finds.
+  fn directives_ahead<'inp, Src, Ctx>(inp, open_at: usize, owner: impl Header, found: &mut bool) {
+    while peek_kind::<Src, Ctx>(inp)? == Some(Kind::At) {
+      inp.try_expect_or_stop(|_| true)?;
+      let mut written = false;
+      path_ahead::<Src, Ctx>(inp, &mut written)?;
+      if written && peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
+        written = false;
+        balanced_ahead::<Src, Ctx>(inp, Kind::LParen, Kind::RParen, &mut written)?;
+      }
+      if !written {
+        return Ok(());
+      }
+    }
+    next_ahead::<Src, Ctx>(inp, open_at, owner, found)
+  }
+
+  /// What may stand behind the owner's directives, ahead: what [`behind_ahead`] finds, or what the
+  /// owner reads next by its own test, a body behind a `{` where it reads one, a union's members
+  /// behind an `=` where it reads them, and `where`, `repeatable` or `on` where it reads the word.
+  fn next_ahead<'inp, Src, Ctx>(inp, open_at: usize, owner: impl Header, found: &mut bool) {
+    let head = peek_kind::<Src, Ctx>(inp)?;
+    let word = head == Some(Kind::Identifier)
+      && ends_at_word(owner, peek_as::<Src, Ctx, Keyword>(inp)?);
+    match head {
+      Some(Kind::LBrace) if asks(owner, Kind::LBrace) => {
+        body_ahead::<Src, Ctx>(inp, open_at, found)
+      }
+      Some(Kind::Equal) if asks(owner, Kind::Equal) => {
+        members_ahead::<Src, Ctx>(inp, open_at, owner, found)
+      }
+      Some(Kind::Identifier) if word => {
+        inp.try_expect_or_stop(|_| true)?;
+        word_ahead::<Src, Ctx>(inp, found)
+      }
+      _ => behind_ahead::<Src, Ctx>(inp, open_at, found),
+    }
+  }
+
+  /// A union's members ahead, at its `=`: a `|` or none, then paths with a `|` between each two;
+  /// and behind them what [`behind_ahead`] finds, or a `where` by its test where the owner reads
+  /// one.
+  fn members_ahead<'inp, Src, Ctx>(inp, open_at: usize, owner: impl Header, found: &mut bool) {
+    inp.try_expect_or_stop(|_| true)?;
+    if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Pipe) {
+      inp.try_expect_or_stop(|_| true)?;
+    }
+    loop {
+      let mut written = false;
+      path_ahead::<Src, Ctx>(inp, &mut written)?;
+      if !written {
+        return Ok(());
+      }
+      if peek_kind::<Src, Ctx>(inp)? != Some(Kind::Pipe) {
+        break;
+      }
+      inp.try_expect_or_stop(|_| true)?;
+    }
+    let head = peek_kind::<Src, Ctx>(inp)?;
+    if head == Some(Kind::Identifier) && ends_at_word(owner, peek_as::<Src, Ctx, Keyword>(inp)?) {
+      inp.try_expect_or_stop(|_| true)?;
+      return word_ahead::<Src, Ctx>(inp, found);
+    }
+    behind_ahead::<Src, Ctx>(inp, open_at, found)
+  }
+
+  /// The word its owner reads next, ahead, the word taken: [`word_goes_on`]'s test of the token
+  /// behind it, read across any trivia. The end of input behind the word is no evidence.
+  fn word_ahead<'inp, Src, Ctx>(inp, found: &mut bool) {
+    if let Some(kind) = peek_kind::<Src, Ctx>(inp)? {
+      *found = word_goes_on(kind, peek_as::<Src, Ctx, Keyword>(inp)?);
+    }
+    Ok(())
+  }
+
+  /// A path ahead, as a directive's name and a union's member are written, which `ty.rs`'s
+  /// `type_path` reads: a root, `~ ::` or `^ ::` once or `.. ::` any number of times, or none; a
+  /// name, and `:: Name` any number of times; and where a `<` follows, the `>` that balances it.
+  /// `written` says whether the whole of it is.
+  fn path_ahead<'inp, Src, Ctx>(inp, written: &mut bool) {
+    match peek_kind::<Src, Ctx>(inp)? {
+      Some(Kind::Tilde | Kind::Caret) => {
+        inp.try_expect_or_stop(|_| true)?;
+        if peek_kind::<Src, Ctx>(inp)? != Some(Kind::PathSeparator) {
+          return Ok(());
+        }
+        inp.try_expect_or_stop(|_| true)?;
+      }
+      _ => {
+        while peek_kind::<Src, Ctx>(inp)? == Some(Kind::DotDot) {
+          inp.try_expect_or_stop(|_| true)?;
+          if peek_kind::<Src, Ctx>(inp)? != Some(Kind::PathSeparator) {
+            return Ok(());
+          }
+          inp.try_expect_or_stop(|_| true)?;
+        }
+      }
+    }
+    if peek_kind::<Src, Ctx>(inp)? != Some(Kind::Identifier) {
+      return Ok(());
+    }
+    inp.try_expect_or_stop(|_| true)?;
+    while peek_kind::<Src, Ctx>(inp)? == Some(Kind::PathSeparator) {
+      inp.try_expect_or_stop(|_| true)?;
+      if peek_kind::<Src, Ctx>(inp)? != Some(Kind::Identifier) {
+        return Ok(());
+      }
+      inp.try_expect_or_stop(|_| true)?;
+    }
+    if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LAngle) {
+      return balanced_ahead::<Src, Ctx>(inp, Kind::LAngle, Kind::RAngle, written);
+    }
+    *written = true;
     Ok(())
   }
 }
