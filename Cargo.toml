@@ -95,7 +95,7 @@ derive_more = { version = "2", default-features = false, features = ["unwrap", "
 # one, `cargo publish` would drop the git source and verify each package against the registry
 # release that key names, not the commit every build here uses. Without one, it refuses to
 # package, which is right while the pin stands.
-tokora = { git = "https://github.com/al8n/tokora", rev = "ac79b11121b437d460946301f9c1518ff83d1285", default-features = false, features = ["logos", "unstable-raw", "combinators"] }
+tokora = { git = "https://github.com/al8n/tokora", rev = "b0a70b62f497fe485e89638e50ba83cfdc206194", default-features = false, features = ["logos", "unstable-raw", "combinators"] }
 
 paste = "1"
 thiserror = { version = "2", default-features = false }
