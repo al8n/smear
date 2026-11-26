@@ -773,6 +773,30 @@ mod lossless {
     }
   }
 
+  /// A last member, or a last directive's name, spelled like a keyword a root restarts at with a
+  /// name behind it is no evidence: the keyword may be a definition's, that name its name. The list
+  /// skips its junk as it always did, the owner is lost at the `:` its next argument misses, and
+  /// the root reads the definition whole, where the evidence would have made its keyword a member
+  /// or a directive and its name and braces an operation.
+  #[test]
+  fn a_member_spelled_like_a_definitions_keyword_is_no_evidence() {
+    for text in [
+      "union U @d(x: 1 = A | enum query { VALUE }",
+      "type T @d(x: 1 @a @enum query { VALUE }",
+    ] {
+      assert_eq!(
+        written(&read(text).tree, K::EnumTypeDefinition),
+        ["enum query { VALUE }"],
+        "{text} at the type-system root"
+      );
+      assert_eq!(
+        written(&parse_document(text).syntax(), K::EnumTypeDefinition),
+        ["enum query { VALUE }"],
+        "{text} at the mixed root"
+      );
+    }
+  }
+
   /// The least produce-event budget under which `text` reads with no error.
   fn least_budget(text: &str) -> usize {
     (0..=4 * lexemes(text))

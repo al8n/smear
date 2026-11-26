@@ -1429,7 +1429,10 @@ lossless_production! {
   ///   stand behind a body, or a `where` by its test.
   /// - **A string:** the description of a definition that starts behind it.
   ///
-  /// Where it meets the end of input in place of what it asks about, it finds nothing.
+  /// Where it meets the end of input in place of what it asks about, it finds nothing. Nor does it
+  /// find anything behind a last directive or a last member that is a name alone, spelled like a
+  /// keyword a root restarts at, with a name behind it: that keyword may be a definition's, its
+  /// name behind it, and what follows that name is no evidence for the owner.
   fn ahead<'inp, Src, Ctx>(inp, open_at: usize, owner: impl Header, found: &mut bool) {
     match peek_kind::<Src, Ctx>(inp)? {
       Some(Kind::LBrace) => body_ahead::<Src, Ctx>(inp, open_at, found),
@@ -1520,19 +1523,27 @@ lossless_production! {
 
   /// The owner's next directive ahead, at its `@`: each `@`, its path and, where a `(` follows the
   /// path, the `)` that balances it, again while an `@` follows; and behind them what
-  /// [`next_ahead`] finds.
+  /// [`next_ahead`] finds. Where the last is a name alone, spelled like a keyword a root restarts
+  /// at, and a name stands behind it, nothing is found.
   fn directives_ahead<'inp, Src, Ctx>(inp, open_at: usize, owner: impl Header, found: &mut bool) {
+    let mut last = None;
     while peek_kind::<Src, Ctx>(inp)? == Some(Kind::At) {
       inp.try_expect_or_stop(|_| true)?;
       let mut written = false;
-      path_ahead::<Src, Ctx>(inp, &mut written)?;
+      let mut bare = None;
+      path_ahead::<Src, Ctx>(inp, &mut written, &mut bare)?;
       if written && peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
         written = false;
+        bare = None;
         balanced_ahead::<Src, Ctx>(inp, Kind::LParen, Kind::RParen, &mut written)?;
       }
       if !written {
         return Ok(());
       }
+      last = bare;
+    }
+    if restarts_a_root(last) && peek_kind::<Src, Ctx>(inp)? == Some(Kind::Identifier) {
+      return Ok(());
     }
     next_ahead::<Src, Ctx>(inp, open_at, owner, found)
   }
@@ -1561,27 +1572,33 @@ lossless_production! {
 
   /// A union's members ahead, at its `=`: a `|` or none, then paths with a `|` between each two;
   /// and behind them what [`behind_ahead`] finds, or a `where` by its test where the owner reads
-  /// one.
+  /// one. Where the last is a name alone, spelled like a keyword a root restarts at, and a name
+  /// stands behind it, nothing is found.
   fn members_ahead<'inp, Src, Ctx>(inp, open_at: usize, owner: impl Header, found: &mut bool) {
     inp.try_expect_or_stop(|_| true)?;
     if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Pipe) {
       inp.try_expect_or_stop(|_| true)?;
     }
-    loop {
+    let last = loop {
       let mut written = false;
-      path_ahead::<Src, Ctx>(inp, &mut written)?;
+      let mut bare = None;
+      path_ahead::<Src, Ctx>(inp, &mut written, &mut bare)?;
       if !written {
         return Ok(());
       }
       if peek_kind::<Src, Ctx>(inp)? != Some(Kind::Pipe) {
-        break;
+        break bare;
       }
       inp.try_expect_or_stop(|_| true)?;
-    }
-    let head = peek_kind::<Src, Ctx>(inp)?;
-    if head == Some(Kind::Identifier) && ends_at_word(owner, peek_as::<Src, Ctx, Keyword>(inp)?) {
-      inp.try_expect_or_stop(|_| true)?;
-      return word_ahead::<Src, Ctx>(inp, found);
+    };
+    if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Identifier) {
+      if restarts_a_root(last) {
+        return Ok(());
+      }
+      if ends_at_word(owner, peek_as::<Src, Ctx, Keyword>(inp)?) {
+        inp.try_expect_or_stop(|_| true)?;
+        return word_ahead::<Src, Ctx>(inp, found);
+      }
     }
     behind_ahead::<Src, Ctx>(inp, open_at, found)
   }
@@ -1598,8 +1615,10 @@ lossless_production! {
   /// A path ahead, as a directive's name and a union's member are written, which `ty.rs`'s
   /// `type_path` reads: a root, `~ ::` or `^ ::` once or `.. ::` any number of times, or none; a
   /// name, and `:: Name` any number of times; and where a `<` follows, the `>` that balances it.
-  /// `written` says whether the whole of it is.
-  fn path_ahead<'inp, Src, Ctx>(inp, written: &mut bool) {
+  /// `written` says whether the whole of it is, and `bare` takes the keyword the path spells where
+  /// it is a name alone, with no root, no `::` and no `<` behind it.
+  fn path_ahead<'inp, Src, Ctx>(inp, written: &mut bool, bare: &mut Option<Keyword>) {
+    let mut name = None;
     match peek_kind::<Src, Ctx>(inp)? {
       Some(Kind::Tilde | Kind::Caret) => {
         inp.try_expect_or_stop(|_| true)?;
@@ -1608,6 +1627,7 @@ lossless_production! {
         }
         inp.try_expect_or_stop(|_| true)?;
       }
+      Some(Kind::Identifier) => name = peek_as::<Src, Ctx, Keyword>(inp)?,
       _ => {
         while peek_kind::<Src, Ctx>(inp)? == Some(Kind::DotDot) {
           inp.try_expect_or_stop(|_| true)?;
@@ -1623,6 +1643,7 @@ lossless_production! {
     }
     inp.try_expect_or_stop(|_| true)?;
     while peek_kind::<Src, Ctx>(inp)? == Some(Kind::PathSeparator) {
+      name = None;
       inp.try_expect_or_stop(|_| true)?;
       if peek_kind::<Src, Ctx>(inp)? != Some(Kind::Identifier) {
         return Ok(());
@@ -1632,6 +1653,7 @@ lossless_production! {
     if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LAngle) {
       return balanced_ahead::<Src, Ctx>(inp, Kind::LAngle, Kind::RAngle, written);
     }
+    *bare = name;
     *written = true;
     Ok(())
   }
