@@ -23,8 +23,8 @@ use crate::limits::SyntacticLimits;
 /// [`leave_const_block`](Self::leave_const_block).
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SyntacticState {
-  /// The nesting ceiling in the low half, and the block's word in the high half: zero outside a
-  /// block, and inside one, one more than the count of open `<`. The two are halves of one `u64`
+  /// The block's word in the low half, zero outside a block and inside one, one more than the
+  /// count of open `<`, and the nesting ceiling in the high half. The two are halves of one `u64`
   /// and not two `u32` fields because no field of the state is narrower than a word, so that no
   /// narrow store meets the whole-word copy of the state that tokora makes into each token it
   /// caches.
@@ -58,11 +58,14 @@ const _: () = assert!(
   "SyntacticState::limits must stay a const fn that reads back the held ceiling."
 );
 
-/// The packed word's low half, where the ceiling is. As a number it is the highest ceiling a state
-/// holds: 4,294,967,295 levels.
+/// The highest ceiling a state holds, all that a half of the packed word holds: 4,294,967,295
+/// levels.
+const MAX_CEILING: u64 = u32::MAX as u64;
+
+/// The packed word's low half, where the block's word is.
 const LOW_HALF: u64 = u32::MAX as u64;
 
-/// The shift to the packed word's high half, where the block's word is.
+/// The shift to the packed word's high half, where the ceiling is.
 const HIGH_HALF: u32 = u32::BITS;
 
 impl SyntacticState {
@@ -71,41 +74,43 @@ impl SyntacticState {
   #[inline(always)]
   pub const fn new(limits: SyntacticLimits) -> Self {
     let ceiling = limits.max_nesting_depth() as u64;
+    let ceiling = if ceiling < MAX_CEILING {
+      ceiling
+    } else {
+      MAX_CEILING
+    };
     Self {
-      packed: if ceiling < LOW_HALF {
-        ceiling
-      } else {
-        LOW_HALF
-      },
+      packed: ceiling << HIGH_HALF,
       depth: limits.depth(),
     }
   }
 
-  /// The nesting ceiling: the packed word's low half.
+  /// The nesting ceiling: the packed word's high half.
   #[inline(always)]
   const fn ceiling(&self) -> usize {
-    (self.packed & LOW_HALF) as usize
+    (self.packed >> HIGH_HALF) as usize
   }
 
-  /// The block's word: the packed word's high half.
+  /// The block's word: the packed word's low half.
   #[inline(always)]
   const fn block(&self) -> u32 {
-    (self.packed >> HIGH_HALF) as u32
+    self.packed as u32
   }
 
   /// Writes the block's word, and leaves the ceiling as it is.
   #[inline(always)]
   const fn set_block(&mut self, block: u32) {
-    self.packed = (self.packed & LOW_HALF) | ((block as u64) << HIGH_HALF);
+    self.packed = (self.packed & !LOW_HALF) | (block as u64);
   }
 
   /// Whether the lexer is inside a `const { … }` block, where a comma is a token, `-` is always an
   /// operator, `>>` is a shift where no `<` is open, and a name touching a quote is a prefix.
   #[inline(always)]
   pub const fn in_const_block(&self) -> bool {
-    // The intent is one compare with memory. Only the high half is tested, so a load of the word
-    // can narrow to that half and fold into the compare, but only where the load feeds nothing
-    // else: where it also feeds the ceiling's read, the test shifts the word in a register.
+    // The intent is one compare and no shift. Only the low half is tested, so a load of the word
+    // can narrow to that half and fold into a compare with memory, but only where the load feeds
+    // nothing else: where it also feeds the ceiling's read, the test is one compare of the word's
+    // 32-bit register. Only the ceiling's read shifts.
     self.block() != 0
   }
 
