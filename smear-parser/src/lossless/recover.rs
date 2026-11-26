@@ -143,14 +143,21 @@
 //! attempt is declined only where what the skip committed holds a `}` the skip did not open, and
 //! a declined one is a failed scan in all but name: it gives back what the skip crossed, to be
 //! lexed again, and the guard charges it as one. The look-aheads are always declined, are made
-//! only where the allowance is open, and are charged the same way. This exception is the
-//! mechanism, not a leak in it. The one leak is in the peek windows a header's list opens: they
-//! read no further than the cache retains, but a window that meets the end of input across a run
-//! of lexer errors leaves the run behind the newest token tokora retains, and the parse lexes the
-//! run a second time, charged twice to `spent`, once a parse. Without a durable ceiling only the
-//! test-support counters see it; under a produce-event ceiling within the run's length of what
-//! the parse needs, the budget's refusal is lent in front of the report the parse would make at
-//! the end of input. It stays so until tokora retains the end of input after an error run.
+//! only where the allowance is open, and are charged the same way. Each takes at most its
+//! dialect's `LOOK_AHEAD_CAP` tokens, trivia among them, and the one it stops at, and runs only
+//! at a head or a location the parse has just reported, once at each: so what the look-aheads
+//! lex and give back is a constant at each such head, but for the runs of lexer errors they
+//! cross, which tokora lexes whole inside one read and the cap cannot count. The durable
+//! produce-event budget sees all of it, as the real cost it is. This exception is the mechanism,
+//! not a leak in it.
+//!
+//! The one leak is in the peek windows a header's list opens: they read no further than the cache
+//! retains, but a window that meets the end of input across a run of lexer errors leaves the run
+//! behind the newest token tokora retains, and the parse lexes the run a second time, charged
+//! twice to `spent`, once a parse. Without a durable ceiling only the test-support counters see
+//! it; under a produce-event ceiling within the run's length of what the parse needs, the
+//! budget's refusal is lent in front of the report the parse would make at the end of input. It
+//! stays so until tokora retains the end of input after an error run.
 //!
 //! **Exception 2 — lexer errors. Closed, and named here because the arithmetic it drove is still
 //! quoted below.** tokora charges `spent` for *every* item the lexer hands back, errors included

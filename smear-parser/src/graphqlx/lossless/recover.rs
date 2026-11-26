@@ -903,6 +903,48 @@ const fn fits(depth: usize, limitation: usize, stack: usize) -> bool {
   stack.saturating_add(2) <= limitation.saturating_sub(depth)
 }
 
+/// How many tokens a look-ahead takes at most, trivia among them, from where it starts. One that
+/// would take more finds no evidence, and the list reads as main reads it. The bound keeps what a
+/// look-ahead lexes, and gives back to be lexed again, to a constant at each head it is made at,
+/// however long a run of trivia or of crossed tokens stands there. A run of lexer errors is no
+/// token: tokora lexes it whole inside the one read that meets it and hands the parser none of
+/// it, so the cap does not count it, and a look-ahead lexes such a run in full where it reaches
+/// one.
+const LOOK_AHEAD_CAP: usize = 256;
+
+/// What a look-ahead may still take of [`LOOK_AHEAD_CAP`], and whether it has met the cap, behind
+/// which nothing it reads is evidence.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Reach {
+  left: usize,
+  spent: bool,
+}
+
+impl Reach {
+  /// The whole of [`LOOK_AHEAD_CAP`].
+  const fn new() -> Self {
+    Self {
+      left: LOOK_AHEAD_CAP,
+      spent: false,
+    }
+  }
+
+  /// Whether the look-ahead has met the cap.
+  const fn spent(&self) -> bool {
+    self.spent
+  }
+
+  /// One token more: `false` where the cap is met, which spends the reach.
+  const fn take(&mut self) -> bool {
+    if self.left == 0 {
+      self.spent = true;
+      return false;
+    }
+    self.left -= 1;
+    true
+  }
+}
+
 /// The owner of a list on a definition's header, as a type: what the owner's production reads
 /// behind the list, in front of which the list ends.
 ///
@@ -1252,7 +1294,8 @@ lossless_production! {
 // Every token a look-ahead crosses on its way to its evidence passes `cross`. A reader takes no
 // token itself but the structure it reads, the head, an `@`, an `=`, a `|`, a path's sigils and
 // `::`, the owner's body's `{` and `}` and a group's own opener and closer, and its terminal
-// evidence.
+// evidence. Every token it takes, trivia among them, it takes through `kind_ahead` and
+// `take_ahead`, within `LOOK_AHEAD_CAP`.
 // ---------------------------------------------------------------------------------------------
 
 lossless_production! {
@@ -1433,9 +1476,11 @@ lossless_production! {
   /// starts a definition with it by [`starts_with`]'s test. Everywhere else they go on, and the
   /// name is a location misspelled, as main reads it: at a name spelled like no such keyword, at
   /// the end of input behind the name, where the allowance is spent, and where the look-ahead
-  /// meets a stop or an error.
+  /// meets a stop or an error, or would take more than [`LOOK_AHEAD_CAP`] tokens.
   ///
   /// No valid location is spelled like such a keyword, so no valid document makes the look-ahead.
+  /// What it lexes and gives back, at most [`LOOK_AHEAD_CAP`] tokens and any run of lexer errors
+  /// among them, the durable produce-event budget sees, and so does the allowance.
   fn location_ends<'inp, Src, Ctx>(inp, keyword: Option<Keyword>, ends: &mut bool) {
     if !restarts_a_root(keyword) {
       return Ok(());
@@ -1449,10 +1494,11 @@ lossless_production! {
     if !exhausted {
       // Declined always, so every token the look-ahead reads, every report a lexer makes inside it
       // and any stop it meets are taken back with it.
+      let mut reach = Reach::new();
       inp.attempt(|inp| {
         let mut read = false;
-        if location_ahead::<Src, Ctx>(inp, keyword, &mut read).is_ok() {
-          starts = read;
+        if location_ahead::<Src, Ctx>(inp, keyword, &mut reach, &mut read).is_ok() {
+          starts = read && !reach.spent();
         }
         None::<()>
       });
@@ -1489,6 +1535,11 @@ lossless_production! {
   /// allowance is read where [`unexpected`] reads it, in front of the report, and governs the
   /// look-ahead and the skip alike: where it is spent no look-ahead is made, and the skip takes
   /// what [`unexpected`]'s would.
+  ///
+  /// What the look-ahead costs is what it lexes, which it gives back to be lexed again: at most
+  /// [`LOOK_AHEAD_CAP`] tokens, trivia among them, the one it stops at and any run of lexer errors
+  /// among them, which the cap cannot count, once at this head. The durable produce-event budget
+  /// sees all of it, as the real cost it is, and so does the allowance, which reads that budget.
   fn unexpected_or_ends<'inp, Src, Ctx>(
     inp,
     expected: &'static [Kind],
@@ -1510,10 +1561,11 @@ lossless_production! {
       // and any stop it meets are taken back with it. A stop or an error is no evidence, and the
       // skip below then meets it for real.
       let mut found = false;
+      let mut reach = Reach::new();
       inp.attempt(|inp| {
         let mut read = false;
-        if ahead::<Src, Ctx>(inp, open_at, owner, &mut read).is_ok() {
-          found = read;
+        if ahead::<Src, Ctx>(inp, open_at, owner, &mut reach, &mut read).is_ok() {
+          found = read && !reach.spent();
         }
         None::<()>
       });
@@ -1544,17 +1596,53 @@ lossless_production! {
   /// arguments hold a word the owner's list stops at, and where a bracket closes out of order or
   /// nests deeper than the parse has left. Where it meets the end of input in place of what it
   /// asks about, it finds nothing either.
-  fn ahead<'inp, Src, Ctx>(inp, open_at: usize, owner: impl Header, found: &mut bool) {
-    match peek_kind::<Src, Ctx>(inp)? {
-      Some(Kind::LBrace) => body_ahead::<Src, Ctx>(inp, open_at, owner, true, found),
-      Some(Kind::At) => directives_ahead::<Src, Ctx>(inp, open_at, owner, found),
-      Some(Kind::Equal) => members_ahead::<Src, Ctx>(inp, open_at, owner, found),
+  ///
+  /// Every token it takes, trivia among them, it takes within `reach`, through [`kind_ahead`] and
+  /// [`take_ahead`], so it takes no more than [`LOOK_AHEAD_CAP`]: where it would, `reach` is spent
+  /// and what it read is no evidence, whatever it would have answered.
+  fn ahead<'inp, Src, Ctx>(
+    inp,
+    open_at: usize,
+    owner: impl Header,
+    reach: &mut Reach,
+    found: &mut bool,
+  ) {
+    let mut head = None;
+    kind_ahead::<Src, Ctx>(inp, reach, &mut head)?;
+    match head {
+      Some(Kind::LBrace) => body_ahead::<Src, Ctx>(inp, open_at, owner, true, reach, found),
+      Some(Kind::At) => directives_ahead::<Src, Ctx>(inp, open_at, owner, reach, found),
+      Some(Kind::Equal) => members_ahead::<Src, Ctx>(inp, open_at, owner, reach, found),
       Some(Kind::InlineString | Kind::BlockString) => {
-        inp.try_expect_or_stop(|_| true)?;
-        starts_ahead::<Src, Ctx>(inp, found)
+        take_ahead::<Src, Ctx>(inp, reach)?;
+        starts_ahead::<Src, Ctx>(inp, reach, found)
       }
       _ => Ok(()),
     }
+  }
+
+  /// The kind of the next token that is no trivia, ahead, the trivia in front of it taken within
+  /// `reach`. `None` at the end of input, and where `reach` is spent: where it is already, and
+  /// where the trivia would take the look-ahead past [`LOOK_AHEAD_CAP`], which spends it there.
+  fn kind_ahead<'inp, Src, Ctx>(inp, reach: &mut Reach, out: &mut Option<Kind>) {
+    *out = None;
+    if reach.spent() {
+      return Ok(());
+    }
+    inp.skip_while(|token| token.is_trivia() && reach.take())?;
+    if !reach.spent() {
+      *out = peek_kind::<Src, Ctx>(inp)?;
+    }
+    Ok(())
+  }
+
+  /// One token ahead taken, within `reach`: where none of it is left, nothing is taken and `reach`
+  /// is spent.
+  fn take_ahead<'inp, Src, Ctx>(inp, reach: &mut Reach) {
+    if reach.take() {
+      inp.try_expect_or_stop(|_| true)?;
+    }
+    Ok(())
   }
 
   /// A body ahead, at its `{`: the `}` that answers it, every token between crossed by [`cross`]
@@ -1572,19 +1660,22 @@ lossless_production! {
     open_at: usize,
     owner: impl Header,
     end_counts: bool,
+    reach: &mut Reach,
     found: &mut bool,
   ) {
     let mut crossing = Crossing::new();
     let mut refused = false;
-    opener::<Src, Ctx>(inp, &mut crossing, Kind::RBrace, &mut refused)?;
+    opener::<Src, Ctx>(inp, &mut crossing, Kind::RBrace, reach, &mut refused)?;
     while !refused {
-      match peek_kind::<Src, Ctx>(inp)? {
+      let mut head = None;
+      kind_ahead::<Src, Ctx>(inp, reach, &mut head)?;
+      match head {
         None => return Ok(()),
         Some(Kind::RBrace) if crossing.depth() == 1 => {
-          inp.try_expect_or_stop(|_| true)?;
-          return behind_ahead::<Src, Ctx>(inp, open_at, end_counts, found);
+          take_ahead::<Src, Ctx>(inp, reach)?;
+          return behind_ahead::<Src, Ctx>(inp, open_at, end_counts, reach, found);
         }
-        Some(_) => cross::<Src, Ctx>(inp, owner, &mut crossing, false, &mut refused)?,
+        Some(_) => cross::<Src, Ctx>(inp, owner, &mut crossing, false, reach, &mut refused)?,
       }
     }
     Ok(())
@@ -1603,20 +1694,23 @@ lossless_production! {
     owner: impl Header,
     closer: Kind,
     words: bool,
+    reach: &mut Reach,
     written: &mut bool,
   ) {
     let mut crossing = Crossing::new();
     let mut refused = false;
-    opener::<Src, Ctx>(inp, &mut crossing, closer, &mut refused)?;
+    opener::<Src, Ctx>(inp, &mut crossing, closer, reach, &mut refused)?;
     while !refused {
-      match peek_kind::<Src, Ctx>(inp)? {
+      let mut head = None;
+      kind_ahead::<Src, Ctx>(inp, reach, &mut head)?;
+      match head {
         None => return Ok(()),
         Some(kind) if kind == closer && crossing.depth() == 1 => {
-          inp.try_expect_or_stop(|_| true)?;
+          take_ahead::<Src, Ctx>(inp, reach)?;
           *written = true;
           return Ok(());
         }
-        Some(_) => cross::<Src, Ctx>(inp, owner, &mut crossing, words, &mut refused)?,
+        Some(_) => cross::<Src, Ctx>(inp, owner, &mut crossing, words, reach, &mut refused)?,
       }
     }
     Ok(())
@@ -1627,10 +1721,16 @@ lossless_production! {
   /// Every production the reading that would take the evidence runs at an opener requests a
   /// frame of the parser there, where main scans the brackets flat, and a refusal at the parse's
   /// nesting ceiling would end the document.
-  fn opener<'inp, Src, Ctx>(inp, crossing: &mut Crossing, closer: Kind, refused: &mut bool) {
+  fn opener<'inp, Src, Ctx>(
+    inp,
+    crossing: &mut Crossing,
+    closer: Kind,
+    reach: &mut Reach,
+    refused: &mut bool,
+  ) {
     let (depth, limitation) = (inp.recursion().depth(), inp.recursion().limitation());
     if crossing.enter(closer) && fits(depth, limitation, crossing.depth()) {
-      inp.try_expect_or_stop(|_| true)?;
+      take_ahead::<Src, Ctx>(inp, reach)?;
     } else {
       *refused = true;
     }
@@ -1659,17 +1759,21 @@ lossless_production! {
     owner: impl Header,
     crossing: &mut Crossing,
     words: bool,
+    reach: &mut Reach,
     refused: &mut bool,
   ) {
-    match peek_kind::<Src, Ctx>(inp)? {
+    let mut head = None;
+    kind_ahead::<Src, Ctx>(inp, reach, &mut head)?;
+    match head {
       None | Some(Kind::LBrace) => *refused = true,
       Some(Kind::Identifier) => {
         let keyword = peek_as::<Src, Ctx, Keyword>(inp)?;
-        inp.try_expect_or_stop(|_| true)?;
+        take_ahead::<Src, Ctx>(inp, reach)?;
         let word = words && crossing.depth() == 1 && ends_at_word(owner, keyword);
         let collection = matches!(keyword, Some(Keyword::Set | Keyword::Map));
         if restarts_a_root(keyword) || word || collection {
-          let behind = peek_kind::<Src, Ctx>(inp)?;
+          let mut behind = None;
+          kind_ahead::<Src, Ctx>(inp, reach, &mut behind)?;
           let word_ends = match behind {
             Some(kind) if word => word_goes_on(kind, peek_as::<Src, Ctx, Keyword>(inp)?),
             _ => false,
@@ -1681,20 +1785,18 @@ lossless_production! {
           *refused = may_start(keyword, behind) || word_ends || frame;
         }
       }
-      Some(Kind::LParen) => opener::<Src, Ctx>(inp, crossing, Kind::RParen, refused)?,
-      Some(Kind::LBracket) => opener::<Src, Ctx>(inp, crossing, Kind::RBracket, refused)?,
-      Some(Kind::LAngle) => opener::<Src, Ctx>(inp, crossing, Kind::RAngle, refused)?,
+      Some(Kind::LParen) => opener::<Src, Ctx>(inp, crossing, Kind::RParen, reach, refused)?,
+      Some(Kind::LBracket) => opener::<Src, Ctx>(inp, crossing, Kind::RBracket, reach, refused)?,
+      Some(Kind::LAngle) => opener::<Src, Ctx>(inp, crossing, Kind::RAngle, reach, refused)?,
       Some(closer @ (Kind::RParen | Kind::RBracket | Kind::RAngle | Kind::RBrace)) => {
         if crossing.innermost() == Some(closer) {
           crossing.leave();
-          inp.try_expect_or_stop(|_| true)?;
+          take_ahead::<Src, Ctx>(inp, reach)?;
         } else {
           *refused = true;
         }
       }
-      Some(_) => {
-        inp.try_expect_or_stop(|_| true)?;
-      }
+      Some(_) => take_ahead::<Src, Ctx>(inp, reach)?,
     }
     Ok(())
   }
@@ -1703,15 +1805,23 @@ lossless_production! {
   /// input where `end_counts` says so, a `}` that closes a block around the list, by the brace
   /// count at that `}`, or the start of a definition, a description's string in front of it or
   /// not.
-  fn behind_ahead<'inp, Src, Ctx>(inp, open_at: usize, end_counts: bool, found: &mut bool) {
-    match peek_kind::<Src, Ctx>(inp)? {
+  fn behind_ahead<'inp, Src, Ctx>(
+    inp,
+    open_at: usize,
+    end_counts: bool,
+    reach: &mut Reach,
+    found: &mut bool,
+  ) {
+    let mut head = None;
+    kind_ahead::<Src, Ctx>(inp, reach, &mut head)?;
+    match head {
       None => *found = end_counts,
       Some(Kind::RBrace) => *found = closes_enclosing_block(open_at, inp.state().brace_depth()),
       Some(Kind::InlineString | Kind::BlockString) => {
-        inp.try_expect_or_stop(|_| true)?;
-        starts_ahead::<Src, Ctx>(inp, found)?;
+        take_ahead::<Src, Ctx>(inp, reach)?;
+        starts_ahead::<Src, Ctx>(inp, reach, found)?;
       }
-      Some(Kind::Identifier) => starts_ahead::<Src, Ctx>(inp, found)?,
+      Some(Kind::Identifier) => starts_ahead::<Src, Ctx>(inp, reach, found)?,
       Some(_) => {}
     }
     Ok(())
@@ -1719,13 +1829,20 @@ lossless_production! {
 
   /// The start of a definition ahead, at a name: [`starts_with`]'s test of it and of the token
   /// behind it, read across any trivia. The end of input behind the name is no evidence.
-  fn starts_ahead<'inp, Src, Ctx>(inp, found: &mut bool) {
+  fn starts_ahead<'inp, Src, Ctx>(inp, reach: &mut Reach, found: &mut bool) {
+    let mut head = None;
+    kind_ahead::<Src, Ctx>(inp, reach, &mut head)?;
+    if head != Some(Kind::Identifier) {
+      return Ok(());
+    }
     let keyword = peek_as::<Src, Ctx, Keyword>(inp)?;
     if !restarts_a_root(keyword) {
       return Ok(());
     }
-    inp.try_expect_or_stop(|_| true)?;
-    if let Some(kind) = peek_kind::<Src, Ctx>(inp)? {
+    take_ahead::<Src, Ctx>(inp, reach)?;
+    let mut behind = None;
+    kind_ahead::<Src, Ctx>(inp, reach, &mut behind)?;
+    if let Some(kind) = behind {
       *found = starts_with(keyword, kind, peek_as::<Src, Ctx, Keyword>(inp)?);
     }
     Ok(())
@@ -1734,9 +1851,16 @@ lossless_production! {
   /// A location ahead, at a name spelled `keyword`: the name taken, and whether the token behind
   /// it, read across any trivia, starts a definition with it by [`starts_with`]'s test. The end of
   /// input behind it starts none.
-  fn location_ahead<'inp, Src, Ctx>(inp, keyword: Option<Keyword>, starts: &mut bool) {
-    inp.try_expect_or_stop(|_| true)?;
-    if let Some(kind) = peek_kind::<Src, Ctx>(inp)? {
+  fn location_ahead<'inp, Src, Ctx>(
+    inp,
+    keyword: Option<Keyword>,
+    reach: &mut Reach,
+    starts: &mut bool,
+  ) {
+    take_ahead::<Src, Ctx>(inp, reach)?;
+    let mut behind = None;
+    kind_ahead::<Src, Ctx>(inp, reach, &mut behind)?;
+    if let Some(kind) = behind {
       *starts = starts_with(keyword, kind, peek_as::<Src, Ctx, Keyword>(inp)?);
     }
     Ok(())
@@ -1746,42 +1870,64 @@ lossless_production! {
   /// and where a `(` follows the path, its arguments, read by [`group_ahead`] with the owner's
   /// words asked, again while an `@` follows; and behind them what [`next_ahead`] finds. Where a
   /// path or arguments are unwritten, or crossed into a refusal, nothing is found.
-  fn directives_ahead<'inp, Src, Ctx>(inp, open_at: usize, owner: impl Header, found: &mut bool) {
-    while peek_kind::<Src, Ctx>(inp)? == Some(Kind::At) {
-      inp.try_expect_or_stop(|_| true)?;
+  fn directives_ahead<'inp, Src, Ctx>(
+    inp,
+    open_at: usize,
+    owner: impl Header,
+    reach: &mut Reach,
+    found: &mut bool,
+  ) {
+    loop {
+      let mut head = None;
+      kind_ahead::<Src, Ctx>(inp, reach, &mut head)?;
+      if head != Some(Kind::At) {
+        break;
+      }
+      take_ahead::<Src, Ctx>(inp, reach)?;
       let mut written = false;
-      path_ahead::<Src, Ctx>(inp, owner, &mut written)?;
-      if written && peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
-        written = false;
-        group_ahead::<Src, Ctx>(inp, owner, Kind::RParen, true, &mut written)?;
+      path_ahead::<Src, Ctx>(inp, owner, reach, &mut written)?;
+      if written {
+        let mut next = None;
+        kind_ahead::<Src, Ctx>(inp, reach, &mut next)?;
+        if next == Some(Kind::LParen) {
+          written = false;
+          group_ahead::<Src, Ctx>(inp, owner, Kind::RParen, true, reach, &mut written)?;
+        }
       }
       if !written {
         return Ok(());
       }
     }
-    next_ahead::<Src, Ctx>(inp, open_at, owner, found)
+    next_ahead::<Src, Ctx>(inp, open_at, owner, reach, found)
   }
 
   /// What may stand behind the owner's directives, ahead: what [`behind_ahead`] finds, or what the
   /// owner reads next by its own test, a body behind a `{` where it reads one, with no end of
   /// input behind that body as evidence, a union's members behind an `=` where it reads them, and
   /// `where`, `repeatable` or `on` where it reads the word.
-  fn next_ahead<'inp, Src, Ctx>(inp, open_at: usize, owner: impl Header, found: &mut bool) {
-    let head = peek_kind::<Src, Ctx>(inp)?;
+  fn next_ahead<'inp, Src, Ctx>(
+    inp,
+    open_at: usize,
+    owner: impl Header,
+    reach: &mut Reach,
+    found: &mut bool,
+  ) {
+    let mut head = None;
+    kind_ahead::<Src, Ctx>(inp, reach, &mut head)?;
     let word = head == Some(Kind::Identifier)
       && ends_at_word(owner, peek_as::<Src, Ctx, Keyword>(inp)?);
     match head {
       Some(Kind::LBrace) if asks(owner, Kind::LBrace) => {
-        body_ahead::<Src, Ctx>(inp, open_at, owner, false, found)
+        body_ahead::<Src, Ctx>(inp, open_at, owner, false, reach, found)
       }
       Some(Kind::Equal) if asks(owner, Kind::Equal) => {
-        members_ahead::<Src, Ctx>(inp, open_at, owner, found)
+        members_ahead::<Src, Ctx>(inp, open_at, owner, reach, found)
       }
       Some(Kind::Identifier) if word => {
-        inp.try_expect_or_stop(|_| true)?;
-        word_ahead::<Src, Ctx>(inp, found)
+        take_ahead::<Src, Ctx>(inp, reach)?;
+        word_ahead::<Src, Ctx>(inp, reach, found)
       }
-      _ => behind_ahead::<Src, Ctx>(inp, open_at, true, found),
+      _ => behind_ahead::<Src, Ctx>(inp, open_at, true, reach, found),
     }
   }
 
@@ -1789,34 +1935,47 @@ lossless_production! {
   /// each read by [`path_ahead`]; and behind them what [`behind_ahead`] finds, or a `where` by its
   /// test where the owner reads one. Where a path is unwritten, or crossed into a refusal, nothing
   /// is found.
-  fn members_ahead<'inp, Src, Ctx>(inp, open_at: usize, owner: impl Header, found: &mut bool) {
-    inp.try_expect_or_stop(|_| true)?;
-    if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Pipe) {
-      inp.try_expect_or_stop(|_| true)?;
+  fn members_ahead<'inp, Src, Ctx>(
+    inp,
+    open_at: usize,
+    owner: impl Header,
+    reach: &mut Reach,
+    found: &mut bool,
+  ) {
+    take_ahead::<Src, Ctx>(inp, reach)?;
+    let mut head = None;
+    kind_ahead::<Src, Ctx>(inp, reach, &mut head)?;
+    if head == Some(Kind::Pipe) {
+      take_ahead::<Src, Ctx>(inp, reach)?;
     }
     loop {
       let mut written = false;
-      path_ahead::<Src, Ctx>(inp, owner, &mut written)?;
+      path_ahead::<Src, Ctx>(inp, owner, reach, &mut written)?;
       if !written {
         return Ok(());
       }
-      if peek_kind::<Src, Ctx>(inp)? != Some(Kind::Pipe) {
+      let mut next = None;
+      kind_ahead::<Src, Ctx>(inp, reach, &mut next)?;
+      if next != Some(Kind::Pipe) {
         break;
       }
-      inp.try_expect_or_stop(|_| true)?;
+      take_ahead::<Src, Ctx>(inp, reach)?;
     }
-    let head = peek_kind::<Src, Ctx>(inp)?;
-    if head == Some(Kind::Identifier) && ends_at_word(owner, peek_as::<Src, Ctx, Keyword>(inp)?) {
-      inp.try_expect_or_stop(|_| true)?;
-      return word_ahead::<Src, Ctx>(inp, found);
+    let mut tail = None;
+    kind_ahead::<Src, Ctx>(inp, reach, &mut tail)?;
+    if tail == Some(Kind::Identifier) && ends_at_word(owner, peek_as::<Src, Ctx, Keyword>(inp)?) {
+      take_ahead::<Src, Ctx>(inp, reach)?;
+      return word_ahead::<Src, Ctx>(inp, reach, found);
     }
-    behind_ahead::<Src, Ctx>(inp, open_at, true, found)
+    behind_ahead::<Src, Ctx>(inp, open_at, true, reach, found)
   }
 
   /// The word its owner reads next, ahead, the word taken: [`word_goes_on`]'s test of the token
   /// behind it, read across any trivia. The end of input behind the word is no evidence.
-  fn word_ahead<'inp, Src, Ctx>(inp, found: &mut bool) {
-    if let Some(kind) = peek_kind::<Src, Ctx>(inp)? {
+  fn word_ahead<'inp, Src, Ctx>(inp, reach: &mut Reach, found: &mut bool) {
+    let mut behind = None;
+    kind_ahead::<Src, Ctx>(inp, reach, &mut behind)?;
+    if let Some(kind) = behind {
       *found = word_goes_on(kind, peek_as::<Src, Ctx, Keyword>(inp)?);
     }
     Ok(())
@@ -1827,42 +1986,49 @@ lossless_production! {
   /// name, and `:: Name` any number of times, each name crossed by [`cross`]; and where a `<`
   /// follows, its type arguments, read by [`group_ahead`]. `written` says whether the whole of it
   /// is, with nothing in it refused.
-  fn path_ahead<'inp, Src, Ctx>(inp, owner: impl Header, written: &mut bool) {
-    match peek_kind::<Src, Ctx>(inp)? {
+  fn path_ahead<'inp, Src, Ctx>(inp, owner: impl Header, reach: &mut Reach, written: &mut bool) {
+    let mut head = None;
+    kind_ahead::<Src, Ctx>(inp, reach, &mut head)?;
+    match head {
       Some(Kind::Tilde | Kind::Caret) => {
-        inp.try_expect_or_stop(|_| true)?;
-        if peek_kind::<Src, Ctx>(inp)? != Some(Kind::PathSeparator) {
+        take_ahead::<Src, Ctx>(inp, reach)?;
+        kind_ahead::<Src, Ctx>(inp, reach, &mut head)?;
+        if head != Some(Kind::PathSeparator) {
           return Ok(());
         }
-        inp.try_expect_or_stop(|_| true)?;
+        take_ahead::<Src, Ctx>(inp, reach)?;
       }
       _ => {
-        while peek_kind::<Src, Ctx>(inp)? == Some(Kind::DotDot) {
-          inp.try_expect_or_stop(|_| true)?;
-          if peek_kind::<Src, Ctx>(inp)? != Some(Kind::PathSeparator) {
+        while head == Some(Kind::DotDot) {
+          take_ahead::<Src, Ctx>(inp, reach)?;
+          kind_ahead::<Src, Ctx>(inp, reach, &mut head)?;
+          if head != Some(Kind::PathSeparator) {
             return Ok(());
           }
-          inp.try_expect_or_stop(|_| true)?;
+          take_ahead::<Src, Ctx>(inp, reach)?;
+          kind_ahead::<Src, Ctx>(inp, reach, &mut head)?;
         }
       }
     }
     let mut crossing = Crossing::new();
     let mut refused = false;
     loop {
-      if peek_kind::<Src, Ctx>(inp)? != Some(Kind::Identifier) {
+      kind_ahead::<Src, Ctx>(inp, reach, &mut head)?;
+      if head != Some(Kind::Identifier) {
         return Ok(());
       }
-      cross::<Src, Ctx>(inp, owner, &mut crossing, false, &mut refused)?;
+      cross::<Src, Ctx>(inp, owner, &mut crossing, false, reach, &mut refused)?;
       if refused {
         return Ok(());
       }
-      if peek_kind::<Src, Ctx>(inp)? != Some(Kind::PathSeparator) {
+      kind_ahead::<Src, Ctx>(inp, reach, &mut head)?;
+      if head != Some(Kind::PathSeparator) {
         break;
       }
-      inp.try_expect_or_stop(|_| true)?;
+      take_ahead::<Src, Ctx>(inp, reach)?;
     }
-    if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LAngle) {
-      return group_ahead::<Src, Ctx>(inp, owner, Kind::RAngle, false, written);
+    if head == Some(Kind::LAngle) {
+      return group_ahead::<Src, Ctx>(inp, owner, Kind::RAngle, false, reach, written);
     }
     *written = true;
     Ok(())
