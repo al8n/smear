@@ -3,13 +3,15 @@
 
 `ci/perf/run.sh` builds the head's `wall_clock` and the base's, and this runs each one in its count
 mode, `--only <name> --size lo|hi --iterations <n>` (see `smear/benches/solo/wall_clock.rs`), under
-callgrind. A reading is a DIFFERENCE of two totals of one binary at two iteration counts:
+callgrind. A reading is a DIFFERENCE of two totals of one binary at two iteration counts, each
+total the `summary:` line of callgrind's file for that run:
 
     Ir(2n) - Ir(n)  =  n x the measured region's cost per iteration
 
 Nothing inside the binary is toggled, marked or timed. Every once-per-process cost — the loader,
-`main`, `warm_up`, building and parsing the corpus, the allocator's first arena — is in both totals
-and cancels exactly, so what is left is the region and nothing else.
+`main`, `warm_up`, building and parsing the corpus, the allocator's first arena, whatever callgrind
+itself adds to a total — is in both totals and cancels exactly, so what is left is the region and
+nothing else.
 
 Each row is read at both of its sizes, in `compare.py`'s own schema, so the count's per-doubling
 ratio is gated by the code that gates the other two instruments' ratios.
@@ -19,6 +21,7 @@ WHAT A ROW HAS TO SHOW BEFORE IT IS A READING. Each (side, row, size) is run fou
 
   * a run exits non-zero, or does not finish inside `--timeout`, or its last line is not the
     `<name> <lo|hi> <n>` it was asked for;
+  * the file a run left cannot be read as a whole one: see `parse_callgrind`;
   * the two runs at n differ in any event: a count that moves between two runs of one binary is
     not a property of the binary, and no threshold over it means anything;
   * Ir does not grow from n to 2n;
@@ -62,6 +65,16 @@ LINEARITY = 1e-4
 # cache's geometry, only the miss counts do, and `compare.py` shows them with no verdict.
 GATED = "Ir"
 ADVISORY = ("Dr", "Dw")
+
+# How far a file's `totals:` line may stand from its `summary:` line, on any one event, before the
+# file is taken for a damaged one. The two lines sum different things (`callgrind/dump.c`):
+# `summary:` is each thread's entry context at the dump, and `totals:` is the sum of every cost line
+# the dump wrote, printed last, as the file is closed. On real runs they are a few apart and the same
+# few at every row and size: 2 Ir on x86-64, and 10 Ir, 1 Dr, 2 Dw and a few misses on aarch64. The
+# bound is on the size of that gap, in either direction. Whatever constant it is, the reading is
+# `summary:` alone, and a constant in a total cancels in `Ir(2n) - Ir(n)`; what refuses a total that
+# moves is the repeat at n, not this. This only tells a whole file from a damaged one.
+TOTALS_SLACK = 64
 
 
 def fail(outcome, message):
@@ -150,28 +163,49 @@ def list_rows(binary, side, outcome):
 
 
 def parse_callgrind(path):
-  """`{event: total}` for every event a callgrind output file records.
+  """`{event: total}` for one callgrind run: its `summary:` line, columns named by `events:`.
 
-  The `events:` line names the columns and `summary:` and `totals:` carry one number for each.
-  Reading the columns off `events:` keeps this right whichever events the run collected, and the
-  two lines must agree: they disagree only for a run that was not one thread.
+  Reading the columns off `events:` keeps this right whichever events the run collected. The file
+  must be a whole one: one `events:`, one `summary:` and one `totals:` line, every number a number,
+  no more of them than there are events (fewer are trailing zeros, as in callgrind's cost lines),
+  and `totals:` within `TOTALS_SLACK` of `summary:` on every event. `totals:` is the last line
+  callgrind writes, so a file that has none was cut short.
   """
-  events = None
-  rows = []
+  events, lines = None, {"summary": [], "totals": []}
   with open(path, encoding="utf-8", errors="replace") as handle:
     for line in handle:
-      if line.startswith("events:"):
-        events = line[len("events:"):].split()
-      elif line.startswith(("summary:", "totals:")):
-        rows.append(tuple(int(field) for field in line.split(":", 1)[1].split()))
-  if events is None or not rows:
-    raise ValueError("no `events:` or no `summary:` line; callgrind's output format has changed")
-  if len(set(rows)) != 1:
-    raise ValueError(f"`summary:` and `totals:` disagree: {sorted(set(rows))}")
-  totals = dict(zip(events, rows[0]))
-  if GATED not in totals:
+      key = line.split(":", 1)[0]
+      if key == "events":
+        if events is not None:
+          raise ValueError("more than one `events:` line")
+        events = line.split(":", 1)[1].split()
+      elif key in lines:
+        lines[key].append([int(field) for field in line.split(":", 1)[1].split()])
+  if events is None:
+    raise ValueError("no `events:` line; callgrind's output format has changed")
+  for key, found in lines.items():
+    if len(found) != 1:
+      cut = " — callgrind writes it last, so the file was cut short" if key == "totals" else ""
+      raise ValueError(f"{len(found)} `{key}:` lines, not one{cut}")
+    if len(found[0]) > len(events):
+      raise ValueError(f"`{key}:` has {len(found[0])} numbers for {len(events)} events")
+  def by_event(numbers):
+    return dict(zip(events, numbers + [0] * (len(events) - len(numbers))))
+
+  summary, totals = by_event(lines["summary"][0]), by_event(lines["totals"][0])
+  apart = {
+    event: totals[event] - summary[event]
+    for event in events
+    if abs(totals[event] - summary[event]) > TOTALS_SLACK
+  }
+  if apart:
+    raise ValueError(
+      f"`totals:` stands from `summary:` by {apart}, past {TOTALS_SLACK} an event: summary "
+      f"{[summary[event] for event in events]}, totals {[totals[event] for event in events]}"
+    )
+  if GATED not in summary:
     raise ValueError(f"`events: {' '.join(events)}` has no {GATED}")
-  return totals
+  return summary
 
 
 def run_once(task, scratch, timeout, data):
