@@ -3367,9 +3367,10 @@ mod lossless {
       ),
     ] {
       let at = text.rfind('{').expect("the body's brace");
+      let brace = at..at + 1;
       assert_eq!(
         error_spans(text),
-        [at..at + 1],
+        [brace],
         "{text}: one report, at the body's brace"
       );
       let answer = read(text);
