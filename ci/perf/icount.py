@@ -268,6 +268,16 @@ def main():
 
   if shutil.which("valgrind") is None:
     fail(args.outcome, "valgrind is not installed on this host")
+  # The binary's path is its argv[0], and argv and the environment are laid out at the top of the
+  # initial stack. Paths of one length — `run.sh` builds into `target-head` and `target-base` — put
+  # every stack buffer at the same address on both sides; another length shifts them all, and a
+  # copy routine that branches on alignment would then count differently for no change in the code.
+  if len(args.head) != len(args.base):
+    fail(
+      args.outcome,
+      f"the two sides' wall_clock are at paths of different lengths ({len(args.head)} and "
+      f"{len(args.base)} bytes), so their stacks would be laid out apart",
+    )
 
   host = host_facts()
   print(
