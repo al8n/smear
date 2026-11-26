@@ -15,11 +15,14 @@ Two things are gated, per workload, and they catch different failures:
 Neither subsumes the other, so a workload fails on either.
 
 Three instruments are read: `alloc`, peak bytes; `wall`, nanoseconds per iteration; and `icount`,
-instructions per iteration as `ci/perf/icount.py` counts them. The count brings four things the
+instructions per iteration as `ci/perf/icount.py` counts them. The count brings five things the
 other two do not have:
 
   * a workload `icount.py` could not read is in its readings with the reason, and reads NOT
     MEASURED here: it fails the stage, in the table, and is never dropped from it;
+  * with `--spread-share`, so does a workload whose reading spreads, on either side at either
+    size, past that share of the finest line it is read against — the threshold, or J1's for a J1
+    row — because a reading that uncertain cannot say which side of the line a change fell;
   * the two sides must have been read at the same iteration counts, or nothing is compared;
   * `--j1-rows` names workloads that carry a second verdict at `--j1-threshold`, under the
     threshold, printed in the table and raised as a warning, and never shown as `ok`;
@@ -28,7 +31,7 @@ other two do not have:
 Usage:
     compare.py --kind alloc|wall|icount --base A[,A2...] --head B[,B2...] --threshold PCT
                --ratio-tolerance DELTA [--accept-file FILE] [--summary FILE] [--outcome FILE]
-               [--j1-rows NAME[,NAME...] --j1-threshold PCT]
+               [--j1-rows NAME[,NAME...] --j1-threshold PCT] [--spread-share FRACTION]
 
 Several files per side are reduced with MIN per reading. That is meaningful for the wall-clock
 instrument, where `run.sh` interleaves whole invocations and noise is one-directional; for the
@@ -140,12 +143,20 @@ def ratio(row):
   return row["hi"] / row["lo"] if row["lo"] else None
 
 
-def data_delta(base, head, size, keys):
-  """The head's change in reads, writes or both at `size`, in per cent, or None if not read."""
+def data_delta(base, head, size, keys, bound):
+  """The head's change in reads, writes or both at `size`, in per cent, or None if not read.
+
+  A reading whose spread is past `bound` on either side is not shown either: it has no verdict to
+  lose, but a number that uncertain would be read as one.
+  """
   values = []
   for row in (base, head):
     parts = [row.get(f"{size}_{key}") for key in keys]
     if any(part is None for part in parts):
+      return None
+    if bound is not None and any(
+      (row.get(f"{size}_{key}_spread") or 0.0) > bound for key in keys
+    ):
       return None
     values.append(sum(parts))
   return percent(values[0], values[1])
@@ -157,6 +168,15 @@ def cell(value, spec):
 
 def signed(value):
   return "-" if value is None else f"{value:+.3f}%"
+
+
+def share(value):
+  return "-" if value is None else f"{value:.3f}%"
+
+
+def finest_line(name, args, j1_rows):
+  """The smallest change a workload is read against: J1's allowance for a J1 row, else the gate's."""
+  return min(args.threshold, args.j1_threshold) if name in j1_rows else args.threshold
 
 
 def count_heading(head, args, j1_rows):
@@ -173,9 +193,22 @@ def count_heading(head, args, j1_rows):
     "",
     f"{host.get('os', '?')}, {host.get('arch', '?')}, CPU {host.get('cpu', '?')}, "
     f"{host.get('valgrind', '?')}. Every workload and size was read at n = {n}, {2 * n} and "
-    f"{3 * n} iterations on both sides, and at {n} again. {collected}",
+    f"{3 * n} iterations on both sides, and at {n} again, and each reading is the cost over "
+    f"iterations {n + 1} to {3 * n}. {collected}",
     "",
   ]
+  if args.spread_share is not None:
+    finest = [args.threshold * args.spread_share]
+    if j1_rows:
+      finest.append(min(args.threshold, args.j1_threshold) * args.spread_share)
+    lines.append(
+      "A reading's **spread** is how far apart the two halves of those iterations read. It may be "
+      f"at most {args.spread_share:.0%} of the finest line its workload is read against — "
+      + f"{finest[0]:g}% for the +{args.threshold:g}% line"
+      + (f", {finest[1]:g}% for J1's rows" if j1_rows else "")
+      + " — and a workload past that on either side, at either size, is NOT MEASURED."
+    )
+    lines.append("")
   if host.get("arch") in ("x86_64", "amd64", "AMD64"):
     lines.append(
       f"The +{args.threshold:g}% line rests on how far a row moves between two builds whose "
@@ -212,12 +245,19 @@ def main():
   parser.add_argument("--outcome", help="write this stage's part of the run's last line here")
   parser.add_argument("--j1-rows", default="", help="comma-separated workloads with J1's verdict")
   parser.add_argument("--j1-threshold", type=float, help="J1's allowance, in per cent")
+  parser.add_argument(
+    "--spread-share", type=float, help="the share of its finest line a reading may spread"
+  )
   args = parser.parse_args()
   OUTCOME = args.outcome
   counting = args.kind == "icount"
   j1_rows = [name for name in args.j1_rows.split(",") if name]
   if j1_rows and args.j1_threshold is None:
     parser.error("--j1-rows needs --j1-threshold")
+  if args.spread_share is not None and not (counting and 0 < args.spread_share <= 1):
+    parser.error("--spread-share is a fraction in (0, 1], and a count's alone")
+  # The bound the reads-and-writes table holds its cells to: the gate's, since it carries no J1.
+  data_bound = args.threshold * args.spread_share if args.spread_share is not None else None
 
   if counting and ("," in args.base or "," in args.head):
     refuse("a count is read once on each side, and there is nothing to reduce")
@@ -268,6 +308,24 @@ def main():
     unmeasured = "; ".join(why for why in (b.get("not_measured"), h.get("not_measured")) if why)
     if not unmeasured and None in (b["lo"], b["hi"], h["lo"], h["hi"]):
       unmeasured = "a side's readings hold no number for it"
+    spreads = [
+      (side, size, row[f"{size}_spread"])
+      for side, row in (("base", b), ("head", h))
+      for size in ("lo", "hi")
+      if row.get(f"{size}_spread") is not None
+    ]
+    spread = max((value for _, _, value in spreads), default=None)
+    # A reading whose two halves disagree by more than its share of the line cannot say which side
+    # of that line a change fell, so it is no reading for this gate, on either side.
+    if not unmeasured and args.spread_share is not None:
+      line = finest_line(name, args, j1_rows)
+      bound = line * args.spread_share
+      unmeasured = "; ".join(
+        f"{side} side, {size}: its halves read {value:.3f}% apart, past the {bound:g}% a reading "
+        f"against the +{line:g}% line may spread"
+        for side, size, value in spreads
+        if value > bound
+      )
     if unmeasured:
       rows.append(
         {
@@ -276,6 +334,7 @@ def main():
           "base_hi": None, "head_hi": None, "hi_pct": None,
           "worst": None, "base_ratio": None, "head_ratio": None, "ratio_delta": None,
           "verdict": "NOT MEASURED", "reason": unmeasured, "j1": False, "data": {},
+          "spread": spread,
         }
       )
       continue
@@ -320,10 +379,11 @@ def main():
         "base_ratio": base_ratio, "head_ratio": head_ratio, "ratio_delta": ratio_delta,
         "verdict": verdict, "reason": reason, "j1": j1,
         "data": {
-          (label, size): data_delta(b, h, size, keys)
+          (label, size): data_delta(b, h, size, keys, data_bound)
           for label, keys in DATA_COLUMNS
           for size in ("lo", "hi")
         } if data else {},
+        "spread": spread,
       }
     )
 
@@ -331,16 +391,19 @@ def main():
   rows.sort(key=lambda row: (row["measured"], -row["worst"] if row["measured"] else 0.0))
 
   width = max(len(row["name"]) for row in rows)
+  # The count's tables carry each workload's widest spread, so a reading near its bound shows it.
+  spread_title = f"  {'spread':>8}" if counting else ""
   print()
   print(
     f"{'workload':<{width}}  {'lo delta':>9}  {'hi delta':>9}  "
-    f"{'base hi/lo':>10}  {'head hi/lo':>10}  verdict"
+    f"{'base hi/lo':>10}  {'head hi/lo':>10}{spread_title}  verdict"
   )
-  print("-" * (width + 60))
+  print("-" * (width + 60 + len(spread_title)))
   for row in rows:
+    spread_cell = f"  {share(row['spread']):>8}" if counting else ""
     print(
       f"{row['name']:<{width}}  {signed(row['lo_pct']):>9}  {signed(row['hi_pct']):>9}  "
-      f"{cell(row['base_ratio'], '.3f'):>10}  {cell(row['head_ratio'], '.3f'):>10}  "
+      f"{cell(row['base_ratio'], '.3f'):>10}  {cell(row['head_ratio'], '.3f'):>10}{spread_cell}  "
       f"{row['verdict']}"
     )
     if row["reason"] and (row["verdict"].startswith("accepted") or not row["measured"]):
@@ -412,19 +475,23 @@ def main():
         handle.write(f"### {head['instrument']} vs merge-base\n\n")
       handle.write(
         f"| workload | family | base lo | head lo | base hi | head hi | "
-        f"lo delta | hi delta | base hi/lo | head hi/lo | verdict |\n"
+        f"lo delta | hi delta | base hi/lo | head hi/lo |{' spread |' if counting else ''} verdict |\n"
       )
-      handle.write("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n")
+      handle.write(
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+        + (" ---: |" if counting else "") + " --- |\n"
+      )
       for row in rows:
         note = ""
         if row["reason"] and (row["verdict"].startswith("accepted") or not row["measured"]):
           note = f" — {row['reason']}"
+        spread_cell = f"{share(row['spread'])} | " if counting else ""
         handle.write(
           f"| `{row['name']}` | {row['family']} | {cell(row['base_lo'], ',.0f')} | "
           f"{cell(row['head_lo'], ',.0f')} | {cell(row['base_hi'], ',.0f')} | "
           f"{cell(row['head_hi'], ',.0f')} | {signed(row['lo_pct'])} | {signed(row['hi_pct'])} | "
           f"{cell(row['base_ratio'], '.3f')} | {cell(row['head_ratio'], '.3f')} | "
-          f"{row['verdict']}{note} |\n"
+          f"{spread_cell}{row['verdict']}{note} |\n"
         )
       handle.write(
         f"\nUnit **{unit}**. Threshold **+{args.threshold:g}%** at either size, ratio tolerance "

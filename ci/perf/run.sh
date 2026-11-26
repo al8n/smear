@@ -102,8 +102,9 @@
 #
 #   * valgrind is absent — and a run that asked for counts alone stops before it builds anything;
 #   * a callgrind run on either side exits non-zero, or outlives `PERF_ICOUNT_TIMEOUT`;
-#   * a row's two runs at n differ, its count does not grow from n to 2n, or its line bends: the
-#     second difference over the three points is past the tolerance `icount.py` states;
+#   * a row's two runs at n differ, or its count does not grow from n to 2n and from 2n to 3n;
+#   * the two halves of a row's reading disagree by more than `PERF_ICOUNT_SPREAD` of the finest
+#     line it is read against (see that setting);
 #   * the two sides were read at different n.
 #
 # A row so refused fails the stage and stays in the table. Dropped, it would be a row the gate had
@@ -127,8 +128,8 @@
 # `PERF_ONLY=icount ci/perf/run.sh --self` reads the counts alone, on a Linux host with valgrind.
 #
 # Environment: PERF_ALLOC_THRESHOLD, PERF_ALLOC_RATIO, PERF_WALL_THRESHOLD, PERF_WALL_RATIO,
-# PERF_ICOUNT_THRESHOLD, PERF_ICOUNT_RATIO, PERF_ICOUNT_J1, PERF_ICOUNT_N, PERF_ICOUNT_TIMEOUT,
-# PERF_ICOUNT_JOBS, PERF_ICOUNT_DATA, PERF_RUNNER_IMAGE,
+# PERF_ICOUNT_THRESHOLD, PERF_ICOUNT_RATIO, PERF_ICOUNT_J1, PERF_ICOUNT_SPREAD, PERF_ICOUNT_N,
+# PERF_ICOUNT_TIMEOUT, PERF_ICOUNT_JOBS, PERF_ICOUNT_DATA, PERF_RUNNER_IMAGE,
 # PERF_ROUNDS, PERF_INNER_ROUNDS, PERF_WORK, PERF_ONLY, PERF_LOCK.
 
 set -euo pipefail
@@ -242,8 +243,8 @@ set -euo pipefail
 # THE CLAIM A CALLER RELIES ON: **this gate sees a 1% change in any workload's instructions per
 # iteration, at either size, and a move of its per-doubling ratio past the tolerance below.**
 #
-# A count has no run-to-run spread to clear: two runs of one binary execute the same instructions,
-# and `icount.py` refuses a row whose repeated run says otherwise. So `--self` reads exactly zero on
+# A count does not vary from run to run: two runs of one binary execute the same instructions, and
+# `icount.py` refuses a row whose repeated run says otherwise. So `--self` reads exactly zero on
 # every row by construction — it builds identical source twice, and one source gives one binary —
 # which proves the reading deterministic and calibrates nothing. **What the number rests on is
 # codegen drift**: a pull request moves inlining and partitioning in code it never touched, and a
@@ -294,11 +295,45 @@ set -euo pipefail
 : "${PERF_ICOUNT_J1:=0.5}"
 icount_j1_rows=lex_graphqlx_syntactic,parse_graphqlx_type_system,parse_graphqlx_executable
 
-# How many iterations a count is read at: n, 2n and 3n, and n again for the repeat. n is past the
-# warm-up — the allocator's bins and `Scratch` grow over the first iterations and are reused after,
-# and tokora's gate takes 8 for the same reason — and n, 2n and 3n have one digit count, so the
-# three runs' argv are the same length. 10, 20 and 30 meet both; 16, 32 and 48 would too, at 60%
-# more callgrind time.
+# ── A reading's spread, and how much of it a line can bear ──────────────────────────────────
+#
+# A count reads one iteration's cost over iterations n+1 to 3n, and its SPREAD is how far apart the
+# two halves of that baseline read, as a per cent of one half (`icount.py`). A cost per iteration
+# that is constant has none. MEASURED on the first runs of this stage, both images, every row and
+# size on each side:
+#
+#   * the lexer and validate rows, exactly 0 — one allocation of a known size an iteration, or
+#     buffers kept across iterations;
+#   * the executable and deep-value parse rows, under 0.007%;
+#   * the GraphQLx syntactic rows, J1's three, at most 0.050% (`parse_graphqlx_type_system` at hi
+#     on x86);
+#   * the rows that build and free many heap objects in each iteration, the schema family and the
+#     type-system parses, up to 0.45% on x86 and 0.52% on aarch64, of either sign.
+#
+# THAT LAST IS NOT A WARM-UP, and more warm-up iterations would not remove it. The first n
+# iterations already cancel in every difference, and both halves come after them. A warm-up still
+# settling would move a row's two halves one way at both of its sizes; of the eleven x86 readings
+# over 0.01%, six rise and five fall, and three of the five rows that spread go opposite ways at
+# their two sizes. Nothing grows across iterations either: no cache, interner or kept `Vec` on these
+# paths, and the two validate rows, which do keep their buffers, read exactly 0. What one of these
+# iterations costs depends on where the allocator's free lists left the last one, and nothing shows
+# it settling.
+#
+# SO A SPREAD IS BOUNDED, AGAINST THE LINE IT HAS TO SUPPORT. The reading sits between its two
+# halves, and a head-against-base delta takes two readings, so a delta can carry about one spread
+# of allocator placement that is not the change. A quarter of the finest line a workload is read
+# against keeps a delta that reaches that line at four spreads or more of it: at most 0.25% for the
+# +1% threshold, and 0.125% for J1's 0.5% on its three rows. A workload past that, on either side at
+# either size, is NOT MEASURED, and every table shows each workload's widest spread. On the first
+# runs that refused `schema_iface_mismatch` (0.45% at lo) on x86 and `schema_valid` (0.52% at lo) on
+# aarch64, and read every J1 row with room.
+: "${PERF_ICOUNT_SPREAD:=0.25}"
+
+# How many iterations a count is read at: n, 2n and 3n, and n again for the repeat. The first n
+# cancel in every difference, so they are the warm-up — the allocator's bins and `Scratch` grow over
+# the first iterations and are reused after, and tokora's gate takes 8 for the same reason — and n,
+# 2n and 3n have one digit count, so the three runs' argv are the same length. 10, 20 and 30 meet
+# both; 16, 32 and 48 would too, at 60% more callgrind time.
 : "${PERF_ICOUNT_N:=10}"
 
 # Seconds one callgrind run may take before its row reads NOT MEASURED. A bound, not an estimate:
@@ -866,6 +901,7 @@ if [ "$want_icount" -eq 1 ]; then
         --ratio-tolerance "$PERF_ICOUNT_RATIO" \
         --j1-rows "$icount_j1_rows" \
         --j1-threshold "$PERF_ICOUNT_J1" \
+        --spread-share "$PERF_ICOUNT_SPREAD" \
         --accept-file "$PERF_WORK/accept.txt" \
         --summary "$PERF_WORK/summary.md" \
         --outcome "$PERF_WORK/icount.outcome" || status=1

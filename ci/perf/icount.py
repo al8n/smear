@@ -4,29 +4,35 @@
 `ci/perf/run.sh` builds the head's `wall_clock` and the base's, and this runs each one in its count
 mode, `--only <name> --size lo|hi --iterations <n>` (see `smear/benches/solo/wall_clock.rs`), under
 callgrind. A reading is a DIFFERENCE of two totals of one binary at two iteration counts, each
-total the `summary:` line of callgrind's file for that run:
+total the `summary:` line of callgrind's file for that run, over the longest baseline the runs give:
 
-    Ir(2n) - Ir(n)  =  n x the measured region's cost per iteration
+    (Ir(3n) - Ir(n)) / 2n  =  the measured region's cost per iteration, over iterations n+1 to 3n
 
 Nothing inside the binary is toggled, marked or timed. Every once-per-process cost — the loader,
 `main`, `warm_up`, building and parsing the corpus, the allocator's first arena, whatever callgrind
 itself adds to a total — is in both totals and cancels exactly, so what is left is the region and
-nothing else.
+nothing else. The first n iterations cancel too, which makes them the warm-up.
 
 Each row is read at both of its sizes, in `compare.py`'s own schema, so the count's per-doubling
 ratio is gated by the code that gates the other two instruments' ratios.
 
-WHAT A ROW HAS TO SHOW BEFORE IT IS A READING. Each (side, row, size) is run four times: at n, 2n and
-3n, and at n again. A row is NOT MEASURED, with the side and the reason in the readings, when:
+ITS SPREAD. The cost of one iteration is not a constant on every row: where an iteration builds and
+frees many heap objects, it depends on where the allocator's free lists left them, and that moves
+from iteration to iteration even after the warm-up. So each reading carries how far its two halves
+disagree, `|(Ir(3n) - Ir(2n)) - (Ir(2n) - Ir(n))|` over half of `Ir(3n) - Ir(n)`, in per cent.
+`compare.py` decides how much a reading may carry for the lines it is read against; `run.sh` says
+how that bound was set.
+
+WHAT A ROW HAS TO SHOW BEFORE IT IS A READING AT ALL. Each (side, row, size) is run four times: at
+n, 2n and 3n, and at n again. A row is NOT MEASURED, with the side and the reason in the readings,
+when:
 
   * a run exits non-zero, or does not finish inside `--timeout`, or its last line is not the
     `<name> <lo|hi> <n>` it was asked for;
   * the file a run left cannot be read as a whole one: see `parse_callgrind`;
   * the two runs at n differ in any event: a count that moves between two runs of one binary is
     not a property of the binary, and no threshold over it means anything;
-  * Ir does not grow from n to 2n;
-  * the second difference, `(Ir(3n) - Ir(2n)) - (Ir(2n) - Ir(n))`, is over `LINEARITY` of the
-    reading: the differencing assumes a straight line, and this is the check that it is one.
+  * Ir does not grow from n to 2n and from 2n to 3n.
 
 A row NOT MEASURED stays in the readings, so `compare.py` puts it in the table and fails the stage
 rather than the row going missing from the gate.
@@ -52,13 +58,6 @@ import sys
 import time
 
 NOT_MEASURED = 3
-
-# The second difference a row may show, as a fraction of its reading. The three runs' argv are the
-# same length (see `--iterations`) and nothing else differs between them, so the residue should be
-# zero; this is room for an allocator that settles a few instructions differently after a few more
-# iterations, two orders of magnitude under the 1% threshold. A cost that grows with n is far
-# larger, and a per-process difference is caught exactly by the repeat at n.
-LINEARITY = 1e-4
 
 # The events read off each run. Ir is gated. Dr and Dw — data reads and writes — need callgrind's
 # cache simulator (`--data yes`); they are counts of accesses, which do not depend on the simulated
@@ -254,27 +253,24 @@ def run_once(task, scratch, timeout, data):
 
 
 def per_iteration(event, runs, n):
-  """The cost of one iteration in `event`, from four runs, and why it is not one when it is not.
+  """`(cost, spread, None)` for one iteration in `event`, from four runs, or `(None, None, why)`.
 
-  `runs` holds the totals at n, 2n and 3n and the repeat at n, in that order.
+  `runs` holds the totals at n, 2n and 3n and the repeat at n, in that order. The cost is read over
+  the longest baseline, iterations n+1 to 3n. The spread is how far apart its two halves read, as
+  a per cent of the cost of one half.
   """
   first, double, triple, again = (run[event] for run in runs)
   if first != again:
-    return None, (
+    return None, None, (
       f"two runs at n={n} read {first:,} and {again:,} {event}: the count is not deterministic"
     )
-  delta = double - first
-  if delta <= 0:
-    return None, f"{event} did not grow from n={n} to n={2 * n} ({first:,} to {double:,})"
-  second = abs((triple - double) - delta)
-  limit = max(1, int(delta * LINEARITY))
-  if second > limit:
-    return None, (
-      f"the cost per iteration is not constant: {event} at n={n}/{2 * n}/{3 * n} is "
-      f"{first:,}/{double:,}/{triple:,}, a second difference of {second:,} against a tolerance "
-      f"of {limit:,}"
+  early, late = double - first, triple - double
+  if early <= 0 or late <= 0:
+    return None, None, (
+      f"{event} did not grow with n: {first:,}/{double:,}/{triple:,} at n={n}/{2 * n}/{3 * n}"
     )
-  return delta / n, None
+  half = (triple - first) / 2
+  return (triple - first) / (2 * n), abs(late - early) / half * 100.0, None
 
 
 def main():
@@ -373,29 +369,31 @@ def main():
       for size in ("lo", "hi"):
         runs = [results[(side, binary, name, size, point, take)] for take, point in enumerate(points)]
         broken = [run["error"] for run in runs if "error" in run]
-        reading, problem = (None, broken[0]) if broken else per_iteration(
+        reading, spread, problem = (None, None, broken[0]) if broken else per_iteration(
           GATED, [run["totals"] for run in runs], n
         )
         row[size] = reading
+        row[f"{size}_spread"] = spread
         if problem:
           problems.append(f"{side} side, {size}: {problem}")
-        shown = "NOT MEASURED" if reading is None else f"{reading:,.1f} Ir/iter"
+        shown = "NOT MEASURED" if reading is None else f"{reading:,.1f} Ir/iter ({spread:.4f}%)"
         for event in ADVISORY:
           key = f"{size}_{event.lower()}"
-          value, note = None, None
+          value, apart, note = None, None, None
           if not broken and data:
             if all(event in run["totals"] for run in runs):
-              value, note = per_iteration(event, [run["totals"] for run in runs], n)
+              value, apart, note = per_iteration(event, [run["totals"] for run in runs], n)
             else:
               note = f"callgrind recorded no {event}"
           row[key] = value
+          row[f"{key}_spread"] = apart
           if note:
             row[f"{key}_note"] = note
             # Said once for the row when the gated reading failed too; then this adds nothing.
             if problem is None:
               print(f"::warning::icount {side} side: {name} at {size}, {event} not shown: {note}")
           elif value is not None:
-            shown += f"  {event} {value:,.1f}"
+            shown += f"  {event} {value:,.1f} ({apart:.4f}%)"
         if not broken:
           # The raw totals at n, 2n, 3n and n again, for the events this reads. The miss counts
           # callgrind also records depend on the cache it simulates and are not kept.
@@ -416,7 +414,6 @@ def main():
       "iterations": n,
       "points": [n, 2 * n, 3 * n],
       "data": data,
-      "linearity": LINEARITY,
       "host": host,
       "workloads": workloads,
     }
