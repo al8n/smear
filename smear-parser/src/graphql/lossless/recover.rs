@@ -669,23 +669,20 @@ lossless_production! {
   dialect = graphql::lossless;
 
   /// The token at `at` of the peek window, the head at 0, read through the narrowest window that
-  /// holds it, and only where that window is no wider than what the active cache retains and
-  /// `past` tokens more: [`Seen::Short`] where it is wider, and where the window comes back short
-  /// of the token, whether the input ends in front of it or the scanner stopped, since a short
-  /// window cannot tell the two apart and the parse's own read meets the stop where it stands.
+  /// holds it, and only where the active cache retains that window: [`Seen::Short`] where it does
+  /// not, and where the window comes back short of the token, whether the input ends in front of
+  /// it or the scanner stopped, since a short window cannot tell the two apart and the parse's own
+  /// read meets the stop where it stands.
   ///
-  /// A window the cache retains lexes nothing the parse does not lex next in any case. A token
-  /// past what it retains is lexed again where the parse reads it, a produce event more under a
-  /// budget, so every read on a valid document's path passes `past` 0 but one, which passes 1:
-  /// [`description_ends_header`]'s, behind a name spelled like a definition's keyword.
+  /// A window the cache retains lexes nothing the parse does not lex next in any case, so no read
+  /// here costs a produce event.
   fn window_at<'inp, Src, Ctx>(
     inp,
     at: usize,
-    past: usize,
     out: &mut Seen<GraphqlLosslessToken<'inp, Src>>,
   ) {
     let cache = inp.cache();
-    if at >= cache.len().saturating_add(cache.remaining()).saturating_add(past) {
+    if at >= cache.len().saturating_add(cache.remaining()) {
       *out = Seen::Short;
       return Ok(());
     }
@@ -700,24 +697,20 @@ lossless_production! {
   }
 
   /// The first token behind the peek window's `at` that is no trivia, where at most one trivia
-  /// token stands between, each read as [`window_at`] reads it under `past`. `None` where a window
-  /// is not read or comes back short of it, or where two trivia tokens stand between, since each
-  /// blank is a token of its own and the window sees past one.
-  ///
-  /// The windows widen by one token each, so under `past` 1 the two reads lex one token past what
-  /// the cache retains at most: a window one wider than that is not read.
+  /// token stands between, each read as [`window_at`] reads it. `None` where a window is not read
+  /// or comes back short of it, or where two trivia tokens stand between, since each blank is a
+  /// token of its own and the window sees past one.
   fn token_behind<'inp, Src, Ctx>(
     inp,
     at: usize,
-    past: usize,
     out: &mut Option<Behind<GraphqlLosslessToken<'inp, Src>>>,
   ) {
     let mut behind = at + 1;
     let mut token = Seen::Short;
-    window_at::<Src, Ctx>(inp, behind, past, &mut token)?;
+    window_at::<Src, Ctx>(inp, behind, &mut token)?;
     if matches!(token, Seen::Trivia) {
       behind += 1;
-      window_at::<Src, Ctx>(inp, behind, past, &mut token)?;
+      window_at::<Src, Ctx>(inp, behind, &mut token)?;
     }
     *out = match token {
       Seen::Token(kind, spelled, found) => Some(Behind {
@@ -767,7 +760,7 @@ lossless_production! {
       return Ok(());
     }
     let mut behind = None;
-    token_behind::<Src, Ctx>(inp, 0, 0, &mut behind)?;
+    token_behind::<Src, Ctx>(inp, 0, &mut behind)?;
     let Some(behind) = behind else {
       return Ok(());
     };
@@ -789,19 +782,18 @@ lossless_production! {
   /// token behind that name.
   ///
   /// The brace count must be what it was behind the list's `(`. The window is then read in two
-  /// stages. First the string and up to two tokens behind it, as far as the cache retains them;
+  /// stages, each as far as the cache retains it. First the string and up to two tokens behind it;
   /// where the first of them that is no trivia is not a name spelled like a keyword a root restarts
-  /// at, nothing more is asked. Where it is, the token behind that name is read, one token past
-  /// what the cache retains at most, and that token is lexed again where the parse reads it: so
-  /// `directive @d("doc" type: Int)`, which is valid, costs one produce event more than it would
-  /// without this test, and no valid document costs more. Where the token behind the name stands
-  /// further, behind a trivia token past the cache, no stop is made.
+  /// at, nothing more is asked. Where it is, the token behind that name. A token past what the
+  /// cache retains is not read: a peek that reached it would lex every lexer error in front of it
+  /// as well, each lexed again where the parse reads it. So no stop is made there, and a valid
+  /// `directive @d("doc" type: Int)` costs no produce event more than it would without this test.
   fn description_ends_header<'inp, Src, Ctx>(inp, open_at: usize, ends: &mut bool) {
     if inp.state().brace_depth() != open_at {
       return Ok(());
     }
     let mut name = None;
-    token_behind::<Src, Ctx>(inp, 0, 0, &mut name)?;
+    token_behind::<Src, Ctx>(inp, 0, &mut name)?;
     let Some(Behind { at, kind: Kind::Identifier, spelled: keyword, .. }) = name else {
       return Ok(());
     };
@@ -809,7 +801,7 @@ lossless_production! {
       return Ok(());
     }
     let mut behind = None;
-    token_behind::<Src, Ctx>(inp, at, 1, &mut behind)?;
+    token_behind::<Src, Ctx>(inp, at, &mut behind)?;
     let Some(behind) = behind else {
       return Ok(());
     };

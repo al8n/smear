@@ -676,10 +676,9 @@ mod lossless {
   }
 
   /// A list on a header that has lost its `)` ends in front of the start of a definition, of
-  /// `repeatable` and `on` on a directive definition, of a description's string that the start of
-  /// a definition follows, of a union's members and of the owner's next directive, each on its
-  /// test; one report, the definition kept and the next read. `extend` with the keyword of what it
-  /// extends is one start.
+  /// `repeatable` and `on` on a directive definition, of a union's members and of the owner's next
+  /// directive, each on its test; one report, the definition kept and the next read. `extend` with
+  /// the keyword of what it extends is one start.
   #[test]
   fn a_headers_list_that_lost_its_closer_leaves_what_its_owner_reads_next() {
     for (text, kept, reports) in [
@@ -718,13 +717,6 @@ mod lossless {
         &["directive @d(a: Int) @x(y: 1 on FIELD", "scalar S"][..],
         1,
       ),
-      // The member's `:` missing, and the directive definition's `on` and a location at the
-      // string. The token behind `scalar` stands one past the cache.
-      (
-        "directive @d(a: Int \"doc\"scalar S",
-        &["directive @d(a: Int", "\"doc\"scalar S"][..],
-        3,
-      ),
       (
         "union U @d(x: 1 = A | B scalar S",
         &["union U @d(x: 1 = A | B", "scalar S"][..],
@@ -743,8 +735,8 @@ mod lossless {
 
   /// Where a test says nothing the list reads its head as it always did: the list's `)` behind an
   /// `@` or an `=`, a keyword at the end of input, a body with junk behind it, a keyword behind a
-  /// keyword, and a described keyword whose token behind stands across a blank past the cache,
-  /// which the window does not read; and a list in a member reads as it did.
+  /// keyword, and a described keyword whose token behind stands past the cache, which the window
+  /// does not read; and a list in a member reads as it did.
   #[test]
   fn a_headers_list_reads_as_before_where_no_test_holds() {
     for (text, kept, reports) in [
@@ -766,6 +758,7 @@ mod lossless {
       ),
       ("scalar A @d(x: 1 type scalar S", &["scalar S"][..], 1),
       ("directive @d(a: Int \"doc\" scalar S", &[][..], 1),
+      ("directive @d(a: Int \"doc\"scalar S", &[][..], 1),
       ("type T { f: Int @d(x: 1 scalar S", &[][..], 1),
     ] {
       assert_eq!(lent(&Lossless::new(), text).len(), reports, "{text}");
@@ -797,23 +790,24 @@ mod lossless {
     }
   }
 
-  /// The least produce-event budget under which `text` reads with no error.
+  /// The least produce-event budget under which the parse of `text` is not refused.
   fn least_budget(text: &str) -> usize {
     (0..=4 * lexemes(text))
       .find(|&max| {
         let limits = LosslessLimits::default().with_max_produce_events(max);
-        lent(&Lossless::with_limits(limits), text).is_empty()
+        lent(&Lossless::with_limits(limits), text)
+          .iter()
+          .all(|(code, _)| code.as_str() != "smear::syntax::token-budget")
       })
       .unwrap_or_else(|| panic!("{text} reads under no budget"))
   }
 
-  /// No valid document makes a stop, and the peek window lexes nothing twice where the cache
-  /// retains it: a header's argument named like a definition's keyword reads under one
-  /// produce-event for each lexeme and one more, the least budget the same text reads under with
-  /// a name that spells nothing. A described member of a directive definition named like such a
-  /// keyword is the one valid text that spends more, the token behind its name standing past the
-  /// cache: one event, and with a blank in front of its `:` no more, since the window reads one
-  /// token past the cache at most.
+  /// No valid document makes a stop, and the peek window lexes nothing twice: a header's argument
+  /// named like a definition's keyword reads under one produce-event for each lexeme and one more,
+  /// the least budget the same text reads under with a name that spells nothing, and so does a
+  /// described member of a directive definition, whose name's token behind stands past the cache
+  /// and is not read. With lexer errors in front of that token the window would have lexed them
+  /// all to fill its one slot, and each again where the member reads them.
   #[test]
   fn a_valid_header_reads_as_before() {
     for text in [
@@ -838,12 +832,17 @@ mod lossless {
       (
         "directive @d(\"doc\" type: Int) on FIELD",
         "directive @d(\"doc\" tipe: Int) on FIELD",
-        1,
+        0,
       ),
       (
         "directive @d(\"doc\" type : Int) on FIELD",
         "directive @d(\"doc\" tipe : Int) on FIELD",
-        1,
+        0,
+      ),
+      (
+        "directive @d(\"doc\" type??: Int) on FIELD scalar S",
+        "directive @d(\"doc\" tipe??: Int) on FIELD scalar S",
+        0,
       ),
     ] {
       assert_eq!(least_budget(text), least_budget(plain) + more, "{text}");
@@ -967,11 +966,16 @@ mod lossless {
   /// A stop's report is built from the token the window found, so no budget spent behind that
   /// window can leave the stop without it: under every produce-event budget the parse either stops
   /// before the report, with the budget's refusal its one error, or lends the `:` missing at `S`
-  /// first. In the second text the token behind `scalar` stands across a blank past the cache, no
-  /// stop is made, and the member misses its `:` there itself.
+  /// first. A window the refusal cuts short is no answer, and the member's own read meets the
+  /// refusal. In the last two texts the token behind `scalar` stands past the cache, no stop is
+  /// made, and the member misses its `:` there itself.
   #[test]
   fn a_stops_report_comes_from_the_window_that_found_it() {
-    for text in ["directive @d(\"d\"scalar S", "directive @d(\"d\" scalar S"] {
+    for text in [
+      "type T @d(x: 1 scalar S",
+      "directive @d(\"d\"scalar S",
+      "directive @d(\"d\" scalar S",
+    ] {
       let at = text.rfind('S').expect("the name behind the keyword");
       let colon = (String::from("smear::syntax::unexpected-token"), at..at + 1);
       let mut reached = 0usize;

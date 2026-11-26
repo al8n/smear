@@ -3472,11 +3472,8 @@ mod lossless {
   }
 
   /// A directive definition's two lists end in front of `repeatable` and `on`, by the test the
-  /// start of a definition makes of the token behind, and its own list in front of a description's
-  /// string that the start of a definition follows, where the window sees the token behind its
-  /// keyword one token past the cache at most: the directive definition keeps what it writes, and
-  /// the next definition is read. Behind the string the directive definition reports its `on` and
-  /// a location missing, at the string.
+  /// start of a definition makes of the token behind: the directive definition keeps what it
+  /// writes, and the next definition is read.
   #[test]
   fn a_directive_definitions_list_that_lost_its_closer_leaves_its_tail() {
     for (text, kept, reports) in [
@@ -3494,11 +3491,6 @@ mod lossless {
         "directive @d(a: Int) @x(y: 1 on FIELD scalar S",
         &["directive @d(a: Int) @x(y: 1 on FIELD", "scalar S"][..],
         1,
-      ),
-      (
-        "directive @d(a: Int \"doc\"scalar S",
-        &["directive @d(a: Int", "\"doc\"scalar S"][..],
-        3,
       ),
     ] {
       let answer = read(text);
@@ -3656,22 +3648,23 @@ mod lossless {
     }
   }
 
-  /// The least produce-event budget under which `text` reads with no error.
+  /// The least produce-event budget under which the parse of `text` is not refused.
   fn least_budget(text: &str) -> usize {
     (0..=4 * lexemes(text))
       .find(|&max| {
         let limits = LosslessLimits::default().with_max_produce_events(max);
-        !read_with(&Lossless::with_limits(limits), text).errors
+        lent(&Lossless::with_limits(limits), text)
+          .iter()
+          .all(|(code, _)| code.as_str() != "smear::syntax::token-budget")
       })
       .unwrap_or_else(|| panic!("{text} reads under no budget"))
   }
 
-  /// The peek window lexes nothing twice where the cache retains it: a header's argument named
-  /// like a definition's keyword reads under the least produce-event budget the same text reads
-  /// under with a name that spells nothing. A described member of a directive definition named
-  /// like such a keyword is the one valid text that spends more, the token behind its name
-  /// standing past the cache: one event, and with a blank in front of its `:` no more, since the
-  /// window reads one token past the cache at most.
+  /// The peek window lexes nothing twice: a header's argument named like a definition's keyword
+  /// reads under the least produce-event budget the same text reads under with a name that spells
+  /// nothing, and so does a described member of a directive definition, whose name's token behind
+  /// stands past the cache and is not read. With lexer errors in front of that token the window
+  /// would have lexed them all to fill its one slot, and each again where the member reads them.
   #[test]
   fn the_window_lexes_nothing_twice() {
     let text = "scalar X @extern(lang: \"rust\", type: \"x\")";
@@ -3690,12 +3683,17 @@ mod lossless {
       (
         "directive @d(\"doc\" type: Int) on FIELD",
         "directive @d(\"doc\" tipe: Int) on FIELD",
-        1,
+        0,
       ),
       (
         "directive @d(\"doc\" type : Int) on FIELD",
         "directive @d(\"doc\" tipe : Int) on FIELD",
-        1,
+        0,
+      ),
+      (
+        "directive @d(\"doc\" type??: Int) on FIELD scalar S",
+        "directive @d(\"doc\" tipe??: Int) on FIELD scalar S",
+        0,
       ),
     ] {
       assert_eq!(least_budget(text), least_budget(plain) + more, "{text}");
@@ -3720,8 +3718,7 @@ mod lossless {
   /// Where a test says nothing the list reads its head as it always did: a keyword at the end of
   /// input, a `{` that nothing balances, a body with junk behind it, a keyword behind a keyword,
   /// a keyword with two blanks behind it, which the window does not see past, and a described
-  /// keyword whose token behind stands across a blank past the cache, which the window does not
-  /// read.
+  /// keyword whose token behind stands past the cache, which the window does not read.
   #[test]
   fn a_headers_list_reads_as_before_where_no_test_holds() {
     for (text, kept, reports) in [
@@ -3740,6 +3737,7 @@ mod lossless {
       ("scalar A @d(x: 1 type scalar S", &["scalar S"][..], 1),
       ("type T @d(x: 1 scalar  S", &[][..], 1),
       ("directive @d(a: Int \"doc\" scalar S", &[][..], 1),
+      ("directive @d(a: Int \"doc\"scalar S", &[][..], 1),
     ] {
       let answer = read(text);
       assert_eq!(answer.reports, reports, "{text}");
@@ -3914,11 +3912,16 @@ mod lossless {
   /// A stop's report is built from the token the window found, so no budget spent behind that
   /// window can leave the stop without it: under every produce-event budget the parse either stops
   /// before the report, with the budget's refusal its one error, or lends the `:` missing at `S`
-  /// first. In the second text the token behind `scalar` stands across a blank past the cache, no
-  /// stop is made, and the member misses its `:` there itself.
+  /// first. A window the refusal cuts short is no answer, and the member's own read meets the
+  /// refusal. In the last two texts the token behind `scalar` stands past the cache, no stop is
+  /// made, and the member misses its `:` there itself.
   #[test]
   fn a_stops_report_comes_from_the_window_that_found_it() {
-    for text in ["directive @d(\"d\"scalar S", "directive @d(\"d\" scalar S"] {
+    for text in [
+      "type T @d(x: 1 scalar S",
+      "directive @d(\"d\"scalar S",
+      "directive @d(\"d\" scalar S",
+    ] {
       let at = text.rfind('S').expect("the name behind the keyword");
       let colon = (String::from("smear::syntax::unexpected-token"), at..at + 1);
       let mut reached = 0usize;

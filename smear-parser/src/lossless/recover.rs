@@ -143,10 +143,9 @@
 //! attempt is declined only where what the skip committed holds a `}` the skip did not open, and
 //! a declined one is a failed scan in all but name: it gives back what the skip crossed, to be
 //! lexed again, and the guard charges it as one. The look-aheads are always declined, are made
-//! only where the allowance is open, and are charged the same way. One peek window reads past the
-//! cache as well, by one token at most: the one a directive definition's own list opens behind a
-//! described member named like a definition's keyword, whose token past the cache is lexed again
-//! where it is read. This exception is the mechanism, not a leak in it.
+//! only where the allowance is open, and are charged the same way; the peek windows a header's list
+//! opens read no further than the cache retains, so they lex nothing twice. This exception is the
+//! mechanism, not a leak in it.
 //!
 //! **Exception 2 — lexer errors. Closed, and named here because the arithmetic it drove is still
 //! quoted below.** tokora charges `spent` for *every* item the lexer hands back, errors included
