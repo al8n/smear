@@ -65,6 +65,16 @@ NOT_MEASURED = 3
 GATED = "Ir"
 ADVISORY = ("Dr", "Dw")
 
+# valgrind's options beyond the tool, for this host. Some atomics in these binaries run on aarch64
+# as load-exclusive/store-exclusive loops, and valgrind runs that pair natively by default, on the
+# host's exclusive monitor, which events on the host clear: now and then a store-exclusive fails and
+# its loop goes round once more. That is 4 Ir, 1 Dr and 1 Dw, which is exactly every difference two
+# runs of one binary have shown on aarch64, twice in 208 runs. `fallback-llsc` has valgrind emulate
+# the pair instead, and drop the reservation only where it re-enters the program's code
+# (`coregrind/m_scheduler/scheduler.c`), which happens at the same places in every run of one binary.
+# x86-64 has no such pair, and its runs agree to the instruction.
+HOST_OPTIONS = ["--sim-hints=fallback-llsc"] if platform.machine() in ("aarch64", "arm64") else []
+
 # How far a file's `totals:` line may stand from its `summary:` line, on any one event, before the
 # file is taken for a damaged one. The two lines sum different things (`callgrind/dump.c`):
 # `summary:` is each thread's entry context at the dump, and `totals:` is the sum of every cost line
@@ -134,7 +144,9 @@ def host_facts():
     "os": release or platform.platform(),
     "arch": platform.machine(),
     "cpu": cpu or "unknown",
-    "valgrind": first_line(["valgrind", "--version"], "") or "unknown",
+    "valgrind": " ".join(
+      [first_line(["valgrind", "--version"], "") or "unknown"] + HOST_OPTIONS
+    ),
   }
 
 
@@ -220,6 +232,7 @@ def run_once(task, scratch, timeout, data):
     f"--cache-sim={'yes' if data else 'no'}",
     "--branch-sim=no",
     "--collect-systime=no",
+    *HOST_OPTIONS,
     binary,
     "--only", name,
     "--size", size,
