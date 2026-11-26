@@ -272,11 +272,12 @@ def main():
   # initial stack. Paths of one length — `run.sh` builds into `target-head` and `target-base` — put
   # every stack buffer at the same address on both sides; another length shifts them all, and a
   # copy routine that branches on alignment would then count differently for no change in the code.
-  if len(args.head) != len(args.base):
+  lengths = [len(os.fsencode(path)) for path in (args.head, args.base)]
+  if lengths[0] != lengths[1]:
     fail(
       args.outcome,
-      f"the two sides' wall_clock are at paths of different lengths ({len(args.head)} and "
-      f"{len(args.base)} bytes), so their stacks would be laid out apart",
+      f"the two sides' wall_clock are at paths of different lengths ({lengths[0]} and "
+      f"{lengths[1]} bytes), so their stacks would be laid out apart",
     )
 
   host = host_facts()
