@@ -287,9 +287,13 @@ set -euo pipefail
 # read +0.83% and +0.87% on two of these rows, which +1% passes and J1 fails — so they carry a
 # second verdict at 0.5%, printed in the table and raised as a warning, and never shown as `ok`.
 #
-# It fails nothing. On the executable row, single inlining decisions that moved with unrelated
-# commits were each about the size of the allowance, so a red at 0.5% would fire on pull requests
-# that never touched the parser. The lexer row's own figure is the owner's to set; it takes the
+# It fails nothing, with one exception that is not a verdict: a J1 row whose halves read more than
+# the spread bound below apart at n and again at 4n is NOT MEASURED, and that fails the stage at any
+# delta. A red J1 leg of that kind means the row was not measured, not that it regressed.
+#
+# On the executable row, single inlining decisions that moved with unrelated commits were each
+# about the size of the allowance, so a red at 0.5% would fire on pull requests that never touched
+# the parser. The lexer row's own figure is the owner's to set; it takes the
 # parse rows' half per cent until they do. `lex_graphql_syntactic` is not here: it is GraphQL's own
 # row, and belongs with the drift sample, not with J1. No verdict of any kind reads reads and
 # writes: their 95th-percentile step in the sample above was 0.47% and 0.65%.

@@ -439,6 +439,26 @@ def main():
   # initial stack. Paths of one length — `run.sh` builds into `target-head` and `target-base` — put
   # every stack buffer at the same address on both sides; another length shifts them all, and a
   # copy routine that branches on alignment would then count differently for no change in the code.
+  resolved = {
+    side: os.path.realpath(path) for side, path in (("head", args.head), ("base", args.base))
+  }
+  print(f"icount: head wall_clock {resolved['head']}")
+  print(f"icount: base wall_clock {resolved['base']}")
+  # One file handed to both sides would read +0.000% on every row, whatever the change, and look
+  # like a run of two identical builds. Two builds of an unchanged library may well be byte-equal,
+  # so only the FILE is compared, never its contents.
+  same = resolved["head"] == resolved["base"]
+  if not same:
+    try:
+      same = os.path.samefile(args.head, args.base)
+    except OSError:
+      pass
+  if same:
+    fail(
+      args.outcome,
+      f"the head's and the base's wall_clock are one file, {resolved['head']}: a count of it "
+      f"against itself reads no difference",
+    )
   lengths = [len(os.fsencode(path)) for path in (args.head, args.base)]
   if lengths[0] != lengths[1]:
     fail(
