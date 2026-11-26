@@ -456,8 +456,10 @@ where
 
 /// Nothing that could start one of `expected` is here, and there is still input.
 ///
-/// Reports once through [`report_unexpected`], then makes progress — in that order, because the
-/// diagnostic names the token that is about to be skipped.
+/// Reports once through [`report_unexpected`], then makes progress through [`skip_unexpected`] — in
+/// that order, because the diagnostic names the token that is about to be skipped. The two halves
+/// are functions of their own for a caller that reads ahead between them: see
+/// [`skip_unexpected`].
 ///
 /// # Why this cannot be `sync_balanced` alone
 ///
@@ -569,7 +571,45 @@ where
     + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, SimpleSpan, Lang>>,
 {
   report_unexpected(inp, expected)?;
+  skip_unexpected(
+    inp,
+    delimiters,
+    is_sync_point,
+    error_kind,
+    allowance_exhausted,
+  )
+}
 
+/// [`unexpected`] behind its report: the skip, its second scan and its one-token fallback, as
+/// [`unexpected`]'s docs give them, with the same progress whenever input remains.
+///
+/// # Why the skip is a function of its own
+///
+/// A caller that must read ahead before it knows whether the head is junk makes the report first,
+/// through [`report_unexpected`], so that nothing its read-ahead spends of a budget can stop the
+/// parse in front of that report; it then reads ahead, and where the head is junk after all it
+/// calls this, so the head is reported once whichever way the read-ahead went. A list on a
+/// definition's header is that caller, in each dialect's lossless layer.
+///
+/// `allowance_exhausted` is read where [`unexpected`]'s caller reads it: in front of the report,
+/// and so in front of anything read ahead behind it. A read-ahead lexes, and a flag read after it
+/// could refuse the scan that [`unexpected`] would have made at the same head.
+pub fn skip_unexpected<'inp, L, Ctx, Lang>(
+  inp: &mut InputRef<'inp, '_, L, Ctx, Lang>,
+  delimiters: fn(&<L::Token as Token<'inp>>::Kind) -> Balance<u8>,
+  is_sync_point: fn(&L::Token) -> bool,
+  error_kind: u16,
+  allowance_exhausted: bool,
+) -> Result<(), ErrorOf<'inp, L, Ctx, Lang>>
+where
+  Lang: ?Sized,
+  L: Lexer<'inp, Span = SimpleSpan, Offset = usize>,
+  L::Token: FromLogos<'inp> + Clone,
+  Ctx: ParseContext<'inp, L, Lang>,
+  Ctx::Emitter: CstEmitter<'inp, L, Lang>,
+  ErrorOf<'inp, L, Ctx, Lang>: From<UnexpectedEot<usize, Lang>>
+    + From<UnexpectedToken<'inp, L::Token, <L::Token as Token<'inp>>::Kind, SimpleSpan, Lang>>,
+{
   // #168's guard, computed by the dialect wrapper — see `scan_allowance_exhausted` for why the
   // number arrives rather than being read here. `None` is safe to substitute *at this site* —
   // unlike in [`resync_to`], which needs a peek in its place — because the test below folds `None`
