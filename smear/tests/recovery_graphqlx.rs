@@ -3799,11 +3799,14 @@ mod lossless {
       .unwrap_or_else(|| panic!("{text} reads under no budget"))
   }
 
-  /// The peek window lexes nothing twice: a header's argument named like a definition's keyword
-  /// reads under the least produce-event budget the same text reads under with a name that spells
-  /// nothing, and so does a described member of a directive definition, whose name's token behind
-  /// stands past the cache and is not read. With lexer errors in front of that token the window
-  /// would have lexed them all to fill its one slot, and each again where the member reads them.
+  /// The peek window lexes nothing twice where it meets no end of input across a run of lexer
+  /// errors: a header's argument named like a definition's keyword reads under the least
+  /// produce-event budget the same text reads under with a name that spells nothing, and so does a
+  /// described member of a directive definition, whose name's token behind stands past the cache
+  /// and is not read. With lexer errors in front of that token the window would have lexed them
+  /// all to fill its one slot, and each again where the member reads them. The last text's errors
+  /// have a `:` behind them. Where a window meets the end of input across such a run, the parse
+  /// lexes the run a second time, until tokora retains the end of input after an error run.
   #[test]
   fn the_window_lexes_nothing_twice() {
     let text = "scalar X @extern(lang: \"rust\", type: \"x\")";

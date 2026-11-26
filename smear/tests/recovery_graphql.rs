@@ -951,12 +951,14 @@ mod lossless {
       .unwrap_or_else(|| panic!("{text} reads under no budget"))
   }
 
-  /// No valid document makes a stop, and the peek window lexes nothing twice: a header's argument
-  /// named like a definition's keyword reads under one produce-event for each lexeme and one more,
-  /// the least budget the same text reads under with a name that spells nothing, and so does a
-  /// described member of a directive definition, whose name's token behind stands past the cache
-  /// and is not read. With lexer errors in front of that token the window would have lexed them
-  /// all to fill its one slot, and each again where the member reads them.
+  /// No valid document makes a stop, and in one the peek window lexes nothing twice: a header's
+  /// argument named like a definition's keyword reads under one produce-event for each lexeme and
+  /// one more, the least budget the same text reads under with a name that spells nothing, and so
+  /// does a described member of a directive definition, whose name's token behind stands past the
+  /// cache and is not read. With lexer errors in front of that token the window would have lexed
+  /// them all to fill its one slot, and each again where the member reads them. A window lexes
+  /// twice only a run of lexer errors it meets the end of input across, until tokora retains the
+  /// end of input after an error run, and a valid document holds no lexer error.
   #[test]
   fn a_valid_header_reads_as_before() {
     for text in [

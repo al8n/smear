@@ -761,10 +761,12 @@ fn braces(kind: &Kind) -> Balance<u8> {
 //
 // A head a valid list can hold, a name or a description's string, is decided through the peek
 // window, read no further than the member there would read and no further than the cache retains,
-// and a stop reports the `:` that member would miss, the token the window found. A head no valid
-// list holds is reported first, as `unexpected` reports it, and decided behind that report by a
-// look-ahead that is given back. So is a directive definition's location spelled like a keyword a
-// root restarts at, which no valid location is.
+// and a stop reports the `:` that member would miss, the token the window found. Where a window
+// meets the end of input across a run of lexer errors, the parse lexes that run a second time,
+// until tokora retains the end of input after an error run. A head no valid list holds is
+// reported first, as `unexpected` reports it, and decided behind that report by a look-ahead that
+// is given back. So is a directive definition's location spelled like a keyword a root restarts
+// at, which no valid location is.
 //
 // A look-ahead finds its evidence only where every token it crosses on the way passes one step,
 // `cross`: no name a root restarts at with anything but a `:` behind it, no `{` but the owner's
@@ -1249,8 +1251,11 @@ lossless_production! {
   /// holds it, and only where the active cache retains that window: [`Seen::Short`] where it does
   /// not, and where the window comes back short of the token at the end of input.
   ///
-  /// A window the cache retains lexes nothing the parse does not lex next in any case, so no read
-  /// here costs a produce event. The read raises a stop the scanner meets while it fills, and that
+  /// A window the cache retains lexes nothing the parse does not lex next, but for one shape: where
+  /// it meets the end of input across a run of lexer errors, tokora retains nothing of the run
+  /// behind the newest token it holds, and the parse lexes the run a second time, each error
+  /// charged to the produce-event budget twice. That stays so until tokora retains the end of
+  /// input after an error run. The read raises a stop the scanner meets while it fills, and that
   /// stop reads as [`Seen::Short`] too: it is no answer, and the parse's own read meets it where it
   /// stands.
   fn window_at<'inp, Src, Ctx>(
@@ -1338,8 +1343,15 @@ lossless_production! {
   /// it. Only behind a spelling that matches are the brace count, which must be what it was behind
   /// the list's `(`, and the peek window read. The window reads no further than that member reads
   /// to its `:`, so every lexer error in front of the report is reported where the member would
-  /// report it, and no further than the cache retains, so nothing is lexed twice: where the cache
-  /// retains less, no stop is made and the member reads as it always did.
+  /// report it, and no further than the cache retains: where the cache retains less, no stop is
+  /// made and the member reads as it always did. What it lexes twice is a run of lexer errors it
+  /// meets the end of input across, as [`window_at`] says.
+  ///
+  /// What begins at the stop reads on as it reads at a root, and may take in what main reads as a
+  /// definition, as a definition or a where clause that begins in the junk does: at a mixed root,
+  /// `type T @d(x: 1 type U { f: Int }` builds `U` where main builds the operation `{ f: Int }`,
+  /// and `type T @d(x: 1 where K: L { f: Int }` reads `{ f: Int }` as `T`'s body behind its where
+  /// clause. Both are among the costs of a stop the repair accepts; no look-ahead decides them.
   fn name_ends_header<'inp, Src, Ctx>(inp, open_at: usize, owner: impl Header, ends: &mut bool) {
     let keyword = peek_as::<Src, Ctx, Keyword>(inp)?;
     let start = restarts_a_root(keyword);
@@ -1375,9 +1387,10 @@ lossless_production! {
   /// stages, each as far as the cache retains it. First the string and up to two tokens behind it;
   /// where the first of them that is no trivia is not a name spelled like a keyword a root restarts
   /// at, nothing more is asked. Where it is, the token behind that name. A token past what the
-  /// cache retains is not read: a peek that reached it would lex every lexer error in front of it
-  /// as well, each lexed again where the parse reads it. So no stop is made there, and a valid
+  /// cache retains is not read, so no stop is made there, and the valid
   /// `directive @d("doc" type: Int)` costs no produce event more than it would without this test.
+  /// A run of lexer errors a window meets the end of input across is lexed again, as
+  /// [`window_at`] says.
   fn description_ends_header<'inp, Src, Ctx>(inp, open_at: usize, ends: &mut bool) {
     if inp.state().brace_depth() != open_at {
       return Ok(());
