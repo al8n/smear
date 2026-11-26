@@ -375,8 +375,10 @@ def main():
       "host": host,
       "workloads": workloads,
     }
+    # Unsorted, so the rows keep the order `--list` gave them and the table groups them by family
+    # as the other two instruments' tables do.
     with open(os.path.join(args.out, f"{side}.json"), "w", encoding="utf-8") as handle:
-      json.dump(document, handle, indent=2, sort_keys=True)
+      json.dump(document, handle, indent=2)
       handle.write("\n")
   return 0
 
