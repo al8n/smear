@@ -1168,12 +1168,12 @@ lossless_production! {
 
   /// The token at `at` of the peek window, the head at 0, read through the narrowest window that
   /// holds it, and only where the active cache retains that window: [`Seen::Short`] where it does
-  /// not, and where the window comes back short of the token, whether the input ends in front of
-  /// it or the scanner stopped, since a short window cannot tell the two apart and the parse's own
-  /// read meets the stop where it stands.
+  /// not, and where the window comes back short of the token at the end of input.
   ///
   /// A window the cache retains lexes nothing the parse does not lex next in any case, so no read
-  /// here costs a produce event.
+  /// here costs a produce event. The read raises a stop the scanner meets while it fills, and that
+  /// stop reads as [`Seen::Short`] too: it is no answer, and the parse's own read meets it where it
+  /// stands.
   fn window_at<'inp, Src, Ctx>(
     inp,
     at: usize,
@@ -1184,12 +1184,25 @@ lossless_production! {
       *out = Seen::Short;
       return Ok(());
     }
-    *out = match at {
-      1 => seen(inp.peek::<U2>()?.get(1).map(|entry| (entry.token(), entry.span()))),
-      2 => seen(inp.peek::<U3>()?.get(2).map(|entry| (entry.token(), entry.span()))),
-      3 => seen(inp.peek::<U4>()?.get(3).map(|entry| (entry.token(), entry.span()))),
-      4 => seen(inp.peek::<U5>()?.get(4).map(|entry| (entry.token(), entry.span()))),
-      _ => Seen::Short,
+    let read = match at {
+      1 => inp.peek_map::<U2, _, _>(|window| {
+        seen(window.get(1).map(|entry| (entry.token(), entry.span())))
+      }),
+      2 => inp.peek_map::<U3, _, _>(|window| {
+        seen(window.get(2).map(|entry| (entry.token(), entry.span())))
+      }),
+      3 => inp.peek_map::<U4, _, _>(|window| {
+        seen(window.get(3).map(|entry| (entry.token(), entry.span())))
+      }),
+      4 => inp.peek_map::<U5, _, _>(|window| {
+        seen(window.get(4).map(|entry| (entry.token(), entry.span())))
+      }),
+      _ => Ok(Seen::Short),
+    };
+    *out = match read {
+      Ok(token) => token,
+      Err(stop) if tokora::error::MaybeTerminal::is_terminal(&stop) => Seen::Short,
+      Err(error) => return Err(error),
     };
     Ok(())
   }
