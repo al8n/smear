@@ -4130,7 +4130,7 @@ const SITES: &[Site] = &[
   ),
   // No hole-free text reaches this site. The list is a field's, and a field fails for want of its
   // `:` once the list has stopped, so the definition is lost and the `}` the list left is the
-  // root's. A directive definition's own list is a header's, the row after next.
+  // root's. A directive definition's own list is a header's, the rows after.
   (
     "definition.rs",
     "report",
