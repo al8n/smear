@@ -1,4 +1,5 @@
-//! The workloads both perf gates read, and the two sizes each of them declares.
+//! The workloads the perf lane reads — peak allocation, wall clock and instruction counts — and
+//! the two sizes each of them declares.
 //!
 //! # Why two sizes, and why the ratio is the number that matters
 //!
@@ -55,7 +56,8 @@
 //! nothing else. Parsing is outside — that is the methodology `MAX_INTERFACE_IMPLEMENTATION_MISMATCHES`'s
 //! own table was taken under ("with the document parsed before the instrument is armed"), and it
 //! is what makes a schema row a reading about the builder rather than about the parser in front of
-//! it. The closure must be re-runnable, because the wall-clock instrument calls it many times.
+//! it. The closure must be re-runnable, because the wall clock and the count mode call it many
+//! times.
 //!
 //! [`Schema::build`]: smear::validator::Schema::build
 
@@ -770,50 +772,183 @@ pub fn print_table(unit: &str, readings: &[Reading]) {
   println!();
 }
 
-/// Where to write the JSON, read out of `--json <path>`.
+/// One of a workload's two sizes, as the count mode names it on its command line.
+#[derive(Clone, Copy)]
+pub enum Size {
+  Lo,
+  Hi,
+}
+
+impl Size {
+  pub fn as_str(self) -> &'static str {
+    match self {
+      Self::Lo => "lo",
+      Self::Hi => "hi",
+    }
+  }
+
+  /// The `n` this size stands for in `workload`.
+  pub fn of(self, workload: &Workload) -> usize {
+    match self {
+      Self::Lo => workload.lo,
+      Self::Hi => workload.hi,
+    }
+  }
+}
+
+/// What one run of a perf binary was asked to do.
+pub enum Request {
+  /// Every workload at both sizes, read by the binary's own instrument. The JSON goes to `json`
+  /// when one is named; `rounds` is the wall clock's batch count.
+  Measure {
+    json: Option<String>,
+    rounds: Option<usize>,
+  },
+  /// `--list`: every workload, one a line, as `<name> <family> <lo> <hi>`. `ci/perf/icount.py`
+  /// takes its rows from here and keeps no list of its own, so a row added to [`WORKLOADS`] is
+  /// counted from the run that adds it.
+  List,
+  /// `--only <name> --size lo|hi --iterations <n>`: one workload's measured region, run `n` times
+  /// at one of its sizes, with nothing timed. The instrument is outside the process: callgrind
+  /// reads the run at three values of `n`, and the difference of two totals is the count of the
+  /// iterations between them.
+  Count {
+    workload: &'static Workload,
+    size: Size,
+    iterations: u64,
+  },
+}
+
+/// Reads a perf binary's arguments.
+///
+/// `counting` says whether the binary offers the count mode, `--list` and `--only`. `wall_clock`
+/// does and `peak_alloc` does not: that binary's counting allocator would add its own bookkeeping
+/// to every count. Where the mode is not offered, its flags are refused like any other unknown
+/// one.
 ///
 /// `--bench` is accepted and ignored: `cargo bench` passes it to every `harness = false` target,
 /// and a binary that rejected it would fail the moment somebody ran `cargo bench` rather than the
 /// gate. Anything else unrecognised is an error, because a mistyped flag that is silently dropped
-/// is a run that measured something other than what was asked for.
-pub fn json_destination(args: &[String]) -> Option<String> {
-  let mut destination = None;
+/// is a run that measured something other than what was asked for. For the same reason a row name
+/// [`WORKLOADS`] does not hold is refused, and so is a count flag without `--only`, or `--only`
+/// beside a flag of the measuring mode.
+pub fn request(args: &[String], counting: bool) -> Request {
+  let mut json = None;
+  let mut rounds = None;
+  let mut list = false;
+  let mut only = None;
+  let mut size = None;
+  let mut iterations = None;
   let mut index = 0;
   while index < args.len() {
-    match args[index].as_str() {
-      "--json" => {
-        index += 1;
-        destination = Some(
-          args
-            .get(index)
-            .unwrap_or_else(|| panic!("--json needs a path"))
-            .clone(),
+    let flag = args[index].as_str();
+    match flag {
+      "--json" => json = Some(value(args, &mut index, flag).to_owned()),
+      "--rounds" => {
+        rounds = Some(
+          value(args, &mut index, flag)
+            .parse::<usize>()
+            .unwrap_or_else(|_| panic!("--rounds needs a positive integer")),
         );
       }
-      // Consumed by `rounds` below; its value is skipped here so it cannot be read as a
-      // positional argument, which is what turned a valid `--rounds 5` into a panic once.
-      "--rounds" => index += 1,
       "--bench" | "--nocapture" => {}
+      "--list" if counting => list = true,
+      "--only" if counting => only = Some(value(args, &mut index, flag)),
+      "--size" if counting => {
+        size = Some(match value(args, &mut index, flag) {
+          "lo" => Size::Lo,
+          "hi" => Size::Hi,
+          other => panic!("--size takes `lo` or `hi`, not `{other}`"),
+        });
+      }
+      "--iterations" if counting => {
+        iterations = Some(
+          value(args, &mut index, flag)
+            .parse::<u64>()
+            .ok()
+            .filter(|&n| n > 0)
+            .unwrap_or_else(|| panic!("--iterations needs a positive integer")),
+        );
+      }
       other => panic!("unrecognised argument: {other}"),
     }
     index += 1;
   }
-  destination
+
+  let measuring = json.is_some() || rounds.is_some();
+  if list {
+    assert!(
+      !measuring && only.is_none() && size.is_none() && iterations.is_none(),
+      "--list takes no other argument"
+    );
+    return Request::List;
+  }
+  let Some(name) = only else {
+    assert!(
+      size.is_none() && iterations.is_none(),
+      "--size and --iterations belong to the count mode, which --only <name> selects"
+    );
+    return Request::Measure { json, rounds };
+  };
+  assert!(
+    !measuring,
+    "--only counts one workload; --json and --rounds belong to the measuring mode"
+  );
+  let workload = WORKLOADS
+    .iter()
+    .find(|workload| workload.name == name)
+    .unwrap_or_else(|| panic!("--only: no workload is named `{name}`; --list names them"));
+  Request::Count {
+    workload,
+    size: size.unwrap_or_else(|| panic!("--only needs --size lo|hi")),
+    iterations: iterations.unwrap_or_else(|| panic!("--only needs --iterations <n>")),
+  }
 }
 
-/// `--rounds <n>`, defaulting to `default`.
-pub fn rounds(args: &[String], default: usize) -> usize {
-  let mut index = 0;
-  while index < args.len() {
-    if args[index] == "--rounds" {
-      return args
-        .get(index + 1)
-        .and_then(|value| value.parse().ok())
-        .unwrap_or_else(|| panic!("--rounds needs a positive integer"));
-    }
-    index += 1;
+/// The value after `args[*index]`, which is `flag`; `index` is left on it.
+fn value<'a>(args: &'a [String], index: &mut usize, flag: &str) -> &'a str {
+  *index += 1;
+  match args.get(*index) {
+    Some(value) => value.as_str(),
+    None if flag == "--json" => panic!("--json needs a path"),
+    None => panic!("{flag} needs a value"),
   }
-  default
+}
+
+/// Where to write the JSON, read out of `--json <path>`, for a binary with no count mode.
+pub fn json_destination(args: &[String]) -> Option<String> {
+  match request(args, false) {
+    Request::Measure { json, .. } => json,
+    Request::List | Request::Count { .. } => {
+      unreachable!("`request` refuses the count mode's flags where the mode is not offered")
+    }
+  }
+}
+
+/// Panics unless `workload`'s two sizes are a doubling, which is what makes `hi / lo` a
+/// per-doubling ratio.
+pub fn assert_doubling(workload: &Workload) {
+  assert_eq!(
+    workload.hi,
+    workload.lo * 2,
+    "`{}` declares sizes that are not a doubling, so its ratio would not be a per-doubling \
+     reading",
+    workload.name
+  );
+}
+
+/// Prints every workload for `--list`, one a line: `<name> <family> <lo> <hi>`.
+pub fn list() {
+  for workload in WORKLOADS {
+    assert_doubling(workload);
+    println!(
+      "{} {} {} {}",
+      workload.name,
+      workload.family.as_str(),
+      workload.lo,
+      workload.hi
+    );
+  }
 }
 
 /// Settles the once-per-process work no workload should be charged for.
