@@ -64,7 +64,7 @@ use super::coverage::node;
 
 use super::{
   GraphqlLosslessInput, recover,
-  recover::{ARGUMENT_HEADS, PARENS_CLOSER_HEADS, closes_enclosing_block, opener_span},
+  recover::{ARGUMENT_HEADS, Header, PARENS_CLOSER_HEADS, closes_enclosing_block, opener_span},
   trivia::{eat_if, expect, peek_kind},
   value::{Constness, required_value},
 };
@@ -175,6 +175,116 @@ lossless_production! {
           directive::<Src, Ctx>(inp, konst)?;
         }
         Ok(())
+      },
+    )
+    .parse_input(inp)
+  }
+
+  /// [`directives`] on a definition's header, `owner`'s: the same run, each directive read by
+  /// [`header_directive`].
+  ///
+  /// A member's directives are [`directives`], which is not touched. `owner` is a marker with no
+  /// size, so this passes nothing [`directives`] does not.
+  fn header_directives<'inp, Src, Ctx>(inp, konst: Constness, owner: impl Header) {
+    if peek_kind::<Src, Ctx>(inp)? != Some(Kind::At) {
+      return Ok(());
+    }
+    node(
+      K::Directives.raw(),
+      |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
+        while peek_kind::<Src, Ctx>(inp)? == Some(Kind::At) {
+          header_directive::<Src, Ctx>(inp, konst, owner)?;
+        }
+        Ok(())
+      },
+    )
+    .parse_input(inp)
+  }
+
+  /// [`directive`] on `owner`'s header: the same directive, its arguments read by
+  /// [`header_arguments`].
+  fn header_directive<'inp, Src, Ctx>(inp, konst: Constness, owner: impl Header) {
+    node(
+      K::Directive.raw(),
+      |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
+        expect::<Src, Ctx>(inp, Kind::At)?;
+        expect::<Src, Ctx>(inp, Kind::Identifier)?;
+        if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
+          header_arguments::<Src, Ctx>(inp, konst, owner)?;
+        }
+        Ok(())
+      },
+    )
+    .parse_input(inp)
+  }
+
+  /// [`arguments`] on `owner`'s header, which ends unclosed in front of what `owner` reads next and
+  /// in front of the start of a definition, where one stands at a member position and nothing the
+  /// list has read leaves a brace open: smear issue #295, as GraphQLx's twin reads it.
+  ///
+  /// No brace of a header's definition is open, so a `}` of a block around the list cannot bound
+  /// it as it bounds a member's, and a list that has lost its `)` would read on through the body
+  /// and the next definition. Each new arm is keyed by its head, and every other arm is
+  /// [`arguments`]' own, in its order:
+  ///
+  /// - **A name** is the member's head, so a valid list reaches it: its spelling is asked first,
+  ///   and only a name spelled like a definition's keyword or a word the owner reads is decided
+  ///   through the peek window, by [`recover::name_ends_header`].
+  /// - **A `{`, an `@`, an `=` or a string** stands at no member position of a valid list, and
+  ///   [`arguments`] sends each to `unexpected`. Here each is reported first, as `unexpected`
+  ///   reports it, and the list ends where a look-ahead behind that report finds what the owner
+  ///   reads next: [`recover::unexpected_or_ends`]. A `{` is asked only where the owner reads a
+  ///   body and an `=` only where it reads a union's members.
+  ///
+  /// Where a test says nothing the list reads its head as [`arguments`] does.
+  fn header_arguments<'inp, Src, Ctx>(inp, konst: Constness, owner: impl Header) {
+    let mut frame = super::descend::<Src, Ctx>(inp)?;
+    let inp = &mut *frame;
+    node(
+      K::Arguments.raw(),
+      |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
+        expect::<Src, Ctx>(inp, Kind::LParen)?;
+        let open = opener_span(inp.span().end());
+        let open_at: usize = inp.state().brace_depth();
+        loop {
+          if eat_if::<Src, Ctx>(inp, Kind::RParen)? {
+            return Ok(());
+          }
+          match peek_kind::<Src, Ctx>(inp)? {
+            None => return recover::unclosed_parens::<Src, Ctx>(inp, open),
+            Some(Kind::RBrace) if closes_enclosing_block(open_at, inp.state().brace_depth()) => {
+              return recover::report_unexpected::<Src, Ctx>(inp, PARENS_CLOSER_HEADS);
+            }
+            Some(Kind::Identifier) => {
+              let mut ends = false;
+              recover::name_ends_header::<Src, Ctx>(inp, open_at, owner, &mut ends)?;
+              if ends {
+                return Ok(());
+              }
+              argument::<Src, Ctx>(inp, konst)?
+            }
+            Some(
+              head @ (Kind::LBrace
+              | Kind::At
+              | Kind::Equal
+              | Kind::InlineString
+              | Kind::BlockString),
+            ) if recover::asks(owner, head) && inp.state().brace_depth() == open_at => {
+              let mut ends = false;
+              recover::unexpected_or_ends::<Src, Ctx>(
+                inp,
+                ARGUMENT_HEADS,
+                open_at,
+                owner,
+                &mut ends,
+              )?;
+              if ends {
+                return Ok(());
+              }
+            }
+            Some(_) => recover::unexpected::<Src, Ctx>(inp, ARGUMENT_HEADS)?,
+          }
+        }
       },
     )
     .parse_input(inp)

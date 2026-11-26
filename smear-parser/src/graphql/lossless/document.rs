@@ -81,13 +81,14 @@ use super::{
     input_fields_definition, root_operation_type_definitions, starts_description,
     type_system_definition, union_member_types,
   },
-  directive::directives,
+  directive::header_directives,
   executable::{fragment_definition, operation_definition},
   recover,
   recover::{
-    BLOCK_EXTENSION_TAIL_HEADS, DEFINITION_HEADS, DESCRIBED_DEFINITION_HEADS,
-    DIRECTIVE_EXTENSION_TAIL_HEADS, OBJECT_EXTENSION_TAIL_HEADS, SCALAR_EXTENSION_TAIL_HEADS,
-    TYPE_EXTENSION_HEADS, TYPE_SYSTEM_DEFINITION_HEADS, UNION_EXTENSION_TAIL_HEADS,
+    BLOCK_EXTENSION_TAIL_HEADS, BareHeader, BodyHeader, DEFINITION_HEADS,
+    DESCRIBED_DEFINITION_HEADS, DIRECTIVE_EXTENSION_TAIL_HEADS, OBJECT_EXTENSION_TAIL_HEADS,
+    SCALAR_EXTENSION_TAIL_HEADS, TYPE_EXTENSION_HEADS, TYPE_SYSTEM_DEFINITION_HEADS,
+    UNION_EXTENSION_TAIL_HEADS, UnionHeader,
   },
   trivia::{expect, peek_as, peek_kind},
   value::Constness,
@@ -114,7 +115,7 @@ lossless_production! {
       |inp: &mut GraphqlLosslessInput<'inp, '_, Src, Ctx>| {
         expect_two_names::<Src, Ctx>(inp)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::At) {
-          directives::<Src, Ctx>(inp, Constness::Const)
+          header_directives::<Src, Ctx>(inp, Constness::Const, BareHeader)
         } else {
           // Reported, and nothing is consumed: whatever is here starts the next definition.
           recover::report_unexpected::<Src, Ctx>(inp, SCALAR_EXTENSION_TAIL_HEADS)
@@ -162,7 +163,7 @@ lossless_production! {
       present = true;
     }
     if peek_kind::<Src, Ctx>(inp)? == Some(Kind::At) {
-      directives::<Src, Ctx>(inp, Constness::Const)?;
+      header_directives::<Src, Ctx>(inp, Constness::Const, BodyHeader)?;
       present = true;
     }
     if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
@@ -185,7 +186,7 @@ lossless_production! {
         expect_two_names::<Src, Ctx>(inp)?;
         let mut present = false;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::At) {
-          directives::<Src, Ctx>(inp, Constness::Const)?;
+          header_directives::<Src, Ctx>(inp, Constness::Const, UnionHeader)?;
           present = true;
         }
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Equal) {
@@ -210,7 +211,7 @@ lossless_production! {
         expect_two_names::<Src, Ctx>(inp)?;
         let mut present = false;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::At) {
-          directives::<Src, Ctx>(inp, Constness::Const)?;
+          header_directives::<Src, Ctx>(inp, Constness::Const, BodyHeader)?;
           present = true;
         }
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
@@ -235,7 +236,7 @@ lossless_production! {
         expect_two_names::<Src, Ctx>(inp)?;
         let mut present = false;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::At) {
-          directives::<Src, Ctx>(inp, Constness::Const)?;
+          header_directives::<Src, Ctx>(inp, Constness::Const, BodyHeader)?;
           present = true;
         }
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
@@ -262,7 +263,7 @@ lossless_production! {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         let mut present = false;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::At) {
-          directives::<Src, Ctx>(inp, Constness::Const)?;
+          header_directives::<Src, Ctx>(inp, Constness::Const, BodyHeader)?;
           present = true;
         }
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
@@ -295,7 +296,7 @@ lossless_production! {
         expect::<Src, Ctx>(inp, Kind::At)?;
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::At) {
-          directives::<Src, Ctx>(inp, Constness::Const)
+          header_directives::<Src, Ctx>(inp, Constness::Const, BareHeader)
         } else {
           // Reported, and nothing is consumed: whatever is here starts the next definition.
           recover::report_unexpected::<Src, Ctx>(inp, DIRECTIVE_EXTENSION_TAIL_HEADS)

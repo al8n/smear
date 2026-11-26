@@ -3279,11 +3279,14 @@ enum Absent {
 /// probe that reaches it with a hole-free tree, the root, what the projection answers, and what
 /// the site leaves out.
 ///
-/// Two sites build no hole and still have no hole-free probe, and their rows answer `hole`: the
-/// `report` rows for a variables definition and for an arguments definition. A `hole` measures
-/// nothing of the site itself, so what holds their arms is `recovery_graphql.rs`:
+/// Four sites build no hole and still have no hole-free probe, and their rows answer `hole`: the
+/// `report` rows for a variables definition and for a field's arguments definition, and the two
+/// for a list on a definition's header that meets a `}` closing a brace open before it, which
+/// only a stray `{` the root takes as an `Error` puts there. A `hole` measures nothing of the site
+/// itself, so what holds the first two arms is `recovery_graphql.rs`:
 /// `an_unclosed_variables_definition_leaves_the_operation_after_the_brace` and
-/// `an_unclosed_arguments_definition_leaves_the_definition_after_the_brace`.
+/// `an_unclosed_arguments_definition_leaves_the_definition_after_the_brace`. The header's two are
+/// the arms GraphQLx's twin has, where a module's brace stands open around a header.
 type Site = (
   &'static str,
   &'static str,
@@ -3508,12 +3511,39 @@ const SITES: &[Site] = &[
   ),
   // No hole-free text reaches this site either. Inside a block the list is a field's, and a field
   // fails for want of its `:` once the list has stopped, so the definition is lost and the `}`
-  // the list left is the root's. A directive's list stands in no block.
+  // the list left is the root's. A directive definition's own list is a header's, the rows after.
   (
     "definition.rs",
     "report",
     "type T { f(a: Int }",
     Root::Mixed,
+    "hole",
+    Absent::Token(K::ArgumentsDefinition, ")"),
+  ),
+  // A directive definition's own list, on its header: the empty list, the end of input, and a `}`
+  // closing a brace open before it. A header stands in no block, so only the root's `Error` of a
+  // stray `{` puts a brace open there, and that probe carries the hole.
+  (
+    "definition.rs",
+    "report",
+    "directive @d() on FIELD",
+    Root::Mixed,
+    "MissingChild ArgumentsDefinition",
+    Absent::Imaged,
+  ),
+  (
+    "definition.rs",
+    "unclosed",
+    "directive @d(a: Int",
+    Root::Mixed,
+    "MissingChild DirectiveDefinition",
+    Absent::Token(K::ArgumentsDefinition, ")"),
+  ),
+  (
+    "definition.rs",
+    "report",
+    "{ directive @d(a: Int }",
+    Root::TypeSystem,
     "hole",
     Absent::Token(K::ArgumentsDefinition, ")"),
   ),
@@ -3691,6 +3721,24 @@ const SITES: &[Site] = &[
     "{ f(a: 1 }",
     Root::Mixed,
     "Ok",
+    Absent::Token(K::Arguments, ")"),
+  ),
+  // A directive's list on a definition's header: the end of input, and a `}` closing a brace open
+  // before it, which only the root's `Error` of a stray `{` puts there.
+  (
+    "directive.rs",
+    "unclosed",
+    "scalar S @k(a: 1",
+    Root::Mixed,
+    "Ok",
+    Absent::Token(K::Arguments, ")"),
+  ),
+  (
+    "directive.rs",
+    "report",
+    "{ scalar S @k(a: 1 }",
+    Root::TypeSystem,
+    "hole",
     Absent::Token(K::Arguments, ")"),
   ),
   (
@@ -3883,16 +3931,22 @@ const FAMILIES: [(&str, &[&str]); 2] = [
 ];
 
 /// How many of [`SITES`]' probes project.
-const PROJECTING_SITES: usize = 14;
+const PROJECTING_SITES: usize = 15;
 
 /// Image-less tokens a site can leave out whose probe is **not** a witness.
 ///
-/// Two: the `)` of an arguments definition and of a variables definition, where the list stops
-/// at a `}` open before it. Each of those probes carries the `Error` the root makes of that `}`:
-/// the field around the first list fails for want of its `:`, and no block of the grammar stands
-/// around the second. Both pairs are in the header's table all the same, witnessed by the site
-/// that leaves the same `)` out at the end of input.
-const UNWITNESSED: &[(&str, &str)] = &[("ArgumentsDefinition", ")"), ("VariablesDefinition", ")")];
+/// Three: the `)` of a directive's arguments, of an arguments definition and of a variables
+/// definition, where the list stops at a `}` open before it. Each of those probes carries an
+/// `Error` the root makes of a brace: on a definition's header no block of the grammar stands
+/// around the list, so only a stray `{` the root takes puts one open there; the field around an
+/// arguments definition fails for want of its `:`, and the root takes the `}`; and no block stands
+/// around an operation. All three pairs are in the header's table all the same, witnessed by the
+/// sites that leave the same `)` out at the end of input.
+const UNWITNESSED: &[(&str, &str)] = &[
+  ("Arguments", ")"),
+  ("ArgumentsDefinition", ")"),
+  ("VariablesDefinition", ")"),
+];
 
 #[test]
 fn every_report_and_build_site_has_a_measured_answer() {
@@ -3947,7 +4001,7 @@ fn every_report_and_build_site_has_a_measured_answer() {
   };
   assert_eq!(
     (total("report"), total("unclosed")),
-    (46, 11),
+    (49, 13),
     "the two families' populations"
   );
 
