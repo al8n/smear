@@ -3718,6 +3718,78 @@ mod lossless {
     }
   }
 
+  /// A look-ahead takes at most 256 tokens, trivia among them, from the head it is made at, so
+  /// what it lexes and gives back stays a constant there. Codex's witness stands five thousand
+  /// blanks inside the body it would cross: a look-ahead that crossed them all spent the scan
+  /// allowance with what it gave back, so that the list's next skip took one token and `T` was
+  /// lost. Here it stops at the cap, finds nothing, and leaves the allowance open, the list skips
+  /// its junk as main does, and `T` keeps its field.
+  #[test]
+  fn a_look_ahead_takes_no_more_than_its_cap() {
+    let text = ["type T @d({(x y)", &" ".repeat(5000), "}) { f: Int }"].concat();
+    assert_eq!(
+      written(&read(&text).tree, K::FieldDefinition),
+      ["f: Int"],
+      "{text}"
+    );
+  }
+
+  /// The cap counts from the head: with 246 blanks in front of `f` the look-ahead takes 256
+  /// tokens, to the blank in front of `S`, finds `scalar S` behind the body, and the list ends in
+  /// front of the body; with 247 it would take a 257th, finds nothing, and the list reads its junk
+  /// as main reads it, `f: Int` among its arguments. `S` is a definition either way.
+  #[test]
+  fn a_look_ahead_finds_its_evidence_up_to_its_cap_and_none_past_it() {
+    for (blanks, kept) in [(246, true), (247, false)] {
+      let text = ["type T @d(x: 1 {", &" ".repeat(blanks), "f: Int } scalar S"].concat();
+      let answer = read(&text);
+      let fields = written(&answer.tree, K::FieldDefinition);
+      assert_eq!(
+        fields.len(),
+        usize::from(kept),
+        "{blanks} blanks: {fields:?}"
+      );
+      let arguments = written(&answer.tree, K::Argument);
+      assert_eq!(
+        arguments.iter().any(|argument| argument == "f: Int"),
+        !kept,
+        "{blanks} blanks: {arguments:?}"
+      );
+      assert_eq!(scalars(&top(&answer.tree)), ["scalar S"], "{blanks} blanks");
+    }
+  }
+
+  /// The reading that would take a look-ahead's evidence requests a parser frame at a group's own
+  /// opener, and at `set!` or `map!` in front of the `{` it asks for next, and the look-ahead asks
+  /// for both. Codex's witness, under a nesting ceiling of one: `@e`'s arguments would take the
+  /// one frame `@d`'s leave free, and `set!` would request a second, which ends the document. The
+  /// list reads as main reads it, no root is refused, and `S` is a definition at both.
+  #[test]
+  fn a_look_ahead_asks_for_every_frame_the_reading_would_request() {
+    let text = "scalar A @d(] @e(x:set!) scalar S";
+    let limits = LosslessLimits::with_max_nesting_depth(1);
+    let errors = lent(&Lossless::with_limits(limits), text);
+    assert!(
+      !errors
+        .iter()
+        .any(|(code, _)| code == "smear::syntax::nesting-limit"),
+      "{text}: {errors:?}"
+    );
+    for (root, parse) in [
+      ("mixed", parse_document_with_limits(text, limits)),
+      (
+        "type-system",
+        parse_type_system_document_with_limits(text, limits),
+      ),
+    ] {
+      let scalars = written(&parse.syntax(), K::ScalarTypeDefinition);
+      assert!(
+        scalars.iter().any(|scalar| scalar == "scalar S"),
+        "{text} at the {root} root: {scalars:?}"
+      );
+    }
+  }
+
   /// A brace inside a header's list stays the list's junk, as it always was, where no evidence of a
   /// body stands behind its `}` or no `}` balances it: the list reads the members around and inside
   /// it, and the definition keeps its own body.

@@ -939,6 +939,46 @@ mod lossless {
     }
   }
 
+  /// GraphQLx's twin: a look-ahead takes at most 256 tokens, trivia among them, from the head it
+  /// is made at. Codex's witness stands five thousand blanks inside the body it would cross: a
+  /// look-ahead that crossed them all spent the scan allowance with what it gave back, so that the
+  /// list's next skip took one token and `T` was lost. Here it stops at the cap, the list skips
+  /// its junk as main does, and `T` keeps its field.
+  #[test]
+  fn a_look_ahead_takes_no_more_than_its_cap() {
+    let text = ["type T @d({(x y)", &" ".repeat(5000), "}) { f: Int }"].concat();
+    assert_eq!(
+      written(&read(&text).tree, K::FieldDefinition),
+      ["f: Int"],
+      "{text}"
+    );
+  }
+
+  /// GraphQLx's twin: with 246 blanks in front of `f` the look-ahead takes 256 tokens, to the
+  /// blank in front of `S`, and the list ends in front of the body; with 247 it would take a
+  /// 257th, finds nothing, and the list reads its junk as main reads it, `f: Int` among its
+  /// arguments. `S` is a definition either way.
+  #[test]
+  fn a_look_ahead_finds_its_evidence_up_to_its_cap_and_none_past_it() {
+    for (blanks, kept) in [(246, true), (247, false)] {
+      let text = ["type T @d(x: 1 {", &" ".repeat(blanks), "f: Int } scalar S"].concat();
+      let tree = read(&text).tree;
+      let fields = written(&tree, K::FieldDefinition);
+      assert_eq!(
+        fields.len(),
+        usize::from(kept),
+        "{blanks} blanks: {fields:?}"
+      );
+      let arguments = written(&tree, K::Argument);
+      assert_eq!(
+        arguments.iter().any(|argument| argument == "f: Int"),
+        !kept,
+        "{blanks} blanks: {arguments:?}"
+      );
+      assert_eq!(top_level_scalars(&tree), ["scalar S"], "{blanks} blanks");
+    }
+  }
+
   /// The least produce-event budget under which the parse of `text` is not refused.
   fn least_budget(text: &str) -> usize {
     (0..=4 * lexemes(text))
