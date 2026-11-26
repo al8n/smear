@@ -1335,11 +1335,12 @@ lossless_production! {
 
   /// Behind the report of a name where a directive definition reads a location, a name whose
   /// spelling is no location's: whether the locations end in front of it, which leaves it to the
-  /// item loop. A name spelled like no keyword a root restarts at is a location misspelled, and
-  /// they go on. At one spelled like such a keyword they go on only where a look-ahead, given back,
-  /// takes the name and finds behind it, across any trivia, a token that starts no definition with
-  /// it by [`starts_with`]'s test, or the end of input. Where the allowance is spent, and where the
-  /// look-ahead meets a stop or an error, they end.
+  /// item loop. They end only at a name spelled like a keyword a root restarts at, and only where a
+  /// look-ahead, given back, takes the name and finds behind it, across any trivia, a token that
+  /// starts a definition with it by [`starts_with`]'s test. Everywhere else they go on, and the
+  /// name is a location misspelled, as main reads it: at a name spelled like no such keyword, at
+  /// the end of input behind the name, where the allowance is spent, and where the look-ahead
+  /// meets a stop or an error.
   ///
   /// No valid location is spelled like such a keyword, so no valid document makes the look-ahead.
   fn location_ends<'inp, Src, Ctx>(inp, keyword: Option<Keyword>, ends: &mut bool) {
@@ -1351,19 +1352,19 @@ lossless_production! {
       inp.token_budget().spent(),
       inp.state().token().tokens(),
     );
-    let mut goes_on = false;
+    let mut starts = false;
     if !exhausted {
       // Declined always, so every token the look-ahead reads, every report a lexer makes inside it
       // and any stop it meets are taken back with it.
       inp.attempt(|inp| {
         let mut read = false;
         if location_ahead::<Src, Ctx>(inp, keyword, &mut read).is_ok() {
-          goes_on = read;
+          starts = read;
         }
         None::<()>
       });
     }
-    *ends = !goes_on;
+    *ends = starts;
     Ok(())
   }
 
@@ -1526,14 +1527,13 @@ lossless_production! {
   }
 
   /// A location ahead, at a name spelled `keyword`: the name taken, and whether the token behind
-  /// it, read across any trivia, starts no definition with it by [`starts_with`]'s test. The end of
+  /// it, read across any trivia, starts a definition with it by [`starts_with`]'s test. The end of
   /// input behind it starts none.
-  fn location_ahead<'inp, Src, Ctx>(inp, keyword: Option<Keyword>, goes_on: &mut bool) {
+  fn location_ahead<'inp, Src, Ctx>(inp, keyword: Option<Keyword>, starts: &mut bool) {
     inp.try_expect_or_stop(|_| true)?;
-    *goes_on = match peek_kind::<Src, Ctx>(inp)? {
-      None => true,
-      Some(kind) => !starts_with(keyword, kind, peek_as::<Src, Ctx, Keyword>(inp)?),
-    };
+    if let Some(kind) = peek_kind::<Src, Ctx>(inp)? {
+      *starts = starts_with(keyword, kind, peek_as::<Src, Ctx, Keyword>(inp)?);
+    }
     Ok(())
   }
 
