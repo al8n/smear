@@ -435,10 +435,6 @@ def main():
 
   if shutil.which("valgrind") is None:
     fail(args.outcome, "valgrind is not installed on this host")
-  # The binary's path is its argv[0], and argv and the environment are laid out at the top of the
-  # initial stack. Paths of one length — `run.sh` builds into `target-head` and `target-base` — put
-  # every stack buffer at the same address on both sides; another length shifts them all, and a
-  # copy routine that branches on alignment would then count differently for no change in the code.
   resolved = {
     side: os.path.realpath(path) for side, path in (("head", args.head), ("base", args.base))
   }
@@ -459,6 +455,10 @@ def main():
       f"the head's and the base's wall_clock are one file, {resolved['head']}: a count of it "
       f"against itself reads no difference",
     )
+  # The binary's path is its argv[0], and argv and the environment are laid out at the top of the
+  # initial stack. Paths of one length — `run.sh` builds into `target-head` and `target-base` — put
+  # every stack buffer at the same address on both sides; another length shifts them all, and a
+  # copy routine that branches on alignment would then count differently for no change in the code.
   lengths = [len(os.fsencode(path)) for path in (args.head, args.base)]
   if lengths[0] != lengths[1]:
     fail(
