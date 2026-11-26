@@ -1294,6 +1294,46 @@ jobs:
         key: ${{ runner.os }}-publish-dry-run-downloads-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-publish-dry-run-downloads-
+    # A package whose dependency comes from git cannot be packaged as it is built. `cargo publish`
+    # refuses a git dependency that has no `version`, and with a `version` beside the `git` key it
+    # drops the git source and verifies against that registry release instead of the pinned
+    # commit. So while the resolved graph takes any package from git, the two dry runs below and
+    # the packaged-README check between them do not run: this step names those packages in a
+    # notice, and the job stays green.
+    #
+    # A git source is the only reason they are skipped. `--all-features` because packaging reads
+    # every declared dependency, an optional one included, so a pin behind a feature counts too.
+    # The release workflow has no such exit, and the same pin keeps it blocked.
+    - name: Find the packages the graph takes from git
+      id: git-pins
+      run: |
+        set -euo pipefail
+        META="$RUNNER_TEMP/publish-dry-run-metadata.json"
+        cargo metadata --format-version 1 --all-features > "$META"
+        python3 - "$META" <<'PY'
+        import json, os, sys
+
+        with open(sys.argv[1]) as handle:
+            packages = json.load(handle)["packages"]
+
+        pins = sorted(
+            f"{pkg['name']} {pkg['version']} ({pkg['source']})"
+            for pkg in packages
+            if (pkg.get("source") or "").startswith("git+")
+        )
+        with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+            output.write(f"found={'true' if pins else 'false'}\n")
+
+        if pins:
+            message = (
+                "cargo publish cannot package a dependency taken from git, and the resolved graph "
+                "takes " + ", ".join(pins) + " from git, so the dry runs did not run"
+            )
+            escaped = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+            print(f"::notice title=publish dry run skipped::{escaped}")
+        else:
+            print("ok: the resolved graph takes no package from git")
+        PY
     # `--workspace`, NOT `-p smear`, and the difference is a hard failure rather than a
     # preference. `smear` depends on `smear-lexer` by path plus version, and nothing named
     # `smear-lexer` is on the registry yet, so `cargo publish --dry-run -p smear` exits 1 with
@@ -1304,6 +1344,7 @@ jobs:
     # `publish = false` members are skipped by cargo itself, so `smear-smoke`, `smear-noatomic`
     # and `source-census` are not named here and do not need to be.
     - name: cargo publish --dry-run --workspace
+      if: steps.git-pins.outputs.found != 'true'
       run: cargo publish --dry-run --workspace
     # The dry run passing is necessary and NOT sufficient, and the gap is specific.
     # `smear/README.md` is a symlink to the workspace-root `README.md`, which cargo resolves by
@@ -1317,6 +1358,7 @@ jobs:
     # cargo's temporary archive path has moved between releases (`package/` -> `package/tmp-crate/`
     # as of 1.99) while the extracted tree has not.
     - name: Assert the packaged README is the real one
+      if: steps.git-pins.outputs.found != 'true'
       run: |
         set -euo pipefail
         TD="${CARGO_TARGET_DIR:-target}"
@@ -1346,6 +1388,7 @@ jobs:
     # fallback is `cargo publish --dry-run --workspace --all-features`, which also verifies
     # `graphql-proto` and `smear` once more.
     - name: cargo publish --dry-run, every packaged source of the compiler
+      if: steps.git-pins.outputs.found != 'true'
       run: cargo publish --dry-run -p smear-lexer -p smear-parser -p smear-compiler --all-features
 
   # Build with exactly the MSRV declared in Cargo.toml's `rust-version`, so

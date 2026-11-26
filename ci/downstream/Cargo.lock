@@ -33,6 +33,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cower"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4fc0c72149e924a8bc983a767c1246ffec8a25d12b46f5e4ae2b2e842c4e12f3"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "deranged"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -130,12 +139,9 @@ dependencies = [
 
 [[package]]
 name = "mayber"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbb3d0e65f897f21b9df8f7bbca332058cd812673eb794e3a476c335e4969e57"
-dependencies = [
- "rustversion",
-]
+checksum = "9735e521c3afa9b39bc0ec64f118980adc362e90bd891a9e6301aee8fbc17cd4"
 
 [[package]]
 name = "memchr"
@@ -313,10 +319,10 @@ dependencies = [
 [[package]]
 name = "tokora"
 version = "0.13.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ebda3cea5b9be8d2070e89bd5a8084f27acbf653d477dbb4f3b68c6e2b388087"
+source = "git+https://github.com/al8n/tokora?rev=b0a70b62f497fe485e89638e50ba83cfdc206194#b0a70b62f497fe485e89638e50ba83cfdc206194"
 dependencies = [
  "ascii",
+ "cower",
  "deranged",
  "derive_more",
  "hybrid-arraydeque",

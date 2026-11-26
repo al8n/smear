@@ -189,10 +189,10 @@ const INPUTS: &[(&str, &str, &str)] = &[
   ),
   (
     "\"unterminated",
-    r#"#0 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 13 }, data: String(StringErrors([Unterminated(UnexpectedEnd { offset: 0, name: Some(CowStr { inner: "string value" }), hint: Quote, expected: None, terminal: false, _lang: PhantomData<()> })])) }]))) span=SimpleSpan { start: 0, end: 13 } slice="\"unterminated"
+    r#"#0 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 13 }, data: String(StringErrors([Unterminated(UnexpectedEnd { offset: 0, name: Some("string value"), hint: Quote, expected: None, terminal: false, _lang: PhantomData<()> })])) }]))) span=SimpleSpan { start: 0, end: 13 } slice="\"unterminated"
 #1 lex=None span=SimpleSpan { start: 13, end: 13 } slice=""
 "#,
-    r#"#0 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 13 }, data: String(StringErrors([Unterminated(UnexpectedEnd { offset: 0, name: Some(CowStr { inner: "string value" }), hint: Quote, expected: None, terminal: false, _lang: PhantomData<()> })])) }]))) span=SimpleSpan { start: 0, end: 13 } slice=[34, 117, 110, 116, 101, 114, 109, 105, 110, 97, 116, 101, 100]
+    r#"#0 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 13 }, data: String(StringErrors([Unterminated(UnexpectedEnd { offset: 0, name: Some("string value"), hint: Quote, expected: None, terminal: false, _lang: PhantomData<()> })])) }]))) span=SimpleSpan { start: 0, end: 13 } slice=[34, 117, 110, 116, 101, 114, 109, 105, 110, 97, 116, 101, 100]
 #1 lex=None span=SimpleSpan { start: 13, end: 13 } slice=[]
 "#,
   ),
@@ -207,10 +207,10 @@ const INPUTS: &[(&str, &str, &str)] = &[
   ),
   (
     "1e",
-    r#"#0 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 2 }, data: Float(UnexpectedEnd(UnexpectedEnd { offset: 0, name: Some(CowStr { inner: "float" }), hint: Exponent(SignOrDigit), expected: None, terminal: false, _lang: PhantomData<()> })) }]))) span=SimpleSpan { start: 0, end: 2 } slice="1e"
+    r#"#0 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 2 }, data: Float(UnexpectedEnd(UnexpectedEnd { offset: 0, name: Some("float"), hint: Exponent(SignOrDigit), expected: None, terminal: false, _lang: PhantomData<()> })) }]))) span=SimpleSpan { start: 0, end: 2 } slice="1e"
 #1 lex=None span=SimpleSpan { start: 2, end: 2 } slice=""
 "#,
-    r#"#0 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 2 }, data: Float(UnexpectedEnd(UnexpectedEnd { offset: 0, name: Some(CowStr { inner: "float" }), hint: Exponent(SignOrDigit), expected: None, terminal: false, _lang: PhantomData<()> })) }]))) span=SimpleSpan { start: 0, end: 2 } slice=[49, 101]
+    r#"#0 lex=Some(Err(LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 2 }, data: Float(UnexpectedEnd(UnexpectedEnd { offset: 0, name: Some("float"), hint: Exponent(SignOrDigit), expected: None, terminal: false, _lang: PhantomData<()> })) }]))) span=SimpleSpan { start: 0, end: 2 } slice=[49, 101]
 #1 lex=None span=SimpleSpan { start: 2, end: 2 } slice=[]
 "#,
   ),
