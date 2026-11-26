@@ -466,22 +466,31 @@ All notable changes to Smear are documented in this file.
 - `smear-parser`: in both dialects' lossless layers, a list on a definition's header that has lost
   its `)`, a directive's arguments or a directive definition's own list, no longer reads the
   definition's body and the next definition as its members. It ends, unclosed, in front of what the
-  definition reads next: its body, where the `}` that balances the `{` is written and the end of
-  input, a `}` closing a block around the list or the start of a definition stands behind it; its
-  next directive and a union's members, on the same evidence, and on none where a directive's name
-  or a member, anywhere in the chain, is spelled like a definition's keyword with a token behind it
-  that may begin that definition; GraphQLx's `where`, and a directive definition's `repeatable`
-  and `on`, with neither a `:` nor a definition's keyword behind the word; and the start of a
-  definition, a keyword a root restarts at with neither behind it, `extend` and what it extends
-  counting as one, its description's string in front of it or not. The report there is the one the
-  list made first at that head: the unexpected token at a `{`, an `@`, an `=` or a string, or the
-  `:` a member named like the keyword misses. A directive definition reads no location where a
-  definition starts: a location spelled like a definition's keyword is reported at once, and a
-  look-ahead behind that report decides whether a definition starts there, across any trivia. A
-  list inside a definition's braces reads as it did, and so does every valid document, under a
-  produce-event budget as well: what the list reads ahead of a valid member stays within the
-  lexer's cache, so no valid document costs an event more than before. The trees and the
-  diagnostics of broken documents change accordingly.
+  definition reads next: its body, where the `}` that balances the `{` is written, nothing inside it
+  may begin a definition and every bracket inside it closes in order, and the end of input, a `}`
+  closing a block around the list or the start of a definition stands behind it; its next directive
+  and a union's members, on the same evidence but for the end of input behind a body reached through
+  a directive, and on none where anything the evidence crosses may begin a definition, a `{`
+  included, where a word the owner's list stops at stands at the top of a directive's arguments,
+  where a bracket inside a directive's arguments or a path's type arguments closes out of order, or
+  where the brackets it crosses nest deeper than the nesting the parse has left; GraphQLx's `where`,
+  and a directive definition's `repeatable` and `on`, with neither a `:` nor a definition's keyword
+  behind the word; and the start of a definition, a keyword a root restarts at with neither behind
+  it, `extend` and what it extends counting as one, its description's string in front of it or not.
+  The report there is the one the list made first at that head: the unexpected token at a `{`, an
+  `@`, an `=` or a string, or the `:` a member named like the keyword misses. What begins at a stop
+  reads as it reads at a root, so a definition, or GraphQLx's where clause, that begins in the junk
+  may take in what main reads as a definition: at a mixed root `type T @d(x: 1 type U { f: Int }`
+  builds the type `U` where main builds the operation `{ f: Int }`. A directive definition reads no
+  location where a definition starts: a location spelled like a definition's keyword is reported at
+  once, and a look-ahead behind that report decides whether a definition starts there, across any
+  trivia; where that look-ahead cannot be made, the name is a location, as before. A list inside a
+  definition's braces reads as it did, and so does every valid document, under a produce-event
+  budget as well: what the list reads ahead of a valid member stays within the lexer's cache, so no
+  valid document costs an event more than before. In a broken document, a window that meets the end
+  of input across a run of lexer errors has that run lexed a second time and charged twice, until
+  tokora retains the end of input after an error run. The trees and the diagnostics of broken
+  documents change accordingly.
 - `smear-parser`: `lossless::recover::skip_unexpected`, `unexpected` behind its report, for a
   caller that reads ahead between the two, and `lossless::trivia::expected_at`, the failure
   `expect` reports, built from a token a production has read through the peek window.
