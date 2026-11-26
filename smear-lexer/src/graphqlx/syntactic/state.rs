@@ -25,9 +25,8 @@ use crate::limits::SyntacticLimits;
 pub struct SyntacticState {
   /// The block's word in the low half, zero outside a block and inside one, one more than the
   /// count of open `<`, and the nesting ceiling in the high half. The two are halves of one `u64`
-  /// and not two `u32` fields because no field of the state is narrower than a word, so that no
-  /// narrow store meets the whole-word copy of the state that tokora makes into each token it
-  /// caches.
+  /// and not two `u32` fields so that no field of the state is narrower than a word, and the copy
+  /// of the state that tokora makes into each token it caches moves whole words.
   packed: u64,
   /// The count of open brackets.
   depth: usize,
