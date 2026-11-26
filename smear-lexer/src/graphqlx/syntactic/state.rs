@@ -18,31 +18,31 @@ use crate::limits::SyntacticLimits;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct SyntacticState {
   limits: SyntacticLimits,
-  /// Zero outside a block, and inside one, one more than the count of open `<`.
-  block: usize,
 }
 
-// tokora copies the state into every token it caches, so a word added here is a word per cached
-// token. The state is its limits and the one word of a block.
+// PROBE F.S: the state is its limits and nothing else, two words on a 64-bit target.
 const _: () = assert!(
-  core::mem::size_of::<SyntacticState>()
-    == core::mem::size_of::<SyntacticLimits>() + core::mem::size_of::<usize>(),
-  "SyntacticState must stay its SyntacticLimits and one word: every cached GraphQLx token carries \
-   one."
+  core::mem::size_of::<SyntacticState>() == core::mem::size_of::<SyntacticLimits>(),
+  "SyntacticState must be exactly its SyntacticLimits."
+);
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(
+  core::mem::size_of::<SyntacticState>() == 2 * core::mem::size_of::<usize>(),
+  "SyntacticState must be two words."
 );
 
 impl SyntacticState {
   /// A state that holds `limits`, outside a block.
   #[inline(always)]
   pub const fn new(limits: SyntacticLimits) -> Self {
-    Self { limits, block: 0 }
+    Self { limits }
   }
 
   /// Whether the lexer is inside a `const { … }` block, where a comma is a token, `-` is always an
   /// operator, `>>` is a shift where no `<` is open, and a name touching a quote is a prefix.
   #[inline(always)]
   pub const fn in_const_block(&self) -> bool {
-    // PROBE F.Q: never in a block, so the loop's tests of it fold away. Measurement only.
+    // PROBE F.Q and F.S: never in a block, so the loop's tests of it fold away. Measurement only.
     false
   }
 
@@ -50,47 +50,31 @@ impl SyntacticState {
   /// ceiling once it reaches it, and a `{` or a `}` sets it to zero.
   #[inline(always)]
   pub const fn open_angles(&self) -> usize {
-    self.block.saturating_sub(1)
+    0
   }
 
   /// Enters a block, with no `<` open. A parser calls it right after the block's `{`. It touches
   /// none of the limits.
   #[inline(always)]
-  pub const fn enter_const_block(&mut self) {
-    self.block = 1;
-  }
+  pub const fn enter_const_block(&mut self) {}
 
   /// Leaves the block. A parser calls it right after the block's `}`. It touches none of the
   /// limits.
   #[inline(always)]
-  pub const fn leave_const_block(&mut self) {
-    self.block = 0;
-  }
+  pub const fn leave_const_block(&mut self) {}
 
   /// Counts a `<` that opens, inside a block; nothing outside one.
   #[inline(always)]
-  pub(crate) const fn open_angle(&mut self) {
-    if self.block != 0 {
-      self.block = self.block.saturating_add(1);
-    }
-  }
+  pub(crate) const fn open_angle(&mut self) {}
 
   /// Uncounts a `>` that closes a `<` the block opened; nothing when none is open.
   #[inline(always)]
-  pub(crate) const fn close_angle(&mut self) {
-    if self.block > 1 {
-      self.block -= 1;
-    }
-  }
+  pub(crate) const fn close_angle(&mut self) {}
 
   /// A brace's clear: no `<` is open after it. Outside a block this is the identity, so no brace
   /// enters one.
   #[inline(always)]
-  pub(crate) const fn clear_angles(&mut self) {
-    if self.block > 1 {
-      self.block = 1;
-    }
-  }
+  pub(crate) const fn clear_angles(&mut self) {}
 
   /// The limits this state holds, with the count of open brackets the lexer has stepped.
   #[inline(always)]
