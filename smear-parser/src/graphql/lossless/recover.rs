@@ -382,7 +382,8 @@ fn delimiters(kind: &Kind) -> Balance<u8> {
 // A head a valid list can hold, a name or a description's string, is decided through the peek
 // window, read no further than the member there would read, and a stop reports the `:` that
 // member would miss. A head no valid list holds is reported first, as `unexpected` reports it, and
-// decided behind that report by a look-ahead that is given back.
+// decided behind that report by a look-ahead that is given back. So is a directive definition's
+// location spelled like a keyword a root restarts at, which no valid location is.
 // ---------------------------------------------------------------------------------------------
 
 /// Whether `keyword` names what an `extend` extends: the eight `document.rs`'s
@@ -639,7 +640,8 @@ lossless_production! {
 // ---------------------------------------------------------------------------------------------
 // What a list on a definition's header reads at its head before it ends there. The window reads
 // are for a head a valid list can hold and make no report but the stop's own; the look-ahead is for
-// a head no valid list holds, is made behind that head's report, and is given back.
+// a head no valid list holds, is made behind that head's report, and is given back. A directive
+// definition's location spelled like a definition's keyword is decided the same way.
 // ---------------------------------------------------------------------------------------------
 
 lossless_production! {
@@ -791,22 +793,41 @@ lossless_production! {
     Ok(())
   }
 
-  /// Whether the start of a definition stands at the head, a name: [`starts_with`]'s test of it
-  /// and of the token behind it, read through the peek window. Where a directive definition reads
-  /// a location, such a name is none.
+  /// Behind the report of a name where a directive definition reads a location, a name whose
+  /// spelling is no location's: whether the locations end in front of it, which leaves it to the
+  /// item loop. A name spelled like no keyword a root restarts at is a location misspelled, and
+  /// they go on. At one spelled like such a keyword they go on only where a look-ahead, given back,
+  /// takes the name and finds behind it, across any trivia, a token that starts no definition with
+  /// it by [`starts_with`]'s test, or the end of input. Where the allowance is spent, and where the
+  /// look-ahead meets a stop or an error, they end.
   ///
-  /// The spelling is asked first. A location is spelled in upper case and these keywords in lower,
-  /// so a valid location costs one test of its spelling and opens no window.
-  fn starts_definition<'inp, Src, Ctx>(inp, starts: &mut bool) {
-    let keyword = peek_as::<Src, Ctx, ContextualKeyword>(inp)?;
+  /// No valid location is spelled like such a keyword, so no valid document makes the look-ahead.
+  fn location_ends<'inp, Src, Ctx>(
+    inp,
+    keyword: Option<ContextualKeyword>,
+    ends: &mut bool,
+  ) {
     if !restarts_a_root(keyword) {
       return Ok(());
     }
-    let mut behind = None;
-    token_behind::<Src, Ctx>(inp, 0, &mut behind)?;
-    if let Some((_, kind, spelled)) = behind {
-      *starts = starts_with(keyword, kind, spelled);
+    // `unexpected`'s guard; `scan_allowance_exhausted` says what it is.
+    let exhausted = crate::lossless::recover::scan_allowance_exhausted(
+      inp.token_budget().spent(),
+      inp.state().token().tokens(),
+    );
+    let mut goes_on = false;
+    if !exhausted {
+      // Declined always, so every token the look-ahead reads, every report a lexer makes inside it
+      // and any stop it meets are taken back with it.
+      inp.attempt(|inp| {
+        let mut read = false;
+        if location_ahead::<Src, Ctx>(inp, keyword, &mut read).is_ok() {
+          goes_on = read;
+        }
+        None::<()>
+      });
     }
+    *ends = !goes_on;
     Ok(())
   }
 
@@ -954,6 +975,22 @@ lossless_production! {
     if let Some(kind) = peek_kind::<Src, Ctx>(inp)? {
       *found = starts_with(keyword, kind, peek_as::<Src, Ctx, ContextualKeyword>(inp)?);
     }
+    Ok(())
+  }
+
+  /// A location ahead, at a name spelled `keyword`: the name taken, and whether the token behind
+  /// it, read across any trivia, starts no definition with it by [`starts_with`]'s test. The end of
+  /// input behind it starts none.
+  fn location_ahead<'inp, Src, Ctx>(
+    inp,
+    keyword: Option<ContextualKeyword>,
+    goes_on: &mut bool,
+  ) {
+    inp.try_expect_or_stop(|_| true)?;
+    *goes_on = match peek_kind::<Src, Ctx>(inp)? {
+      None => true,
+      Some(kind) => !starts_with(keyword, kind, peek_as::<Src, Ctx, ContextualKeyword>(inp)?),
+    };
     Ok(())
   }
 

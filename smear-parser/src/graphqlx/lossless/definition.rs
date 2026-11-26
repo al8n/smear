@@ -393,47 +393,60 @@ lossless_production! {
     .parse_input(inp)
   }
 
+  /// At a name where a directive definition reads a location: its report, made at once where its
+  /// spelling is no location's and so in front of anything read ahead, and whether the locations
+  /// end in front of it, which [`recover::location_ends`] decides of such a name. Nothing is
+  /// consumed.
+  ///
+  /// **Precondition: the head is an `Identifier`.** A location is spelled in upper case and every
+  /// keyword a root restarts at in lower, so a valid location costs one test of its spelling.
+  fn location_name<'inp, Src, Ctx>(inp, ends: &mut bool) {
+    let keyword = peek_as::<Src, Ctx, Keyword>(inp)?;
+    if keyword.is_some_and(is_directive_location) {
+      return Ok(());
+    }
+    recover::report_unexpected::<Src, Ctx>(inp, NAME_HEADS)?;
+    recover::location_ends::<Src, Ctx>(inp, keyword, ends)
+  }
+
   /// One directive location — **no node**, the kind space having no image for one.
   ///
   /// A location is a bare `Name` token inside the enclosing
   /// [`DirectiveLocations`](K::DirectiveLocations); the census gives `Location` no kind under *one
   /// token is not a region*.
   ///
-  /// **Precondition: the head is an `Identifier`.** The spelling is checked here, because the check
-  /// is the production's whole content, and the token is consumed either way — the name that is
-  /// there is still what the author meant by a location, and eating the diagnostic's own subject
-  /// would leave nothing to point at.
+  /// **Precondition: the head is a name [`location_name`] has asked, at which the locations do not
+  /// end.** The spelling is checked there, and the token is consumed here either way — the name
+  /// that is there is still what the author meant by a location, and eating the diagnostic's own
+  /// subject would leave nothing to point at.
   fn directive_location<'inp, Src, Ctx>(inp) {
-    if !peek_as::<Src, Ctx, Keyword>(inp)?.is_some_and(is_directive_location) {
-      recover::report_unexpected::<Src, Ctx>(inp, NAME_HEADS)?;
-    }
     expect::<Src, Ctx>(inp, Kind::Identifier)
   }
 
   /// `|? DirectiveLocation (| DirectiveLocation)*`
   ///
-  /// **Precondition: the head is `|`, or an `Identifier` at which no definition starts.**
-  /// [`directive_definition`] decides that, so this production never opens a zero-width node — the
-  /// shape it would otherwise build for `directive @d on` with nothing after it.
+  /// **Precondition: the head is `|`, or a name [`location_name`] has asked, at which the
+  /// locations do not end.** [`directive_definition`] decides that, so this production never opens
+  /// a zero-width node — the shape it would otherwise build for `directive @d on` with nothing
+  /// after it.
   ///
-  /// Behind a `|` the start of a definition is no location either: it is reported missing there,
-  /// as a name that is no location is, and left to the item loop, so a node that ends there holds
-  /// the `|` it read. A location is spelled in upper case, so a valid one costs one test of its
-  /// spelling. [`directive_definition`] asks the same of the first location.
+  /// Behind a `|` each name is asked the same, and where the locations end in front of one, the
+  /// node ends holding the `|` it read.
   fn directive_locations<'inp, Src, Ctx>(inp) {
     node(
       K::DirectiveLocations.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         let mut behind_a_pipe = eat_if::<Src, Ctx>(inp, Kind::Pipe)?;
         loop {
-          let mut location = peek_kind::<Src, Ctx>(inp)? == Some(Kind::Identifier);
-          if location && behind_a_pipe {
-            let mut starts = false;
-            recover::starts_definition::<Src, Ctx>(inp, &mut starts)?;
-            location = !starts;
-          }
-          if !location {
-            return recover::report_unexpected::<Src, Ctx>(inp, NAME_HEADS);
+          if behind_a_pipe {
+            if peek_kind::<Src, Ctx>(inp)? != Some(Kind::Identifier) {
+              return recover::report_unexpected::<Src, Ctx>(inp, NAME_HEADS);
+            }
+            let mut ends = false;
+            location_name::<Src, Ctx>(inp, &mut ends)?;
+            if ends {
+              return Ok(());
+            }
           }
           directive_location::<Src, Ctx>(inp)?;
           if !eat_if::<Src, Ctx>(inp, Kind::Pipe)? {
@@ -789,17 +802,18 @@ lossless_production! {
           recover::report_unexpected::<Src, Ctx>(inp, NAME_HEADS)?;
         }
         // The head check keeps `directive_locations` from opening a zero-width node for
-        // `directive @d on`, and it is what makes the empty form report exactly once. The start of
-        // a definition is no location: it is reported missing as a name that is none is, at the
-        // keyword, and left to the item loop with nothing consumed.
-        let head = peek_kind::<Src, Ctx>(inp)?;
-        let mut starts = false;
-        if head == Some(Kind::Identifier) {
-          recover::starts_definition::<Src, Ctx>(inp, &mut starts)?;
-        }
-        match head {
-          Some(Kind::Pipe | Kind::Identifier) if !starts => {
-            directive_locations::<Src, Ctx>(inp)?
+        // `directive @d on`, and it is what makes the empty form report exactly once. A name there
+        // is asked first: one whose spelling is no location's is reported at once, and where the
+        // locations end in front of it nothing is consumed and the item loop reads the definition
+        // that starts there.
+        match peek_kind::<Src, Ctx>(inp)? {
+          Some(Kind::Pipe) => directive_locations::<Src, Ctx>(inp)?,
+          Some(Kind::Identifier) => {
+            let mut ends = false;
+            location_name::<Src, Ctx>(inp, &mut ends)?;
+            if !ends {
+              directive_locations::<Src, Ctx>(inp)?;
+            }
           }
           _ => recover::report_unexpected::<Src, Ctx>(inp, NAME_HEADS)?,
         }
@@ -910,7 +924,9 @@ lossless_drivers! {
   /// `super::union_member_types` over `src`.
   fn parse_union_member_types => union_member_types [Constness::Schema];
 
-  /// `super::directive_locations` over `src` — the only door to `directive_location`.
+  /// `super::directive_locations` over `src` — the only door to `directive_location`. A name at
+  /// the head of `src` is the caller's to ask, as `directive_definition` asks it, so a `src` that
+  /// leads with no `|` leads with a valid location.
   fn parse_directive_locations => directive_locations;
 
   /// `super::enum_values_definition` over `src` — the only door to `enum_value_definition`.

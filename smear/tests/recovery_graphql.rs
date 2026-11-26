@@ -799,9 +799,10 @@ mod lossless {
   }
 
   /// A directive definition reads no location at the start of a definition: at the head of its
-  /// locations and behind a `|` such a keyword is reported as a location missing, at the keyword,
-  /// and left to the root, which reads the definition behind. The first error is where it was,
-  /// and a valid directive definition makes no report.
+  /// locations and behind a `|` such a keyword is reported as a location missing, at the keyword
+  /// and before anything behind it is read, and left to the root where a look-ahead behind that
+  /// report finds a definition starting there, across any trivia: the root reads the definition
+  /// behind. The first error is where it was, and a valid directive definition makes no report.
   #[test]
   fn a_directive_definition_reads_no_location_at_the_start_of_a_definition() {
     // Each with the token its first error stands at: the `:` its member misses behind the list,
@@ -823,6 +824,16 @@ mod lossless {
         "scalar",
       ),
       (
+        "directive @d on scalar  S",
+        &["directive @d on", "scalar  S"][..],
+        "scalar",
+      ),
+      (
+        "directive @d(a: Int repeatable on scalar  S",
+        &["directive @d(a: Int repeatable on", "scalar  S"][..],
+        "on",
+      ),
+      (
         "directive @d on FIELD | type U { g: Int }",
         &["directive @d on FIELD |", "type U { g: Int }"][..],
         "type",
@@ -835,6 +846,23 @@ mod lossless {
         Some(&(
           String::from("smear::syntax::unexpected-token"),
           at..at + first.len()
+        )),
+        "{text}"
+      );
+    }
+
+    // The keyword's report is made before the look-ahead lexes the character behind it, at the
+    // head of the locations and behind a `|` alike.
+    for text in [
+      "directive @d on scalar?S",
+      "directive @d on FIELD | scalar?S",
+    ] {
+      let at = text.find("scalar").expect("the keyword");
+      assert_eq!(
+        lent(&Lossless::new(), text).first(),
+        Some(&(
+          String::from("smear::syntax::unexpected-token"),
+          at..at + "scalar".len()
         )),
         "{text}"
       );

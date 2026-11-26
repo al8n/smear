@@ -137,15 +137,16 @@
 //! `rollback_*` appear nowhere, and the lexer crate's own `state_mut` calls are a lexer touching
 //! its own bracket counter. The lossless
 //! tree's only speculation is four single-token probes, the attempt [`unexpected`] runs its skip
-//! in, and the look-ahead a list on a definition's header makes behind its report at a head no
-//! valid list holds, and the remainder is the failed scan this guard exists to bound. That attempt
-//! is declined only where what the skip committed holds a `}` the skip did not open, and a declined
-//! one is a failed scan in all but name: it gives back what the skip crossed, to be lexed again,
-//! and the guard charges it as one. The look-ahead is always declined, is made only where the
-//! allowance is open, and is charged the same way. One peek window reads past the cache as well:
-//! the one a directive definition's own list opens behind a described member named like a
-//! definition's keyword, whose one or two tokens past the cache are lexed again where they are
-//! read. This exception is the mechanism, not a leak in it.
+//! in, and two look-aheads behind a report: the one a list on a definition's header makes at a
+//! head no valid list holds, and the one a directive definition makes at a location spelled like
+//! a definition's keyword. The remainder is the failed scan this guard exists to bound. That
+//! attempt is declined only where what the skip committed holds a `}` the skip did not open, and
+//! a declined one is a failed scan in all but name: it gives back what the skip crossed, to be
+//! lexed again, and the guard charges it as one. The look-aheads are always declined, are made
+//! only where the allowance is open, and are charged the same way. One peek window reads past the
+//! cache as well: the one a directive definition's own list opens behind a described member named
+//! like a definition's keyword, whose one or two tokens past the cache are lexed again where they
+//! are read. This exception is the mechanism, not a leak in it.
 //!
 //! **Exception 2 — lexer errors. Closed, and named here because the arithmetic it drove is still
 //! quoted below.** tokora charges `spent` for *every* item the lexer hands back, errors included
@@ -816,10 +817,11 @@ pub(crate) const SCAN_ALLOWANCE_FLOOR: usize = 4_096;
 /// Both readings are monotone at these call sites because no recovery call is inside a speculative
 /// attempt — the lossless tree's only `attempt`/`try_parse_input` bodies are single-token probes,
 /// the skip [`unexpected`] runs, which holds no recovery call and is declined back to its own
-/// start, and the look-ahead a list on a definition's header makes, which holds none either and is
-/// always declined back to its start: neither goes below a reading taken before it. Should that
-/// stop being true, a rollback lowers `committed` and never lowers `spent`, so the guard engages
-/// *earlier*: recovery coarsens, the bound holds, and nothing becomes unsound.
+/// start, and the look-aheads a list on a definition's header and a directive definition's
+/// location make, which hold none either and are always declined back to their start: none goes
+/// below a reading taken before it. Should that stop being true, a rollback lowers `committed` and
+/// never lowers `spent`, so the guard engages *earlier*: recovery coarsens, the bound holds, and
+/// nothing becomes unsound.
 #[inline]
 #[cfg(any(feature = "graphql", feature = "graphqlx"))]
 pub(crate) fn scan_allowance_exhausted(spent: usize, committed: usize) -> bool {
