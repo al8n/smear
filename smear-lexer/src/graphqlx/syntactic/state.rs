@@ -45,6 +45,16 @@ const _: () = assert!(
   "SyntacticState must stay two words on a 64-bit target: every cached GraphQLx token carries one."
 );
 
+// A caller reads a state's limits in a constant, as every other read of the state allows, so
+// `limits` must stay a `const fn`. There too it reads back the held ceiling.
+const _: () = assert!(
+  SyntacticState::new(SyntacticLimits::unlimited())
+    .limits()
+    .max_nesting_depth()
+    == 4_294_967_295,
+  "SyntacticState::limits must stay a const fn that reads back the held ceiling."
+);
+
 /// The packed word's low half, where the ceiling is. As a number it is the highest ceiling a state
 /// holds: 4,294,967,295 levels.
 const LOW_HALF: u64 = u32::MAX as u64;
@@ -185,8 +195,8 @@ impl SyntacticState {
   /// The limits this state holds, with the count of open brackets the lexer has stepped. The
   /// ceiling is the one the state holds: 4,294,967,295 at the most.
   #[inline(always)]
-  pub fn limits(&self) -> SyntacticLimits {
-    SyntacticLimits::from(self.limiter())
+  pub const fn limits(&self) -> SyntacticLimits {
+    SyntacticLimits::from_limiter(self.limiter())
   }
 }
 

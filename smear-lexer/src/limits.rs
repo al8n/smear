@@ -523,6 +523,15 @@ impl SyntacticLimits {
     Self(RecursionLimiter::unlimited())
   }
 
+  /// The budget `limiter` is, its ceiling and its depth: [`From`]'s answer, as a `const fn`, for a
+  /// state that keeps the two numbers apart and answers them as a budget in a const context. Its
+  /// one caller is GraphQLx's syntactic state, so it is compiled where that module is.
+  #[cfg(all(any(feature = "std", feature = "alloc"), feature = "graphqlx"))]
+  #[inline(always)]
+  pub(crate) const fn from_limiter(limiter: RecursionLimiter) -> Self {
+    Self(limiter)
+  }
+
   /// The ceiling this budget refuses past.
   #[inline(always)]
   pub const fn max_nesting_depth(&self) -> usize {
