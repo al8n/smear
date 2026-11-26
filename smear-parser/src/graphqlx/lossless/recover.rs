@@ -845,8 +845,8 @@ const fn may_start(keyword: Option<Keyword>, behind: Option<Kind>) -> bool {
 const CROSS_CAP: usize = 32;
 
 /// The brackets a look-ahead's crossing holds open, innermost last, each as the closer that
-/// answers it: one stack over every pair this dialect has, `()`, `[]` and `<>`, and a body's own
-/// `{` at its bottom where the crossing is a body's.
+/// answers it: one stack over every pair this dialect has, `()`, `[]` and `<>`, with the opener
+/// of what it crosses at its bottom: a body's own `{`, or a group's own `(` or `<`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Crossing {
   closers: [Kind; CROSS_CAP],
@@ -890,6 +890,17 @@ impl Crossing {
   const fn leave(&mut self) {
     self.depth = self.depth.saturating_sub(1);
   }
+}
+
+/// Whether the reading that would take a look-ahead's evidence has room for `stack` frames, the
+/// brackets the crossing holds open where it asks, the one at hand among them, at a parser depth
+/// of `depth` under a ceiling of `limitation`, with two frames kept back. Both numbers are the
+/// parser's own, `InputRef::recursion`'s, which every production that reads a bracket descends
+/// against; the lexer's tally of open brackets is no measure of them, since a closer that answers
+/// nothing lowers it while the frames stay held.
+#[inline]
+const fn fits(depth: usize, limitation: usize, stack: usize) -> bool {
+  stack.saturating_add(2) <= limitation.saturating_sub(depth)
 }
 
 /// The owner of a list on a definition's header, as a type: what the owner's production reads
@@ -1579,10 +1590,12 @@ lossless_production! {
     Ok(())
   }
 
-  /// A group ahead, at its opener: the opener and the `closer` that ends the group taken, and
-  /// every token between crossed by [`cross`], a directive's arguments, `(` to `)`, or a path's
-  /// type arguments, `<` to `>`. With nothing open inside, only `closer` ends it, and any other
-  /// closer refuses. `words` asks [`cross`] for the owner's words at the group's depth 0, which a
+  /// A group ahead, at its opener: the opener taken through [`opener`], so it is held open at the
+  /// bottom of the crossing and asked for the nesting the parse has left as every bracket inside
+  /// it is, every token behind it crossed by [`cross`], and the `closer` that ends the group
+  /// taken: a directive's arguments, `(` to `)`, or a path's type arguments, `<` to `>`. With
+  /// nothing open inside, only `closer` ends it, and any other closer refuses. `words` asks
+  /// [`cross`] for the owner's words where nothing but the group's opener is open, which a
   /// directive's arguments do. `written` says whether the whole group is, with nothing in it
   /// refused.
   fn group_ahead<'inp, Src, Ctx>(
@@ -1592,13 +1605,13 @@ lossless_production! {
     words: bool,
     written: &mut bool,
   ) {
-    inp.try_expect_or_stop(|_| true)?;
     let mut crossing = Crossing::new();
     let mut refused = false;
+    opener::<Src, Ctx>(inp, &mut crossing, closer, &mut refused)?;
     while !refused {
       match peek_kind::<Src, Ctx>(inp)? {
         None => return Ok(()),
-        Some(kind) if kind == closer && crossing.depth() == 0 => {
+        Some(kind) if kind == closer && crossing.depth() == 1 => {
           inp.try_expect_or_stop(|_| true)?;
           *written = true;
           return Ok(());
@@ -1610,16 +1623,13 @@ lossless_production! {
   }
 
   /// An opener ahead, taken and held open on `crossing`, answered by `closer`: `refused` says
-  /// where that would nest past [`CROSS_CAP`], or past the nesting the parse has left, two frames
-  /// kept back for the reading that would take the evidence. That reading descends a frame for
-  /// each bracket the crossing holds, where main scans them flat, and a refusal at the parse's
+  /// where that would nest past [`CROSS_CAP`], or past what [`fits`] finds the parse has left.
+  /// Every production the reading that would take the evidence runs at an opener requests a
+  /// frame of the parser there, where main scans the brackets flat, and a refusal at the parse's
   /// nesting ceiling would end the document.
   fn opener<'inp, Src, Ctx>(inp, crossing: &mut Crossing, closer: Kind, refused: &mut bool) {
-    let left = inp
-      .recursion()
-      .limitation()
-      .saturating_sub(inp.recursion().depth());
-    if crossing.enter(closer) && crossing.depth().saturating_add(2) <= left {
+    let (depth, limitation) = (inp.recursion().depth(), inp.recursion().limitation());
+    if crossing.enter(closer) && fits(depth, limitation, crossing.depth()) {
       inp.try_expect_or_stop(|_| true)?;
     } else {
       *refused = true;
@@ -1633,9 +1643,12 @@ lossless_production! {
   ///
   /// - a name [`may_start`] finds the keyword of a definition;
   /// - a `{`, since only the owner's body opens one, and that one its reader takes itself;
-  /// - where `words` asks it, at depth 0 of the group: a word the owner's list stops at, by
-  ///   [`ends_at_word`], with a token behind it [`word_goes_on`] accepts, since a directive's
-  ///   arguments end there in the reading that would take the evidence;
+  /// - where `words` asks it, with nothing but the group's own opener open: a word the owner's
+  ///   list stops at, by [`ends_at_word`], with a token behind it [`word_goes_on`] accepts, since
+  ///   a directive's arguments end there in the reading that would take the evidence;
+  /// - `set` or `map` with a `!` behind it, where [`fits`] finds no room for one frame more than
+  ///   the crossing holds: the reading that would take the evidence requests a frame for the
+  ///   collection there, in front of the `{` it then asks for;
   /// - a closer that does not answer the innermost bracket `crossing` holds open;
   /// - an opener [`opener`] refuses;
   /// - the end of input.
@@ -1653,14 +1666,19 @@ lossless_production! {
       Some(Kind::Identifier) => {
         let keyword = peek_as::<Src, Ctx, Keyword>(inp)?;
         inp.try_expect_or_stop(|_| true)?;
-        let word = words && crossing.depth() == 0 && ends_at_word(owner, keyword);
-        if restarts_a_root(keyword) || word {
+        let word = words && crossing.depth() == 1 && ends_at_word(owner, keyword);
+        let collection = matches!(keyword, Some(Keyword::Set | Keyword::Map));
+        if restarts_a_root(keyword) || word || collection {
           let behind = peek_kind::<Src, Ctx>(inp)?;
           let word_ends = match behind {
             Some(kind) if word => word_goes_on(kind, peek_as::<Src, Ctx, Keyword>(inp)?),
             _ => false,
           };
-          *refused = may_start(keyword, behind) || word_ends;
+          let (depth, limitation) = (inp.recursion().depth(), inp.recursion().limitation());
+          let frame = collection
+            && behind == Some(Kind::Bang)
+            && !fits(depth, limitation, crossing.depth().saturating_add(1));
+          *refused = may_start(keyword, behind) || word_ends || frame;
         }
       }
       Some(Kind::LParen) => opener::<Src, Ctx>(inp, crossing, Kind::RParen, refused)?,
