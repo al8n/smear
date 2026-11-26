@@ -766,25 +766,40 @@ mod lossless {
     }
   }
 
-  /// A last member, or a last directive's name, spelled like a keyword a root restarts at with a
-  /// name behind it is no evidence: the keyword may be a definition's, that name its name. The list
-  /// skips its junk as it always did, the owner is lost at the `:` its next argument misses, and
-  /// the root reads the definition whole, where the evidence would have made its keyword a member
-  /// or a directive and its name and braces an operation.
+  /// A member, or a directive's name, spelled like a keyword a root restarts at with a token
+  /// behind it that may begin that definition is no evidence, wherever the chain reaches it: the
+  /// keyword may be a definition's. The list skips its junk as it always did, the owner is lost at
+  /// the `:` its next argument misses, and the root reads the definition whole, where the evidence
+  /// would have made its keyword a member or a directive, and its name and what follows the
+  /// owner's.
   #[test]
   fn a_member_spelled_like_a_definitions_keyword_is_no_evidence() {
-    for text in [
-      "union U @d(x: 1 = A | enum query { VALUE }",
-      "type T @d(x: 1 @a @enum query { VALUE }",
+    for (text, kind, kept) in [
+      (
+        "union U @d(x: 1 = A | enum query { VALUE }",
+        K::EnumTypeDefinition,
+        "enum query { VALUE }",
+      ),
+      (
+        "type T @d(x: 1 @a @enum query { VALUE }",
+        K::EnumTypeDefinition,
+        "enum query { VALUE }",
+      ),
+      // `directive` stands in the middle of the chain, and `on FIELD` behind its last directive.
+      (
+        "directive @a(@e @\ndirective @b on FIELD",
+        K::DirectiveDefinition,
+        "directive @b on FIELD",
+      ),
     ] {
       assert_eq!(
-        written(&read(text).tree, K::EnumTypeDefinition),
-        ["enum query { VALUE }"],
+        written(&read(text).tree, kind),
+        [kept],
         "{text} at the type-system root"
       );
       assert_eq!(
-        written(&parse_document(text).syntax(), K::EnumTypeDefinition),
-        ["enum query { VALUE }"],
+        written(&parse_document(text).syntax(), kind),
+        [kept],
         "{text} at the mixed root"
       );
     }

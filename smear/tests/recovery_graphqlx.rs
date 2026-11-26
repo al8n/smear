@@ -3558,11 +3558,12 @@ mod lossless {
     }
   }
 
-  /// A last member, or a last directive's name, spelled like a keyword a root restarts at with a
-  /// name behind it is no evidence: the keyword may be a definition's, that name its name. The list
-  /// skips its junk as it always did, the owner is lost at the `:` its next argument misses, and
-  /// the root reads the definition whole, where the evidence would have made its keyword a member
-  /// or a directive and its name and braces an operation.
+  /// A member, or a directive's name, spelled like a keyword a root restarts at with a token
+  /// behind it that may begin that definition is no evidence, wherever the chain reaches it: the
+  /// keyword may be a definition's. The list skips its junk as it always did, the owner is lost at
+  /// the `:` its next argument misses, and the root reads the definition whole, where the evidence
+  /// would have made its keyword a member or a directive, and its name and what follows the
+  /// owner's.
   #[test]
   fn a_member_spelled_like_a_definitions_keyword_is_no_evidence() {
     for text in [
@@ -3576,6 +3577,16 @@ mod lossless {
           "{text} at the {root} root"
         );
       }
+    }
+
+    // `directive` stands in the middle of the chain, and `on FIELD` behind its last directive.
+    let text = "directive @a(@e @\ndirective @b on FIELD";
+    for (root, tree, _) in at_both_roots(text) {
+      assert_eq!(
+        written(&tree, K::DirectiveDefinition),
+        ["directive @b on FIELD"],
+        "{text} at the {root} root"
+      );
     }
   }
 

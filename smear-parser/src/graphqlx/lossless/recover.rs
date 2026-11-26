@@ -816,6 +816,16 @@ const fn word_goes_on(kind: Kind, spelled: Option<Keyword>) -> bool {
   }
 }
 
+/// Whether a name spelled `keyword`, which a look-ahead reads as a directive's or a member's, may
+/// instead be the keyword of a definition that begins there, a token of `kind` spelled `spelled`
+/// standing behind it: the keyword is one a root restarts at, and behind it stands a name, which
+/// may be that definition's, or a token at which [`starts_with`] finds a start.
+#[inline]
+const fn may_start(keyword: Option<Keyword>, kind: Kind, spelled: Option<Keyword>) -> bool {
+  restarts_a_root(keyword)
+    && (matches!(kind, Kind::Identifier) || starts_with(keyword, kind, spelled))
+}
+
 /// The owner of a list on a definition's header, as a type: what the owner's production reads
 /// behind the list, in front of which the list ends.
 ///
@@ -1435,9 +1445,10 @@ lossless_production! {
   /// - **A string:** the description of a definition that starts behind it.
   ///
   /// Where it meets the end of input in place of what it asks about, it finds nothing. Nor does it
-  /// find anything behind a last directive or a last member that is a name alone, spelled like a
-  /// keyword a root restarts at, with a name behind it: that keyword may be a definition's, its
-  /// name behind it, and what follows that name is no evidence for the owner.
+  /// find anything behind a name it reads in a directive's path or a member's, at any place in the
+  /// chain, that is spelled like a keyword a root restarts at with a token behind it that may begin
+  /// that definition, as [`name_ahead`] asks it: the keyword may be the definition's, and what
+  /// follows it is no evidence for the owner.
   fn ahead<'inp, Src, Ctx>(inp, open_at: usize, owner: impl Header, found: &mut bool) {
     match peek_kind::<Src, Ctx>(inp)? {
       Some(Kind::LBrace) => body_ahead::<Src, Ctx>(inp, open_at, found),
@@ -1528,27 +1539,20 @@ lossless_production! {
 
   /// The owner's next directive ahead, at its `@`: each `@`, its path and, where a `(` follows the
   /// path, the `)` that balances it, again while an `@` follows; and behind them what
-  /// [`next_ahead`] finds. Where the last is a name alone, spelled like a keyword a root restarts
-  /// at, and a name stands behind it, nothing is found.
+  /// [`next_ahead`] finds. Where [`path_ahead`] finds a path unwritten, as it does where
+  /// [`name_ahead`] takes no name of it, nothing is found.
   fn directives_ahead<'inp, Src, Ctx>(inp, open_at: usize, owner: impl Header, found: &mut bool) {
-    let mut last = None;
     while peek_kind::<Src, Ctx>(inp)? == Some(Kind::At) {
       inp.try_expect_or_stop(|_| true)?;
       let mut written = false;
-      let mut bare = None;
-      path_ahead::<Src, Ctx>(inp, &mut written, &mut bare)?;
+      path_ahead::<Src, Ctx>(inp, &mut written)?;
       if written && peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
         written = false;
-        bare = None;
         balanced_ahead::<Src, Ctx>(inp, Kind::LParen, Kind::RParen, &mut written)?;
       }
       if !written {
         return Ok(());
       }
-      last = bare;
-    }
-    if restarts_a_root(last) && peek_kind::<Src, Ctx>(inp)? == Some(Kind::Identifier) {
-      return Ok(());
     }
     next_ahead::<Src, Ctx>(inp, open_at, owner, found)
   }
@@ -1577,33 +1581,28 @@ lossless_production! {
 
   /// A union's members ahead, at its `=`: a `|` or none, then paths with a `|` between each two;
   /// and behind them what [`behind_ahead`] finds, or a `where` by its test where the owner reads
-  /// one. Where the last is a name alone, spelled like a keyword a root restarts at, and a name
-  /// stands behind it, nothing is found.
+  /// one. Where [`path_ahead`] finds a path unwritten, as it does where [`name_ahead`] takes no
+  /// name of it, nothing is found.
   fn members_ahead<'inp, Src, Ctx>(inp, open_at: usize, owner: impl Header, found: &mut bool) {
     inp.try_expect_or_stop(|_| true)?;
     if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Pipe) {
       inp.try_expect_or_stop(|_| true)?;
     }
-    let last = loop {
+    loop {
       let mut written = false;
-      let mut bare = None;
-      path_ahead::<Src, Ctx>(inp, &mut written, &mut bare)?;
+      path_ahead::<Src, Ctx>(inp, &mut written)?;
       if !written {
         return Ok(());
       }
       if peek_kind::<Src, Ctx>(inp)? != Some(Kind::Pipe) {
-        break bare;
+        break;
       }
       inp.try_expect_or_stop(|_| true)?;
-    };
-    if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Identifier) {
-      if restarts_a_root(last) {
-        return Ok(());
-      }
-      if ends_at_word(owner, peek_as::<Src, Ctx, Keyword>(inp)?) {
-        inp.try_expect_or_stop(|_| true)?;
-        return word_ahead::<Src, Ctx>(inp, found);
-      }
+    }
+    let head = peek_kind::<Src, Ctx>(inp)?;
+    if head == Some(Kind::Identifier) && ends_at_word(owner, peek_as::<Src, Ctx, Keyword>(inp)?) {
+      inp.try_expect_or_stop(|_| true)?;
+      return word_ahead::<Src, Ctx>(inp, found);
     }
     behind_ahead::<Src, Ctx>(inp, open_at, found)
   }
@@ -1620,10 +1619,8 @@ lossless_production! {
   /// A path ahead, as a directive's name and a union's member are written, which `ty.rs`'s
   /// `type_path` reads: a root, `~ ::` or `^ ::` once or `.. ::` any number of times, or none; a
   /// name, and `:: Name` any number of times; and where a `<` follows, the `>` that balances it.
-  /// `written` says whether the whole of it is, and `bare` takes the keyword the path spells where
-  /// it is a name alone, with no root, no `::` and no `<` behind it.
-  fn path_ahead<'inp, Src, Ctx>(inp, written: &mut bool, bare: &mut Option<Keyword>) {
-    let mut name = None;
+  /// `written` says whether the whole of it is, each of its names taken as [`name_ahead`] takes it.
+  fn path_ahead<'inp, Src, Ctx>(inp, written: &mut bool) {
     match peek_kind::<Src, Ctx>(inp)? {
       Some(Kind::Tilde | Kind::Caret) => {
         inp.try_expect_or_stop(|_| true)?;
@@ -1632,7 +1629,6 @@ lossless_production! {
         }
         inp.try_expect_or_stop(|_| true)?;
       }
-      Some(Kind::Identifier) => name = peek_as::<Src, Ctx, Keyword>(inp)?,
       _ => {
         while peek_kind::<Src, Ctx>(inp)? == Some(Kind::DotDot) {
           inp.try_expect_or_stop(|_| true)?;
@@ -1643,23 +1639,42 @@ lossless_production! {
         }
       }
     }
-    if peek_kind::<Src, Ctx>(inp)? != Some(Kind::Identifier) {
-      return Ok(());
+    let mut taken = false;
+    name_ahead::<Src, Ctx>(inp, &mut taken)?;
+    while taken && peek_kind::<Src, Ctx>(inp)? == Some(Kind::PathSeparator) {
+      inp.try_expect_or_stop(|_| true)?;
+      taken = false;
+      name_ahead::<Src, Ctx>(inp, &mut taken)?;
     }
-    inp.try_expect_or_stop(|_| true)?;
-    while peek_kind::<Src, Ctx>(inp)? == Some(Kind::PathSeparator) {
-      name = None;
-      inp.try_expect_or_stop(|_| true)?;
-      if peek_kind::<Src, Ctx>(inp)? != Some(Kind::Identifier) {
-        return Ok(());
-      }
-      inp.try_expect_or_stop(|_| true)?;
+    if !taken {
+      return Ok(());
     }
     if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LAngle) {
       return balanced_ahead::<Src, Ctx>(inp, Kind::LAngle, Kind::RAngle, written);
     }
-    *bare = name;
     *written = true;
+    Ok(())
+  }
+
+  /// A name ahead, taken where one stands: `taken` says whether one is, and stays `false` where the
+  /// name is spelled like a keyword a root restarts at and the token behind it, read across any
+  /// trivia, may begin that definition by [`may_start`]. Every name of a directive's path and of a
+  /// member's is asked so as the chain reaches it, the last no more than the first: the keyword may
+  /// be the definition's, and nothing the look-ahead read behind it would be evidence for the
+  /// owner, so the list's skip and the root then read the definition as they always did.
+  fn name_ahead<'inp, Src, Ctx>(inp, taken: &mut bool) {
+    if peek_kind::<Src, Ctx>(inp)? != Some(Kind::Identifier) {
+      return Ok(());
+    }
+    let keyword = peek_as::<Src, Ctx, Keyword>(inp)?;
+    inp.try_expect_or_stop(|_| true)?;
+    if restarts_a_root(keyword)
+      && let Some(kind) = peek_kind::<Src, Ctx>(inp)?
+      && may_start(keyword, kind, peek_as::<Src, Ctx, Keyword>(inp)?)
+    {
+      return Ok(());
+    }
+    *taken = true;
     Ok(())
   }
 }
