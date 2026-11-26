@@ -3473,9 +3473,10 @@ mod lossless {
 
   /// A directive definition's two lists end in front of `repeatable` and `on`, by the test the
   /// start of a definition makes of the token behind, and its own list in front of a description's
-  /// string that the start of a definition follows: the directive definition keeps what it
-  /// writes, and the next definition is read. Behind the string the directive definition reports
-  /// its `on` and a location missing, at the string.
+  /// string that the start of a definition follows, where the window sees the token behind its
+  /// keyword one token past the cache at most: the directive definition keeps what it writes, and
+  /// the next definition is read. Behind the string the directive definition reports its `on` and
+  /// a location missing, at the string.
   #[test]
   fn a_directive_definitions_list_that_lost_its_closer_leaves_its_tail() {
     for (text, kept, reports) in [
@@ -3495,8 +3496,8 @@ mod lossless {
         1,
       ),
       (
-        "directive @d(a: Int \"doc\" scalar S",
-        &["directive @d(a: Int", "\"doc\" scalar S"][..],
+        "directive @d(a: Int \"doc\"scalar S",
+        &["directive @d(a: Int", "\"doc\"scalar S"][..],
         3,
       ),
     ] {
@@ -3634,11 +3635,22 @@ mod lossless {
     }
   }
 
-  /// The peek window lexes nothing twice: a header's argument named like a definition's keyword
-  /// reads under the least produce-event budget its text reads under, one event for each lexeme
-  /// and one more. A described member of a directive definition named like such a keyword is the
-  /// one valid text that spends more: the token behind its name stands past the cache, and costs
-  /// one or two events more.
+  /// The least produce-event budget under which `text` reads with no error.
+  fn least_budget(text: &str) -> usize {
+    (0..=4 * lexemes(text))
+      .find(|&max| {
+        let limits = LosslessLimits::default().with_max_produce_events(max);
+        !read_with(&Lossless::with_limits(limits), text).errors
+      })
+      .unwrap_or_else(|| panic!("{text} reads under no budget"))
+  }
+
+  /// The peek window lexes nothing twice where the cache retains it: a header's argument named
+  /// like a definition's keyword reads under the least produce-event budget the same text reads
+  /// under with a name that spells nothing. A described member of a directive definition named
+  /// like such a keyword is the one valid text that spends more, the token behind its name
+  /// standing past the cache: one event, and with a blank in front of its `:` no more, since the
+  /// window reads one token past the cache at most.
   #[test]
   fn the_window_lexes_nothing_twice() {
     let text = "scalar X @extern(lang: \"rust\", type: \"x\")";
@@ -3648,12 +3660,25 @@ mod lossless {
       "{text}"
     );
 
-    let text = "directive @d(\"doc\" type: Int) on FIELD";
-    let limits = LosslessLimits::default().with_max_produce_events(lexemes(text) + 3);
-    assert!(
-      !read_with(&Lossless::with_limits(limits), text).errors,
-      "{text}"
-    );
+    for (text, plain, more) in [
+      (
+        "scalar X @extern(lang: \"rust\", type: \"x\")",
+        "scalar X @extern(lang: \"rust\", tipe: \"x\")",
+        0,
+      ),
+      (
+        "directive @d(\"doc\" type: Int) on FIELD",
+        "directive @d(\"doc\" tipe: Int) on FIELD",
+        1,
+      ),
+      (
+        "directive @d(\"doc\" type : Int) on FIELD",
+        "directive @d(\"doc\" tipe : Int) on FIELD",
+        1,
+      ),
+    ] {
+      assert_eq!(least_budget(text), least_budget(plain) + more, "{text}");
+    }
   }
 
   /// A list in a member reads as it did: inside a definition's braces a keyword is a member's name,
@@ -3673,7 +3698,9 @@ mod lossless {
 
   /// Where a test says nothing the list reads its head as it always did: a keyword at the end of
   /// input, a `{` that nothing balances, a body with junk behind it, a keyword behind a keyword,
-  /// and a keyword with two blanks behind it, which the window does not see past.
+  /// a keyword with two blanks behind it, which the window does not see past, and a described
+  /// keyword whose token behind stands across a blank past the cache, which the window does not
+  /// read.
   #[test]
   fn a_headers_list_reads_as_before_where_no_test_holds() {
     for (text, kept, reports) in [
@@ -3691,6 +3718,7 @@ mod lossless {
       ),
       ("scalar A @d(x: 1 type scalar S", &["scalar S"][..], 1),
       ("type T @d(x: 1 scalar  S", &[][..], 1),
+      ("directive @d(a: Int \"doc\" scalar S", &[][..], 1),
     ] {
       let answer = read(text);
       assert_eq!(answer.reports, reports, "{text}");
@@ -3860,6 +3888,37 @@ mod lossless {
       );
     }
     assert!(reached > 0, "no budget let the parse reach the brace");
+  }
+
+  /// A stop's report is built from the token the window found, so no budget spent behind that
+  /// window can leave the stop without it: under every produce-event budget the parse either stops
+  /// before the report, with the budget's refusal its one error, or lends the `:` missing at `S`
+  /// first. In the second text the token behind `scalar` stands across a blank past the cache, no
+  /// stop is made, and the member misses its `:` there itself.
+  #[test]
+  fn a_stops_report_comes_from_the_window_that_found_it() {
+    for text in ["directive @d(\"d\"scalar S", "directive @d(\"d\" scalar S"] {
+      let at = text.rfind('S').expect("the name behind the keyword");
+      let colon = (String::from("smear::syntax::unexpected-token"), at..at + 1);
+      let mut reached = 0usize;
+      for max in 0..=4 * lexemes(text) {
+        let limits = LosslessLimits::default().with_max_produce_events(max);
+        let errors = lent(&Lossless::with_limits(limits), text);
+        if errors.len() == 1 && errors[0].0 == "smear::syntax::token-budget" {
+          continue;
+        }
+        reached += 1;
+        assert_eq!(
+          errors.first(),
+          Some(&colon),
+          "{text} under max_produce_events({max}): {errors:?}"
+        );
+      }
+      assert!(
+        reached > 0,
+        "{text}: no budget let the parse reach the report"
+      );
+    }
   }
 
   /// A lexer's error in front of a stop's report keeps its place: the window lexes no further than

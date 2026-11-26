@@ -719,10 +719,10 @@ mod lossless {
         1,
       ),
       // The member's `:` missing, and the directive definition's `on` and a location at the
-      // string.
+      // string. The token behind `scalar` stands one past the cache.
       (
-        "directive @d(a: Int \"doc\" scalar S",
-        &["directive @d(a: Int", "\"doc\" scalar S"][..],
+        "directive @d(a: Int \"doc\"scalar S",
+        &["directive @d(a: Int", "\"doc\"scalar S"][..],
         3,
       ),
       (
@@ -742,8 +742,9 @@ mod lossless {
   }
 
   /// Where a test says nothing the list reads its head as it always did: the list's `)` behind an
-  /// `@` or an `=`, a keyword at the end of input, a body with junk behind it, and a keyword behind
-  /// a keyword; and a list in a member reads as it did.
+  /// `@` or an `=`, a keyword at the end of input, a body with junk behind it, a keyword behind a
+  /// keyword, and a described keyword whose token behind stands across a blank past the cache,
+  /// which the window does not read; and a list in a member reads as it did.
   #[test]
   fn a_headers_list_reads_as_before_where_no_test_holds() {
     for (text, kept, reports) in [
@@ -764,6 +765,7 @@ mod lossless {
         3,
       ),
       ("scalar A @d(x: 1 type scalar S", &["scalar S"][..], 1),
+      ("directive @d(a: Int \"doc\" scalar S", &[][..], 1),
       ("type T { f: Int @d(x: 1 scalar S", &[][..], 1),
     ] {
       assert_eq!(lent(&Lossless::new(), text).len(), reports, "{text}");
@@ -771,10 +773,23 @@ mod lossless {
     }
   }
 
-  /// No valid document makes a stop, and the peek window lexes nothing twice: a header's argument
-  /// named like a definition's keyword reads under one produce-event for each lexeme and one
-  /// more. A described member of a directive definition named like such a keyword is the one valid
-  /// text that spends more, one or two events, the token behind its name standing past the cache.
+  /// The least produce-event budget under which `text` reads with no error.
+  fn least_budget(text: &str) -> usize {
+    (0..=4 * lexemes(text))
+      .find(|&max| {
+        let limits = LosslessLimits::default().with_max_produce_events(max);
+        lent(&Lossless::with_limits(limits), text).is_empty()
+      })
+      .unwrap_or_else(|| panic!("{text} reads under no budget"))
+  }
+
+  /// No valid document makes a stop, and the peek window lexes nothing twice where the cache
+  /// retains it: a header's argument named like a definition's keyword reads under one
+  /// produce-event for each lexeme and one more, the least budget the same text reads under with
+  /// a name that spells nothing. A described member of a directive definition named like such a
+  /// keyword is the one valid text that spends more, the token behind its name standing past the
+  /// cache: one event, and with a blank in front of its `:` no more, since the window reads one
+  /// token past the cache at most.
   #[test]
   fn a_valid_header_reads_as_before() {
     for text in [
@@ -790,12 +805,25 @@ mod lossless {
       lent(&Lossless::with_limits(limits), text).is_empty(),
       "{text}"
     );
-    let text = "directive @d(\"doc\" type: Int) on FIELD";
-    let limits = LosslessLimits::default().with_max_produce_events(lexemes(text) + 3);
-    assert!(
-      lent(&Lossless::with_limits(limits), text).is_empty(),
-      "{text}"
-    );
+    for (text, plain, more) in [
+      (
+        "type T @d(type: 1 input: 2) { f: Int }",
+        "type T @d(tipe: 1 inpot: 2) { f: Int }",
+        0,
+      ),
+      (
+        "directive @d(\"doc\" type: Int) on FIELD",
+        "directive @d(\"doc\" tipe: Int) on FIELD",
+        1,
+      ),
+      (
+        "directive @d(\"doc\" type : Int) on FIELD",
+        "directive @d(\"doc\" tipe : Int) on FIELD",
+        1,
+      ),
+    ] {
+      assert_eq!(least_budget(text), least_budget(plain) + more, "{text}");
+    }
   }
 
   /// A directive definition reads no location at the start of a definition: at the head of its
@@ -910,5 +938,36 @@ mod lossless {
       Some(&(String::from("smear::syntax::unknown-character"), at..at + 1)),
       "{text}"
     );
+  }
+
+  /// A stop's report is built from the token the window found, so no budget spent behind that
+  /// window can leave the stop without it: under every produce-event budget the parse either stops
+  /// before the report, with the budget's refusal its one error, or lends the `:` missing at `S`
+  /// first. In the second text the token behind `scalar` stands across a blank past the cache, no
+  /// stop is made, and the member misses its `:` there itself.
+  #[test]
+  fn a_stops_report_comes_from_the_window_that_found_it() {
+    for text in ["directive @d(\"d\"scalar S", "directive @d(\"d\" scalar S"] {
+      let at = text.rfind('S').expect("the name behind the keyword");
+      let colon = (String::from("smear::syntax::unexpected-token"), at..at + 1);
+      let mut reached = 0usize;
+      for max in 0..=4 * lexemes(text) {
+        let limits = LosslessLimits::default().with_max_produce_events(max);
+        let errors = lent(&Lossless::with_limits(limits), text);
+        if errors.len() == 1 && errors[0].0 == "smear::syntax::token-budget" {
+          continue;
+        }
+        reached += 1;
+        assert_eq!(
+          errors.first(),
+          Some(&colon),
+          "{text} under max_produce_events({max}): {errors:?}"
+        );
+      }
+      assert!(
+        reached > 0,
+        "{text}: no budget let the parse reach the report"
+      );
+    }
   }
 }

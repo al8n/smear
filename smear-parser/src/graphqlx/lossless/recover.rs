@@ -30,7 +30,7 @@
 use smear_lexer::graphqlx::lossless::{LosslessToken, LosslessTokenKind as Kind};
 use tokora::{
   SimpleSpan,
-  cache::PeekedTokenExt as _,
+  cache::{Cache as _, PeekedTokenExt as _},
   error::{UnclosedAngle, UnclosedBrace, UnclosedBracket, UnclosedParen},
   input::Balance,
   span::Spanned,
@@ -43,7 +43,7 @@ use tokora::{
 use crate::graphqlx::{GraphQLx, kinds::SyntaxKind as K};
 
 use super::{
-  GraphqlxLosslessLexer, Keyword,
+  GraphqlxLosslessLexer, GraphqlxLosslessToken, Keyword,
   trivia::{kind_of, peek_as, peek_kind},
 };
 use crate::lossless::recover::keyword_of;
@@ -760,10 +760,11 @@ fn braces(kind: &Kind) -> Balance<u8> {
 // member's entries are not touched.
 //
 // A head a valid list can hold, a name or a description's string, is decided through the peek
-// window, read no further than the member there would read, and a stop reports the `:` that
-// member would miss. A head no valid list holds is reported first, as `unexpected` reports it, and
-// decided behind that report by a look-ahead that is given back. So is a directive definition's
-// location spelled like a keyword a root restarts at, which no valid location is.
+// window, read no further than the member there would read and no further than the cache retains,
+// and a stop reports the `:` that member would miss, the token the window found. A head no valid
+// list holds is reported first, as `unexpected` reports it, and decided behind that report by a
+// look-ahead that is given back. So is a directive definition's location spelled like a keyword a
+// root restarts at, which no valid location is.
 // ---------------------------------------------------------------------------------------------
 
 /// Whether `keyword` names what an `extend` extends: the eight `extension.rs`'s
@@ -926,27 +927,47 @@ fn ends_at_word<O: Header>(_: O, keyword: Option<Keyword>) -> bool {
 }
 
 /// One token of the peek window, as a header's tests read it.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum Seen {
-  /// The window came back short of it: the input ends in front of it, or the scanner stopped.
+#[derive(Debug, Clone)]
+pub(crate) enum Seen<T> {
+  /// Not read: the window would be wider than the cache retains, or it came back short of it,
+  /// where the input ends in front of it or the scanner stopped.
   Short,
   /// A trivia token.
   Trivia,
-  /// A significant token: its kind, and the keyword it spells where it spells one.
-  Token(Kind, Option<Keyword>),
+  /// A significant token: its kind, the keyword it spells where it spells one, and the token
+  /// itself with its span.
+  Token(Kind, Option<Keyword>, Spanned<T, SimpleSpan>),
 }
 
-/// What a header's tests read of `token`, the window's entry where it holds one.
+/// What a header's tests read of `entry`, the window's token and its span where it holds one.
 #[inline]
-fn seen<S>(token: Option<&LosslessToken<S>>) -> Seen
+fn seen<S>(entry: Option<(&LosslessToken<S>, &SimpleSpan)>) -> Seen<LosslessToken<S>>
 where
-  LosslessToken<S>: DowncastRef<Keyword>,
+  LosslessToken<S>: Clone + DowncastRef<Keyword>,
 {
-  match token {
+  match entry {
     None => Seen::Short,
-    Some(token) if token.is_trivia() => Seen::Trivia,
-    Some(token) => Seen::Token(token.kind(), keyword_of(token)),
+    Some((token, _)) if token.is_trivia() => Seen::Trivia,
+    Some((token, span)) => Seen::Token(
+      token.kind(),
+      keyword_of(token),
+      Spanned::new(*span, Clone::clone(token)),
+    ),
   }
+}
+
+/// The first token that is no trivia behind a name or a description's string, where a header's
+/// test decides on it.
+#[derive(Debug, Clone)]
+pub(crate) struct Behind<T> {
+  /// Where it stands in the peek window, the head at 0.
+  at: usize,
+  /// Its kind.
+  kind: Kind,
+  /// The keyword it spells, where it spells one.
+  spelled: Option<Keyword>,
+  /// The token and its span, as the window read them: what a stop reports in place of the `:`.
+  found: Spanned<T, SimpleSpan>,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1146,77 +1167,80 @@ lossless_production! {
   dialect = graphqlx::lossless;
 
   /// The token at `at` of the peek window, the head at 0, read through the narrowest window that
-  /// holds it: [`Seen::Short`] where the window comes back short of it, whether the input ends in
-  /// front of it or the scanner stopped, since a short window cannot tell the two apart and the
-  /// parse's own read meets the stop where it stands.
+  /// holds it, and only where that window is no wider than what the active cache retains and
+  /// `past` tokens more: [`Seen::Short`] where it is wider, and where the window comes back short
+  /// of the token, whether the input ends in front of it or the scanner stopped, since a short
+  /// window cannot tell the two apart and the parse's own read meets the stop where it stands.
   ///
-  /// The cache holds three tokens, so a window of up to three is served from it and lexes nothing
-  /// the parse does not lex next in any case. A wider one lexes the tokens past the cache, and
-  /// they are lexed again where the parse reads them.
-  fn window_at<'inp, Src, Ctx>(inp, at: usize, out: &mut Seen) {
+  /// A window the cache retains lexes nothing the parse does not lex next in any case. A token
+  /// past what it retains is lexed again where the parse reads it, a produce event more under a
+  /// budget, so every read on a valid document's path passes `past` 0 but one, which passes 1:
+  /// [`description_ends_header`]'s, behind a name spelled like a definition's keyword.
+  fn window_at<'inp, Src, Ctx>(
+    inp,
+    at: usize,
+    past: usize,
+    out: &mut Seen<GraphqlxLosslessToken<'inp, Src>>,
+  ) {
+    let cache = inp.cache();
+    if at >= cache.len().saturating_add(cache.remaining()).saturating_add(past) {
+      *out = Seen::Short;
+      return Ok(());
+    }
     *out = match at {
-      1 => seen(inp.peek::<U2>()?.get(1).map(|entry| entry.token())),
-      2 => seen(inp.peek::<U3>()?.get(2).map(|entry| entry.token())),
-      3 => seen(inp.peek::<U4>()?.get(3).map(|entry| entry.token())),
-      4 => seen(inp.peek::<U5>()?.get(4).map(|entry| entry.token())),
+      1 => seen(inp.peek::<U2>()?.get(1).map(|entry| (entry.token(), entry.span()))),
+      2 => seen(inp.peek::<U3>()?.get(2).map(|entry| (entry.token(), entry.span()))),
+      3 => seen(inp.peek::<U4>()?.get(3).map(|entry| (entry.token(), entry.span()))),
+      4 => seen(inp.peek::<U5>()?.get(4).map(|entry| (entry.token(), entry.span()))),
       _ => Seen::Short,
     };
     Ok(())
   }
 
   /// The first token behind the peek window's `at` that is no trivia, where at most one trivia
-  /// token stands between: where it stands, its kind and the keyword it spells. `None` where the
-  /// window comes back short of it, or where two trivia tokens stand between, since each blank is
-  /// a token of its own and the window sees past one.
+  /// token stands between, each read as [`window_at`] reads it under `past`. `None` where a window
+  /// is not read or comes back short of it, or where two trivia tokens stand between, since each
+  /// blank is a token of its own and the window sees past one.
+  ///
+  /// The windows widen by one token each, so under `past` 1 the two reads lex one token past what
+  /// the cache retains at most: a window one wider than that is not read.
   fn token_behind<'inp, Src, Ctx>(
     inp,
     at: usize,
-    out: &mut Option<(usize, Kind, Option<Keyword>)>,
+    past: usize,
+    out: &mut Option<Behind<GraphqlxLosslessToken<'inp, Src>>>,
   ) {
     let mut behind = at + 1;
     let mut token = Seen::Short;
-    window_at::<Src, Ctx>(inp, behind, &mut token)?;
+    window_at::<Src, Ctx>(inp, behind, past, &mut token)?;
     if matches!(token, Seen::Trivia) {
       behind += 1;
-      window_at::<Src, Ctx>(inp, behind, &mut token)?;
+      window_at::<Src, Ctx>(inp, behind, past, &mut token)?;
     }
     *out = match token {
-      Seen::Token(kind, spelled) => Some((behind, kind, spelled)),
+      Seen::Token(kind, spelled, found) => Some(Behind {
+        at: behind,
+        kind,
+        spelled,
+        found,
+      }),
       Seen::Short | Seen::Trivia => None,
     };
     Ok(())
   }
 
-  /// The report a member's `expect` makes where the token at `at` of the peek window stands in
-  /// place of its `:`, made without consuming anything in front of that token: the same code, the
-  /// same span and the same token found.
-  fn colon_missing_at<'inp, Src, Ctx>(inp, at: usize) {
-    let found = match at {
-      1 => inp
-        .peek::<U2>()?
-        .get(1)
-        .map(|entry| Spanned::new(*entry.span(), Clone::clone(entry.token()))),
-      2 => inp
-        .peek::<U3>()?
-        .get(2)
-        .map(|entry| Spanned::new(*entry.span(), Clone::clone(entry.token()))),
-      3 => inp
-        .peek::<U4>()?
-        .get(3)
-        .map(|entry| Spanned::new(*entry.span(), Clone::clone(entry.token()))),
-      4 => inp
-        .peek::<U5>()?
-        .get(4)
-        .map(|entry| Spanned::new(*entry.span(), Clone::clone(entry.token()))),
-      _ => None,
-    };
-    if let Some(found) = found {
-      inp.emit_error(crate::lossless::trivia::expected_at::<
-        GraphqlxLosslessLexer<'inp, Src>,
-        Ctx,
-        GraphQLx,
-      >(found, Kind::Colon))?;
-    }
+  /// The report a member's `expect` makes where `found` stands in place of its `:`: the same
+  /// code, the same span and the same token found, built from what the window that made the stop
+  /// read. Nothing is read again, so no budget spent since can leave the stop without its report.
+  fn colon_missing<'inp, Src, Ctx>(
+    inp,
+    found: Spanned<GraphqlxLosslessToken<'inp, Src>, SimpleSpan>,
+  ) {
+    inp.emit_error(crate::lossless::trivia::expected_at::<
+      GraphqlxLosslessLexer<'inp, Src>,
+      Ctx,
+      GraphQLx,
+    >(found, Kind::Colon))?;
     Ok(())
   }
 
@@ -1229,7 +1253,8 @@ lossless_production! {
   /// it. Only behind a spelling that matches are the brace count, which must be what it was behind
   /// the list's `(`, and the peek window read. The window reads no further than that member reads
   /// to its `:`, so every lexer error in front of the report is reported where the member would
-  /// report it.
+  /// report it, and no further than the cache retains, so nothing is lexed twice: where the cache
+  /// retains less, no stop is made and the member reads as it always did.
   fn name_ends_header<'inp, Src, Ctx>(inp, open_at: usize, owner: impl Header, ends: &mut bool) {
     let keyword = peek_as::<Src, Ctx, Keyword>(inp)?;
     let start = restarts_a_root(keyword);
@@ -1240,17 +1265,17 @@ lossless_production! {
       return Ok(());
     }
     let mut behind = None;
-    token_behind::<Src, Ctx>(inp, 0, &mut behind)?;
-    let Some((at, kind, spelled)) = behind else {
+    token_behind::<Src, Ctx>(inp, 0, 0, &mut behind)?;
+    let Some(behind) = behind else {
       return Ok(());
     };
     let stops = if start {
-      starts_with(keyword, kind, spelled)
+      starts_with(keyword, behind.kind, behind.spelled)
     } else {
-      word_goes_on(kind, spelled)
+      word_goes_on(behind.kind, behind.spelled)
     };
     if stops {
-      colon_missing_at::<Src, Ctx>(inp, at)?;
+      colon_missing::<Src, Ctx>(inp, behind.found)?;
       *ends = true;
     }
     Ok(())
@@ -1262,30 +1287,32 @@ lossless_production! {
   /// token behind that name.
   ///
   /// The brace count must be what it was behind the list's `(`. The window is then read in two
-  /// stages. The string and up to two tokens behind it are in the cache, and where the first of
-  /// them that is no trivia is not a name spelled like a keyword a root restarts at, nothing more
-  /// is asked. Where it is, the token behind that name can stand past the cache, and is then lexed
-  /// there and again where the parse reads it: `directive @d("doc" type: Int)` is valid, and
-  /// spends a produce-event or two more than it would without this test.
+  /// stages. First the string and up to two tokens behind it, as far as the cache retains them;
+  /// where the first of them that is no trivia is not a name spelled like a keyword a root restarts
+  /// at, nothing more is asked. Where it is, the token behind that name is read, one token past
+  /// what the cache retains at most, and that token is lexed again where the parse reads it: so
+  /// `directive @d("doc" type: Int)`, which is valid, costs one produce event more than it would
+  /// without this test, and no valid document costs more. Where the token behind the name stands
+  /// further, behind a trivia token past the cache, no stop is made.
   fn description_ends_header<'inp, Src, Ctx>(inp, open_at: usize, ends: &mut bool) {
     if inp.state().brace_depth() != open_at {
       return Ok(());
     }
     let mut name = None;
-    token_behind::<Src, Ctx>(inp, 0, &mut name)?;
-    let Some((at, Kind::Identifier, keyword)) = name else {
+    token_behind::<Src, Ctx>(inp, 0, 0, &mut name)?;
+    let Some(Behind { at, kind: Kind::Identifier, spelled: keyword, .. }) = name else {
       return Ok(());
     };
     if !restarts_a_root(keyword) {
       return Ok(());
     }
     let mut behind = None;
-    token_behind::<Src, Ctx>(inp, at, &mut behind)?;
-    let Some((at, kind, spelled)) = behind else {
+    token_behind::<Src, Ctx>(inp, at, 1, &mut behind)?;
+    let Some(behind) = behind else {
       return Ok(());
     };
-    if starts_with(keyword, kind, spelled) {
-      colon_missing_at::<Src, Ctx>(inp, at)?;
+    if starts_with(keyword, behind.kind, behind.spelled) {
+      colon_missing::<Src, Ctx>(inp, behind.found)?;
       *ends = true;
     }
     Ok(())
