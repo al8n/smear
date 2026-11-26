@@ -473,24 +473,31 @@ All notable changes to Smear are documented in this file.
   a directive, and on none where anything the evidence crosses may begin a definition, a `{`
   included, where a word the owner's list stops at stands at the top of a directive's arguments,
   where a bracket inside a directive's arguments or a path's type arguments closes out of order, or
-  where the brackets it crosses nest deeper than the nesting the parse has left; GraphQLx's `where`,
-  and a directive definition's `repeatable` and `on`, with neither a `:` nor a definition's keyword
-  behind the word; and the start of a definition, a keyword a root restarts at with neither behind
-  it, `extend` and what it extends counting as one, its description's string in front of it or not.
-  The report there is the one the list made first at that head: the unexpected token at a `{`, an
-  `@`, an `=` or a string, or the `:` a member named like the keyword misses. What begins at a stop
-  reads as it reads at a root, so a definition, or GraphQLx's where clause, that begins in the junk
-  may take in what main reads as a definition: at a mixed root `type T @d(x: 1 type U { f: Int }`
-  builds the type `U` where main builds the operation `{ f: Int }`. A directive definition reads no
-  location where a definition starts: a location spelled like a definition's keyword is reported at
-  once, and a look-ahead behind that report decides whether a definition starts there, across any
-  trivia; where that look-ahead cannot be made, the name is a location, as before. A list inside a
-  definition's braces reads as it did, and so does every valid document, under a produce-event
-  budget as well: what the list reads ahead of a valid member stays within the lexer's cache, so no
-  valid document costs an event more than before. In a broken document, a window that meets the end
-  of input across a run of lexer errors has that run lexed a second time and charged twice, until
-  tokora retains the end of input after an error run. The trees and the diagnostics of broken
-  documents change accordingly.
+  where what it crosses, a group's own opener and GraphQLx's `set!` and `map!` among it, would take
+  the reading deeper than the nesting the parse has left; GraphQLx's `where`, and a directive
+  definition's `repeatable` and `on`, with neither a `:` nor a definition's keyword behind the word;
+  and the start of a definition, a keyword a root restarts at with neither behind it, `extend` and
+  what it extends counting as one, its description's string in front of it or not. The report there
+  is the one the list made first at that head: the unexpected token at a `{`, an `@`, an `=` or a
+  string, or the `:` a member named like the keyword misses. What begins at a stop reads as it reads
+  at a root, so a definition, or GraphQLx's where clause, that begins in the junk may take in what
+  main reads as a definition: at a mixed root `type T @d(x: 1 type U { f: Int }` builds the type `U`
+  where main builds the operation `{ f: Int }`. A directive definition reads no location where a
+  definition starts: a location spelled like a definition's keyword is reported at once, and a
+  look-ahead behind that report decides whether a definition starts there, across any trivia; where
+  that look-ahead cannot be made, the name is a location, as before. Each look-ahead takes at most
+  256 tokens, trivia among them, and finds no evidence where it would take more; it runs only at a
+  head or a location just reported, once at each, so what the look-aheads lex and give back is a
+  constant at each such head but for the runs of lexer errors they cross, which the cap cannot
+  count, and the produce-event budget sees all of it. A list inside a definition's braces reads as
+  it did, and so does every valid document, under a produce-event budget as well: what the list
+  reads ahead of a valid member stays within the lexer's cache, so no valid document costs an event
+  more than before. In a broken document, a window that meets the end of input across a run of lexer
+  errors has that run lexed a second time and charged twice, a ruled exception that al8n/tokora#380
+  tracks: the run is the document's tail and its first lexer error is the first error either way, so
+  no definition is lost, and only under a produce-event ceiling within the run's length can the
+  reports behind that error differ. The trees and the diagnostics of broken documents change
+  accordingly.
 - `smear-parser`: `lossless::recover::skip_unexpected`, `unexpected` behind its report, for a
   caller that reads ahead between the two, and `lossless::trivia::expected_at`, the failure
   `expect` reports, built from a token a production has read through the peek window.
