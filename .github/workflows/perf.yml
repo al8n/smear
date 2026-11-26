@@ -239,7 +239,7 @@ jobs:
         # All history, every branch (as `origin/<name>`) and every tag, so `base` can name any.
         fetch-depth: 0
     - name: Install Rust
-      run: rustup update stable --no-self-update && rustup default stable
+      run: rustup update stable --no-self-update && rustup default stable && (lscpu | grep 'Model name' || true)
     - name: Cache cargo registry and both sides' target directories
       uses: actions/cache@v6
       with:
@@ -255,3 +255,16 @@ jobs:
       env:
         PERF_BASE: ${{ inputs.base }}
       run: ci/perf/run.sh --against "$PERF_BASE"
+    - name: code check
+      if: always()
+      timeout-minutes: 45
+      run: |
+        (sudo apt-get update -qq && sudo apt-get install -y -qq valgrind) || echo "codecheck: no valgrind, so no counts"
+        python3 ci/perf/codecheck.py collect "$RUNNER_TEMP/smear-perf"
+    - name: keep the code check
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: codecheck-${{ github.run_id }}
+        path: ${{ runner.temp }}/smear-perf/codecheck
+        retention-days: 14
