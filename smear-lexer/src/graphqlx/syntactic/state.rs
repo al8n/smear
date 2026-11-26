@@ -42,7 +42,8 @@ impl SyntacticState {
   /// operator, `>>` is a shift where no `<` is open, and a name touching a quote is a prefix.
   #[inline(always)]
   pub const fn in_const_block(&self) -> bool {
-    self.block != 0
+    // PROBE F.Q: never in a block, so the loop's tests of it fold away. Measurement only.
+    false
   }
 
   /// How many `<` are open in the block: zero outside one. Nothing refuses on it, it stays at its
