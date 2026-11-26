@@ -463,6 +463,25 @@ All notable changes to Smear are documented in this file.
   skips wreckage that left delimiters open: it spends its first `left` closers on the wreckage and
   stops before the next restart point outside it. One call costs at most one scan and one token;
   a caller that loops on it bounds the loop with the allowance flag it passes.
+- `smear-parser`: in both dialects' lossless layers, a list on a definition's header that has lost
+  its `)`, a directive's arguments or a directive definition's own list, no longer reads the
+  definition's body and the next definition as its members. It ends, unclosed, in front of what the
+  definition reads next: its body, where the `}` that balances the `{` is written and the end of
+  input, a `}` closing a block around the list or the start of a definition stands behind it; its
+  next directive and a union's members, on the same evidence; GraphQLx's `where`, and a directive
+  definition's `repeatable` and `on`, with neither a `:` nor a definition's keyword behind the
+  word; and the start of a definition, a keyword a root restarts at with neither behind it,
+  `extend` and what it extends counting as one, its description's string in front of it or not.
+  The report there is the one the list made first at that head: the unexpected token at a `{`, an
+  `@`, an `=` or a string, or the `:` a member named like the keyword misses. A directive
+  definition reads no location where a definition starts. A list inside a definition's braces
+  reads as it did, and so does every valid document, though under a produce-event budget a
+  directive definition's described argument named like a definition's keyword costs one or two
+  events more. The trees and the diagnostics of broken documents change accordingly.
+- `smear-parser`: `lossless::recover::skip_unexpected`, `unexpected` behind its report, for a
+  caller that reads ahead between the two, and `lossless::trivia::expected_at`, the failure
+  `expect` reports, built from a token a production has read through the peek window.
+  `unexpected` is the report and the skip, as it was.
 - `smear-lexer`: `LosslessLimits::brace_depth()` answers how many `{` are open at the state's
   position. Both dialects' lossless lexers keep the count, over every source. It is no budget and
   nothing refuses on it; it lives in the rewindable state, so a rewind takes it back; and it joins
