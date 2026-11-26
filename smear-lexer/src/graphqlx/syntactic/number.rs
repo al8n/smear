@@ -51,9 +51,9 @@ use crate::{
 /// The number sub-lexer's state: the limits the syntactic lexer lends it, and whether the number
 /// is inside a `const { … }` block.
 ///
-/// The block is a flag, never the lexer's word: the lexer folds back only the limits, so nothing
-/// the sub-lexer answers can write the count of open `<`. Inside a block an incomplete number's
-/// refusal ends before a brace or an angle bracket, as the lossless grammar's does there.
+/// The block is a flag, never the lexer's word: the lexer folds back only the limits' depth, so
+/// nothing the sub-lexer answers can write the count of open `<`. Inside a block an incomplete
+/// number's refusal ends before a brace or an angle bracket, as the lossless grammar's does there.
 ///
 /// `pub` because the grammar's logos token, which is `pub`, names it as its `Extras`. This module
 /// is crate-private and nothing re-exports the type, so no caller can name it.

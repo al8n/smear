@@ -101,10 +101,10 @@ All notable changes to Smear are documented in this file.
   integer part, refused as one, as the lossless lexer's longest match does. It used to refuse the
   `.` alone and lex the rest apart.
 - `smear-lexer`!: each GraphQLx lexer has a `const { … }` block's lexing mode, held in its state.
-  - **The state.** `SyntacticState` and `LosslessState` gain one word, and `in_const_block`,
-    `open_angles`, `enter_const_block` and `leave_const_block`. A lexer never enters or leaves a
-    block by what it reads: its parser does, and no parser does yet. Outside a block both lexers
-    lex as they did.
+  - **The state.** `LosslessState` gains one word, and `SyntacticState` none on a 64-bit target
+    (below). Both gain `in_const_block`, `open_angles`, `enter_const_block` and
+    `leave_const_block`. A lexer never enters or leaves a block by what it reads: its parser does,
+    and no parser does yet. Outside a block both lexers lex as they did.
   - **What a block lexes otherwise.** A comma is the token `Separator` while no `<` is open, `-`
     is always `Minus` and no number carries a sign, `>>` is the token `Shr` where no `<` is open,
     and a brace clears the count of open `<`. A name touching a quote is one token: `b` or `i`
@@ -158,6 +158,12 @@ All notable changes to Smear are documented in this file.
   - **What does not change.** `SyntacticLimits` and `LosslessLimits` are as they were, and each
     is still the state of GraphQL's lexers. Every door takes the parameter it took: the layers
     their limits, and each lossless `*_with_limits` door a `LosslessLimits`.
+- `smear-lexer`: `graphqlx::syntactic::SyntacticState` is two words on a 64-bit target, the size
+  the lexer's state had in 0.0.1, because its nesting ceiling shares a word with the block's
+  state. On a 32-bit target it is 12 or 16 bytes, where it was 8. So it holds the ceiling in 32
+  bits: a state built from one above 4,294,967,295, `SyntacticLimits::unlimited()`'s among them,
+  refuses past 4,294,967,295 open brackets, and its `limits()`, which now answers the limits by
+  value, reads back 4,294,967,295 as the ceiling.
 - `smear-compiler`! and `smear`: `smear-schema`, `smear-semantics` and `smear-analysis` are folded
   into `smear-compiler`, and the set is five crates from this release. Under `smear` no path and no
   feature changes: `smear::diagnostic`, `smear::validator`, `smear::validator::schema` and
