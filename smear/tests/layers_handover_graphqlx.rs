@@ -621,6 +621,61 @@ mod lossless {
     }
   }
 
+  /// The first error each layer lends for `text`, read as a type-system document, as
+  /// `code at start..end`: the lossless layer's first in the order it lends them, which is the
+  /// order it makes them in, and the syntactic layer's one.
+  fn first_lent(text: &str) -> (Option<String>, Option<String>) {
+    fn code_at<E: Diagnose>(error: &E) -> String {
+      let span = error.primary().span();
+      format!(
+        "{} at {}..{}",
+        error.code().as_str(),
+        span.map_or(0, |span| span.start()),
+        span.map_or(0, |span| span.end())
+      )
+    }
+    let mut lossless: Vec<Lent<'_>> = Vec::new();
+    let _ = Lossless::new()
+      .type_system_document(text, &mut lossless)
+      .expect("a short text is short enough for a tree");
+    let mut syntactic: Vec<GraphqlxError<&str>> = Vec::new();
+    let _ = Syntactic::new().type_system_document(text, &mut syntactic);
+    (
+      lossless.first().map(code_at),
+      syntactic.first().map(code_at),
+    )
+  }
+
+  /// A list on a header that has lost its `)` and ends there reports first what the lossless layer
+  /// reported first before, and that is the syntactic layer's one error, in code and in span: the
+  /// unexpected token at a `{`, a string, an `=` or an `@` the list ends in front of, and the `:`
+  /// missing behind a keyword, a word its owner reads, or a description's name.
+  #[test]
+  fn a_headers_stop_reports_first_the_one_error_of_both_layers() {
+    for (text, token, len) in [
+      ("type T @d(x: 1 { f: Int } scalar S", "{", 1),
+      ("type T @d(x: 1 scalar S", "S", 1),
+      ("type T @d(x: 1 \"doc\" scalar S", "\"doc\"", 5),
+      ("directive @d(a: Int on FIELD scalar S", "FIELD", 5),
+      ("directive @d(a: Int \"doc\" scalar S", "S", 1),
+      ("union U @d(x: 1 = A | B scalar S", "=", 1),
+      ("type T @d(x: 1 @e { f: Int } scalar S", "@e", 1),
+      ("type T @d(x: 1 where K: L { f: Int } scalar S", "K", 1),
+    ] {
+      let at = text.rfind(token).expect("the token the error stands at");
+      let (ours, theirs) = first_lent(text);
+      assert_eq!(ours, theirs, "{text}");
+      assert_eq!(
+        ours,
+        Some(format!(
+          "smear::syntax::unexpected-token at {at}..{}",
+          at + len
+        )),
+        "{text}"
+      );
+    }
+  }
+
   /// A `::` at a block operand's head begins no operand, and both layers refuse it as they refuse
   /// every head that begins none: one code, at one token.
   #[test]
