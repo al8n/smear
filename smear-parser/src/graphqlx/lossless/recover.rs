@@ -765,6 +765,13 @@ fn braces(kind: &Kind) -> Balance<u8> {
 // list holds is reported first, as `unexpected` reports it, and decided behind that report by a
 // look-ahead that is given back. So is a directive definition's location spelled like a keyword a
 // root restarts at, which no valid location is.
+//
+// A look-ahead finds its evidence only where every token it crosses on the way passes one step,
+// `cross`: no name a root restarts at with anything but a `:` behind it, no `{` but the owner's
+// body's, no word the owner's list stops at directly inside a directive's arguments, and no
+// bracket that closes out of order or nests deeper than the parse has left. Behind their own
+// report, main's skip and root rebuild a definition from any part of the text that nobody asked,
+// so the step asks every part.
 // ---------------------------------------------------------------------------------------------
 
 /// Whether `keyword` names what an `extend` extends: the eight `extension.rs`'s
@@ -816,14 +823,71 @@ const fn word_goes_on(kind: Kind, spelled: Option<Keyword>) -> bool {
   }
 }
 
-/// Whether a name spelled `keyword`, which a look-ahead reads as a directive's or a member's, may
-/// instead be the keyword of a definition that begins there, a token of `kind` spelled `spelled`
-/// standing behind it: the keyword is one a root restarts at, and behind it stands a name, which
-/// may be that definition's, or a token at which [`starts_with`] finds a start.
+/// Whether a name spelled `keyword`, which a look-ahead crosses on its way to its evidence, may be
+/// the keyword of a definition that begins there, `behind` the kind of the token behind it: the
+/// keyword is one a root restarts at, and anything but a `:` stands behind it, the end of input
+/// included. Main's skip and root, behind their own report, build a definition at such a name, a
+/// bare one where nothing names it, so what follows it is no evidence for the owner. Every name
+/// crossed is asked so, at every depth: a directive's, a member's, a step of a path, and any
+/// inside a directive's arguments, a path's type arguments or a body. Behind a `:` the name is a
+/// member's: a definition main builds from a keyword with a `:` or the end of input behind it is
+/// not counted lost, and the end of input refuses all the same, which only removes stops.
 #[inline]
-const fn may_start(keyword: Option<Keyword>, kind: Kind, spelled: Option<Keyword>) -> bool {
-  restarts_a_root(keyword)
-    && (matches!(kind, Kind::Identifier) || starts_with(keyword, kind, spelled))
+const fn may_start(keyword: Option<Keyword>, behind: Option<Kind>) -> bool {
+  restarts_a_root(keyword) && !matches!(behind, Some(Kind::Colon))
+}
+
+/// How many brackets a look-ahead's crossing holds open at most. A crossing that would nest
+/// deeper finds no evidence, which only removes stops; the bound keeps the crossing's state in a
+/// fixed array.
+const CROSS_CAP: usize = 32;
+
+/// The brackets a look-ahead's crossing holds open, innermost last, each as the closer that
+/// answers it: one stack over every pair this dialect has, `()`, `[]` and `<>`, and a body's own
+/// `{` at its bottom where the crossing is a body's.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Crossing {
+  closers: [Kind; CROSS_CAP],
+  depth: usize,
+}
+
+impl Crossing {
+  /// A crossing that holds nothing open.
+  const fn new() -> Self {
+    Self {
+      closers: [Kind::RParen; CROSS_CAP],
+      depth: 0,
+    }
+  }
+
+  /// How many brackets it holds open.
+  const fn depth(&self) -> usize {
+    self.depth
+  }
+
+  /// The closer that answers the innermost bracket it holds open, where it holds one.
+  const fn innermost(&self) -> Option<Kind> {
+    if self.depth == 0 {
+      None
+    } else {
+      Some(self.closers[self.depth - 1])
+    }
+  }
+
+  /// Holds open a bracket that `closer` answers: `false` where [`CROSS_CAP`] are open already.
+  const fn enter(&mut self, closer: Kind) -> bool {
+    if self.depth == CROSS_CAP {
+      return false;
+    }
+    self.closers[self.depth] = closer;
+    self.depth += 1;
+    true
+  }
+
+  /// Closes the innermost bracket it holds open.
+  const fn leave(&mut self) {
+    self.depth = self.depth.saturating_sub(1);
+  }
 }
 
 /// The owner of a list on a definition's header, as a type: what the owner's production reads
@@ -1171,6 +1235,11 @@ lossless_production! {
 // are for a head a valid list can hold and make no report but the stop's own; the look-ahead is for
 // a head no valid list holds, is made behind that head's report, and is given back. A directive
 // definition's location spelled like a definition's keyword is decided the same way.
+//
+// Every token a look-ahead crosses on its way to its evidence passes `cross`. A reader takes no
+// token itself but the structure it reads, the head, an `@`, an `=`, a `|`, a path's sigils and
+// `::`, the owner's body's `{` and `}` and a group's own opener and closer, and its terminal
+// evidence.
 // ---------------------------------------------------------------------------------------------
 
 lossless_production! {
@@ -1435,24 +1504,25 @@ lossless_production! {
   /// What a look-ahead reads at a head no valid list holds, on `owner`'s header: whether what the
   /// owner reads next stands there.
   ///
-  /// - **A `{`:** the owner's body. The `}` that balances it is written, read by braces alone, and
-  ///   behind it stands the end of input, a `}` that closes a block around the list, or the start
-  ///   of a definition.
-  /// - **An `@`:** the owner's next directive. One or more, each an `@`, its path and the `)` that
-  ///   balances its `(` where one follows, and behind them what may stand behind a body, or what
-  ///   the owner reads next by its own test.
+  /// - **A `{`:** the owner's body, read by [`body_ahead`]. The `}` that answers it is written,
+  ///   and behind it stands the end of input, a `}` that closes a block around the list, or the
+  ///   start of a definition.
+  /// - **An `@`:** the owner's next directive. One or more, each an `@`, its path and its
+  ///   arguments where a `(` follows, and behind them what may stand behind a body, or what the
+  ///   owner reads next by its own test.
   /// - **An `=`:** a union's members. A `|` or none, paths between `|`, and behind them what may
   ///   stand behind a body, or a `where` by its test.
   /// - **A string:** the description of a definition that starts behind it.
   ///
-  /// Where it meets the end of input in place of what it asks about, it finds nothing. Nor does it
-  /// find anything behind a name it reads in a directive's path or a member's, at any place in the
-  /// chain, that is spelled like a keyword a root restarts at with a token behind it that may begin
-  /// that definition, as [`name_ahead`] asks it: the keyword may be the definition's, and what
-  /// follows it is no evidence for the owner.
+  /// Every token it crosses on the way to what it asks about passes [`cross`], and where that
+  /// refuses one it finds nothing. So it finds nothing where a definition may begin in what it
+  /// crosses, at any depth, where a `{` but the owner's body's stands there, where a directive's
+  /// arguments hold a word the owner's list stops at, and where a bracket closes out of order or
+  /// nests deeper than the parse has left. Where it meets the end of input in place of what it
+  /// asks about, it finds nothing either.
   fn ahead<'inp, Src, Ctx>(inp, open_at: usize, owner: impl Header, found: &mut bool) {
     match peek_kind::<Src, Ctx>(inp)? {
-      Some(Kind::LBrace) => body_ahead::<Src, Ctx>(inp, open_at, found),
+      Some(Kind::LBrace) => body_ahead::<Src, Ctx>(inp, open_at, owner, true, found),
       Some(Kind::At) => directives_ahead::<Src, Ctx>(inp, open_at, owner, found),
       Some(Kind::Equal) => members_ahead::<Src, Ctx>(inp, open_at, owner, found),
       Some(Kind::InlineString | Kind::BlockString) => {
@@ -1463,44 +1533,148 @@ lossless_production! {
     }
   }
 
-  /// A body ahead, at its `{`: the `}` that balances it, by braces alone, and behind it what
-  /// [`behind_ahead`] finds. A `(` or a `[` left open inside hides nothing, as in a module's body:
-  /// the braces as written are the body's.
-  fn body_ahead<'inp, Src, Ctx>(inp, open_at: usize, found: &mut bool) {
-    let mut closed = false;
-    balanced_ahead::<Src, Ctx>(inp, Kind::LBrace, Kind::RBrace, &mut closed)?;
-    if closed {
-      behind_ahead::<Src, Ctx>(inp, open_at, found)?;
+  /// A body ahead, at its `{`: the `}` that answers it, every token between crossed by [`cross`]
+  /// with the body's `{` at the bottom of what the crossing holds open, and behind it what
+  /// [`behind_ahead`] finds. So nothing inside may begin a definition, no `{` stands inside, and
+  /// every bracket inside closes in order: the body's `}` ends it only where nothing above its `{`
+  /// is open. A bracket the body leaves open would hide what stands behind it from main's scan,
+  /// which counts the closers blind to which opener each answers, and main's walk would then read
+  /// the body.
+  ///
+  /// `end_counts` says whether the end of input behind the body is evidence. Behind a body reached
+  /// through a directive it is not: at a mixed root main's walk reads that `{` as an operation.
+  fn body_ahead<'inp, Src, Ctx>(
+    inp,
+    open_at: usize,
+    owner: impl Header,
+    end_counts: bool,
+    found: &mut bool,
+  ) {
+    let mut crossing = Crossing::new();
+    let mut refused = false;
+    opener::<Src, Ctx>(inp, &mut crossing, Kind::RBrace, &mut refused)?;
+    while !refused {
+      match peek_kind::<Src, Ctx>(inp)? {
+        None => return Ok(()),
+        Some(Kind::RBrace) if crossing.depth() == 1 => {
+          inp.try_expect_or_stop(|_| true)?;
+          return behind_ahead::<Src, Ctx>(inp, open_at, end_counts, found);
+        }
+        Some(_) => cross::<Src, Ctx>(inp, owner, &mut crossing, false, &mut refused)?,
+      }
     }
     Ok(())
   }
 
-  /// A group ahead, at its `open`: every token to the `close` that balances it, those two kinds
-  /// counted and no other, and that `close` taken. `closed` says whether it is written.
-  fn balanced_ahead<'inp, Src, Ctx>(inp, open: Kind, close: Kind, closed: &mut bool) {
+  /// A group ahead, at its opener: the opener and the `closer` that ends the group taken, and
+  /// every token between crossed by [`cross`], a directive's arguments, `(` to `)`, or a path's
+  /// type arguments, `<` to `>`. With nothing open inside, only `closer` ends it, and any other
+  /// closer refuses. `words` asks [`cross`] for the owner's words at the group's depth 0, which a
+  /// directive's arguments do. `written` says whether the whole group is, with nothing in it
+  /// refused.
+  fn group_ahead<'inp, Src, Ctx>(
+    inp,
+    owner: impl Header,
+    closer: Kind,
+    words: bool,
+    written: &mut bool,
+  ) {
     inp.try_expect_or_stop(|_| true)?;
-    let mut depth = 1usize;
-    while depth > 0 {
-      let Some(kind) = peek_kind::<Src, Ctx>(inp)? else {
-        return Ok(());
-      };
-      if kind == open {
-        depth += 1;
-      } else if kind == close {
-        depth -= 1;
+    let mut crossing = Crossing::new();
+    let mut refused = false;
+    while !refused {
+      match peek_kind::<Src, Ctx>(inp)? {
+        None => return Ok(()),
+        Some(kind) if kind == closer && crossing.depth() == 0 => {
+          inp.try_expect_or_stop(|_| true)?;
+          *written = true;
+          return Ok(());
+        }
+        Some(_) => cross::<Src, Ctx>(inp, owner, &mut crossing, words, &mut refused)?,
       }
-      inp.try_expect_or_stop(|_| true)?;
     }
-    *closed = true;
+    Ok(())
+  }
+
+  /// An opener ahead, taken and held open on `crossing`, answered by `closer`: `refused` says
+  /// where that would nest past [`CROSS_CAP`], or past the nesting the parse has left, two frames
+  /// kept back for the reading that would take the evidence. That reading descends a frame for
+  /// each bracket the crossing holds, where main scans them flat, and a refusal at the parse's
+  /// nesting ceiling would end the document.
+  fn opener<'inp, Src, Ctx>(inp, crossing: &mut Crossing, closer: Kind, refused: &mut bool) {
+    let left = inp
+      .recursion()
+      .limitation()
+      .saturating_sub(inp.recursion().depth());
+    if crossing.enter(closer) && crossing.depth().saturating_add(2) <= left {
+      inp.try_expect_or_stop(|_| true)?;
+    } else {
+      *refused = true;
+    }
+    Ok(())
+  }
+
+  /// One token a look-ahead crosses on its way to its evidence, taken, and asked: `refused` says
+  /// where nothing behind it can be evidence for `owner`, since main's skip and root, behind their
+  /// own report, rebuild a definition from any token at any depth. That is so at
+  ///
+  /// - a name [`may_start`] finds the keyword of a definition;
+  /// - a `{`, since only the owner's body opens one, and that one its reader takes itself;
+  /// - where `words` asks it, at depth 0 of the group: a word the owner's list stops at, by
+  ///   [`ends_at_word`], with a token behind it [`word_goes_on`] accepts, since a directive's
+  ///   arguments end there in the reading that would take the evidence;
+  /// - a closer that does not answer the innermost bracket `crossing` holds open;
+  /// - an opener [`opener`] refuses;
+  /// - the end of input.
+  ///
+  /// Nothing is taken at a `{` or a closer it refuses, nor at the end of input.
+  fn cross<'inp, Src, Ctx>(
+    inp,
+    owner: impl Header,
+    crossing: &mut Crossing,
+    words: bool,
+    refused: &mut bool,
+  ) {
+    match peek_kind::<Src, Ctx>(inp)? {
+      None | Some(Kind::LBrace) => *refused = true,
+      Some(Kind::Identifier) => {
+        let keyword = peek_as::<Src, Ctx, Keyword>(inp)?;
+        inp.try_expect_or_stop(|_| true)?;
+        let word = words && crossing.depth() == 0 && ends_at_word(owner, keyword);
+        if restarts_a_root(keyword) || word {
+          let behind = peek_kind::<Src, Ctx>(inp)?;
+          let word_ends = match behind {
+            Some(kind) if word => word_goes_on(kind, peek_as::<Src, Ctx, Keyword>(inp)?),
+            _ => false,
+          };
+          *refused = may_start(keyword, behind) || word_ends;
+        }
+      }
+      Some(Kind::LParen) => opener::<Src, Ctx>(inp, crossing, Kind::RParen, refused)?,
+      Some(Kind::LBracket) => opener::<Src, Ctx>(inp, crossing, Kind::RBracket, refused)?,
+      Some(Kind::LAngle) => opener::<Src, Ctx>(inp, crossing, Kind::RAngle, refused)?,
+      Some(closer @ (Kind::RParen | Kind::RBracket | Kind::RAngle | Kind::RBrace)) => {
+        if crossing.innermost() == Some(closer) {
+          crossing.leave();
+          inp.try_expect_or_stop(|_| true)?;
+        } else {
+          *refused = true;
+        }
+      }
+      Some(_) => {
+        inp.try_expect_or_stop(|_| true)?;
+      }
+    }
     Ok(())
   }
 
   /// What may stand behind a body, the owner's directives or a union's members, ahead: the end of
-  /// input, a `}` that closes a block around the list, by the brace count at that `}`, or the start
-  /// of a definition, a description's string in front of it or not.
-  fn behind_ahead<'inp, Src, Ctx>(inp, open_at: usize, found: &mut bool) {
+  /// input where `end_counts` says so, a `}` that closes a block around the list, by the brace
+  /// count at that `}`, or the start of a definition, a description's string in front of it or
+  /// not.
+  fn behind_ahead<'inp, Src, Ctx>(inp, open_at: usize, end_counts: bool, found: &mut bool) {
     match peek_kind::<Src, Ctx>(inp)? {
-      None => *found = true,
+      None => *found = end_counts,
       Some(Kind::RBrace) => *found = closes_enclosing_block(open_at, inp.state().brace_depth()),
       Some(Kind::InlineString | Kind::BlockString) => {
         inp.try_expect_or_stop(|_| true)?;
@@ -1537,18 +1711,18 @@ lossless_production! {
     Ok(())
   }
 
-  /// The owner's next directive ahead, at its `@`: each `@`, its path and, where a `(` follows the
-  /// path, the `)` that balances it, again while an `@` follows; and behind them what
-  /// [`next_ahead`] finds. Where [`path_ahead`] finds a path unwritten, as it does where
-  /// [`name_ahead`] takes no name of it, nothing is found.
+  /// The owner's next directive ahead, at its `@`: each `@`, its path, read by [`path_ahead`],
+  /// and where a `(` follows the path, its arguments, read by [`group_ahead`] with the owner's
+  /// words asked, again while an `@` follows; and behind them what [`next_ahead`] finds. Where a
+  /// path or arguments are unwritten, or crossed into a refusal, nothing is found.
   fn directives_ahead<'inp, Src, Ctx>(inp, open_at: usize, owner: impl Header, found: &mut bool) {
     while peek_kind::<Src, Ctx>(inp)? == Some(Kind::At) {
       inp.try_expect_or_stop(|_| true)?;
       let mut written = false;
-      path_ahead::<Src, Ctx>(inp, &mut written)?;
+      path_ahead::<Src, Ctx>(inp, owner, &mut written)?;
       if written && peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
         written = false;
-        balanced_ahead::<Src, Ctx>(inp, Kind::LParen, Kind::RParen, &mut written)?;
+        group_ahead::<Src, Ctx>(inp, owner, Kind::RParen, true, &mut written)?;
       }
       if !written {
         return Ok(());
@@ -1558,15 +1732,16 @@ lossless_production! {
   }
 
   /// What may stand behind the owner's directives, ahead: what [`behind_ahead`] finds, or what the
-  /// owner reads next by its own test, a body behind a `{` where it reads one, a union's members
-  /// behind an `=` where it reads them, and `where`, `repeatable` or `on` where it reads the word.
+  /// owner reads next by its own test, a body behind a `{` where it reads one, with no end of
+  /// input behind that body as evidence, a union's members behind an `=` where it reads them, and
+  /// `where`, `repeatable` or `on` where it reads the word.
   fn next_ahead<'inp, Src, Ctx>(inp, open_at: usize, owner: impl Header, found: &mut bool) {
     let head = peek_kind::<Src, Ctx>(inp)?;
     let word = head == Some(Kind::Identifier)
       && ends_at_word(owner, peek_as::<Src, Ctx, Keyword>(inp)?);
     match head {
       Some(Kind::LBrace) if asks(owner, Kind::LBrace) => {
-        body_ahead::<Src, Ctx>(inp, open_at, found)
+        body_ahead::<Src, Ctx>(inp, open_at, owner, false, found)
       }
       Some(Kind::Equal) if asks(owner, Kind::Equal) => {
         members_ahead::<Src, Ctx>(inp, open_at, owner, found)
@@ -1575,14 +1750,14 @@ lossless_production! {
         inp.try_expect_or_stop(|_| true)?;
         word_ahead::<Src, Ctx>(inp, found)
       }
-      _ => behind_ahead::<Src, Ctx>(inp, open_at, found),
+      _ => behind_ahead::<Src, Ctx>(inp, open_at, true, found),
     }
   }
 
-  /// A union's members ahead, at its `=`: a `|` or none, then paths with a `|` between each two;
-  /// and behind them what [`behind_ahead`] finds, or a `where` by its test where the owner reads
-  /// one. Where [`path_ahead`] finds a path unwritten, as it does where [`name_ahead`] takes no
-  /// name of it, nothing is found.
+  /// A union's members ahead, at its `=`: a `|` or none, then paths with a `|` between each two,
+  /// each read by [`path_ahead`]; and behind them what [`behind_ahead`] finds, or a `where` by its
+  /// test where the owner reads one. Where a path is unwritten, or crossed into a refusal, nothing
+  /// is found.
   fn members_ahead<'inp, Src, Ctx>(inp, open_at: usize, owner: impl Header, found: &mut bool) {
     inp.try_expect_or_stop(|_| true)?;
     if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Pipe) {
@@ -1590,7 +1765,7 @@ lossless_production! {
     }
     loop {
       let mut written = false;
-      path_ahead::<Src, Ctx>(inp, &mut written)?;
+      path_ahead::<Src, Ctx>(inp, owner, &mut written)?;
       if !written {
         return Ok(());
       }
@@ -1604,7 +1779,7 @@ lossless_production! {
       inp.try_expect_or_stop(|_| true)?;
       return word_ahead::<Src, Ctx>(inp, found);
     }
-    behind_ahead::<Src, Ctx>(inp, open_at, found)
+    behind_ahead::<Src, Ctx>(inp, open_at, true, found)
   }
 
   /// The word its owner reads next, ahead, the word taken: [`word_goes_on`]'s test of the token
@@ -1618,9 +1793,10 @@ lossless_production! {
 
   /// A path ahead, as a directive's name and a union's member are written, which `ty.rs`'s
   /// `type_path` reads: a root, `~ ::` or `^ ::` once or `.. ::` any number of times, or none; a
-  /// name, and `:: Name` any number of times; and where a `<` follows, the `>` that balances it.
-  /// `written` says whether the whole of it is, each of its names taken as [`name_ahead`] takes it.
-  fn path_ahead<'inp, Src, Ctx>(inp, written: &mut bool) {
+  /// name, and `:: Name` any number of times, each name crossed by [`cross`]; and where a `<`
+  /// follows, its type arguments, read by [`group_ahead`]. `written` says whether the whole of it
+  /// is, with nothing in it refused.
+  fn path_ahead<'inp, Src, Ctx>(inp, owner: impl Header, written: &mut bool) {
     match peek_kind::<Src, Ctx>(inp)? {
       Some(Kind::Tilde | Kind::Caret) => {
         inp.try_expect_or_stop(|_| true)?;
@@ -1639,42 +1815,25 @@ lossless_production! {
         }
       }
     }
-    let mut taken = false;
-    name_ahead::<Src, Ctx>(inp, &mut taken)?;
-    while taken && peek_kind::<Src, Ctx>(inp)? == Some(Kind::PathSeparator) {
+    let mut crossing = Crossing::new();
+    let mut refused = false;
+    loop {
+      if peek_kind::<Src, Ctx>(inp)? != Some(Kind::Identifier) {
+        return Ok(());
+      }
+      cross::<Src, Ctx>(inp, owner, &mut crossing, false, &mut refused)?;
+      if refused {
+        return Ok(());
+      }
+      if peek_kind::<Src, Ctx>(inp)? != Some(Kind::PathSeparator) {
+        break;
+      }
       inp.try_expect_or_stop(|_| true)?;
-      taken = false;
-      name_ahead::<Src, Ctx>(inp, &mut taken)?;
-    }
-    if !taken {
-      return Ok(());
     }
     if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LAngle) {
-      return balanced_ahead::<Src, Ctx>(inp, Kind::LAngle, Kind::RAngle, written);
+      return group_ahead::<Src, Ctx>(inp, owner, Kind::RAngle, false, written);
     }
     *written = true;
-    Ok(())
-  }
-
-  /// A name ahead, taken where one stands: `taken` says whether one is, and stays `false` where the
-  /// name is spelled like a keyword a root restarts at and the token behind it, read across any
-  /// trivia, may begin that definition by [`may_start`]. Every name of a directive's path and of a
-  /// member's is asked so as the chain reaches it, the last no more than the first: the keyword may
-  /// be the definition's, and nothing the look-ahead read behind it would be evidence for the
-  /// owner, so the list's skip and the root then read the definition as they always did.
-  fn name_ahead<'inp, Src, Ctx>(inp, taken: &mut bool) {
-    if peek_kind::<Src, Ctx>(inp)? != Some(Kind::Identifier) {
-      return Ok(());
-    }
-    let keyword = peek_as::<Src, Ctx, Keyword>(inp)?;
-    inp.try_expect_or_stop(|_| true)?;
-    if restarts_a_root(keyword)
-      && let Some(kind) = peek_kind::<Src, Ctx>(inp)?
-      && may_start(keyword, kind, peek_as::<Src, Ctx, Keyword>(inp)?)
-    {
-      return Ok(());
-    }
-    *taken = true;
     Ok(())
   }
 }
