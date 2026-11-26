@@ -3591,6 +3591,133 @@ mod lossless {
     }
   }
 
+  /// What a look-ahead crosses on its way to its evidence is asked a token at a time, at every
+  /// depth, so a definition that begins inside it is no evidence: a keyword inside a directive's
+  /// arguments, inside a path's type arguments, on a directive and on a union's member, and inside
+  /// the body at the head; and a `)` inside a directive's arguments with a `[` still open in front
+  /// of it. The list skips its junk as it always did, and the root reads the definition, where the
+  /// evidence would have made it a value, a type argument or a member. In the first two the owner
+  /// is itself a scalar, so `S` stands beside it.
+  #[test]
+  fn a_definition_inside_what_a_look_ahead_crosses_is_no_evidence() {
+    for text in [
+      "scalar A @d(@e(x:[\nscalar S\n])",
+      "scalar A @d(@e<[\nscalar S\n]>",
+    ] {
+      for (root, tree, _) in at_both_roots(text) {
+        let scalars = written(&tree, K::ScalarTypeDefinition);
+        assert!(
+          scalars.iter().any(|scalar| scalar == "scalar S"),
+          "{text} at the {root} root: {scalars:?}"
+        );
+      }
+    }
+
+    for text in [
+      "union U @d(x: 1 = A<[\nscalar S\n]>",
+      "type T @d(x: 1 { f: Int @deprecated scalar S }",
+      "type T @d(x: 1 @e(y: [1) scalar S ])",
+    ] {
+      for (root, tree, _) in at_both_roots(text) {
+        assert_eq!(
+          written(&tree, K::ScalarTypeDefinition),
+          ["scalar S"],
+          "{text} at the {root} root"
+        );
+      }
+    }
+
+    let text = "enum E @d(x: 1 { A B scalar S } type T { f: Int }";
+    for (root, tree, _) in at_both_roots(text) {
+      assert_eq!(
+        written(&tree, K::ScalarTypeDefinition),
+        ["scalar S"],
+        "{text} at the {root} root"
+      );
+      assert_eq!(
+        written(&tree, K::ObjectTypeDefinition),
+        ["type T { f: Int }"],
+        "{text} at the {root} root"
+      );
+    }
+  }
+
+  /// A mixed root reads as an operation a `{` its scan leaves at the root, so a look-ahead finds
+  /// nothing where main would read one: at a `{` inside a directive's arguments, at the end of
+  /// input behind a body reached through a directive, and behind a body that leaves a bracket open
+  /// at its `}`, which hides from main's scan, blind to which closer answers which opener, the
+  /// definition behind it. The root reads the operation main reads, and the definition after it.
+  #[test]
+  fn an_operation_main_reads_behind_a_header_is_no_evidence() {
+    for (text, operation) in [
+      ("type T @d(@e(x: [\n{ me }\n])", "{ me }"),
+      ("type T @d(x: 1 @e @g\n{ me }", "{ me }"),
+      ("type T @d(x: 1 @e @g { f(b: 1 } scalar S", "{ f(b: 1 }"),
+    ] {
+      assert_eq!(
+        written(&parse_document(text).syntax(), K::OperationDefinition),
+        [operation],
+        "{text}"
+      );
+    }
+
+    let text = "type T @d(x: 1 @e @g { f(b: 1 } scalar S";
+    for (root, tree, _) in at_both_roots(text) {
+      assert_eq!(
+        written(&tree, K::ScalarTypeDefinition),
+        ["scalar S"],
+        "{text} at the {root} root"
+      );
+    }
+  }
+
+  /// A look-ahead crosses brackets only as deep as the parse has left, and only where each closes
+  /// the one open last: the reading that would take its evidence descends a frame for each, where
+  /// main scans them flat, and a refusal there ends the document. Inside a directive's arguments,
+  /// `}` answers no `[` under the default ceiling, and under a raised one 300 `[` nest past what a
+  /// crossing holds; inside a body, `)` answers no `[`. The type-system root lends no refusal, and
+  /// both roots read the definition behind as main does, which a refusal would have ended the
+  /// document in front of.
+  #[test]
+  fn a_look_ahead_crosses_no_deeper_than_the_parse_reads() {
+    let unpaired = format!("type T @d(x: 1 @e(y: {}1) scalar S", "[ } ".repeat(30));
+    let deep = format!(
+      "type T @d(x: 1 @e(y: {}1{}) scalar S",
+      "[".repeat(300),
+      "]".repeat(300)
+    );
+    let body = format!(
+      "type T @d(x: 1 {{ f: Int @x(a: {}1) }} scalar S",
+      "[ ) ".repeat(30)
+    );
+    for (text, limits) in [
+      (unpaired, LosslessLimits::default()),
+      (deep, LosslessLimits::with_max_nesting_depth(1000)),
+      (body, LosslessLimits::default()),
+    ] {
+      let errors = lent(&Lossless::with_limits(limits), &text);
+      assert!(
+        !errors
+          .iter()
+          .any(|(code, _)| code == "smear::syntax::nesting-limit"),
+        "{text}: {errors:?}"
+      );
+      for (root, parse) in [
+        ("mixed", parse_document_with_limits(&text, limits)),
+        (
+          "type-system",
+          parse_type_system_document_with_limits(&text, limits),
+        ),
+      ] {
+        assert_eq!(
+          written(&parse.syntax(), K::ScalarTypeDefinition),
+          ["scalar S"],
+          "{text} at the {root} root"
+        );
+      }
+    }
+  }
+
   /// A brace inside a header's list stays the list's junk, as it always was, where no evidence of a
   /// body stands behind its `}` or no `}` balances it: the list reads the members around and inside
   /// it, and the definition keeps its own body.
