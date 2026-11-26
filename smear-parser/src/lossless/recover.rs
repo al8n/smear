@@ -157,7 +157,9 @@
 //! twice to `spent`, once a parse. Without a durable ceiling only the test-support counters see
 //! it; under a produce-event ceiling within the run's length of what the parse needs, the
 //! budget's refusal is lent in front of the report the parse would make at the end of input. It
-//! stays so until tokora retains the end of input after an error run.
+//! is a ruled exception, which al8n/tokora#380 tracks: the run is the document's tail and its
+//! first lexer error is the first error on both readings, so no definition is lost, and only the
+//! reports behind that error can differ.
 //!
 //! **Exception 2 — lexer errors. Closed, and named here because the arithmetic it drove is still
 //! quoted below.** tokora charges `spent` for *every* item the lexer hands back, errors included

@@ -3878,7 +3878,7 @@ mod lossless {
   /// and is not read. With lexer errors in front of that token the window would have lexed them
   /// all to fill its one slot, and each again where the member reads them. The last text's errors
   /// have a `:` behind them. Where a window meets the end of input across such a run, the parse
-  /// lexes the run a second time, until tokora retains the end of input after an error run.
+  /// lexes the run a second time, a ruled exception that al8n/tokora#380 tracks.
   #[test]
   fn the_window_lexes_nothing_twice() {
     let text = "scalar X @extern(lang: \"rust\", type: \"x\")";

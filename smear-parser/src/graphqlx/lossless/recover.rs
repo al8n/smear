@@ -762,11 +762,12 @@ fn braces(kind: &Kind) -> Balance<u8> {
 // A head a valid list can hold, a name or a description's string, is decided through the peek
 // window, read no further than the member there would read and no further than the cache retains,
 // and a stop reports the `:` that member would miss, the token the window found. Where a window
-// meets the end of input across a run of lexer errors, the parse lexes that run a second time,
-// until tokora retains the end of input after an error run. A head no valid list holds is
-// reported first, as `unexpected` reports it, and decided behind that report by a look-ahead that
-// is given back. So is a directive definition's location spelled like a keyword a root restarts
-// at, which no valid location is.
+// meets the end of input across a run of lexer errors, the parse lexes that run a second time and
+// charges it twice, a ruled exception al8n/tokora#380 tracks: the run is the document's tail, and
+// its first lexer error is the first error either way, so no definition is lost. A head no valid
+// list holds is reported first, as `unexpected` reports it, and decided behind that report by a
+// look-ahead that is given back. So is a directive definition's location spelled like a keyword a
+// root restarts at, which no valid location is.
 //
 // A look-ahead finds its evidence only where every token it crosses on the way passes one step,
 // `cross`: no name a root restarts at with anything but a `:` behind it, no `{` but the owner's
@@ -1308,10 +1309,12 @@ lossless_production! {
   /// A window the cache retains lexes nothing the parse does not lex next, but for one shape: where
   /// it meets the end of input across a run of lexer errors, tokora retains nothing of the run
   /// behind the newest token it holds, and the parse lexes the run a second time, each error
-  /// charged to the produce-event budget twice. That stays so until tokora retains the end of
-  /// input after an error run. The read raises a stop the scanner meets while it fills, and that
-  /// stop reads as [`Seen::Short`] too: it is no answer, and the parse's own read meets it where it
-  /// stands.
+  /// charged to the produce-event budget twice. That is a ruled exception, which al8n/tokora#380
+  /// tracks. The run is the document's tail and its first lexer error is the first error on both
+  /// readings, so no definition is lost: only under a produce-event ceiling within the run's
+  /// length of what the parse needs can the reports behind that error differ. The read raises a
+  /// stop the scanner meets while it fills, and that stop reads as [`Seen::Short`] too: it is no
+  /// answer, and the parse's own read meets it where it stands.
   fn window_at<'inp, Src, Ctx>(
     inp,
     at: usize,
