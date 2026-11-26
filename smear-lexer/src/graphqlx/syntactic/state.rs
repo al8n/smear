@@ -24,7 +24,10 @@ use crate::limits::SyntacticLimits;
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SyntacticState {
   /// The nesting ceiling in the low half, and the block's word in the high half: zero outside a
-  /// block, and inside one, one more than the count of open `<`.
+  /// block, and inside one, one more than the count of open `<`. The two are halves of one `u64`
+  /// and not two `u32` fields because no field of the state is narrower than a word, so that no
+  /// narrow store meets the whole-word copy of the state that tokora makes into each token it
+  /// caches.
   packed: u64,
   /// The count of open brackets.
   depth: usize,
@@ -100,9 +103,9 @@ impl SyntacticState {
   /// operator, `>>` is a shift where no `<` is open, and a name touching a quote is a prefix.
   #[inline(always)]
   pub const fn in_const_block(&self) -> bool {
-    // The high half against zero, and no other bit of the word: where this load feeds nothing
-    // else, the backend narrows it to that half's 32 bits and folds it into the compare, one
-    // compare with memory.
+    // The intent is one compare with memory. Only the high half is tested, so a load of the word
+    // can narrow to that half and fold into the compare, but only where the load feeds nothing
+    // else: where it also feeds the ceiling's read, the test shifts the word in a register.
     self.block() != 0
   }
 

@@ -91,11 +91,11 @@ smol-bytes_0_2 = { package = "smol-bytes", version = "0.2", default-features = f
 derive_more = { version = "2", default-features = false, features = ["unwrap", "is_variant", "try_unwrap", "from", "into", "deref", "deref_mut", "as_ref", "display"] }
 
 # tokora at a fixed commit, until a tokora release that contains it is on crates.io; this row then
-# returns to a registry `version`. The commit is the head of tokora#376 until that pull request
-# merges, and a commit of `main` from then on. No `version` key sits beside `git`, on purpose: with
-# one, `cargo publish` would drop the git source and verify each package against the registry
-# release that key names, not the commit every build here uses. Without one, it refuses to
-# package, which is right while the pin stands.
+# returns to a registry `version`. The commit is one on tokora#376's branch, `57c98993`, until that
+# pull request merges, and a commit of `main` from then on. No `version` key sits beside `git`, on
+# purpose: with one, `cargo publish` would drop the git source and verify each package against the
+# registry release that key names, not the commit every build here uses. Without one, it refuses
+# to package, which is right while the pin stands.
 tokora = { git = "https://github.com/al8n/tokora", rev = "57c989938a1d6ca72aba8ffe9baa46e2e224f8c4", default-features = false, features = ["logos", "unstable-raw", "combinators"] }
 
 paste = "1"
