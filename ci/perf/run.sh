@@ -104,7 +104,8 @@
 #   * a callgrind run on either side exits non-zero, or outlives `PERF_ICOUNT_TIMEOUT`;
 #   * a row's two runs at n differ, or its count does not grow from n to 2n and from 2n to 3n;
 #   * the two halves of a row's reading disagree by more than `PERF_ICOUNT_SPREAD` of the finest
-#     line it is read against (see that setting);
+#     line it is read against, and still do when the row is read again at four times n (see that
+#     setting);
 #   * the two sides were read at different n.
 #
 # A row so refused fails the stage and stays in the table. Dropped, it would be a row the gate had
@@ -323,24 +324,36 @@ icount_j1_rows=lex_graphqlx_syntactic,parse_graphqlx_type_system,parse_graphqlx_
 # halves, and a head-against-base delta takes two readings, so a delta can carry about one spread
 # of allocator placement that is not the change. A quarter of the finest line a workload is read
 # against keeps a delta that reaches that line at four spreads or more of it: at most 0.25% for the
-# +1% threshold, and 0.125% for J1's 0.5% on its three rows. A workload past that, on either side at
-# either size, is NOT MEASURED, and every table shows each workload's widest spread. On the first
-# runs that refused `schema_iface_mismatch` (0.45% at lo) on x86 and `schema_valid` (0.52% at lo) on
-# aarch64, and read every J1 row with room.
+# +1% threshold, and 0.125% for J1's 0.5% on its three rows. Every table shows each workload's
+# widest spread, and the n it was read at. On the first runs every J1 row read with room, and two
+# rows missed: `schema_iface_mismatch` (0.450% at lo) on x86 and `schema_valid` (0.519% at lo) on
+# aarch64.
+#
+# A MISS IS READ AGAIN, NOT REFUSED AT ONCE. A workload past its bound on either side, at either
+# size, is read again on both sides at four times n — 40, 80 and 120 — and that reading replaces
+# the first; past the bound there too, it is NOT MEASURED. If the offset placement puts on a half
+# is bounded, a half four times as long carries a quarter of the spread; if each iteration's
+# placement is independent of the last, half of it. One length of half cannot tell those apart, so
+# the first runs predict a range: x86's miss would read 0.112% or 0.225%, under its 0.25% either
+# way, and aarch64's 0.130% or 0.259%, under it by the first and just over it by the second. The
+# second reading is 24n iterations a size and side against the first's 7n, and only rows that miss
+# pay for it: at the first runs' speeds, about 600 s of callgrind for x86's miss and 140 s for
+# aarch64's, under four minutes and under one at four runs at a time.
 : "${PERF_ICOUNT_SPREAD:=0.25}"
 
 # How many iterations a count is read at: n, 2n and 3n, and n again for the repeat. The first n
 # cancel in every difference, so they are the warm-up — the allocator's bins and `Scratch` grow over
-# the first iterations and are reused after, and tokora's gate takes 8 for the same reason — and n,
-# 2n and 3n have one digit count, so the three runs' argv are the same length. 10, 20 and 30 meet
-# both; 16, 32 and 48 would too, at 60% more callgrind time.
+# the first iterations and are reused after, and tokora's gate takes 8 for the same reason. Every
+# run's `--iterations` is zero-padded to one width, a second reading's 12n included, so argv is the
+# same length in every run. 16 would serve as well as 10, at 60% more callgrind time.
 : "${PERF_ICOUNT_N:=10}"
 
 # Seconds one callgrind run may take before its row reads NOT MEASURED. A bound, not an estimate:
 # the dearest run is 3n iterations of the dearest row at its large size, and the probe branch made
 # two calls of every row's region at both sizes, on both sides and with branch simulation as well,
 # in one CI step of 75 s that included installing valgrind. It is here so that a run which hangs is
-# a refusal on its row and not the job's timeout.
+# a refusal on its row and not the job's timeout. A second reading's runs are four times as long
+# and are given four times this.
 : "${PERF_ICOUNT_TIMEOUT:=600}"
 
 # How many callgrind runs go at once; empty is one per CPU. The count stage runs after the wall
@@ -891,7 +904,11 @@ if [ "$want_icount" -eq 1 ]; then
       --iterations "$PERF_ICOUNT_N" \
       --timeout "$PERF_ICOUNT_TIMEOUT" \
       --jobs "${PERF_ICOUNT_JOBS:-0}" \
-      --data "$PERF_ICOUNT_DATA" || icount_status=$?
+      --data "$PERF_ICOUNT_DATA" \
+      --threshold "$PERF_ICOUNT_THRESHOLD" \
+      --j1-rows "$icount_j1_rows" \
+      --j1-threshold "$PERF_ICOUNT_J1" \
+      --spread-share "$PERF_ICOUNT_SPREAD" || icount_status=$?
     if [ "$icount_status" -eq 0 ]; then
       python3 "$perf_dir/compare.py" \
         --kind icount \

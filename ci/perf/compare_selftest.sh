@@ -34,6 +34,7 @@ failures=0
 #   <row>.dr=<factor>    both sizes' Dr alone
 #   <row>.spread=<pct>   the large size's Ir reading spread that far (every spread is 0 otherwise)
 #   <row>.drspread=<pct> the large size's Dr reading spread that far
+#   <row>.n=<n>          the row read again at <n>, after a first reading at the stage's n
 #   <row>!=<reason>      the row NOT MEASURED, for <reason>
 reading() {
   "$python" - "$@" <<'PY'
@@ -47,7 +48,7 @@ rows = {
     "parse_graphqlx_executable": "graphqlx",
 }
 options = {"n": "10", "arch": "x86_64", "data": "1", "kind": "icount", "drop": ""}
-scale, scale_hi, scale_dr, broken, spread, drspread = {}, {}, {}, {}, {}, {}
+scale, scale_hi, scale_dr, broken, spread, drspread, row_n = {}, {}, {}, {}, {}, {}, {}
 for setting in settings:
     key, value = setting.split("=", 1)
     if key in options:
@@ -60,6 +61,8 @@ for setting in settings:
         scale_dr[key[:-3]] = float(value)
     elif key.endswith(".spread"):
         spread[key[:-7]] = float(value)
+    elif key.endswith(".n"):
+        row_n[key[:-2]] = int(value)
     elif key.endswith(".drspread"):
         drspread[key[:-9]] = float(value)
     else:
@@ -73,7 +76,9 @@ for name, family in rows.items():
     row = {"family": family, "lo_size": 4, "hi_size": 8,
            "lo": 100000.0 * k, "hi": 200000.0 * k * scale_hi.get(name, 1.0), "not_measured": None}
     if options["kind"] == "icount":
-        row.update({"lo_spread": 0.0, "hi_spread": spread.get(name, 0.0)})
+        row.update({"lo_spread": 0.0, "hi_spread": spread.get(name, 0.0), "n": row_n.get(name, n)})
+        if name in row_n:
+            row["first"] = {"n": n, "spread": 0.4496}
         for size, ir in (("lo", 100000.0), ("hi", 200000.0)):
             row[f"{size}_dr"] = ir / 3 * k * scale_dr.get(name, 1.0) if data else None
             row[f"{size}_dw"] = ir / 5 * k if data else None
@@ -84,7 +89,7 @@ for name, family in rows.items():
     workloads[name] = row
 if options["kind"] == "icount":
     document = {"instrument": "icount", "unit": "Ir/iter", "iterations": n,
-                "points": [n, 2 * n, 3 * n], "data": data,
+                "points": [n, 2 * n, 3 * n], "escalation": 4, "data": data,
                 "host": {"image": "ubuntu-26.04", "os": "Ubuntu 26.04.1 LTS",
                          "arch": options["arch"], "cpu": "AMD EPYC 7763", "valgrind": "valgrind-3.26.0"},
                 "workloads": workloads}
@@ -189,6 +194,12 @@ reading "$tmp/spread_j1_real.json" parse_graphqlx_executable.spread=0.04974175
 reading "$tmp/spread_j1_wide.json" parse_graphqlx_executable.spread=0.2
 reading "$tmp/spread_same_wide.json" schema_real.spread=0.2
 reading "$tmp/drspread.json" parse_type_system.dr=1.05 parse_type_system.drspread=0.3
+# A row read again at n = 40 after a first reading at 10 spread 0.450%: under its bound at 40 on
+# both sides, 0.112% being the quarter a bounded offset predicts for x86's miss; past it still; and
+# on one side only.
+reading "$tmp/again_base.json" schema_real.n=40
+reading "$tmp/again_ok.json" schema_real.n=40 schema_real.spread=0.1124
+reading "$tmp/again_wide.json" schema_real.n=40 schema_real.spread=0.3
 
 echo "Perf-accept: icount/schema_real +3% the extra instructions buy the fix" > "$tmp/icount_ok.txt"
 echo "Perf-accept: icount/schema_real +1.5% a ceiling below the delta" > "$tmp/icount_low.txt"
@@ -253,8 +264,8 @@ check "a J1 row over J1 is warned about" 0 "::warning::parse_graphqlx_executable
   $(count base j1_08)
 check "and its verdict says so" 0 "over J1 (+0.5%)" -- $(count base j1_08)
 check "and its line is read where its verdict is" 0 \
-  '| +0.800% | +0.800% | 2.000 | 2.000 | 0.000% | over J1 (+0.5%) |' -- $(count base j1_08)
-check_absent "and is not called ok" 0 '| +0.800% | +0.800% | 2.000 | 2.000 | 0.000% | ok |' -- \
+  '| +0.800% | +0.800% | 2.000 | 2.000 | 10 | 0.000% | over J1 (+0.5%) |' -- $(count base j1_08)
+check_absent "and is not called ok" 0 '| +0.800% | +0.800% | 2.000 | 2.000 | 10 | 0.000% | ok |' -- \
   $(count base j1_08)
 check "and the outcome says so" 0 "over J1's +0.5%, a warning: parse_graphqlx_executable" -- \
   $(count base j1_08)
@@ -271,11 +282,11 @@ check "a J1 row the readings do not hold is refused" 1 "--j1-rows names ['nope']
 check "a reading spread past a quarter of the line is NOT MEASURED" 1 \
   "::error::schema_real (icount): NOT MEASURED" -- $(count base spread_wide)
 check "and says how far, against which line" 1 \
-  "head side, hi: its halves read 0.450% apart, past the 0.25% a reading against the +1% line may spread" \
+  "head side, hi: its halves read 0.450% apart at n=10, past the 0.25% a reading against the +1% line may spread" \
   -- $(count base spread_wide)
 check "a spread under the bound is a reading" 0 "no workload over its threshold" -- \
   $(count base spread_ok)
-check "and the table shows it" 0 '| 2.000 | 2.000 | 0.181% | ok |' -- $(count base spread_ok)
+check "and the table shows it" 0 '| 2.000 | 2.000 | 10 | 0.181% | ok |' -- $(count base spread_ok)
 check "the widest J1 spread read so far is a reading" 0 "no workload over its threshold" -- \
   $(count base spread_j1_real)
 check "a J1 row is held to a quarter of J1's line" 1 \
@@ -284,6 +295,17 @@ check "the same spread on a row J1 does not read is a reading" 0 "no workload ov
   -- $(count base spread_same_wide)
 check "a read or write reading spread past the bound is not shown" 0 \
   '| `parse_type_system` | +5.000% | - | +0.000% | +0.000% | +3.125% | - |' -- $(count base drspread)
+
+# A row read again at four times n: used when its spread is under the bound there, refused when not.
+check "a row read again under its bound is a reading" 0 "no workload over its threshold" -- \
+  $(count again_base again_ok)
+check "and the table says it was read at n = 40" 0 '| 2.000 | 2.000 | 40 | 0.112% | ok |' -- \
+  $(count again_base again_ok)
+check "a row read again and past its bound still is NOT MEASURED" 1 \
+  "head side, hi: its halves read 0.300% apart at n=40, after 0.450% at n=10, past the 0.25%" -- \
+  $(count again_base again_wide)
+check "two sides read at different n are not compared on that row" 1 \
+  "the two sides read it at different n (10 and 40)" -- $(count base again_ok)
 
 # Where the cost is: the builder's note for a schema row, and no note for a lexer row.
 check "a schema-only failure is placed in the builder" 1 "inside \`Schema::build\`" -- \
@@ -419,6 +441,51 @@ iteration_check "lex_graphqlx_syntactic at hi on x86, a straight line" "3634726.
 iteration_check "schema_transitive at hi on aarch64, its repeat 4 Ir out, is refused" refused \
   263104785 520308970 777520635 263104789
 iteration_check "a count that does not grow from 2n to 3n is refused" refused 100 200 200 100
+iteration_check "a second reading takes no repeat" "20.00 0.0000" 100 300 500
+
+# `escalation_check <name> <the rows read again, comma-separated> <row:lo:hi[:refused]>...`: which
+# rows `icount.py` reads again, given a first reading whose spreads are these on both sides; a row
+# marked `refused` is NOT MEASURED on its head side. J1's rows here are `parse_graphqlx_type_system`
+# and `j1_wide`, and the bound is the lane's: a quarter of +1%, or of J1's 0.5%.
+escalation_check() {
+  local name="$1" want="$2" got
+  shift 2
+  set +e
+  got="$("$python" -I -B -c '
+import sys
+sys.path.insert(0, sys.argv[1])
+import icount
+from compare import spread_bound
+head = {}
+for spec in sys.argv[2:]:
+    name, lo, hi, *refused = spec.split(":")
+    head[name] = {"lo_spread": float(lo), "hi_spread": float(hi),
+                  "not_measured": "refused" if refused else None}
+base = {name: dict(row, not_measured=None) for name, row in head.items()}
+j1 = ["parse_graphqlx_type_system", "j1_wide"]
+again = icount.escalations(
+    {"head": head, "base": base}, lambda name: spread_bound(name, 1.0, j1, 0.5, 0.25)[0]
+)
+print(",".join(again) or "none")
+' "$here" "$@" 2>&1)"
+  set -e
+  if [ "$got" = "$want" ]; then
+    echo "ok   $name"
+  else
+    echo "FAIL $name: read again $got, expected $want"
+    failures=$((failures + 1))
+  fi
+}
+
+# The first CI runs' spreads: x86's miss and its neighbours, and aarch64's.
+escalation_check "x86's miss is read again, and the rows under their bound are not" \
+  "schema_iface_mismatch" schema_iface_mismatch:0.4496:0.1449 schema_valid:0.1805:0.0824 \
+  schema_transitive:0.0054:0.2113 parse_graphqlx_type_system:0.0137:0.0497
+escalation_check "aarch64's miss is read again" "schema_valid" \
+  schema_valid:0.5186:0.1337 schema_iface_mismatch:0.0090:0.0090
+escalation_check "a J1 row is read again past J1's bound, under the threshold's" "j1_wide" \
+  j1_wide:0.0:0.2 schema_real:0.0:0.2
+escalation_check "a row already NOT MEASURED is not read again" "none" refused_wide:0.9:0.9:refused
 
 if [ "$failures" -ne 0 ]; then
   echo "::error::compare.py self-test: $failures case(s) failed"

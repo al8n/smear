@@ -22,7 +22,9 @@ other two do not have:
     MEASURED here: it fails the stage, in the table, and is never dropped from it;
   * with `--spread-share`, so does a workload whose reading spreads, on either side at either
     size, past that share of the finest line it is read against — the threshold, or J1's for a J1
-    row — because a reading that uncertain cannot say which side of the line a change fell;
+    row — because a reading that uncertain cannot say which side of the line a change fell.
+    `icount.py` has already read such a row again at a longer n; each row says the n it was read
+    at, and two sides that read a row at different n are not compared on it;
   * the two sides must have been read at the same iteration counts, or nothing is compared;
   * `--j1-rows` names workloads that carry a second verdict at `--j1-threshold`, under the
     threshold, printed in the table and raised as a warning, and never shown as `ok`;
@@ -174,9 +176,15 @@ def share(value):
   return "-" if value is None else f"{value:.3f}%"
 
 
-def finest_line(name, args, j1_rows):
-  """The smallest change a workload is read against: J1's allowance for a J1 row, else the gate's."""
-  return min(args.threshold, args.j1_threshold) if name in j1_rows else args.threshold
+def spread_bound(name, threshold, j1_rows, j1_threshold, spread_share):
+  """`(bound, line)`: the spread a reading of `name` may carry, and the line that sets it.
+
+  The line is the finest change the workload is read against, J1's allowance for a J1 row and the
+  threshold otherwise, and the bound is `spread_share` of it. `icount.py` reads a row again at a
+  longer baseline by this same rule, so the two cannot disagree about which rows miss.
+  """
+  line = min(threshold, j1_threshold) if name in j1_rows else threshold
+  return line * spread_share, line
 
 
 def count_heading(head, args, j1_rows):
@@ -201,12 +209,20 @@ def count_heading(head, args, j1_rows):
     finest = [args.threshold * args.spread_share]
     if j1_rows:
       finest.append(min(args.threshold, args.j1_threshold) * args.spread_share)
+    longer = head.get("escalation")
+    again = (
+      f" A workload past that on either side, at either size, is read again on both sides at "
+      f"n = {longer * n}, {2 * longer * n} and {3 * longer * n}, and that reading is used; the "
+      "column `n` says which a workload was read at."
+      if longer
+      else ""
+    )
     lines.append(
       "A reading's **spread** is how far apart the two halves of those iterations read. It may be "
-      f"at most {args.spread_share:.0%} of the finest line its workload is read against — "
+      f"at most {args.spread_share:.0%} of the finest line its workload is read against: "
       + f"{finest[0]:g}% for the +{args.threshold:g}% line"
       + (f", {finest[1]:g}% for J1's rows" if j1_rows else "")
-      + " — and a workload past that on either side, at either size, is NOT MEASURED."
+      + f".{again} A reading past it still is NOT MEASURED."
     )
     lines.append("")
   if host.get("arch") in ("x86_64", "amd64", "AMD64"):
@@ -315,14 +331,20 @@ def main():
       if row.get(f"{size}_spread") is not None
     ]
     spread = max((value for _, _, value in spreads), default=None)
+    # The n a workload was read at: the stage's own, or the longer one `icount.py` read it at again.
+    # The two sides are read again together, so a difference here is a broken reading.
+    row_n = h.get("n", head.get("iterations"))
+    if not unmeasured and counting and b.get("n") != h.get("n"):
+      unmeasured = f"the two sides read it at different n ({b.get('n')} and {h.get('n')})"
     # A reading whose two halves disagree by more than its share of the line cannot say which side
     # of that line a change fell, so it is no reading for this gate, on either side.
     if not unmeasured and args.spread_share is not None:
-      line = finest_line(name, args, j1_rows)
-      bound = line * args.spread_share
+      bound, line = spread_bound(name, args.threshold, j1_rows, args.j1_threshold, args.spread_share)
+      first = h.get("first")
+      before = f", after {first['spread']:.3f}% at n={first['n']}" if first else ""
       unmeasured = "; ".join(
-        f"{side} side, {size}: its halves read {value:.3f}% apart, past the {bound:g}% a reading "
-        f"against the +{line:g}% line may spread"
+        f"{side} side, {size}: its halves read {value:.3f}% apart at n={row_n}{before}, past the "
+        f"{bound:g}% a reading against the +{line:g}% line may spread"
         for side, size, value in spreads
         if value > bound
       )
@@ -334,7 +356,7 @@ def main():
           "base_hi": None, "head_hi": None, "hi_pct": None,
           "worst": None, "base_ratio": None, "head_ratio": None, "ratio_delta": None,
           "verdict": "NOT MEASURED", "reason": unmeasured, "j1": False, "data": {},
-          "spread": spread,
+          "spread": spread, "n": row_n,
         }
       )
       continue
@@ -383,7 +405,7 @@ def main():
           for label, keys in DATA_COLUMNS
           for size in ("lo", "hi")
         } if data else {},
-        "spread": spread,
+        "spread": spread, "n": row_n,
       }
     )
 
@@ -392,7 +414,7 @@ def main():
 
   width = max(len(row["name"]) for row in rows)
   # The count's tables carry each workload's widest spread, so a reading near its bound shows it.
-  spread_title = f"  {'spread':>8}" if counting else ""
+  spread_title = f"  {'n':>4}  {'spread':>8}" if counting else ""
   print()
   print(
     f"{'workload':<{width}}  {'lo delta':>9}  {'hi delta':>9}  "
@@ -400,7 +422,7 @@ def main():
   )
   print("-" * (width + 60 + len(spread_title)))
   for row in rows:
-    spread_cell = f"  {share(row['spread']):>8}" if counting else ""
+    spread_cell = f"  {cell(row['n'], 'd'):>4}  {share(row['spread']):>8}" if counting else ""
     print(
       f"{row['name']:<{width}}  {signed(row['lo_pct']):>9}  {signed(row['hi_pct']):>9}  "
       f"{cell(row['base_ratio'], '.3f'):>10}  {cell(row['head_ratio'], '.3f'):>10}{spread_cell}  "
@@ -475,17 +497,17 @@ def main():
         handle.write(f"### {head['instrument']} vs merge-base\n\n")
       handle.write(
         f"| workload | family | base lo | head lo | base hi | head hi | "
-        f"lo delta | hi delta | base hi/lo | head hi/lo |{' spread |' if counting else ''} verdict |\n"
+        f"lo delta | hi delta | base hi/lo | head hi/lo |{' n | spread |' if counting else ''} verdict |\n"
       )
       handle.write(
         "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
-        + (" ---: |" if counting else "") + " --- |\n"
+        + (" ---: | ---: |" if counting else "") + " --- |\n"
       )
       for row in rows:
         note = ""
         if row["reason"] and (row["verdict"].startswith("accepted") or not row["measured"]):
           note = f" — {row['reason']}"
-        spread_cell = f"{share(row['spread'])} | " if counting else ""
+        spread_cell = f"{cell(row['n'], 'd')} | {share(row['spread'])} | " if counting else ""
         handle.write(
           f"| `{row['name']}` | {row['family']} | {cell(row['base_lo'], ',.0f')} | "
           f"{cell(row['head_lo'], ',.0f')} | {cell(row['base_hi'], ',.0f')} | "
