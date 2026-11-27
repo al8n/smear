@@ -1,0 +1,141 @@
+Root@0..152
+  Document@0..152
+    InputObjectTypeDefinition@0..151
+      Name@0..5 "input"
+      Space@5..6 " "
+      DefinitionName@6..13
+        Name@6..12 "Nested"
+        Space@12..13 " "
+      InputFieldsDefinition@13..151
+        LBrace@13..14 "{"
+        Newline@14..15 "\n"
+        Space@15..16 " "
+        Space@16..17 " "
+        InputValueDefinition@17..46
+          Name@17..22 "paren"
+          Colon@22..23 ":"
+          Space@23..24 " "
+          DefinitionTypePath@24..28
+            Path@24..28
+              Name@24..27 "Int"
+              Space@27..28 " "
+          DefaultValue@28..43
+            Equal@28..29 "="
+            Space@29..30 " "
+            ConstBlock@30..43
+              Name@30..35 "const"
+              Space@35..36 " "
+              LBrace@36..37 "{"
+              Space@37..38 " "
+              Expression@38..42
+                ParenValue@38..41
+                  LParen@38..39 "("
+                  Expression@39..40
+                    IntValue@39..40
+                      Int@39..40 "1"
+                  RParen@40..41 ")"
+                Space@41..42 " "
+              RBrace@42..43 "}"
+          Newline@43..44 "\n"
+          Space@44..45 " "
+          Space@45..46 " "
+        InputValueDefinition@46..77
+          Name@46..51 "twice"
+          Colon@51..52 ":"
+          Space@52..53 " "
+          DefinitionTypePath@53..57
+            Path@53..57
+              Name@53..56 "Int"
+              Space@56..57 " "
+          DefaultValue@57..74
+            Equal@57..58 "="
+            Space@58..59 " "
+            ConstBlock@59..74
+              Name@59..64 "const"
+              Space@64..65 " "
+              LBrace@65..66 "{"
+              Space@66..67 " "
+              Expression@67..73
+                ParenValue@67..72
+                  LParen@67..68 "("
+                  Expression@68..71
+                    ParenValue@68..71
+                      LParen@68..69 "("
+                      Expression@69..70
+                        IntValue@69..70
+                          Int@69..70 "1"
+                      RParen@70..71 ")"
+                  RParen@71..72 ")"
+                Space@72..73 " "
+              RBrace@73..74 "}"
+          Newline@74..75 "\n"
+          Space@75..76 " "
+          Space@76..77 " "
+        InputValueDefinition@77..114
+          Name@77..82 "inner"
+          Colon@82..83 ":"
+          Space@83..84 " "
+          DefinitionTypePath@84..88
+            Path@84..88
+              Name@84..87 "Int"
+              Space@87..88 " "
+          DefaultValue@88..111
+            Equal@88..89 "="
+            Space@89..90 " "
+            ConstBlock@90..111
+              Name@90..95 "const"
+              Space@95..96 " "
+              LBrace@96..97 "{"
+              Space@97..98 " "
+              Expression@98..110
+                ConstBlock@98..109
+                  Name@98..103 "const"
+                  Space@103..104 " "
+                  LBrace@104..105 "{"
+                  Space@105..106 " "
+                  Expression@106..108
+                    IntValue@106..107
+                      Int@106..107 "2"
+                    Space@107..108 " "
+                  RBrace@108..109 "}"
+                Space@109..110 " "
+              RBrace@110..111 "}"
+          Newline@111..112 "\n"
+          Space@112..113 " "
+          Space@113..114 " "
+        InputValueDefinition@114..150
+          Name@114..118 "both"
+          Colon@118..119 ":"
+          Space@119..120 " "
+          DefinitionTypePath@120..124
+            Path@120..124
+              Name@120..123 "Int"
+              Space@123..124 " "
+          DefaultValue@124..149
+            Equal@124..125 "="
+            Space@125..126 " "
+            ConstBlock@126..149
+              Name@126..131 "const"
+              Space@131..132 " "
+              LBrace@132..133 "{"
+              Space@133..134 " "
+              Expression@134..148
+                ParenValue@134..147
+                  LParen@134..135 "("
+                  Expression@135..146
+                    ConstBlock@135..146
+                      Name@135..140 "const"
+                      Space@140..141 " "
+                      LBrace@141..142 "{"
+                      Space@142..143 " "
+                      Expression@143..145
+                        IntValue@143..144
+                          Int@143..144 "1"
+                        Space@144..145 " "
+                      RBrace@145..146 "}"
+                  RParen@146..147 ")"
+                Space@147..148 " "
+              RBrace@148..149 "}"
+          Newline@149..150 "\n"
+        RBrace@150..151 "}"
+    Newline@151..152 "\n"

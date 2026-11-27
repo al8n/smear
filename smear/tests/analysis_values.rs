@@ -34,6 +34,9 @@ const LIMIT: &str = "smear::graphqlx::resource-limit";
 /// consumer that analyzes a library waives it.
 const NO_QUERY_ROOT: &str = "smear::schema::missing-query-root-operation-type";
 
+/// The code of a number the lexer refuses.
+const INVALID_NUMBER: &str = "smear::syntax::invalid-number";
+
 /// The diagnostics of `analysis`, in the list's order, but for the missing query root.
 fn reported(analysis: &Analysis) -> Vec<&Diagnostic> {
   analysis
@@ -856,14 +859,9 @@ fn an_integer_literal_is_a_float() {
 
 #[test]
 fn a_hexadecimal_float_has_a_decimal_exponent() {
-  let text = "input H {\n  a: f64 = 0x1p10\n  b: f64 = 0x1.8p1\n  c: f64 = 0x10p-4\n  \
-              d: f64 = 0x1p1f\n}\n";
+  let text = "input H {\n  a: f64 = 0x1p10\n  b: f64 = 0x1.8p1\n  c: f64 = 0x10p-4\n}\n";
   let analysis = analyze_text(text, &Limits::new());
-  let schema = schema_file(&analysis);
-  assert_eq!(
-    found(&analysis),
-    [(DEFAULT, after(schema, text, "d: f64 = ", "0x1p1f"))]
-  );
+  assert!(clean(&analysis), "{:#?}", found(&analysis));
   let model = analysis.model();
   for (name, value) in [("a", 1024.0f64), ("b", 3.0), ("c", 1.0)] {
     let ValueKind::Float(float) = model.value(default(model, "H", name)).kind() else {
@@ -871,6 +869,19 @@ fn a_hexadecimal_float_has_a_decimal_exponent() {
     };
     assert_eq!(float.to_f64().to_bits(), value.to_bits(), "`{name}`");
   }
+}
+
+/// A hexadecimal letter after a hexadecimal float's exponent is no digit of it, since the exponent
+/// is decimal: the lexer refuses `0x1p1f`, at the literal, and coercion reports nothing of it.
+#[test]
+fn a_hexadecimal_letter_after_the_exponent_is_the_lexers_refusal() {
+  let text = "input H {\n  d: f64 = 0x1p1f\n}\n";
+  let analysis = analyze_text(text, &Limits::new());
+  let schema = schema_file(&analysis);
+  assert_eq!(
+    found(&analysis),
+    [(INVALID_NUMBER, after(schema, text, "d: f64 = ", "0x1p1f"))]
+  );
 }
 
 #[test]

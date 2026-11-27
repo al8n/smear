@@ -3151,9 +3151,9 @@ impl<'p> Coercion<'_, 'p, '_> {
   }
 
   /// Judges `node`, a leaf of the default counted on top, against `base`, as the written mode reads
-  /// it and writing no row: one it refuses does not fit, but for a path whose root lowering does
-  /// not know, which lowering reported. A conversion the budget cannot pay for is past it. Its
-  /// identity, an element's or a key's, goes in `slot`.
+  /// it and writing no row: one it refuses does not fit, but for a node lowering reported, as
+  /// [`reported_by_lowering`](Self::reported_by_lowering) says. A conversion the budget cannot pay
+  /// for is past it. Its identity, an element's or a key's, goes in `slot`.
   fn judge_leaf(&mut self, node: u32, base: Base, slot: Option<u32>) -> Result<(), Count> {
     let tree = self
       .frames
@@ -3175,7 +3175,7 @@ impl<'p> Coercion<'_, 'p, '_> {
         ..
       }) => return Err(Count::Past),
       Err(refused) => {
-        if !self.unknown_root(refused.node) {
+        if !self.reported_by_lowering(refused.node) {
           self.misfit();
         }
       }
@@ -3310,6 +3310,15 @@ impl<'p> Coercion<'_, 'p, '_> {
       Ident::Bytes(bytes) => self.builder.kept_bytes(bytes).len(),
       Ident::Member(_) => 4,
     }
+  }
+
+  /// Whether lowering reported `node`, so that no refusal at it says anything more: a path whose
+  /// root lowering does not know, or a value lowering refused whole. [`classify`](Self::classify)
+  /// answers the second before any reading, but a reader that reads a child directly meets it
+  /// unasked: a `bytes` list reads each of its elements as an integer, and lowering refuses a
+  /// suffixed number inside one.
+  fn reported_by_lowering(&self, node: u32) -> bool {
+    self.unknown_root(node) || matches!(self.kind(node), RawKind::Refused)
   }
 
   /// Whether `node` is a path whose root lowering does not know, which lowering reported.
@@ -4780,7 +4789,10 @@ impl<'p> Coercion<'_, 'p, '_> {
   /// by the walk's definition: no literal is read.
   fn classify(&self, kind: RawKind, ty: Option<TyId>) -> Class {
     // Asked before the type, so that no type that keeps a literal as written keeps the text of a
-    // value lowering refused.
+    // value lowering refused whole. A refused node nested in a list a custom scalar keeps whole is
+    // never asked about: the list's text is kept with it, a suffixed number's among it, and
+    // lowering has reported that number. One nested in a list a `bytes` value reads is met by that
+    // reading, unasked, and `reported_by_lowering` keeps its refusal silent.
     if matches!(kind, RawKind::Refused) {
       return Class::Refused;
     }
@@ -5118,27 +5130,47 @@ impl<'p> Coercion<'_, 'p, '_> {
       }
       RawKind::List => {
         self.octets.clear();
+        // The first element lowering refused, a suffixed number: it was reported there, so the
+        // reading goes on past it, and an element after it that is no byte is still refused aloud.
+        // With none, the refusal is at this one, which says nothing more, and the value is left
+        // unresolved.
+        let mut reported: Option<u32> = None;
         let mut child = node.saturating_add(1);
         while child < raw.after {
           let Some(element) = self.raw.nodes.get(child as usize).copied() else {
             break;
           };
-          let RawKind::Int(radix) = element.kind else {
-            return Err(Refused {
-              node: child,
-              why: Why::Byte,
-            });
-          };
-          let byte = self
-            .byte(child, source, radix)
-            .map_err(|why: Why| Refused { node: child, why })?;
-          self.octets.push(byte);
+          match element.kind {
+            RawKind::Int(radix) => {
+              let byte = self
+                .byte(child, source, radix)
+                .map_err(|why: Why| Refused { node: child, why })?;
+              self.octets.push(byte);
+            }
+            RawKind::Refused => {
+              if reported.is_none() {
+                reported = Some(child);
+              }
+            }
+            _ => {
+              return Err(Refused {
+                node: child,
+                why: Why::Byte,
+              });
+            }
+          }
           if element.after <= child {
             break;
           }
           child = element.after;
         }
-        Ok(self.builder.keep_bytes(&self.octets))
+        match reported {
+          Some(child) => Err(Refused {
+            node: child,
+            why: Why::Byte,
+          }),
+          None => Ok(self.builder.keep_bytes(&self.octets)),
+        }
       }
       _ => Err(refused(Why::Kind)),
     }
@@ -5693,8 +5725,8 @@ impl<'p> Coercion<'_, 'p, '_> {
 
   /// Reports `refused`, a node written in the source `source`, that does not fit, the value it
   /// stands in being expected of `ty`, when `mode` is written; a copy says nothing and searches for
-  /// no near miss. A path whose root lowering does not know says nothing either: lowering reported
-  /// it.
+  /// no near miss. A node lowering reported says nothing either, as
+  /// [`reported_by_lowering`](Self::reported_by_lowering) says.
   fn refuse(&mut self, refused: Refused, source: u32, ty: Option<TyId>, mode: Mode) {
     let Mode::Written(site) = mode else {
       return;
@@ -5702,7 +5734,7 @@ impl<'p> Coercion<'_, 'p, '_> {
     let Some(raw) = self.raw.nodes.get(refused.node as usize).copied() else {
       return;
     };
-    if self.unknown_root(refused.node) {
+    if self.reported_by_lowering(refused.node) {
       return;
     }
     let at = Location::new(source, raw.span);

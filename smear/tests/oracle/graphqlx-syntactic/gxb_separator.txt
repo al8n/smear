@@ -1,0 +1,11 @@
+OK  0..1  LBracket
+OK  1..2  LitInt(Decimal("1"))
+OK  2..3  Separator
+OK  4..5  LitInt(Decimal("2"))
+OK  5..6  Separator
+OK  6..7  RBracket
+OK  8..12  Identifier("Pair")
+OK  12..13  LAngle
+OK  13..14  Identifier("A")
+OK  16..17  Identifier("B")
+OK  17..18  RAngle

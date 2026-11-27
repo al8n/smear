@@ -139,31 +139,47 @@ re-finds most often. These are what make the GraphQLx half a checked claim rathe
 one.
 
 ```compile_fail,E0599
-# use smear_lexer::{graphqlx::lossless::LosslessLexer, limits::LosslessLimits, tokora::Lexer as _};
-let lexer = LosslessLexer::<&str>::with_state("---", LosslessLimits::default().with_max_tokens(0));
+# use smear_lexer::{
+#   graphqlx::lossless::{LosslessLexer, LosslessState},
+#   limits::LosslessLimits,
+#   tokora::Lexer as _,
+# };
+let lexer = LosslessLexer::<&str>::with_state("---", LosslessState::new(LosslessLimits::default().with_max_tokens(0)));
 // error[E0599]: no method named `into_inner` found
 let _raw = lexer.into_inner();
 ```
 
 ```compile_fail,E0599
-# use smear_lexer::{graphqlx::lossless::LosslessLexer, limits::LosslessLimits, tokora::Lexer as _};
-let lexer = LosslessLexer::<&str>::with_state("---", LosslessLimits::default().with_max_tokens(0));
+# use smear_lexer::{
+#   graphqlx::lossless::{LosslessLexer, LosslessState},
+#   limits::LosslessLimits,
+#   tokora::Lexer as _,
+# };
+let lexer = LosslessLexer::<&str>::with_state("---", LosslessState::new(LosslessLimits::default().with_max_tokens(0)));
 // error[E0599]: no method named `inner` found
 let _raw = lexer.inner();
 ```
 
 ```compile_fail,E0599
-# use smear_lexer::{graphqlx::lossless::LosslessLexer, limits::LosslessLimits, tokora::Lexer as _};
+# use smear_lexer::{
+#   graphqlx::lossless::{LosslessLexer, LosslessState},
+#   limits::LosslessLimits,
+#   tokora::Lexer as _,
+# };
 let mut lexer =
-  LosslessLexer::<&str>::with_state("---", LosslessLimits::default().with_max_tokens(0));
+  LosslessLexer::<&str>::with_state("---", LosslessState::new(LosslessLimits::default().with_max_tokens(0)));
 // error[E0599]: no method named `inner_mut` found
 let _raw = lexer.inner_mut();
 ```
 
 ```
-# use smear_lexer::{graphqlx::lossless::LosslessLexer, limits::LosslessLimits, tokora::Lexer as _};
+# use smear_lexer::{
+#   graphqlx::lossless::{LosslessLexer, LosslessState},
+#   limits::LosslessLimits,
+#   tokora::Lexer as _,
+# };
 let mut lexer =
-  LosslessLexer::<&str>::with_state("---", LosslessLimits::default().with_max_tokens(0));
+  LosslessLexer::<&str>::with_state("---", LosslessState::new(LosslessLimits::default().with_max_tokens(0)));
 let mut items = 0usize;
 while lexer.lex().is_some() {
   items += 1;

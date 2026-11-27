@@ -8,9 +8,10 @@
 //!
 //! # The mapping is many-to-one, deliberately, and exactly once
 //!
-//! 37 `LosslessToken` variants enter a space of 35 token images. Six differences are pure
+//! 44 `LosslessToken` variants enter a space of 42 token images. Seven differences are pure
 //! spelling — `Identifier`/`Name`, `LitInt`/`Int`, `LitFloat`/`Float`, `LitInlineStr`/
-//! `InlineString`, `LitBlockStr`/`BlockString` — and the rest is one genuine fold: the lexer
+//! `InlineString`, `LitBlockStr`/`BlockString`, `LitChar`/`Char`, `LitPrefixedStr`/
+//! `PrefixedString` — and the rest is one genuine fold: the lexer
 //! distinguishes `\r`, `\n` and `\r\n`, while the kind space carries a single `Newline` image.
 //!
 //! **That fold costs nothing a CST consumer can observe through kinds alone that it cannot
@@ -107,6 +108,13 @@ pub fn token_kind<S>(token: &LosslessToken<S>) -> u16 {
     LosslessToken::LitInt(_) => K::Int,
     LosslessToken::LitInlineStr(_) => K::InlineString,
     LosslessToken::LitBlockStr(_) => K::BlockString,
+    LosslessToken::Slash => K::Slash,
+    LosslessToken::Percent => K::Percent,
+    LosslessToken::Shl => K::Shl,
+    LosslessToken::LitChar(_) => K::Char,
+    LosslessToken::Shr => K::Shr,
+    LosslessToken::Separator => K::Separator,
+    LosslessToken::LitPrefixedStr(_) => K::PrefixedString,
 
     // ---- Trivia token images ----
     LosslessToken::Bom(_) => K::Bom,
@@ -115,7 +123,7 @@ pub fn token_kind<S>(token: &LosslessToken<S>) -> u16 {
     LosslessToken::Tab => K::Tab,
     // The 3 -> 1 fold, and the only one. `K::CarriageReturn` and `K::CarriageReturnAndNewline` do
     // not exist and must not be added: the three forms stay distinguishable through the token's
-    // text, and adding them would break the space's 114-kind pin.
+    // text, and adding them would break the space's 129-kind pin.
     LosslessToken::Newline => K::Newline,
     LosslessToken::CarriageReturn => K::Newline,
     LosslessToken::CarriageReturnAndNewline => K::Newline,

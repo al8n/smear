@@ -34,7 +34,7 @@ use std::{
 
 use smear::parser::{
   graphqlx::kinds::SyntaxKind as X,
-  lexer::graphqlx::lossless::{LosslessLexer, LosslessToken, LosslessTokenKind},
+  lexer::graphqlx::lossless::{LosslessLexer, LosslessState, LosslessToken, LosslessTokenKind},
   lossless::{KindSpace, test_support::assert_kind_space_is_well_formed},
 };
 
@@ -77,6 +77,13 @@ const TOKEN_IMAGES: &[&str] = &[
   "Int",
   "InlineString",
   "BlockString",
+  "Slash",
+  "Percent",
+  "Shl",
+  "Char",
+  "Shr",
+  "Separator",
+  "PrefixedString",
   "Bom",
   "Comma",
   "Space",
@@ -115,12 +122,23 @@ const RENAMED_IMAGES: &[(&str, &str, &str)] = &[
 
 /// Node kinds whose name is not, literally, a name GraphQLx's own sources use.
 ///
-/// **The derivation produced none, and that is the finding, not an accident.** Every node kind in
-/// the space is spelled exactly as some `graphqlx/ast/**` declaration, some shared carrier that
-/// module binds, or some `graphqlx/syntactic/**` public production. The list stays here — rather
-/// than the filter being deleted as dead code — because it is the door a future kind would have to
-/// come through, and having to write the reason down is the point.
-const KINDS_WITH_NO_NAMED_SOURCE: &[(&str, &str)] = &[];
+/// **The derivation produced none until the block, and the two it has now are the block's.** Every
+/// other node kind in the space is spelled exactly as some `graphqlx/ast/**` declaration, some
+/// shared carrier that module binds, or some `graphqlx/syntactic/**` public production. Having to
+/// write the reason down is the point of the door.
+const KINDS_WITH_NO_NAMED_SOURCE: &[(&str, &str)] = &[
+  (
+    "ConstBlock",
+    "the AST's `ConstBlock` and the `const_block` production, which the census reads as `Block`: \
+     it strips the `Const` of a constant twin, and a block has no twin to be the constant one of",
+  ),
+  (
+    "Expression",
+    "the one node every expression a block holds is, a lone operand's too; the AST has no image \
+     of it, since an expression of one operand is that operand, and the production is \
+     `block_expression`",
+  ),
+];
 
 /// GraphQLx sources that deliberately have no kind of their own, each with the reason.
 ///
@@ -139,7 +157,7 @@ const SOURCES_WITH_NO_KIND: &[(&str, &str)] = &[
   ),
   (
     "Value",
-    "the `value` production; a choice over the eleven InputValue alternatives",
+    "the `value` production; a choice over the twelve InputValue alternatives",
   ),
   (
     "InputValue",
@@ -202,6 +220,47 @@ const SOURCES_WITH_NO_KIND: &[(&str, &str)] = &[
   (
     "TypeSystemItem",
     "the same dispatcher for TypeSystemDocument",
+  ),
+  // ---- a schema position is a parse-time flavour, as constness is: each production builds the
+  // node its constant twin builds ----
+  (
+    "SchemaValue",
+    "the `schema_value` production; the choice `Value` names, in a schema position, and each arm \
+     is a *Value node",
+  ),
+  (
+    "SchemaDefaultValue",
+    "the `schema_default_value` production; it builds a DefaultValue node, in a schema position",
+  ),
+  (
+    "SchemaArgument",
+    "the `schema_argument` production; it builds an Argument node, in a schema position",
+  ),
+  (
+    "SchemaArguments",
+    "the `schema_arguments` production; it builds an Arguments node, in a schema position",
+  ),
+  (
+    "SchemaDirective",
+    "the `schema_directive` production; it builds a Directive node, in a schema position",
+  ),
+  (
+    "SchemaDirectives",
+    "the `schema_directives` production; it builds a Directives node, in a schema position",
+  ),
+  // ---- a block's own productions: the node each builds has a name of its own ----
+  (
+    "Block",
+    "the AST's `ConstBlock` and the `const_block` production with the `Const` stripped; the node \
+     is ConstBlock, which `KINDS_WITH_NO_NAMED_SOURCE` holds for the same reason",
+  ),
+  (
+    "BlockExpression",
+    "the `block_expression` production; it builds an Expression node",
+  ),
+  (
+    "BlockOperand",
+    "the `block_operand` production; a choice over the operands, and each arm is its own node",
   ),
   // ---- one token is not a region: the parent already says what it is ----
   (
@@ -325,6 +384,34 @@ const SOURCES_WITH_NO_KIND: &[(&str, &str)] = &[
   (
     "ModDefinitionComponents",
     "`ModDefinition`'s decomposition, the struct its `into_components` returns; not a production",
+  ),
+  (
+    "CharValueComponents",
+    "`CharValue`'s decomposition, the struct its `into_components` returns; not a production",
+  ),
+  (
+    "TypedObjectValueComponents",
+    "`TypedObjectValue`'s decomposition, the struct its `into_components` returns; not a production",
+  ),
+  (
+    "TypedValueComponents",
+    "`TypedValue`'s decomposition, the struct its `into_components` returns; not a production",
+  ),
+  (
+    "BlockComponents",
+    "`ConstBlock`'s decomposition, read with its `Const` stripped; not a production",
+  ),
+  (
+    "ParenValueComponents",
+    "`ParenValue`'s decomposition, the struct its `into_components` returns; not a production",
+  ),
+  (
+    "BytesValueComponents",
+    "`BytesValue`'s decomposition, the struct its `into_components` returns; not a production",
+  ),
+  (
+    "IdValueComponents",
+    "`IdValue`'s decomposition, the struct its `into_components` returns; not a production",
   ),
 ];
 
@@ -514,6 +601,13 @@ fn the_image_block_matches_the_graphqlx_lexer() {
     LosslessTokenKind::Int,
     LosslessTokenKind::InlineString,
     LosslessTokenKind::BlockString,
+    LosslessTokenKind::Slash,
+    LosslessTokenKind::Percent,
+    LosslessTokenKind::Shl,
+    LosslessTokenKind::Char,
+    LosslessTokenKind::Shr,
+    LosslessTokenKind::Separator,
+    LosslessTokenKind::PrefixedString,
   ];
 
   for (index, kind) in LEXER_KINDS.iter().enumerate() {
@@ -669,6 +763,13 @@ fn image_of(kind: LosslessTokenKind) -> X {
     LosslessTokenKind::Int => X::Int,
     LosslessTokenKind::InlineString => X::InlineString,
     LosslessTokenKind::BlockString => X::BlockString,
+    LosslessTokenKind::Slash => X::Slash,
+    LosslessTokenKind::Percent => X::Percent,
+    LosslessTokenKind::Shl => X::Shl,
+    LosslessTokenKind::Char => X::Char,
+    LosslessTokenKind::Shr => X::Shr,
+    LosslessTokenKind::Separator => X::Separator,
+    LosslessTokenKind::PrefixedString => X::PrefixedString,
     // `LosslessTokenKind` is `#[non_exhaustive]`, so this arm is forced. It is a panic rather
     // than a fallback kind: an image with no tree kind must stop the suite, not land in the tree
     // as something else.
@@ -682,7 +783,7 @@ fn image_of(kind: LosslessTokenKind) -> X {
 /// string literals' constructors are `pub(crate)`, so they cannot be built from here at all. The
 /// broad one is better: a hand-built token proves only that a variant exists, while a lexed one
 /// proves the GraphQLx lexer *emits* it — which is what the image block claims about all
-/// thirty-seven of them. One snippet per image, so a snippet that lexes into something unexpected
+/// forty-four of them. One snippet per image, so a snippet that lexes into something unexpected
 /// shows up as a missing kind rather than being absorbed by a neighbour.
 fn lexed_samples() -> BTreeMap<LosslessTokenKind, LosslessToken<&'static str>> {
   use tokora::lexer::Lexer as _;
@@ -725,11 +826,28 @@ fn lexed_samples() -> BTreeMap<LosslessTokenKind, LosslessToken<&'static str>> {
     "1",
     "\"s\"",
     "\"\"\"b\"\"\"",
+    "/",
+    "%",
+    "<<",
+    "'a'",
   ];
+  // The three kinds a lexer makes inside a `const { … }` block alone, lexed from a state that has
+  // entered one.
+  const BLOCK_SNIPPETS: &[&str] = &[">>", ",", "b\"x\""];
 
+  let mut block = LosslessState::default();
+  block.enter_const_block();
   let mut samples = BTreeMap::new();
-  for snippet in SNIPPETS {
-    let mut lexer = LosslessLexer::<&str>::new(snippet);
+  let snippets = SNIPPETS
+    .iter()
+    .map(|snippet: &&str| (*snippet, LosslessState::default()))
+    .chain(
+      BLOCK_SNIPPETS
+        .iter()
+        .map(|snippet: &&str| (*snippet, block)),
+    );
+  for (snippet, state) in snippets {
+    let mut lexer = LosslessLexer::<&str>::with_state(snippet, state);
     while let Some(item) = lexer.lex() {
       let token =
         item.unwrap_or_else(|e| panic!("the sample snippet {snippet:?} does not lex: {e:?}"));

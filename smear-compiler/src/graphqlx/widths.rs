@@ -378,7 +378,17 @@ impl<'p> Widths<'p> {
         | ConstInputValue::String(_)
         | ConstInputValue::Float(_)
         | ConstInputValue::Int(_)
-        | ConstInputValue::Null(_) => {}
+        | ConstInputValue::Null(_)
+        | ConstInputValue::Char(_)
+        // What a typed form holds is not in the model yet, so neither its type nor its value is
+        // read here.
+        | ConstInputValue::TypedObject(_)
+        | ConstInputValue::Typed(_)
+        // Nor of a block, which holds its value in its own grammar.
+        | ConstInputValue::Block(_)
+        | ConstInputValue::Paren(_)
+        | ConstInputValue::Bytes(_)
+        | ConstInputValue::Id(_) => {}
       }
     }
   }

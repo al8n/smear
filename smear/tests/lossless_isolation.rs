@@ -447,10 +447,10 @@ fn the_substrate_names_no_dialect() {
 ///   `unused_macros` denials.
 /// - **five in `lossless/recover.rs`**, all added for smear#168's scan allowance and all the same
 ///   shape: `SCAN_ALLOWANCE_FACTOR`, `SCAN_ALLOWANCE_FLOOR`, `scan_allowance_exhausted`, and the
-///   two `pub(super)` recorders in its test-support telemetry. Their only callers are the four
-///   wrappers in the two dialects' own `recover.rs`, so with no dialect in the crate they are dead
-///   and `-Dwarnings` makes `dead_code` an error. `pub` used to hide that — rustc counts a
-///   reachable `pub` item as used — and narrowing them to `pub(crate)` is what armed it.
+///   two `pub(super)` recorders in its test-support telemetry. Their only callers are the
+///   dialects' own, the wrappers in each dialect's `recover.rs`, so with no dialect in the crate
+///   they are dead and `-Dwarnings` makes `dead_code` an error. `pub` used to hide that — rustc
+///   counts a reachable `pub` item as used — and narrowing them to `pub(crate)` is what armed it.
 /// - **ten in `lossless/depth.rs`**, nine from smear PR #189's round 5 and one from smear issue
 ///   #193, and every one of them is the
 ///   `recover.rs` shape rather than a new one. Seven are the retracted cluster —
@@ -550,9 +550,10 @@ fn the_substrate_names_no_dialect() {
 /// **23 with the module body's recovery**: `lossless/depth.rs`'s `judge_turn`, the verdict
 /// `root_turn` records, split out of it so that a block which recovers its own items can ask for
 /// the verdict without a root's slot. It is the retracted cluster's shape and belongs to that
-/// family: `pub(crate)`, with `root_turn` and one dialect's module body as its only callers, so
-/// with no dialect in the crate `root_turn` is gated away and it is dead. It names no dialect —
-/// the block that calls it is the dialect's — which is why it can be here at all.
+/// family: `pub(crate)`, with `root_turn` and two of one dialect's productions, a module's body
+/// and a block's expression, as its only callers, so with no dialect in the crate `root_turn` is
+/// gated away and it is dead. It names no dialect — the productions that call it are the
+/// dialect's — which is why it can be here at all.
 ///
 /// **24 with `JudgedTurn`**: the struct `judge_turn` answers instead of a `(RootTurn, bool)`. It is
 /// the same cluster as `judge_turn` and carries the same gate, for the same reason — with no

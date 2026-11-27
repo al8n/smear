@@ -1,0 +1,7 @@
+OK  0..6  LitFloat(Decimal("1.5f32"))
+OK  6..7  Newline
+OK  7..11  LitFloat(Decimal("1f64"))
+OK  11..12  Newline
+OK  12..19  LitFloat(Decimal("1e3_f32"))
+OK  19..20  Newline
+OK  20..28  LitFloat(Hex("0x1p3f32"))

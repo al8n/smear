@@ -136,6 +136,9 @@ lossless-coverage = ["rowan_0_17"]
 test-support = []
 
 [dependencies]
+# Already in the graph through `tokora`, which does not re-export it: `tokora::utils::IsAsciiChar`
+# takes its `AsciiChar`, and GraphQLx reads a number's sign through that trait.
+ascii = { version = "1", default-features = false }
 derive_more.workspace = true
 paste = "1"
 tokora.workspace = true

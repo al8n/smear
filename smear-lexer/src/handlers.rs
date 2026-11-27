@@ -13,12 +13,37 @@ use crate::{
   limits::LosslessLimits,
 };
 
+/// A lossless grammar's `Extras` as the hooks below reach it: the limits it holds.
+///
+/// Both dialects' grammars call these hooks, and their states differ. GraphQL's `Extras` is its
+/// [`LosslessLimits`], so its impl is the identity. GraphQLx's is a state of its own that holds
+/// them. A hook checks and steps the limits through this and nothing else.
+pub(crate) trait LosslessExtras {
+  /// The limits, to read.
+  fn lossless_limits(&self) -> &LosslessLimits;
+
+  /// The limits, to step.
+  fn lossless_limits_mut(&mut self) -> &mut LosslessLimits;
+}
+
+impl LosslessExtras for LosslessLimits {
+  #[inline(always)]
+  fn lossless_limits(&self) -> &LosslessLimits {
+    self
+  }
+
+  #[inline(always)]
+  fn lossless_limits_mut(&mut self) -> &mut LosslessLimits {
+    self
+  }
+}
+
 #[inline(always)]
 fn increase_token<'a, T>(lexer: &mut Lexer<'a, T>)
 where
-  T: Logos<'a, Extras = LosslessLimits>,
+  T: Logos<'a, Extras: LosslessExtras>,
 {
-  lexer.extras.increase_token();
+  lexer.extras.lossless_limits_mut().increase_token();
 }
 
 #[inline(always)]
@@ -26,13 +51,14 @@ pub(super) fn increase_recursion_depth_and_token<'a, T, E>(
   lexer: &mut Lexer<'a, T>,
 ) -> Result<(), E>
 where
-  T: Logos<'a, Extras = LosslessLimits>,
+  T: Logos<'a, Extras: LosslessExtras>,
   E: BadStateError<StateError = LimitExceeded>,
 {
-  lexer.extras.increase_recursion();
-  lexer.extras.increase_token();
+  lexer.extras.lossless_limits_mut().increase_recursion();
+  lexer.extras.lossless_limits_mut().increase_token();
   lexer
     .extras
+    .lossless_limits()
     .check()
     .map_err(|e| E::bad_state(lexer.span().into(), e))
 }
@@ -45,10 +71,10 @@ where
 #[inline(always)]
 pub(super) fn open_brace<'a, T, E>(lexer: &mut Lexer<'a, T>) -> Result<(), E>
 where
-  T: Logos<'a, Extras = LosslessLimits>,
+  T: Logos<'a, Extras: LosslessExtras>,
   E: BadStateError<StateError = LimitExceeded>,
 {
-  lexer.extras.increase_brace_depth();
+  lexer.extras.lossless_limits_mut().increase_brace_depth();
   increase_recursion_depth_and_token(lexer)
 }
 
@@ -58,11 +84,12 @@ pub(super) fn tt_hook_and_then<'a, T, E, O>(
   f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, E>,
 ) -> Result<O, E>
 where
-  T: Logos<'a, Extras = LosslessLimits>,
+  T: Logos<'a, Extras: LosslessExtras>,
   E: BadStateError<StateError = LimitExceeded>,
 {
   lexer
     .extras
+    .lossless_limits()
     .token()
     .check()
     .map_err(|e| E::bad_state(lexer.span().into(), e.into()))
@@ -79,11 +106,12 @@ pub(super) fn tt_hook_and_then_into_errors<'a, T, E, O>(
   f: impl FnOnce(&mut Lexer<'a, T>) -> Result<O, E>,
 ) -> Result<O, E>
 where
-  T: Logos<'a, Extras = LosslessLimits>,
+  T: Logos<'a, Extras: LosslessExtras>,
   E: BadStateError<StateError = LimitExceeded>,
 {
   lexer
     .extras
+    .lossless_limits()
     .token()
     .check()
     .map_err(|e| E::bad_state(lexer.span().into(), e.into()))
@@ -99,11 +127,12 @@ pub(super) fn tt_hook_map<'a, T, E, O>(
   f: impl FnOnce(&mut Lexer<'a, T>) -> O,
 ) -> Result<O, E>
 where
-  T: Logos<'a, Extras = LosslessLimits>,
+  T: Logos<'a, Extras: LosslessExtras>,
   E: BadStateError<StateError = LimitExceeded>,
 {
   lexer
     .extras
+    .lossless_limits()
     .token()
     .check()
     .map_err(|e| E::bad_state(lexer.span().into(), e.into()))
@@ -116,11 +145,12 @@ where
 #[inline(always)]
 pub(super) fn tt_hook<'a, T, E>(lexer: &mut Lexer<'a, T>) -> Result<(), E>
 where
-  T: Logos<'a, Extras = LosslessLimits>,
+  T: Logos<'a, Extras: LosslessExtras>,
   E: BadStateError<StateError = LimitExceeded>,
 {
   lexer
     .extras
+    .lossless_limits()
     .token()
     .check()
     .map_err(|e| E::bad_state(lexer.span().into(), e.into()))
@@ -141,11 +171,11 @@ where
 #[inline(always)]
 pub(super) fn decrease_recursion_depth_and_increase_token<'a, T>(lexer: &mut Lexer<'a, T>)
 where
-  T: Logos<'a, Extras = LosslessLimits>,
+  T: Logos<'a, Extras: LosslessExtras>,
 {
-  lexer.extras.decrease_recursion();
+  lexer.extras.lossless_limits_mut().decrease_recursion();
   // right punctuation also increases the token count
-  lexer.extras.increase_token();
+  lexer.extras.lossless_limits_mut().increase_token();
 }
 
 /// The `}` rule's handler: one brace fewer is open, and then everything a closer does.
@@ -155,9 +185,9 @@ where
 #[inline(always)]
 pub(super) fn close_brace<'a, T>(lexer: &mut Lexer<'a, T>)
 where
-  T: Logos<'a, Extras = LosslessLimits>,
+  T: Logos<'a, Extras: LosslessExtras>,
 {
-  lexer.extras.decrease_brace_depth();
+  lexer.extras.lossless_limits_mut().decrease_brace_depth();
   decrease_recursion_depth_and_increase_token(lexer);
 }
 
@@ -194,7 +224,7 @@ pub(super) fn cst_default_error<'a, Char, T, E>(
   unexpected_eoi: impl FnOnce(Span) -> E,
 ) -> E
 where
-  T: Logos<'a, Extras = LosslessLimits>,
+  T: Logos<'a, Extras: LosslessExtras>,
 {
   match first(lexer) {
     Some(ch) => {
@@ -292,8 +322,8 @@ where
       let mut curr = 1;
       let span = lexer.span();
 
-      for ch in remainder {
-        if ch.is_following_invalid_char() {
+      for next in remainder {
+        if next.is_following_invalid_char() {
           curr += 1;
           continue;
         }
@@ -301,6 +331,8 @@ where
         // bump the lexer to the end of the invalid sequence
         lexer.bump(curr);
 
+        // One unit refused: `ch`, the one the bump covers. `next` only ends the run, and is left
+        // whole for the next token.
         let l = if curr == 1 {
           let pc = PositionedChar::with_position(ch, span.end);
           Lexeme::Char(pc)

@@ -104,6 +104,8 @@ pub enum ContextualKeyword {
   Set,
   /// `map`
   Map,
+  /// `const`
+  Const,
 }
 
 impl ContextualKeyword {
@@ -156,6 +158,7 @@ impl ContextualKeyword {
       Self::Where => "where",
       Self::Set => "set",
       Self::Map => "map",
+      Self::Const => "const",
     }
   }
 }
@@ -215,6 +218,7 @@ pub fn contextual_keyword(source: &[u8]) -> Option<ContextualKeyword> {
     b"where" => Some(ContextualKeyword::Where),
     b"set" => Some(ContextualKeyword::Set),
     b"map" => Some(ContextualKeyword::Map),
+    b"const" => Some(ContextualKeyword::Const),
     _ => None,
   }
 }
@@ -252,7 +256,7 @@ where
 /// now a compile-time check, and `crate::keywords::tests` compares the two dialects' lists against
 /// a third one written out by hand.
 #[cfg(test)]
-pub(crate) const KEYWORDS: [ContextualKeyword; 45] = [
+pub(crate) const KEYWORDS: [ContextualKeyword; 46] = [
   ContextualKeyword::Type,
   ContextualKeyword::Interface,
   ContextualKeyword::Union,
@@ -298,6 +302,7 @@ pub(crate) const KEYWORDS: [ContextualKeyword; 45] = [
   ContextualKeyword::Where,
   ContextualKeyword::Set,
   ContextualKeyword::Map,
+  ContextualKeyword::Const,
 ];
 
 #[cfg(test)]
@@ -358,7 +363,8 @@ impl ContextualKeyword {
       | Self::As
       | Self::Where
       | Self::Set
-      | Self::Map => {}
+      | Self::Map
+      | Self::Const => {}
     }
     assert!(
       KEYWORDS.contains(&self),

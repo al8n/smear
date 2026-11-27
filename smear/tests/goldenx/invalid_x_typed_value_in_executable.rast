@@ -1,0 +1,25 @@
+Root@0..19
+  Document@0..19
+    OperationDefinition@0..18
+      SelectionSet@0..18
+        LBrace@0..1 "{"
+        Space@1..2 " "
+        Field@2..17
+          Name@2..3 "f"
+          Arguments@3..16
+            LParen@3..4 "("
+            Argument@4..10
+              Name@4..5 "a"
+              Colon@5..6 ":"
+              Space@6..7 " "
+              EnumValue@7..10
+                Path@7..10
+                  Name@7..10 "Url"
+            Error@10..15
+              LParen@10..11 "("
+              InlineString@11..14 "\"x\""
+              RParen@14..15 ")"
+            RParen@15..16 ")"
+          Space@16..17 " "
+        RBrace@17..18 "}"
+    Newline@18..19 "\n"

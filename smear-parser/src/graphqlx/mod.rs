@@ -18,7 +18,7 @@
 //! So every valid GraphQL document lexes and parses as GraphQL parses it, through all three
 //! document roots and every production entry point.
 
-/// GraphQLx AST aliases and dialect-specific `use` and `mod` nodes.
+/// GraphQLx AST aliases and dialect-specific value, `use` and `mod` nodes.
 pub mod ast;
 /// GraphQLx parser errors and Tokora conversion glue.
 pub mod error;
@@ -58,6 +58,23 @@ pub use crate::layer::{Parsed, ParsedComponents, Recovery, Rejected, Report};
 /// This is a type-level tag used to brand AST carriers and parser contexts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GraphQLx(());
+
+/// Whether a number's token, `source`, begins with `-`, read from its first character.
+///
+/// After a value where no second value may follow, a number written with a `-` goes on with an
+/// expression: `HOUR-1` is `HOUR` and the literal `-1`. Both layers ask it there, and only of a
+/// token whose kind is a number's.
+#[inline]
+pub(crate) fn begins_with_minus<'source, S>(source: &S) -> bool
+where
+  S: tokora::Slice<'source>,
+  S::Char: tokora::utils::IsAsciiChar,
+{
+  source
+    .iter()
+    .next()
+    .is_some_and(|first| tokora::utils::IsAsciiChar::is_ascii_char(&first, ascii::AsciiChar::Minus))
+}
 
 #[cfg(test)]
 mod tests;

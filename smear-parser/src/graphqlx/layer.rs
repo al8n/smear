@@ -2,7 +2,11 @@
 
 use std::vec::Vec;
 
-use smear_lexer::{SyntaxErrorKind, graphqlx::ContextualKeyword, limits::SyntacticLimits};
+use smear_lexer::{
+  SyntaxErrorKind,
+  graphqlx::{ContextualKeyword, syntactic::SyntacticState},
+  limits::SyntacticLimits,
+};
 use tokora::{
   Lexer, Parse as _, Parser, SimpleSpan, Source, diagnostic::Diagnose, utils::DowncastRef,
 };
@@ -288,10 +292,11 @@ fn read_type_system_document<'src, Src, K>(
 where
   Src: Source<usize> + ?Sized + 'src,
   GraphqlxSlice<'src, Src>: Clone + Leaf,
+  <GraphqlxSlice<'src, Src> as tokora::Slice<'src>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'src, Src>: DowncastRef<ContextualKeyword>,
   GraphqlxLexer<'src, Src>: Lexer<
       'src,
-      State = SyntacticLimits,
+      State = SyntacticState,
       Source = Src,
       Token = GraphqlxToken<'src, Src>,
       Span = SimpleSpan,
@@ -310,7 +315,7 @@ where
     _,
     GraphQLx,
   >(type_system_document)
-  .parse_with_state(source, limits);
+  .parse_with_state(source, SyntacticState::new(limits));
   match parsed {
     Ok(document) => {
       let recovery = Recovery::new(items(&document), 0);

@@ -20,8 +20,11 @@
 
 use std::path::{Path, PathBuf};
 
-use smear::lexer::graphqlx::lossless::LosslessLexer;
-use tokora::Lexer as _;
+use smear::{
+  lexer::graphqlx::lossless::{LosslessLexer, LosslessToken},
+  parser::graphqlx::{kinds::SyntaxKind, lossless::parse_document},
+};
+use tokora::{Lexer as _, SimpleSpan};
 
 /// The eight ignorable forms, one variant of each corpus entry per form.
 ///
@@ -92,30 +95,102 @@ pub fn name_of(path: &Path) -> String {
     .to_string()
 }
 
+/// The outermost `const { … }` blocks of `src`, each its start and its end, as the lossless parser
+/// reads them.
+///
+/// A block's region is lexed in the block's mode, and only a parser can say where one is:
+/// `{ const { id } }` is a field with a selection set. So the extents come from a parse and the
+/// tokens from a lexer, and [`lexed`]'s own control in `lossless_x_trivia.rs` holds the two to each
+/// other.
+pub fn block_extents(src: &str) -> Vec<(usize, usize)> {
+  parse_document(src)
+    .syntax()
+    .descendants()
+    .filter(|node| {
+      node.kind() == SyntaxKind::ConstBlock
+        && !node
+          .ancestors()
+          .skip(1)
+          .any(|ancestor| ancestor.kind() == SyntaxKind::ConstBlock)
+    })
+    .map(|node| {
+      let range = node.text_range();
+      (usize::from(range.start()), usize::from(range.end()))
+    })
+    .collect()
+}
+
+/// Every token of `src` with its span, lexed as the parser lexes it: the lexer enters a block's
+/// mode after the `{` of each outermost block of [`block_extents`] and leaves it after the block's
+/// `}`, and lexes everything else from the default state.
+///
+/// `None` when the source does not lex — see [`UNPADDABLE`].
+pub fn lexed(src: &str) -> Option<Vec<(LosslessToken<&str>, SimpleSpan)>> {
+  let blocks = block_extents(src);
+  let mut lexer = LosslessLexer::<'_, &str>::new(src);
+  let mut out = Vec::new();
+  // The end of the block whose mode the lexer is in.
+  let mut inside: Option<usize> = None;
+  while let Some(result) = lexer.lex() {
+    let token = result.ok()?;
+    let span = lexer.span();
+    match inside {
+      None => {
+        if matches!(token, LosslessToken::LBrace)
+          && let Some(&(_, end)) = blocks
+            .iter()
+            .find(|(start, end)| *start <= span.start() && span.end() < *end)
+        {
+          lexer.state_mut().enter_const_block();
+          inside = Some(end);
+        }
+      }
+      Some(end) => {
+        if span.end() == end {
+          lexer.state_mut().leave_const_block();
+          inside = None;
+        }
+      }
+    }
+    out.push((token, span));
+  }
+  Some(out)
+}
+
 /// Every token boundary in `src`: offset 0, the end of each token, and therefore `src.len()`.
 ///
 /// `None` when the source does not lex — see [`UNPADDABLE`]. Measured with the **lexer**, not with
 /// the tree under test: reading the boundaries off a parse would make the padding a function of the
 /// artifact being asserted about, so a parser that lost a token would quietly stop being padded
-/// there.
+/// there. The lexer reads each block in the block's mode, as [`lexed`] does.
 pub fn token_boundaries(src: &str) -> Option<Vec<usize>> {
-  let mut lexer = LosslessLexer::<'_, &str>::new(src);
   let mut boundaries = vec![0usize];
-  while let Some(result) = lexer.lex() {
-    result.ok()?;
-    boundaries.push(lexer.span().end());
-  }
+  boundaries.extend(lexed(src)?.into_iter().map(|(_, span)| span.end()));
   boundaries.dedup();
   Some(boundaries)
 }
 
 /// `src` with `pad` inserted at every boundary in `boundaries`.
+///
+/// **A comma is no padding inside a block:** between a block's braces the lexer reads a comma as a
+/// separator, so the comma form is injected at no boundary inside an outermost block. The seven
+/// other forms pad there as they do everywhere.
 pub fn inject(src: &str, boundaries: &[usize], pad: &str) -> String {
+  let blocks = if pad == "," {
+    block_extents(src)
+  } else {
+    Vec::new()
+  };
   let mut out = String::with_capacity(src.len() + boundaries.len() * pad.len());
   let mut cursor = 0usize;
   for &boundary in boundaries {
     out.push_str(&src[cursor..boundary]);
-    out.push_str(pad);
+    if !blocks
+      .iter()
+      .any(|(start, end)| *start < boundary && boundary < *end)
+    {
+      out.push_str(pad);
+    }
     cursor = boundary;
   }
   out.push_str(&src[cursor..]);

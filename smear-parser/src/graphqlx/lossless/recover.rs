@@ -44,15 +44,17 @@ use crate::lossless::recover::keyword_of;
 /// `true`, `false`, `null`, `set` and `map` are `Identifier`s to the lexer, so none of them needs
 /// an entry of its own; the value dispatcher separates them on their spelling, not on their kind.
 ///
-/// **`Tilde`, `DotDot` and `Caret` are here and are not in GraphQL's set.** A root's sigil opens a
-/// rooted enum value (`^::ns::Colour`), which is a value head this dialect has and the other does
-/// not. `PathSeparator` is not: a `::` only joins, so no value starts with one.
+/// **`Tilde`, `DotDot`, `Caret` and `Char` are here and are not in GraphQL's set.** A root's sigil
+/// opens a rooted enum value (`^::ns::Colour`), and a `char` literal is a value of its own, two
+/// value heads this dialect has and the other does not. `PathSeparator` is not: a `::` only joins,
+/// so no value starts with one.
 pub(crate) const VALUE_HEADS: &[Kind] = &[
   Kind::Dollar,
   Kind::Int,
   Kind::Float,
   Kind::InlineString,
   Kind::BlockString,
+  Kind::Char,
   Kind::LBracket,
   Kind::LBrace,
   Kind::Identifier,
@@ -72,6 +74,7 @@ pub(crate) const CONST_VALUE_HEADS: &[Kind] = &[
   Kind::Float,
   Kind::InlineString,
   Kind::BlockString,
+  Kind::Char,
   Kind::LBracket,
   Kind::LBrace,
   Kind::Identifier,
@@ -281,6 +284,191 @@ pub(crate) const LIST_CLOSER_HEADS: &[Kind] = &[Kind::RBracket];
 /// The `>` a generic list closes with, reported as [`PARENS_CLOSER_HEADS`] is.
 pub(crate) const ANGLE_CLOSER_HEADS: &[Kind] = &[Kind::RAngle];
 
+/// The two brackets a typed form opens with after its type path: `{` for a typed object and `(`
+/// for a typed value. What a schema value reports as expected where type arguments are followed by
+/// neither.
+pub(crate) const TYPED_FORM_HEADS: &[Kind] = &[Kind::LBrace, Kind::LParen];
+
+/// The `}` a `const { … }` block closes with: what its body reports as expected where something
+/// ended the expression without being the block's own, a `,` among them. A set, a map, an object
+/// and a typed object inside a block report the same where something ended a member without being
+/// their own.
+pub(crate) const BRACE_CLOSER_HEADS: &[Kind] = &[Kind::RBrace];
+
+/// What may begin an operand inside a `const { … }` block: the scalars' tokens, a prefixed string
+/// and a `char` literal, a name, a root's sigil, the `(` of a parenthesis, the `[` of a list and
+/// the `{` of an object. A number carries no sign there, so `-` is no head; and no variable is, as
+/// in a constant position.
+pub(crate) const BLOCK_OPERAND_HEADS: &[Kind] = &[
+  Kind::Int,
+  Kind::Float,
+  Kind::InlineString,
+  Kind::BlockString,
+  Kind::Char,
+  Kind::PrefixedString,
+  Kind::Identifier,
+  Kind::Tilde,
+  Kind::DotDot,
+  Kind::Caret,
+  Kind::LParen,
+  Kind::LBracket,
+  Kind::LBrace,
+];
+
+/// What may follow an operand inside a `const { … }` block and go on with the expression: one of
+/// the ten operators, or a `,`. A report through this set renders as
+/// [`OperatorOrSeparator`](crate::graphqlx::error::Expectation::OperatorOrSeparator), which no other
+/// set of this module has the contents of.
+pub(crate) const OPERATOR_OR_SEPARATOR_HEADS: &[Kind] = &[
+  Kind::Asterisk,
+  Kind::Slash,
+  Kind::Percent,
+  Kind::Plus,
+  Kind::Minus,
+  Kind::Shl,
+  Kind::Shr,
+  Kind::Ampersand,
+  Kind::Caret,
+  Kind::Pipe,
+  Kind::Separator,
+];
+
+/// The two tokens a `const { … }` block opens with, `const` and `{`: what a schema position offers
+/// where its value would be an expression. A report through this set renders as
+/// [`ConstBlock`](crate::graphqlx::error::Expectation::ConstBlock), which no other set of this module
+/// has the contents of.
+pub(crate) const CONST_BLOCK_HEADS: &[Kind] = &[Kind::Identifier, Kind::LBrace];
+
+/// The `:` between an object field's name and its value: what a field inside a block reports where
+/// the `:` is missing, since the field reads it rather than expects it. A report through this set
+/// renders as [`Colon`](crate::graphqlx::error::Expectation::Colon), as a declined `expect` of the
+/// `:` does, and no other set of this module has the contents of.
+pub(crate) const COLON_HEADS: &[Kind] = &[Kind::Colon];
+
+/// The `=>` between a map entry's key and its value, reported as [`COLON_HEADS`] is, and rendering
+/// as [`FatArrow`](crate::graphqlx::error::Expectation::FatArrow).
+pub(crate) const FAT_ARROW_HEADS: &[Kind] = &[Kind::FatArrow];
+
+/// The `{` a set's or a map's members open with after its `!`: what one inside a block reports
+/// where the `{` is missing, since the form reads it rather than expects it. A report through this
+/// set renders as [`LBrace`](crate::graphqlx::error::Expectation::LBrace), as a declined `expect` of
+/// the `{` does.
+///
+/// The `{` is named twice so that no other set of this module has these contents. A set is read by
+/// what it holds, and three others hold the `{` alone and render with no expectation: a module's
+/// body, a schema's operation types and a definition's fields, whose messages stay as they are.
+pub(crate) const COLLECTION_BODY_HEADS: &[Kind] = &[Kind::LBrace, Kind::LBrace];
+
+/// What the productions around one inside a `const { … }` block read next, as far out as the
+/// nearest production delimited by braces: a set over `,`, `=>`, `)`, `]`, `>` and `:`.
+///
+/// Inside a block every token is an operand's, a delimiter, or junk, and each delimiter is the
+/// next read of exactly one production. A brace-delimited production — the block, an object, a
+/// typed object, a set and a map — ends at its own `}` or at the end of input, so nothing outside
+/// it reads past it, and the set its inside is handed starts again: [`Owners::MEMBERS`], the `,`
+/// its members are separated by, with the `=>` beside it while a map entry's key is read. Every
+/// other production adds what it reads itself: a parenthesis and a typed value their `)`, a list
+/// its `]` and its `,`, type arguments their `>`, and a list type its `]`. A field reading on to
+/// its `:` adds that `:`. A production that is not brace-delimited leaves a token of the set it was
+/// handed to the production that reads it, and reports its own closer missing in front of it; the
+/// innermost production that reads a token takes it, so a list reads its own `,` and `]` before it
+/// asks the set.
+///
+/// `Copy` and passed by value, one byte, so handing it down costs what the `&'static [Kind]` it
+/// replaces did, which held the caller's delimiter and no one else's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Owners(u8);
+
+impl Owners {
+  /// What the expression a block holds is handed: nothing, since the block's `}` ends it and it has
+  /// no members.
+  pub(crate) const NONE: Self = Self(0);
+
+  /// What a member of an object, a typed object, a set or a map is handed: the `,` between two.
+  pub(crate) const MEMBERS: Self = Self(Self::bit(Kind::Separator));
+
+  /// The one bit `kind` has in the set, or none for a kind no production around another reads.
+  const fn bit(kind: Kind) -> u8 {
+    match kind {
+      Kind::Separator => 1,
+      Kind::FatArrow => 1 << 1,
+      Kind::RParen => 1 << 2,
+      Kind::RBracket => 1 << 3,
+      Kind::RAngle => 1 << 4,
+      Kind::Colon => 1 << 5,
+      _ => 0,
+    }
+  }
+
+  /// This set and `kind`, which the production handing the set down reads next.
+  #[inline]
+  pub(crate) const fn with(self, kind: Kind) -> Self {
+    Self(self.0 | Self::bit(kind))
+  }
+
+  /// Whether a production around the one holding this set reads `kind` next.
+  #[inline]
+  pub(crate) const fn owns(self, kind: Kind) -> bool {
+    self.0 & Self::bit(kind) != 0
+  }
+}
+
+/// Whether `kind` begins an operand inside a `const { … }` block: [`BLOCK_OPERAND_HEADS`], and the
+/// `$` of a variable, which a block reports and still builds.
+#[inline]
+pub(crate) const fn begins_block_operand(kind: Kind) -> bool {
+  matches!(
+    kind,
+    Kind::Dollar
+      | Kind::Int
+      | Kind::Float
+      | Kind::InlineString
+      | Kind::BlockString
+      | Kind::Char
+      | Kind::PrefixedString
+      | Kind::Identifier
+      | Kind::Tilde
+      | Kind::DotDot
+      | Kind::Caret
+      | Kind::LParen
+      | Kind::LBracket
+      | Kind::LBrace
+  )
+}
+
+/// Whether `kind` is one of the nine tokens an expression's operator is written with outside a
+/// block: `+`, `-`, `*`, `/`, `%`, `<<`, `&`, `|` and `!`.
+#[inline]
+pub(crate) const fn is_operator(kind: Kind) -> bool {
+  matches!(
+    kind,
+    Kind::Plus
+      | Kind::Minus
+      | Kind::Asterisk
+      | Kind::Slash
+      | Kind::Percent
+      | Kind::Shl
+      | Kind::Ampersand
+      | Kind::Pipe
+      | Kind::Bang
+  )
+}
+
+/// Whether `kind`, directly after a value where no second value may follow, can only go on with an
+/// expression: an operator's token, a `>`, which closes nothing there, a `^`, or a `(`. A number
+/// whose token begins with `-` goes on with one too, which its kind cannot say: see
+/// [`super::trivia::peek_signed_number`].
+#[inline]
+pub(crate) const fn continues_an_expression(kind: Kind) -> bool {
+  is_operator(kind) || matches!(kind, Kind::RAngle | Kind::Caret | Kind::LParen)
+}
+
+/// Whether `kind` is a number's, whose token may begin with `-`.
+#[inline]
+pub(crate) const fn is_number(kind: Kind) -> bool {
+  matches!(kind, Kind::Int | Kind::Float)
+}
+
 /// Whether `kind` can begin a value.
 ///
 /// [`VALUE_HEADS`] as a predicate. The two are kept in step by
@@ -302,6 +490,7 @@ pub(crate) const fn starts_value(kind: Kind) -> bool {
       | Kind::Float
       | Kind::InlineString
       | Kind::BlockString
+      | Kind::Char
       | Kind::LBracket
       | Kind::LBrace
       | Kind::Identifier
@@ -386,13 +575,16 @@ pub(crate) use crate::lossless::recover::opener_span;
 ///
 /// # What this dialect adds to GraphQL's set, and what it deliberately does not
 ///
-/// `Tilde`, `DotDot`, `Caret` and `RAngle` are in; `PathSeparator`, `LAngle`, `FatArrow`,
+/// `Tilde`, `DotDot`, `Caret`, `Char` and `RAngle` are in, and so are a block's `Separator` and
+/// prefixed string, which only a lexer in a block's mode makes, so no skip outside a block changes
+/// for them; `PathSeparator`, `LAngle`, `FatArrow`,
 /// `Asterisk`, `Plus` and `Minus` are out. A root's sigil starts a rooted path, which is a value and
 /// a type head, so a skip that ran past one would fold a whole rooted name into the junk before it.
-/// A `>` closes a generic list — the same argument the other three closers make. The six that stay
-/// out begin no production this suite can restart at: `::` and `=>` only ever join or separate,
-/// `<` only ever *follows* a path, and `*`/`+`/`-` reach the tree through recovery alone. Stopping
-/// at one of those would only split one `Error` node into two.
+/// A `char` literal starts a value, as a number does. A `>` closes a generic list — the same
+/// argument the other three closers make. The six that stay out begin no production this suite can
+/// restart at: `::` and `=>` only ever join or separate, `<` only ever *follows* a path, and
+/// `*`/`+`/`-` reach the tree through recovery alone. Stopping at one of those would only split one
+/// `Error` node into two.
 #[inline]
 fn is_sync_point(kind: Kind) -> bool {
   matches!(
@@ -402,6 +594,7 @@ fn is_sync_point(kind: Kind) -> bool {
       | Kind::Float
       | Kind::InlineString
       | Kind::BlockString
+      | Kind::Char
       | Kind::LBracket
       | Kind::LBrace
       | Kind::Identifier
@@ -413,6 +606,8 @@ fn is_sync_point(kind: Kind) -> bool {
       | Kind::RBrace
       | Kind::RParen
       | Kind::RAngle
+      | Kind::Separator
+      | Kind::PrefixedString
   )
 }
 
@@ -591,7 +786,17 @@ lossless_production! {
   /// Nothing that could start one of `expected` is here, and there is still input.
   /// [`crate::lossless::recover::unexpected`] with this dialect's four pairs and its restart
   /// predicate.
+  ///
+  /// Inside a `const { … }` block, where the lexer's state says it is, this is a guard that no
+  /// text reaches: every production there recovers through `value.rs`'s `block_junk`, which reads
+  /// a bracket through the production that owns its closer. Here it reports and takes one token,
+  /// so the shared scan, whose one depth over every pair reads past what a block's productions
+  /// read next, never runs in the block's mode.
   fn unexpected<'inp, Src, Ctx>(inp, expected: &'static [Kind]) {
+    if inp.state().in_const_block() {
+      crate::lossless::recover::report_unexpected(inp, expected)?;
+      return skip_one::<Src, Ctx>(inp);
+    }
     // #168's scan allowance. Read here rather than inside the substrate helper because the
     // committed side is `smear-lexer`'s token tally and `crate::lossless::recover` may not name
     // that crate — `lossless_isolation.rs` enforces it. **Both numbers are produce-events**, and

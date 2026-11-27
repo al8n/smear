@@ -101,6 +101,7 @@ use super::{
   },
   trivia::{eat_if, expect, peek_as, peek_kind},
   use_tree::use_definition,
+  value::Constness,
 };
 
 use crate::lossless::depth::{self, JudgedTurn, RootTurn};
@@ -130,7 +131,15 @@ lossless_production! {
   /// So the error is kept while the node closes around what was parsed, and raised again behind
   /// it. An enclosing module does the same one level up, so every module on the way out keeps its
   /// node and the document still ends.
-  fn mod_definition<'inp, Src, Ctx>(inp, mark: EventMark) {
+  ///
+  /// # The grammar its definitions read
+  ///
+  /// `konst` is the grammar the constant positions of the body's definitions read, at every depth:
+  /// a schema position's in a type-system or a mixed document, and in an executable document, whose
+  /// root refuses the module and still reads its body, that document's own constant grammar, with
+  /// types read as it reads them. So no form only a schema position has reaches an executable
+  /// document's tree.
+  fn mod_definition<'inp, Src, Ctx>(inp, mark: EventMark, konst: Constness) {
     let mut ended: Option<super::Error<'inp, Src, Ctx>> = None;
     node_at(
       mark,
@@ -144,7 +153,7 @@ lossless_production! {
         }
         // The `{` is confirmed here, before the body is entered.
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
-          ended = mod_body::<Src, Ctx>(inp).err();
+          ended = mod_body::<Src, Ctx>(inp, konst).err();
           return Ok(());
         }
         recover::report_unexpected::<Src, Ctx>(inp, MOD_BODY_HEADS)
@@ -214,7 +223,7 @@ lossless_production! {
   /// its end, and the next turn returns, or the scanner has stopped, and the take returns the
   /// terminal error, which the body returns at once. The input is finite, so the loop ends, and
   /// nothing in that argument rests on what an item's production or a skip happens to consume.
-  fn mod_body<'inp, Src, Ctx>(inp) {
+  fn mod_body<'inp, Src, Ctx>(inp, konst: Constness) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;
     expect::<Src, Ctx>(inp, Kind::LBrace)?;
@@ -250,7 +259,7 @@ lossless_production! {
         Some(_) if starts_item => {
           // The verdict is all this loop reads. The trip term beside it is the root's to record.
           let JudgedTurn { turn, .. }: JudgedTurn<(), super::Error<'inp, Src, Ctx>> =
-            depth::judge_turn(inp, type_system_item::<Src, Ctx>);
+            depth::judge_turn(inp, |inp| type_system_item::<Src, Ctx>(inp, konst));
           match turn {
             RootTurn::Parsed(_) => {}
             RootTurn::EndsTheDocument(error) => return Err(error),
@@ -295,7 +304,7 @@ lossless_production! {
         use_definition::<Src, Ctx>(inp)
       }
       // A module may be described, and the description is its own.
-      Some(Keyword::Mod) => mod_definition::<Src, Ctx>(inp, mark),
+      Some(Keyword::Mod) => mod_definition::<Src, Ctx>(inp, mark, Constness::Schema),
       Some(Keyword::Extend) => {
         if described {
           recover::report_unexpected::<Src, Ctx>(inp, DEFINITION_HEADS)?;
@@ -305,7 +314,7 @@ lossless_production! {
         // outside the node, which is the shape the diagnostic describes.
         let extend_mark = inp.cst_mark();
         super::trivia::expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        type_system_extension::<Src, Ctx>(inp, extend_mark)
+        type_system_extension::<Src, Ctx>(inp, extend_mark, Constness::Schema)
       }
       _ => definition_after_description::<Src, Ctx>(inp, mark, described),
     }
@@ -329,7 +338,7 @@ lossless_production! {
       return executable_definition_at::<Src, Ctx>(inp, mark);
     }
     if keyword.is_some() {
-      return type_system_definition_at::<Src, Ctx>(inp, mark);
+      return type_system_definition_at::<Src, Ctx>(inp, mark, Constness::Schema);
     }
     // A name that is none of the twelve, or no name at all. Reported and skipped — `unexpected`
     // consumes at least one token whenever input remains, which is the document loops' only
@@ -356,9 +365,12 @@ lossless_production! {
         }
         return use_definition::<Src, Ctx>(inp);
       }
+      // The module is refused, and its body is still read: in the grammar an executable
+      // document's constant positions read, so its recovery tree is the one this root has always
+      // built, with no form only a schema position has.
       Some(Keyword::Mod) => {
         recover::report_unexpected::<Src, Ctx>(inp, EXECUTABLE_ENTRY_HEADS)?;
-        return mod_definition::<Src, Ctx>(inp, mark);
+        return mod_definition::<Src, Ctx>(inp, mark, Constness::Const);
       }
       _ => {}
     }
@@ -371,8 +383,9 @@ lossless_production! {
   }
 
   /// One entry of a [`type_system_document`], and one item of a module's body: a `use` item, a
-  /// module, an extension, or a described type-system definition.
-  fn type_system_item<'inp, Src, Ctx>(inp) {
+  /// module, an extension, or a described type-system definition. `konst` is
+  /// [`mod_definition`]'s.
+  fn type_system_item<'inp, Src, Ctx>(inp, konst: Constness) {
     let head = peek_kind::<Src, Ctx>(inp)?;
     let mark = inp.cst_mark();
     let described = starts_description(head);
@@ -386,16 +399,16 @@ lossless_production! {
         }
         use_definition::<Src, Ctx>(inp)
       }
-      Some(Keyword::Mod) => mod_definition::<Src, Ctx>(inp, mark),
+      Some(Keyword::Mod) => mod_definition::<Src, Ctx>(inp, mark, konst),
       Some(Keyword::Extend) => {
         if described {
           recover::report_unexpected::<Src, Ctx>(inp, TYPE_SYSTEM_ENTRY_HEADS)?;
         }
         let extend_mark = inp.cst_mark();
         super::trivia::expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        type_system_extension::<Src, Ctx>(inp, extend_mark)
+        type_system_extension::<Src, Ctx>(inp, extend_mark, konst)
       }
-      Some(_) => type_system_definition_at::<Src, Ctx>(inp, mark),
+      Some(_) => type_system_definition_at::<Src, Ctx>(inp, mark, konst),
       // After a description, a `}` while a brace is open closes a block this item stands in — a
       // module's body, or a brace junk opened before it — so it is reported and left to the loop
       // around the item, and a module ends where it was written. The description was this turn's
@@ -471,7 +484,9 @@ lossless_production! {
         }
         while peek_kind::<Src, Ctx>(inp)?.is_some() {
           // The refusal arm [`document`]'s note explains, through the same call and the same slot.
-          match depth::root_turn(inp, stop, type_system_item::<Src, Ctx>) {
+          match depth::root_turn(inp, stop, |inp| {
+            type_system_item::<Src, Ctx>(inp, Constness::Schema)
+          }) {
             RootTurn::Parsed(_) => {}
             RootTurn::EndsTheDocument(error) => return Err(error),
             RootTurn::Recoverable(_) => recover::resync_to_definition::<Src, Ctx>(inp)?,

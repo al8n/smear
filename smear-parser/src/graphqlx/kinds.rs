@@ -23,7 +23,7 @@
 //!
 //! - **`Identifier` becomes [`Name`](SyntaxKind::Name).** GraphQLx's grammar calls this token a
 //!   name — `graphqlx::syntactic::name` builds `graphqlx::ast::Name` — and every contextual
-//!   keyword (`query`, `on`, `use`, `where`, `set`, `map`, `true`, …, forty-five of them) is
+//!   keyword (`query`, `on`, `use`, `where`, `set`, `map`, `true`, …, forty-six of them) is
 //!   *also* this image, told apart on its spelling and never on its kind.
 //! - **The three line terminators fold onto one [`Newline`](SyntaxKind::Newline).** `\n`, `\r` and
 //!   `\r\n` are three spellings of one lexical concept; the lexer splits them because it must match
@@ -35,11 +35,18 @@
 //!
 //! # What GraphQLx has that a GraphQL-shaped space would not predict
 //!
-//! Ten images (`<`, `>`, `::`, `~`, `..`, `^`, `=>`, `*`, `+`, `-`) and, among the nodes, the whole
+//! Seventeen images (`<`, `>`, `::`, `~`, `..`, `^`, `=>`, `*`, `+`, `-`, `/`, `%`, `<<`, `>>`,
+//! the separating `,`, the character literal and the prefixed string) and, among the nodes, the
+//! whole
 //! `use`, module and generic families,
 //! [`SetValue`](SyntaxKind::SetValue)/[`MapValue`](SyntaxKind::MapValue)/
-//! [`MapEntry`](SyntaxKind::MapEntry), [`Path`](SyntaxKind::Path),
-//! [`TypePath`](SyntaxKind::TypePath) and [`TypeGenerics`](SyntaxKind::TypeGenerics).
+//! [`MapEntry`](SyntaxKind::MapEntry), [`CharValue`](SyntaxKind::CharValue),
+//! [`TypedObjectValue`](SyntaxKind::TypedObjectValue), [`TypedValue`](SyntaxKind::TypedValue),
+//! [`ConstBlock`](SyntaxKind::ConstBlock), [`ParenValue`](SyntaxKind::ParenValue),
+//! [`BytesValue`](SyntaxKind::BytesValue), [`IdValue`](SyntaxKind::IdValue),
+//! [`Expression`](SyntaxKind::Expression),
+//! [`Path`](SyntaxKind::Path), [`TypePath`](SyntaxKind::TypePath) and
+//! [`TypeGenerics`](SyntaxKind::TypeGenerics).
 //!
 //! And what it *lacks*: GraphQLx has no non-null node. `graphqlx::syntactic::ty` folds a trailing
 //! `!` into the type node it follows — `DefinitionTypePath` and `ListType` each carry their own
@@ -71,19 +78,19 @@ use crate::lossless::KindSpace;
 ///
 /// # Layout
 ///
-/// The discriminants are the default `0..114` and [`ALL`](Self::ALL) is in declaration order, so
+/// The discriminants are the default `0..129` and [`ALL`](Self::ALL) is in declaration order, so
 /// [`raw`](Self::raw) is an index and [`from_raw`](Self::from_raw) is a bounds check. Four blocks,
 /// in this order:
 ///
 /// | range | block |
 /// |---|---|
-/// | `0..29` | the twenty-nine non-trivia images, in `LosslessTokenKind`'s declaration order |
-/// | `29..35` | the six trivia images, in the same order, with the line terminators folded |
-/// | `35..111` | the seventy-six node kinds |
-/// | `111..114` | [`Error`](Self::Error), [`Gap`](Self::Gap), [`Root`](Self::Root) |
+/// | `0..36` | the thirty-six non-trivia images, in `LosslessTokenKind`'s declaration order |
+/// | `36..42` | the six trivia images, in the same order, with the line terminators folded |
+/// | `42..126` | the eighty-four node kinds |
+/// | `126..129` | [`Error`](Self::Error), [`Gap`](Self::Gap), [`Root`](Self::Root) |
 ///
 /// **Nothing may be appended after [`Root`](Self::Root)** — the shared runner is parameterised over
-/// the last three positions, and the ten images GraphQL lacks therefore live *inside* the image
+/// the last three positions, and the seventeen images GraphQL lacks therefore live *inside* the image
 /// block rather than on the tail.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u16)]
@@ -139,7 +146,7 @@ pub enum SyntaxKind {
   DotDot,
   /// `^` — the dependency root's sigil, `^::`, a leading token child of the [`Path`](Self::Path).
   Caret,
-  /// An identifier: every GraphQLx name, and every one of the forty-five contextual keywords.
+  /// An identifier: every GraphQLx name, and every one of the forty-six contextual keywords.
   ///
   /// The lexer calls this image `Identifier`; the tree calls it what GraphQLx's grammar calls it.
   Name,
@@ -151,6 +158,21 @@ pub enum SyntaxKind {
   InlineString,
   /// A `"""…"""` string literal.
   BlockString,
+  /// `/` — the division operator.
+  Slash,
+  /// `%` — the remainder operator.
+  Percent,
+  /// `<<` — the shift-left operator, one token wherever it is written.
+  Shl,
+  /// A `'…'` character literal.
+  Char,
+  /// `>>` — the shift-right operator, which a lexer makes inside a `const { … }` block alone.
+  Shr,
+  /// `,` where it separates, inside a `const { … }` block: a token, where everywhere else a comma
+  /// is the trivia [`Comma`](Self::Comma).
+  Separator,
+  /// A `b"…"` or `i"…"` prefixed string, which a lexer makes inside a `const { … }` block alone.
+  PrefixedString,
 
   // ---- token images, trivia: `LosslessToken::is_trivia`, same declaration order ----
   /// A byte-order mark.
@@ -203,6 +225,23 @@ pub enum SyntaxKind {
   ObjectField,
   /// `= Value`.
   DefaultValue,
+  /// A `'…'` character literal's value — GraphQLx only.
+  CharValue,
+  /// `TypePath { ObjectField* }`, a typed object — GraphQLx only, in a schema position.
+  TypedObjectValue,
+  /// `TypePath ( Value )`, a typed value — GraphQLx only, in a schema position.
+  TypedValue,
+  /// `const { Expression }`, a block — GraphQLx only, in a schema position and inside a block.
+  ConstBlock,
+  /// `( Expression )`, a parenthesis — GraphQLx only, inside a block.
+  ParenValue,
+  /// `b"…"`, a bytes value — GraphQLx only, inside a block.
+  BytesValue,
+  /// `i"…"`, an id value — GraphQLx only, inside a block.
+  IdValue,
+  /// The expression a block, a parenthesis or a block's member holds — GraphQLx only, inside a
+  /// block. One node around every expression, a lone operand's too.
+  Expression,
 
   // ---- type references, paths, arguments, directives ----
   /// `PathRoot? Name (:: Name)*`, the root being `~ ::`, `^ ::` or `.. ::` repeated, kept as the
@@ -383,7 +422,7 @@ pub enum SyntaxKind {
 impl SyntaxKind {
   /// Every kind, in declaration order, so the index is the raw value.
   pub const ALL: &'static [Self] = &[
-    // images, non-trivia (0..29)
+    // images, non-trivia (0..36)
     Self::Asterisk,
     Self::At,
     Self::Dollar,
@@ -413,14 +452,21 @@ impl SyntaxKind {
     Self::Int,
     Self::InlineString,
     Self::BlockString,
-    // images, trivia (29..35)
+    Self::Slash,
+    Self::Percent,
+    Self::Shl,
+    Self::Char,
+    Self::Shr,
+    Self::Separator,
+    Self::PrefixedString,
+    // images, trivia (36..42)
     Self::Bom,
     Self::Comma,
     Self::Space,
     Self::Tab,
     Self::Newline,
     Self::Comment,
-    // values (35..49)
+    // values (42..64)
     Self::IntValue,
     Self::FloatValue,
     Self::StringValue,
@@ -435,7 +481,15 @@ impl SyntaxKind {
     Self::ObjectValue,
     Self::ObjectField,
     Self::DefaultValue,
-    // types, paths, arguments, directives (49..58)
+    Self::CharValue,
+    Self::TypedObjectValue,
+    Self::TypedValue,
+    Self::ConstBlock,
+    Self::ParenValue,
+    Self::BytesValue,
+    Self::IdValue,
+    Self::Expression,
+    // types, paths, arguments, directives (64..73)
     Self::Path,
     Self::TypeGenerics,
     Self::DefinitionTypePath,
@@ -445,7 +499,7 @@ impl SyntaxKind {
     Self::Arguments,
     Self::Directive,
     Self::Directives,
-    // selections and executable definitions (58..68)
+    // selections and executable definitions (73..83)
     Self::Alias,
     Self::Field,
     Self::FragmentSpread,
@@ -456,7 +510,7 @@ impl SyntaxKind {
     Self::VariablesDefinition,
     Self::OperationDefinition,
     Self::FragmentDefinition,
-    // SDL definitions (68..88)
+    // SDL definitions (83..103)
     Self::SchemaDefinition,
     Self::RootOperationTypesDefinition,
     Self::RootOperationTypeDefinition,
@@ -477,7 +531,7 @@ impl SyntaxKind {
     Self::EnumValuesDefinition,
     Self::EnumValueDefinition,
     Self::DirectiveLocations,
-    // SDL extensions (88..96)
+    // SDL extensions (103..111)
     Self::SchemaExtension,
     Self::ScalarTypeExtension,
     Self::ObjectTypeExtension,
@@ -486,12 +540,12 @@ impl SyntaxKind {
     Self::EnumTypeExtension,
     Self::InputObjectTypeExtension,
     Self::DirectiveExtension,
-    // `use` items (96..98)
+    // `use` items (111..113)
     Self::UseDefinition,
     Self::UseTree,
-    // inline modules (98..99)
+    // inline modules (113..114)
     Self::ModDefinition,
-    // generics (99..108)
+    // generics (114..123)
     Self::DefinitionTypeParam,
     Self::DefinitionTypeGenerics,
     Self::ExtensionTypeGenerics,
@@ -501,11 +555,11 @@ impl SyntaxKind {
     Self::ExecutableDefinitionName,
     Self::WherePredicate,
     Self::WhereClause,
-    // documents (108..111)
+    // documents (123..126)
     Self::Document,
     Self::ExecutableDocument,
     Self::TypeSystemDocument,
-    // bookkeeping (111..114)
+    // bookkeeping (126..129)
     Self::Error,
     Self::Gap,
     Self::Root,
@@ -513,11 +567,11 @@ impl SyntaxKind {
 
   /// How many of [`ALL`](Self::ALL)'s leading entries are token images.
   ///
-  /// Twenty-nine non-trivia plus six trivia. The images are a **prefix** because the bookkeeping
-  /// triple owns the tail, so the ten images GraphQL has no counterpart for had nowhere else to
+  /// Thirty-six non-trivia plus six trivia. The images are a **prefix** because the bookkeeping
+  /// triple owns the tail, so the seventeen images GraphQL has no counterpart for had nowhere else to
   /// go — and that is why a space derived from GraphQLx's lexer cannot agree with GraphQL's
   /// through the end of either image block.
-  pub const IMAGE_BLOCK: usize = 35;
+  pub const IMAGE_BLOCK: usize = 42;
 
   /// The raw `u16` the event channel and the sink speak: the declaration index.
   #[inline]

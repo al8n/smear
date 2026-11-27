@@ -178,8 +178,15 @@ pub mod graphql;
 ///   dependency or at the parent module (`~::geo::Point`, `^::geo::Point`, `..::Point`)
 /// - **Angle brackets**: `<`, `>` for generics (`Container<T>`)
 /// - **Fat arrow**: `=>` for map entries (`map!{ key => value }`)
-/// - **Arithmetic operators**: `+`, `-` for extended type operations
+/// - **Arithmetic operators**: `+`, `-`, `/`, `%` and `<<`, the last one token wherever it is
+///   written
 /// - **Asterisk**: `*` for a `use` item's glob (`use ~::geo::*`)
+/// - **Typed numbers**: a suffix that touches its number, as in `1u8`, `0xFF_u32` or `1.5f32`; a
+///   hexadecimal float's exponent is decimal
+/// - **Character literals**: `'a'`, one character or one escape between single quotes
+/// - **Inside a `const { … }` block**, which a parser enters through the lexer's state: a comma that
+///   separates, `>>` where no `<` is open, `-` always an operator, and the prefixed strings `b"…"`
+///   and `i"…"`, where `\x` and two hexadecimal digits is one byte in `b"…"`
 ///
 /// # Source Types
 ///

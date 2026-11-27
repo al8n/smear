@@ -61,7 +61,7 @@
 //! Both exception sets are **derived**, not hand-listed. [`node_kinds`] takes the kind space minus
 //! its image prefix and minus the bookkeeping triple the [`KindSpace`] trait names, so a kind added
 //! anywhere in the node block defaults into the must-be-covered set — the safe direction — and a
-//! seventy-seventh node kind nobody reaches is a failure rather than an omission.
+//! seventy-eighth node kind nobody reaches is a failure rather than an omission.
 //!
 //! And the counter has a blind spot of its own, which the plan does not name and a mutation found:
 //! a **loop that runs exactly once** reports full coverage while its continuation test is dead.
@@ -116,7 +116,7 @@ use tokora::{Lexer as _, Parse as _, Parser};
 #[path = "support/graphqlx_padding.rs"]
 mod padding;
 
-use padding::{ALPHABET, UNPADDABLE, corpus_files, inject, name_of, token_boundaries};
+use padding::{ALPHABET, UNPADDABLE, corpus_files, inject, lexed, name_of, token_boundaries};
 
 /// The two node kinds [`parse_document`] structurally cannot reach, and the reason each is out.
 ///
@@ -900,17 +900,15 @@ const JUNCTIONS_THE_COMPACT_CORPUS_PADS: &[Junction] = &[Junction::SetOrMapThenB
 /// decides whether the corpus covers the retro-wrap probe.
 fn padded_junctions(src: &str) -> BTreeSet<Junction> {
   let mut found = BTreeSet::new();
-  let mut lexer = LosslessLexer::<'_, &str>::new(src);
   let mut previous: Option<LK> = None;
   let mut previous_text: &str = "";
   let mut trivia_since_previous = false;
-  while let Some(result) = lexer.lex() {
-    let token = result.expect("a valid corpus entry must lex");
+  // Lexed as the parser lexes it: each block's region in the block's mode.
+  for (token, span) in lexed(src).expect("a valid corpus entry must lex") {
     if token.is_trivia() {
       trivia_since_previous = true;
       continue;
     }
-    let span = lexer.span();
     let text = &src[span.start()..span.end()];
     if trivia_since_previous {
       match token.kind() {
@@ -1143,8 +1141,8 @@ fn the_covered_set_is_every_node_kind() {
   let kinds = node_kinds();
   assert_eq!(
     kinds.len(),
-    76,
-    "GraphQLx declares 76 node kinds; the set this gate covers is {kinds:?}"
+    84,
+    "GraphQLx declares 84 node kinds; the set this gate covers is {kinds:?}"
   );
   assert_eq!(
     kinds.len() + K::IMAGE_BLOCK + 3,
@@ -1187,5 +1185,65 @@ fn the_covered_set_is_every_node_kind() {
     kinds,
     K::ALL[K::IMAGE_BLOCK..K::ALL.len() - 3].to_vec(),
     "the covered set is not the node block verbatim"
+  );
+}
+
+/// **The control of the supports that lex a block in its mode.** The lex that switches at each
+/// outermost block's braces is the lossless tree's leaves, kind for kind and span for span, over
+/// every corpus entry that lexes. So a parser that lexed a region in the wrong mode fails here,
+/// and never moves the padding without a word; and the control holds the supports to the parser
+/// rather than to themselves, since the blocks they switch at are read off the same tree.
+#[test]
+fn the_switching_lex_is_the_trees_leaves_over_every_corpus_entry() {
+  let mut compared = 0usize;
+  let mut with_blocks = 0usize;
+  for path in corpus_files() {
+    let name = name_of(&path);
+    let src = std::fs::read_to_string(&path).expect("a corpus entry is readable");
+    let Some(tokens) = lexed(&src) else {
+      assert!(
+        UNPADDABLE.contains(&name.as_str()),
+        "{name}: the lex that switches at its blocks refuses it"
+      );
+      continue;
+    };
+    let switched: Vec<(K, usize, usize)> = tokens
+      .iter()
+      .map(|(token, span)| {
+        let kind = K::from_raw(token_kind(token)).expect("every lexer token maps to a kind");
+        (kind, span.start(), span.end())
+      })
+      .collect();
+    let syntax = parse_document(&src).syntax();
+    let leaves: Vec<(K, usize, usize)> = syntax
+      .descendants_with_tokens()
+      .filter_map(|element| element.into_token())
+      .map(|token| {
+        let range = token.text_range();
+        (
+          token.kind(),
+          usize::from(range.start()),
+          usize::from(range.end()),
+        )
+      })
+      .collect();
+    assert_eq!(
+      switched, leaves,
+      "{name}: the lex that switches at its blocks is not the tree's leaves"
+    );
+    compared += 1;
+    with_blocks += usize::from(
+      syntax
+        .descendants()
+        .any(|node| node.kind() == K::ConstBlock),
+    );
+  }
+  assert!(
+    compared + UNPADDABLE.len() == corpus_files().len(),
+    "every corpus entry is compared or unpaddable"
+  );
+  assert!(
+    with_blocks >= 5,
+    "only {with_blocks} corpus entries hold a block, so the control switches at almost nothing"
   );
 }

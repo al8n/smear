@@ -20,7 +20,7 @@ use smear_lexer::graphqlx::{ContextualKeyword, syntactic::SyntacticTokenKind};
 
 use super::{
   GraphqlxError, GraphqlxInput, GraphqlxLexer, GraphqlxSlice, GraphqlxToken,
-  argument::{arguments, const_arguments},
+  argument::{arguments, const_arguments, schema_arguments},
   path_after_first, path_root, try_name,
   ty::try_type_generics,
   unexpected_here,
@@ -46,6 +46,7 @@ macro_rules! directive_parser {
     where
       Src: Source<usize> + ?Sized,
       GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+      <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
       GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>
         + DowncastRef<ContextualKeyword>,
       GraphqlxLexer<'inp, Src>: Lexer<
@@ -54,6 +55,7 @@ macro_rules! directive_parser {
         Token = GraphqlxToken<'inp, Src>,
         Span = SimpleSpan,
         Offset = usize,
+        State = smear_lexer::graphqlx::syntactic::SyntacticState,
       >,
       Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
       GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
@@ -67,8 +69,15 @@ fn take_at<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -84,9 +93,16 @@ fn take_directive_type_path<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -120,9 +136,16 @@ fn directive_after_at<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -144,21 +167,36 @@ where
     .parse_input(inp)
 }
 
-fn const_directive_after_at<'inp, Src, Ctx>(
+/// A constant directive after its `@`, its arguments read by an executable document's constant
+/// grammar, or by a schema position's when `SCHEMA` holds.
+fn const_directive_after_at<'inp, Src, Ctx, const SCHEMA: bool>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
   start: usize,
 ) -> Result<ConstDirective<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   take_directive_type_path
-    .then(const_arguments)
+    .then(|inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>| {
+      if SCHEMA {
+        schema_arguments(inp)
+      } else {
+        const_arguments(inp)
+      }
+    })
     .spanned_trimmed()
     .map(
       |Spanned {
@@ -183,9 +221,16 @@ pub(super) fn directives_after_at<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -202,23 +247,35 @@ where
   Ok(Directives::new(SimpleSpan::new(start, end), parsed))
 }
 
-fn const_directives_after_at<'inp, Src, Ctx>(
+/// A constant directive run after its first `@`, each directive read as
+/// `const_directive_after_at` reads it under the same `SCHEMA`.
+fn const_directives_after_at<'inp, Src, Ctx, const SCHEMA: bool>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
   first_at: At<SimpleSpan, (), GraphQLx>,
 ) -> Result<ConstDirectives<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
   GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
   let start = first_at.span().start();
-  let mut parsed = Vec::from([const_directive_after_at(inp, start)?]);
+  let mut parsed = Vec::from([const_directive_after_at::<Src, Ctx, SCHEMA>(inp, start)?]);
   while let ParseAttempt::Accept(at) = try_at(inp)? {
-    parsed.push(const_directive_after_at(inp, at.span().start())?);
+    parsed.push(const_directive_after_at::<Src, Ctx, SCHEMA>(
+      inp,
+      at.span().start(),
+    )?);
   }
   let end = parsed
     .last()
@@ -257,7 +314,7 @@ directive_parser!(
   ConstDirective<GraphqlxSlice<'inp, Src>>;
   {
     let at = take_at(inp)?;
-    const_directive_after_at(inp, at.span().start())
+    const_directive_after_at::<Src, Ctx, false>(inp, at.span().start())
   }
 );
 
@@ -301,7 +358,7 @@ directive_parser!(
     // the token that follows it. See tokora's `InputRef::span_since_trimmed`.
     let start = inp.span().end();
     match try_at(inp)? {
-      ParseAttempt::Accept(at) => const_directives_after_at(inp, at),
+      ParseAttempt::Accept(at) => const_directives_after_at::<Src, Ctx, false>(inp, at),
       ParseAttempt::Decline => Ok(ConstDirectives::new(
         SimpleSpan::new(start, start),
         Vec::new(),
@@ -310,20 +367,96 @@ directive_parser!(
   }
 );
 
+/// Parses one committed GraphQLx `Directive` production in a schema position: a directive that a
+/// type-system definition or extension applies.
+///
+/// Every directive [`const_directive`] reads is one here, and its arguments are
+/// [`schema_arguments`].
+pub fn schema_directive<'inp, Src, Ctx>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<ConstDirective<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
+  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  let at = take_at(inp)?;
+  const_directive_after_at::<Src, Ctx, true>(inp, at.span().start())
+}
+
+/// Parses a GraphQLx `Directives` collection in a schema position: the directives a type-system
+/// definition or extension applies.
+///
+/// If `@` is absent, this returns an empty zero-width collection without consuming input. Every
+/// collection [`const_directives`] reads is one here, and each directive is a
+/// [`schema_directive`].
+pub fn schema_directives<'inp, Src, Ctx>(
+  inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
+) -> Result<ConstDirectives<GraphqlxSlice<'inp, Src>>, GraphqlxError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  <GraphqlxSlice<'inp, Src> as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
+  GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind> + DowncastRef<ContextualKeyword>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
+  Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
+{
+  // The committed end, as `const_directives` takes it.
+  let start = inp.span().end();
+  match try_at(inp)? {
+    ParseAttempt::Accept(at) => const_directives_after_at::<Src, Ctx, true>(inp, at),
+    ParseAttempt::Decline => Ok(ConstDirectives::new(
+      SimpleSpan::new(start, start),
+      Vec::new(),
+    )),
+  }
+}
+
 macro_rules! impl_directive_api {
   (
     $(#[$meta:meta])* $slice:ident, $node:ty, $parser:ident;
+  ) => {
+    impl_directive_api!(@impl graphqlx; $(#[$meta])* $slice, $node, $parser;);
+  };
+  // A schema position's twin, under the method name the invocation gives.
+  (
+    $(#[$meta:meta])* $slice:ident, $node:ty, $parser:ident as $method:ident;
+  ) => {
+    impl_directive_api!(@impl $method; $(#[$meta])* $slice, $node, $parser;);
+  };
+  (
+    @impl $method:ident; $(#[$meta:meta])* $slice:ident, $node:ty, $parser:ident;
   ) => {
     impl<$slice> $node {
       $(#[$meta])*
       ///
       /// The lexer source is inferred from `inp`.
-      pub fn graphqlx<'inp, Src, Ctx>(
+      pub fn $method<'inp, Src, Ctx>(
         inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
       ) -> Result<Self, GraphqlxError<'inp, Src, Ctx>>
       where
         Src: Source<usize, Slice<'inp> = $slice> + ?Sized,
         $slice: Slice<'inp> + Clone + 'inp + $crate::value::Leaf,
+        <$slice as Slice<'inp>>::Char: tokora::utils::IsAsciiChar,
         GraphqlxToken<'inp, Src>: Token<'inp, Kind = SyntacticTokenKind>
           + DowncastRef<ContextualKeyword>,
         GraphqlxLexer<'inp, Src>: Lexer<
@@ -332,6 +465,7 @@ macro_rules! impl_directive_api {
           Token = GraphqlxToken<'inp, Src>,
           Span = SimpleSpan,
           Offset = usize,
+          State = smear_lexer::graphqlx::syntactic::SyntacticState,
         >,
         Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
         GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<$slice>>,
@@ -385,6 +519,23 @@ impl_directive_api!(
   S,
   ConstDirectives<S>,
   const_directives;
+);
+impl_directive_api!(
+  /// Parses one committed GraphQLx directive in a schema position.
+  ///
+  /// See [`schema_directive`] and the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
+  S,
+  ConstDirective<S>,
+  schema_directive as graphqlx_schema;
+);
+impl_directive_api!(
+  /// Parses GraphQLx directives in a schema position, returning an empty zero-width list without
+  /// consuming input when `@` is absent.
+  ///
+  /// See [`schema_directives`] and the [GraphQL Directives specification](https://spec.graphql.org/draft/#sec-Language.Directives).
+  S,
+  ConstDirectives<S>,
+  schema_directives as graphqlx_schema;
 );
 
 #[cfg(test)]

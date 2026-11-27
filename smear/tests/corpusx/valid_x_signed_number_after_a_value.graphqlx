@@ -1,0 +1,4 @@
+input Bounds {
+  steps: Steps = [1 -2]
+  limits: Limits = [MAX -1]
+}

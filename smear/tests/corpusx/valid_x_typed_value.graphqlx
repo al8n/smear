@@ -1,0 +1,8 @@
+input Links {
+  home: Link = Url("x")
+  holder: Holder = { u: Url("x") }
+}
+
+type Query {
+  page: Int @link(to: Url("x"))
+}

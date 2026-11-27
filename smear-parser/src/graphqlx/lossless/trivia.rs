@@ -14,9 +14,12 @@
 //! `tests/lossless_x_trivia_atoms.rs` pins that by behaviour, form by form, rather than by this
 //! sentence.
 //!
-//! **The comma is trivia, not punctuation**, here as in GraphQL. It is not a separator any
-//! production may require or count — and GraphQLx's generic lists, `where` clauses and `use`
-//! groups are all comma-*tolerant* rather than comma-separated for exactly that reason.
+//! **The comma is trivia, not punctuation**, here as in GraphQL, everywhere but between the braces
+//! of a `const { … }` block. It is not a separator any production may require or count outside a
+//! block — and GraphQLx's generic lists, `where` clauses and `use` groups are all comma-*tolerant*
+//! rather than comma-separated for exactly that reason. Inside a block the lexer, which the block's
+//! production has switched into the block's mode, makes a comma the token `Separator` while no `<`
+//! is open, and the block's own grammar reads it.
 //!
 //! # The kind vocabulary here is the lexer's, not the tree's
 //!
@@ -27,17 +30,19 @@
 //! `\r`, `\n` and `\r\n` apart where the tree's folds all three, but **no atom here can expose
 //! that difference**, because every atom skips trivia before it answers.
 
+use smear_lexer::graphqlx::lossless::LosslessToken;
 use tokora::{
-  Lexer, ParseAttempt, SimpleSpan, Source, Token,
+  Lexer, ParseAttempt, SimpleSpan, Slice, Source, Token,
   error::{UnexpectedEot, UnexpectedToken},
   lexer::FromLogos,
-  utils::DowncastRef,
+  utils::{DowncastRef, IsAsciiChar},
 };
 
 use crate::graphqlx::GraphQLx;
 
 use super::{
-  GraphqlxLosslessError, GraphqlxLosslessInput, GraphqlxLosslessLexer, GraphqlxLosslessToken,
+  GraphqlxLosslessError, GraphqlxLosslessInput, GraphqlxLosslessLexer, GraphqlxLosslessSlice,
+  GraphqlxLosslessToken,
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -79,6 +84,35 @@ where
   GraphqlxLosslessError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>,
 {
   crate::lossless::trivia::peek_kind(inp)
+}
+
+/// Whether the head is a number whose token begins with `-`: after a value where no second value
+/// may follow, the one number an expression goes on with, as in `HOUR-1`, and inside the run that
+/// reads that expression a value wherever it stands. The caller has peeked the head, so this reads
+/// the cache and lexes nothing, and a token's first character is read only where it is a number.
+#[inline]
+pub(crate) fn peek_signed_number<'inp, Src, Ctx>(
+  inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>,
+) -> Result<bool, GraphqlxLosslessError<'inp, Src, Ctx>>
+where
+  Src: Source<usize> + ?Sized,
+  <GraphqlxLosslessSlice<'inp, Src> as Slice<'inp>>::Char: IsAsciiChar,
+  GraphqlxLosslessToken<'inp, Src>: Token<'inp> + FromLogos<'inp>,
+  GraphqlxLosslessLexer<'inp, Src>:
+    Lexer<'inp, Token = GraphqlxLosslessToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  Ctx: tokora::ParseContext<'inp, GraphqlxLosslessLexer<'inp, Src>, GraphQLx>,
+  GraphqlxLosslessError<'inp, Src, Ctx>: From<UnexpectedEot<usize, GraphQLx>>,
+{
+  peek_kind::<Src, Ctx>(inp)?;
+  Ok(
+    inp
+      .peek_head_map(|t| match t.data {
+        LosslessToken::LitInt(lit) => crate::graphqlx::begins_with_minus(lit.source_ref()),
+        LosslessToken::LitFloat(lit) => crate::graphqlx::begins_with_minus(lit.source_ref()),
+        _ => false,
+      })?
+      .unwrap_or(false),
+  )
 }
 
 /// Commit any leading trivia, then report the kind of the **second significant** token — the one

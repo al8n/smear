@@ -85,8 +85,8 @@ use super::{
   },
   selection::{selection_set, type_condition},
   trivia::{eat_if, expect, peek_as, peek_kind},
-  ty::type_ref,
-  value::{Constness, default_value, variable},
+  ty::{TypeAt, type_ref},
+  value::{Constness, Member, default_value, variable},
 };
 
 /// Whether `keyword` opens an executable definition — the three operation spellings and
@@ -155,11 +155,13 @@ lossless_production! {
         // for it would be paying for a distinction the grammar does not make.
         variable::<Src, Ctx>(inp)?;
         expect::<Src, Ctx>(inp, Kind::Colon)?;
-        type_ref::<Src, Ctx>(inp)?;
+        type_ref::<Src, Ctx>(inp, TypeAt::Executable)?;
         // Dispatched on a peek rather than attempted, so the `=` is consumed *inside* the
-        // `DefaultValue` node and an absent default opens nothing.
+        // `DefaultValue` node and an absent default opens nothing. A variable's definitions close
+        // with `)`, which is what the member says; a `Const` position begins no run, so nothing
+        // reads it.
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Equal) {
-          default_value::<Src, Ctx>(inp)?;
+          default_value::<Src, Ctx>(inp, Constness::Const, Member::InParens)?;
         }
         directives::<Src, Ctx>(inp, Constness::Const)
       },
@@ -244,7 +246,7 @@ lossless_production! {
   /// site — the difference from the five SDL sites Task 12 owns, where a present `where` is what
   /// *makes* the block mandatory.
   fn constrained_selection_set<'inp, Src, Ctx>(inp) {
-    optional_where_clause::<Src, Ctx>(inp)?;
+    optional_where_clause::<Src, Ctx>(inp, TypeAt::Executable)?;
     selection_set::<Src, Ctx>(inp)
   }
 
@@ -270,7 +272,7 @@ lossless_production! {
         // The operation name is optional, and any spelling will do — an operation may be called
         // `query` or `on`; nothing in the grammar reserves one in this position.
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Identifier) {
-          definition_name::<Src, Ctx>(inp)?;
+          definition_name::<Src, Ctx>(inp, TypeAt::Executable)?;
         }
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
           variables_definition::<Src, Ctx>(inp)?;

@@ -141,7 +141,7 @@ use tokora::SimpleSpan;
 ///
 /// | bound | from | value |
 /// |---|---|---|
-/// | lower: the deepest tree the doors were measured to produce | `WORST_DOOR_GREEN_TREE` | **516** |
+/// | lower: the deepest tree the doors produce | `WORST_DOOR_GREEN_TREE` | **771** |
 /// | upper: none | — | — |
 ///
 /// The assertion below keeps `WORST_DOOR_GREEN_TREE` under this constant, and `MAX_DOOR_BRACKETS`
@@ -158,23 +158,41 @@ pub const MAX_GREEN_DEPTH: usize = 1024;
 ///
 /// | shape | brackets | levels | per bracket |
 /// |---|---|---|---|
-/// | object value `{ a: { a: … } }` | 254 | **516** | 2.020 |
+/// | typed object `P { k: P { k: … } }` | 255 | **517** | 2.016 |
+/// | object value `{ a: { a: … } }` | 254 | 516 | 2.020 |
 /// | selection set `{ a { a … } }` | 255 | 515 | 2.008 |
+/// | typed value `U(U(…))` | 255 | 263 | 1.020 |
 /// | list value `[[…]]` | 254 | 262 | 1.020 |
 /// | list type `[[…]]` | 255 | 261 | 1.012 |
 ///
 /// GraphQLx measures identically on every row it shares and is never worse, which is worth
-/// stating because `HARD_MAX`'s own table found GraphQLx the worse of the two by 0.3%.
+/// stating because `HARD_MAX`'s own table found GraphQLx the worse of the two by 0.3%. The two
+/// typed forms are GraphQLx's alone, each in a schema position under the one brace of the
+/// definition it defaults a member of: a typed object costs what an object does for a bracket,
+/// since it holds its fields directly, and its chain reaches one level more for having that one
+/// bracket of context where the object's has two.
+///
+/// Inside a GraphQLx `const { … }` block every member of a container is an expression node, so a
+/// chain whose bracket opens a field or an entry costs three levels a bracket there. These rows
+/// are counted from the shape the productions build, the input object's and the block's two
+/// brackets of context in front of the chain:
+///
+/// | shape, inside a block | brackets | levels | per bracket |
+/// |---|---|---|---|
+/// | object value `{ a: { a: … } }` | 254 | **771** | 3.024 |
+/// | typed object `P { k: P { k: … } }` | 254 | **771** | 3.024 |
+/// | map `map!{ k => map!{ k => … } }` | 254 | **771** | 3.024 |
+/// | list `[[…]]`, set, parenthesis, a block inside the block | 254 | 517 | 2.024 |
 ///
 /// **The number is recorded rather than computed.** The assertions use `GREEN_LEVELS_PER_BRACKET`,
-/// an integer above every row of this table, rather than a formula fitted to one row.
-const WORST_DOOR_GREEN_TREE: usize = 516;
+/// an integer above every row of these tables, rather than a formula fitted to one row.
+const WORST_DOOR_GREEN_TREE: usize = 771;
 
 /// Green levels one open bracket can add to the tree.
 ///
-/// Three, where the worst row of `WORST_DOOR_GREEN_TREE`'s table measures 2.020. It is the
+/// Four, where the worst row of `WORST_DOOR_GREEN_TREE`'s tables per bracket is 3.024. It is the
 /// coefficient the crate root's assertion uses through `MAX_DOOR_BRACKETS`.
-const GREEN_LEVELS_PER_BRACKET: usize = 3;
+const GREEN_LEVELS_PER_BRACKET: usize = 4;
 
 /// The deepest bracket ceiling a lossless door may clamp to and still produce a tree these walks
 /// will descend.
@@ -189,7 +207,7 @@ const GREEN_LEVELS_PER_BRACKET: usize = 3;
 ///
 /// So the substrate states what it **affords**, in its own constants, and the crate root performs
 /// the comparison: `smear_parser`'s root asserts `HARD_MAX <= MAX_DOOR_BRACKETS`. At a `HARD_MAX`
-/// of 342 that assertion fails, since `MAX_DOOR_BRACKETS` is 1024 / 3 = 341.
+/// of 257 that assertion fails, since `MAX_DOOR_BRACKETS` is 1024 / 4 = 256.
 pub(crate) const MAX_DOOR_BRACKETS: usize = MAX_GREEN_DEPTH / GREEN_LEVELS_PER_BRACKET;
 
 // -- THE INVARIANT ------------------------------------------------------------------------------
@@ -203,8 +221,8 @@ const _: () = assert!(
    MAX_GREEN_DEPTH, so a projection refuses a parse this crate just produced"
 );
 
-// The assertion above compares the deepest tree the doors were measured to produce with the
-// ceiling the walks refuse at.
+// The assertion above compares the deepest tree the doors produce with the ceiling the walks
+// refuse at.
 
 /// How a depth-bounded green walk stopped: on a divergence, or on the ceiling.
 ///

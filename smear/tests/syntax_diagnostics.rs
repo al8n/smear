@@ -610,6 +610,7 @@ mod graphqlx {
   use smear::{
     lexer::{
       SyntaxErrorKind,
+      graphqlx::syntactic::SyntacticState,
       limits::SyntacticLimits,
       tokora::{Parse as _, Parser},
     },
@@ -633,7 +634,7 @@ mod graphqlx {
       _,
       GraphQLx,
     >(document)
-    .parse_str_with_state(src, limits)
+    .parse_str_with_state(src, SyntacticState::new(limits))
     .expect_err("the fixture does not parse")
   }
 
@@ -664,7 +665,8 @@ mod graphqlx {
   /// Every kind a GraphQLx document can be refused with, from a real input through the syntactic
   /// door. `UnexpectedCharacter` and `LeadingZero` are GraphQL's alone: GraphQLx lexes `+` and
   /// `-` as operators and admits a leading zero. `LeadingPathSeparator` is GraphQLx's alone, GraphQL
-  /// having no paths.
+  /// having no paths, and so are `InvalidChar` and `UnterminatedChar`, GraphQL having no `char`
+  /// literal.
   #[test]
   fn every_kind_is_reached_from_a_real_document() {
     use Message::{Exact, Starts};
@@ -741,6 +743,16 @@ mod graphqlx {
         SyntaxErrorKind::LeadingPathSeparator,
         Exact("a path cannot start with `::`"),
       ),
+      (
+        "{ a(x: '') }",
+        SyntaxErrorKind::InvalidChar,
+        Exact("a character literal holds exactly one character"),
+      ),
+      (
+        "{ a(x: 'a) }",
+        SyntaxErrorKind::UnterminatedChar,
+        Exact("unterminated character literal"),
+      ),
     ];
     for (src, kind, message) in rows {
       check(&refuse(src), &format!("{src:?}"), *kind, *message);
@@ -787,13 +799,18 @@ mod graphqlx {
 
   /// The variants no document here reaches, read at the value as GraphQL's twin reads them: the
   /// lossless door's two budgets, a line terminator in a string, which the lexer never reports,
-  /// the empty lexer batch's note, the three delimiters besides `{`, an empty kept batch, and the
-  /// variant that exists only to keep `S`.
+  /// the empty lexer batch's note, the two refusals a lexer makes inside a `const { … }` block
+  /// alone, which no parser enters yet, the three delimiters besides `{`, an empty kept batch, and
+  /// the variant that exists only to keep `S`.
   #[test]
   fn the_kinds_this_door_does_not_reach_render_their_sentences() {
     use smear::{
       diagnostic::{Diagnose, Location},
-      lexer::{graphqlx::error::LexerErrors, tokora::SimpleSpan},
+      lexer::{
+        error::{StringError, StringErrors},
+        graphqlx::error::{LexerError, LexerErrorData, LexerErrors},
+        tokora::SimpleSpan,
+      },
     };
 
     let span = SimpleSpan::new(3, 3);
@@ -830,6 +847,27 @@ mod graphqlx {
       "an empty lexer batch",
       SyntaxErrorKind::InvalidSyntax,
       Message::Exact("lexer error"),
+    );
+
+    let reserved = GraphqlxErrors::<&str>::from(LexerErrors::<char, ()>::from(LexerError::new(
+      span,
+      LexerErrorData::ReservedPrefix,
+    )));
+    check(
+      &reserved[0],
+      "a reserved prefix",
+      SyntaxErrorKind::ReservedPrefix,
+      Message::Exact("a name touching a literal is a reserved prefix"),
+    );
+    let byte_escape = GraphqlxErrors::<&str>::from(LexerErrors::<char, ()>::from(LexerError::new(
+      span,
+      LexerErrorData::String(StringErrors::from(StringError::InvalidByteEscape(span))),
+    )));
+    check(
+      &byte_escape[0],
+      "a `\\x` without its two digits in `b\"…\"`",
+      SyntaxErrorKind::InvalidByteEscape,
+      Message::Exact("a `\\x` escape takes two hexadecimal digits"),
     );
 
     for (error, what, message) in [

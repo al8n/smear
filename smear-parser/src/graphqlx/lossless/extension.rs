@@ -62,7 +62,7 @@ lossless_production! {
   ///
   /// **Precondition: `mark` was minted before the `extend`, which is already committed, and the
   /// head is an `Identifier` spelled `scalar`.** [`type_system_extension`] establishes both.
-  fn scalar_type_extension<'inp, Src, Ctx>(inp, mark: EventMark) {
+  fn scalar_type_extension<'inp, Src, Ctx>(inp, mark: EventMark, konst: Constness) {
     node_at(
       mark,
       K::ScalarTypeExtension.raw(),
@@ -70,9 +70,9 @@ lossless_production! {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         extension_name::<Src, Ctx>(inp)?;
         let implements = peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Implements);
-        optional_implements::<Src, Ctx>(inp)?;
+        optional_implements::<Src, Ctx>(inp, konst)?;
         let has_directives = peek_kind::<Src, Ctx>(inp)? == Some(Kind::At);
-        directives::<Src, Ctx>(inp, Constness::Const)?;
+        directives::<Src, Ctx>(inp, konst)?;
         if implements || has_directives {
           return Ok(());
         }
@@ -89,7 +89,7 @@ lossless_production! {
   ///
   /// The one extension whose single tail, its directives, is **required**, behind the `@` a
   /// directive's name is written after. The `@` is required too, as in a directive definition.
-  fn directive_extension<'inp, Src, Ctx>(inp, mark: EventMark) {
+  fn directive_extension<'inp, Src, Ctx>(inp, mark: EventMark, konst: Constness) {
     node_at(
       mark,
       K::DirectiveExtension.raw(),
@@ -100,7 +100,7 @@ lossless_production! {
         if peek_kind::<Src, Ctx>(inp)? != Some(Kind::At) {
           return recover::report_unexpected::<Src, Ctx>(inp, EXTENSION_TAIL_HEADS);
         }
-        directives::<Src, Ctx>(inp, Constness::Const)
+        directives::<Src, Ctx>(inp, konst)
       },
     )
     .parse_input(inp)
@@ -108,28 +108,28 @@ lossless_production! {
 
   /// `extend type ExtensionName ImplementInterfaces? Directives[Const]? WhereClause?
   /// FieldsDefinition?`, at least one of them present.
-  fn object_type_extension<'inp, Src, Ctx>(inp, mark: EventMark) {
+  fn object_type_extension<'inp, Src, Ctx>(inp, mark: EventMark, konst: Constness) {
     node_at(
       mark,
       K::ObjectTypeExtension.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         extension_name::<Src, Ctx>(inp)?;
-        object_extension_body::<Src, Ctx>(inp, false)
+        object_extension_body::<Src, Ctx>(inp, false, konst)
       },
     )
     .parse_input(inp)
   }
 
   /// The `interface` form of [`object_type_extension`]'s shape, sharing its body.
-  fn interface_type_extension<'inp, Src, Ctx>(inp, mark: EventMark) {
+  fn interface_type_extension<'inp, Src, Ctx>(inp, mark: EventMark, konst: Constness) {
     node_at(
       mark,
       K::InterfaceTypeExtension.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         extension_name::<Src, Ctx>(inp)?;
-        object_extension_body::<Src, Ctx>(inp, false)
+        object_extension_body::<Src, Ctx>(inp, false, konst)
       },
     )
     .parse_input(inp)
@@ -139,14 +139,14 @@ lossless_production! {
   /// InputFieldsDefinition?`
   ///
   /// [`object_type_extension`]'s body with the input-object block.
-  fn input_object_type_extension<'inp, Src, Ctx>(inp, mark: EventMark) {
+  fn input_object_type_extension<'inp, Src, Ctx>(inp, mark: EventMark, konst: Constness) {
     node_at(
       mark,
       K::InputObjectTypeExtension.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         extension_name::<Src, Ctx>(inp)?;
-        object_extension_body::<Src, Ctx>(inp, true)
+        object_extension_body::<Src, Ctx>(inp, true, konst)
       },
     )
     .parse_input(inp)
@@ -162,14 +162,14 @@ lossless_production! {
   /// The emptiness check is `has_any`, computed from the three peeks rather than from the parse:
   /// each component may legitimately be absent and only their *conjunction* is an error, which is
   /// the same cross-component shape as the `where` rule and is invisible to the text.
-  fn object_extension_body<'inp, Src, Ctx>(inp, input_object: bool) {
+  fn object_extension_body<'inp, Src, Ctx>(inp, input_object: bool, konst: Constness) {
     let implements = peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Implements);
-    optional_implements::<Src, Ctx>(inp)?;
+    optional_implements::<Src, Ctx>(inp, konst)?;
     let has_directives = peek_kind::<Src, Ctx>(inp)? == Some(Kind::At);
-    directives::<Src, Ctx>(inp, Constness::Const)?;
+    directives::<Src, Ctx>(inp, konst)?;
     let constrained = peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Where);
     let has_block = constrained || peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace);
-    constrained_fields::<Src, Ctx>(inp, input_object)?;
+    constrained_fields::<Src, Ctx>(inp, input_object, konst)?;
     if implements || has_directives || has_block {
       return Ok(());
     }
@@ -180,7 +180,7 @@ lossless_production! {
   /// WhereClause?`
   ///
   /// Divergence 17's extension twin, reached through the same helper the definition uses.
-  fn union_type_extension<'inp, Src, Ctx>(inp, mark: EventMark) {
+  fn union_type_extension<'inp, Src, Ctx>(inp, mark: EventMark, konst: Constness) {
     node_at(
       mark,
       K::UnionTypeExtension.raw(),
@@ -188,11 +188,11 @@ lossless_production! {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         extension_name::<Src, Ctx>(inp)?;
         let implements = peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Implements);
-        optional_implements::<Src, Ctx>(inp)?;
+        optional_implements::<Src, Ctx>(inp, konst)?;
         let has_directives = peek_kind::<Src, Ctx>(inp)? == Some(Kind::At);
-        directives::<Src, Ctx>(inp, Constness::Const)?;
+        directives::<Src, Ctx>(inp, konst)?;
         let has_members = peek_kind::<Src, Ctx>(inp)? == Some(Kind::Equal);
-        constrained_union_members::<Src, Ctx>(inp)?;
+        constrained_union_members::<Src, Ctx>(inp, konst)?;
         if implements || has_directives || has_members {
           return Ok(());
         }
@@ -205,7 +205,7 @@ lossless_production! {
   /// `extend enum ExtensionName ImplementInterfaces? Directives[Const]? EnumValuesDefinition?`
   ///
   /// No `where` clause, exactly as the enum *definition* has none.
-  fn enum_type_extension<'inp, Src, Ctx>(inp, mark: EventMark) {
+  fn enum_type_extension<'inp, Src, Ctx>(inp, mark: EventMark, konst: Constness) {
     node_at(
       mark,
       K::EnumTypeExtension.raw(),
@@ -213,12 +213,12 @@ lossless_production! {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         extension_name::<Src, Ctx>(inp)?;
         let implements = peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Implements);
-        optional_implements::<Src, Ctx>(inp)?;
+        optional_implements::<Src, Ctx>(inp, konst)?;
         let has_directives = peek_kind::<Src, Ctx>(inp)? == Some(Kind::At);
-        directives::<Src, Ctx>(inp, Constness::Const)?;
+        directives::<Src, Ctx>(inp, konst)?;
         let has_values = peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace);
         if has_values {
-          enum_values_definition::<Src, Ctx>(inp)?;
+          enum_values_definition::<Src, Ctx>(inp, konst)?;
         }
         if implements || has_directives || has_values {
           return Ok(());
@@ -233,17 +233,17 @@ lossless_production! {
   ///
   /// The one extension with **no name at all**, and the block is optional here where the schema
   /// *definition* requires it.
-  fn schema_extension<'inp, Src, Ctx>(inp, mark: EventMark) {
+  fn schema_extension<'inp, Src, Ctx>(inp, mark: EventMark, konst: Constness) {
     node_at(
       mark,
       K::SchemaExtension.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         let has_directives = peek_kind::<Src, Ctx>(inp)? == Some(Kind::At);
-        directives::<Src, Ctx>(inp, Constness::Const)?;
+        directives::<Src, Ctx>(inp, konst)?;
         let has_block = peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace);
         if has_block {
-          root_operation_types_definition::<Src, Ctx>(inp)?;
+          root_operation_types_definition::<Src, Ctx>(inp, konst)?;
         }
         if has_directives || has_block {
           return Ok(());
@@ -259,17 +259,19 @@ lossless_production! {
   ///
   /// **Precondition: `mark` was minted before the `extend`, which is already committed.** Both the
   /// driver and the document dispatchers establish that; the keyword is what decides the kind, so
-  /// the `extend` cannot be inside a node opened before it is read.
-  fn type_system_extension<'inp, Src, Ctx>(inp, mark: EventMark) {
+  /// the `extend` cannot be inside a node opened before it is read. `konst` is the grammar the
+  /// extension's directives and members read, as `definition.rs`'s `type_system_definition_at`
+  /// hands it down.
+  fn type_system_extension<'inp, Src, Ctx>(inp, mark: EventMark, konst: Constness) {
     match peek_as::<Src, Ctx, Keyword>(inp)? {
-      Some(Keyword::Scalar) => scalar_type_extension::<Src, Ctx>(inp, mark),
-      Some(Keyword::Type) => object_type_extension::<Src, Ctx>(inp, mark),
-      Some(Keyword::Interface) => interface_type_extension::<Src, Ctx>(inp, mark),
-      Some(Keyword::Union) => union_type_extension::<Src, Ctx>(inp, mark),
-      Some(Keyword::Enum) => enum_type_extension::<Src, Ctx>(inp, mark),
-      Some(Keyword::Input) => input_object_type_extension::<Src, Ctx>(inp, mark),
-      Some(Keyword::Schema) => schema_extension::<Src, Ctx>(inp, mark),
-      Some(Keyword::Directive) => directive_extension::<Src, Ctx>(inp, mark),
+      Some(Keyword::Scalar) => scalar_type_extension::<Src, Ctx>(inp, mark, konst),
+      Some(Keyword::Type) => object_type_extension::<Src, Ctx>(inp, mark, konst),
+      Some(Keyword::Interface) => interface_type_extension::<Src, Ctx>(inp, mark, konst),
+      Some(Keyword::Union) => union_type_extension::<Src, Ctx>(inp, mark, konst),
+      Some(Keyword::Enum) => enum_type_extension::<Src, Ctx>(inp, mark, konst),
+      Some(Keyword::Input) => input_object_type_extension::<Src, Ctx>(inp, mark, konst),
+      Some(Keyword::Schema) => schema_extension::<Src, Ctx>(inp, mark, konst),
+      Some(Keyword::Directive) => directive_extension::<Src, Ctx>(inp, mark, konst),
       // A name that is none of the eight, or no name at all. Reported and skipped, except a `}`
       // while a brace is open: that closes a block this extension stands in — a module's body,
       // or a brace junk opened before it — so it is reported and left to the loop around the
@@ -296,11 +298,11 @@ lossless_production! {
   // "Only the drivers and a direct consumer" is one caller, the drivers being `pub(crate)`'s only
   // reach — so the gate takes it. See `lossless_drivers!`.
   #[cfg_attr(not(feature = "test-support"), allow(dead_code))]
-  fn extension<'inp, Src, Ctx>(inp) {
+  fn extension<'inp, Src, Ctx>(inp, konst: Constness) {
     peek_kind::<Src, Ctx>(inp)?;
     let mark = inp.cst_mark();
     expect::<Src, Ctx>(inp, Kind::Identifier)?;
-    type_system_extension::<Src, Ctx>(inp, mark)
+    type_system_extension::<Src, Ctx>(inp, mark, konst)
   }
 }
 
@@ -313,8 +315,8 @@ lossless_drivers! {
 
   /// `super::extension` over `src` — the entry every extension position uses, and the only door
   /// to the seven `*_type_extension` productions and `directive_extension`.
-  fn parse_type_system_extension => extension;
+  fn parse_type_system_extension => extension [Constness::Schema];
 
   /// `super::extension` over `src` again, under the name divergence 17's test reads.
-  fn parse_union_type_extension => extension;
+  fn parse_union_type_extension => extension [Constness::Schema];
 }

@@ -1,0 +1,21 @@
+OK  0..1  Identifier("b")
+OK  1..5  LitInlineStr(Plain(LitPlainStr { source: "\"ab\"" }))
+OK  5..6  Newline
+OK  6..7  Identifier("r")
+OK  7..10  LitInlineStr(Plain(LitPlainStr { source: "\"x\"" }))
+OK  10..11  Newline
+OK  11..15  Identifier("enum")
+OK  15..16  Space
+OK  16..17  Identifier("E")
+OK  17..18  Space
+OK  18..19  LBrace
+OK  19..20  Space
+OK  20..21  Identifier("A")
+OK  21..24  LitInlineStr(Plain(LitPlainStr { source: "\"d\"" }))
+OK  24..25  Space
+OK  25..26  Identifier("B")
+OK  26..27  Space
+OK  27..28  RBrace
+OK  28..29  Newline
+OK  29..30  Identifier("b")
+OK  30..33  LitChar(LitChar { source: "'a'", value: 'a' })

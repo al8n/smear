@@ -261,6 +261,7 @@ dependencies = [
 name = "smear-parser"
 version = "0.0.0"
 dependencies = [
+ "ascii",
  "derive_more",
  "paste",
  "smear-lexer",

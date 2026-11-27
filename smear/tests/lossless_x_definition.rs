@@ -208,8 +208,8 @@ fn every_plus_block_reports_its_empty_form_without_eating_its_closer() {
 /// In an `EnumValueDefinition` the value stays a bare `Name` token; in a *value* position it is a
 /// whole `EnumValue > Path`.
 ///
-/// **GraphQL routes both through one production and GraphQLx cannot** (`value.rs:279` against
-/// `definition/enum_type.rs:5-28`). Porting the shared route gives `EnumValueDefinition >
+/// **GraphQL routes both through one production and GraphQLx cannot** (`value.rs`'s `enum_value`
+/// against `definition/enum_type.rs:5-28`). Porting the shared route gives `EnumValueDefinition >
 /// EnumValue > Path` here, which re-prints identically and tells the typed layer that an SDL enum
 /// value may be qualified — which it may not.
 #[test]

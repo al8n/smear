@@ -82,11 +82,12 @@ use super::{
   recover::{
     DESCRIBED_MEMBER_HEADS, FIELDS_BLOCK_HEADS, NAME_HEADS, OPERATION_TYPE_HEADS,
     PARENS_CLOSER_HEADS, PATH_HEADS, ROOT_OPERATION_TYPES_HEADS, TYPE_SYSTEM_DEFINITION_HEADS,
-    UNION_MEMBERS_HEADS, closes_enclosing_block, opener_span, starts_description,
+    UNION_MEMBERS_HEADS, closes_enclosing_block, continues_an_expression, is_number, opener_span,
+    starts_description,
   },
-  trivia::{eat_if, expect, peek_as, peek_kind},
+  trivia::{eat_if, expect, peek_as, peek_kind, peek_signed_number},
   ty::{type_path, type_ref},
-  value::{Constness, default_value},
+  value::{Constness, Member, RunAt, default_value, expression_run},
 };
 
 // The twenty directive-location spellings, from Task 7's macro. Written out per dialect
@@ -105,7 +106,12 @@ lossless_production! {
   /// is a plain `Name` and **not** a [`DefinitionName`](K::DefinitionName): a member declares no
   /// generics, and `input_value_definition` reaches `take_name` rather than `definition_name`
   /// (`definition/input_value.rs:20`).
-  fn input_value_definition<'inp, Src, Ctx>(inp) {
+  ///
+  /// `konst` is the grammar its default and its directives read, and its type is read where
+  /// `konst` says: see [`type_system_definition_at`]. Only a schema position's default offers a
+  /// block for an expression after it. `member` is what closes the list the member stands in,
+  /// which its caller states and a run in or after its default leaves to that list.
+  fn input_value_definition<'inp, Src, Ctx>(inp, konst: Constness, member: Member) {
     node(
       K::InputValueDefinition.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
@@ -114,13 +120,23 @@ lossless_production! {
         }
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         expect::<Src, Ctx>(inp, Kind::Colon)?;
-        type_ref::<Src, Ctx>(inp)?;
+        type_ref::<Src, Ctx>(inp, konst.type_at())?;
         // Dispatched on a peek rather than attempted, so the `=` is consumed *inside* the
         // `DefaultValue` node and an absent default opens nothing.
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::Equal) {
-          default_value::<Src, Ctx>(inp)?;
+          default_value::<Src, Ctx>(inp, konst, member)?;
+          // After a written default, what goes on with an expression offers a block, and the run
+          // reads on beside the `DefaultValue`, in the member's node. The read crosses what the
+          // directives' own probe crosses there, in the same node.
+          if konst == Constness::Schema
+            && let Some(head) = peek_kind::<Src, Ctx>(inp)?
+            && (continues_an_expression(head)
+              || (is_number(head) && peek_signed_number::<Src, Ctx>(inp)?))
+          {
+            expression_run::<Src, Ctx>(inp, RunAt::AfterMember(member))?;
+          }
         }
-        directives::<Src, Ctx>(inp, Constness::Const)
+        directives::<Src, Ctx>(inp, konst)
       },
     )
     .parse_input(inp)
@@ -131,7 +147,7 @@ lossless_production! {
   /// `arguments`' loop with a different member and the opposite emptiness ruling: `syntactic/`
   /// accepts the lenient `()` for `Arguments` and rejects it here. It leaves a `}` of a block
   /// around it as `arguments` does.
-  fn arguments_definition<'inp, Src, Ctx>(inp) {
+  fn arguments_definition<'inp, Src, Ctx>(inp, konst: Constness) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;
     node(
@@ -152,8 +168,9 @@ lossless_production! {
             Some(Kind::RBrace) if closes_enclosing_block(open_at, inp.state().brace_depth()) => {
               return recover::report_unexpected::<Src, Ctx>(inp, PARENS_CLOSER_HEADS);
             }
+            // A member of a list that closes with `)`.
             Some(Kind::Identifier | Kind::InlineString | Kind::BlockString) => {
-              input_value_definition::<Src, Ctx>(inp)?
+              input_value_definition::<Src, Ctx>(inp, konst, Member::InParens)?
             }
             // The head is checked here rather than left to the member's own `expect`, because that
             // `expect` would return `Err` and abort the whole list.
@@ -166,7 +183,7 @@ lossless_production! {
   }
 
   /// `Description? Name ArgumentsDefinition? : Type Directives[Const]?`
-  fn field_definition<'inp, Src, Ctx>(inp) {
+  fn field_definition<'inp, Src, Ctx>(inp, konst: Constness) {
     node(
       K::FieldDefinition.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
@@ -175,18 +192,18 @@ lossless_production! {
         }
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
-          arguments_definition::<Src, Ctx>(inp)?;
+          arguments_definition::<Src, Ctx>(inp, konst)?;
         }
         expect::<Src, Ctx>(inp, Kind::Colon)?;
-        type_ref::<Src, Ctx>(inp)?;
-        directives::<Src, Ctx>(inp, Constness::Const)
+        type_ref::<Src, Ctx>(inp, konst.type_at())?;
+        directives::<Src, Ctx>(inp, konst)
       },
     )
     .parse_input(inp)
   }
 
   /// `{ FieldDefinition+ }`
-  fn fields_definition<'inp, Src, Ctx>(inp) {
+  fn fields_definition<'inp, Src, Ctx>(inp, konst: Constness) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;
     node(
@@ -204,7 +221,7 @@ lossless_production! {
           match peek_kind::<Src, Ctx>(inp)? {
             None => return recover::unclosed_object::<Src, Ctx>(inp, open),
             Some(Kind::Identifier | Kind::InlineString | Kind::BlockString) => {
-              field_definition::<Src, Ctx>(inp)?
+              field_definition::<Src, Ctx>(inp, konst)?
             }
             Some(_) => recover::unexpected::<Src, Ctx>(inp, DESCRIBED_MEMBER_HEADS)?,
           }
@@ -219,7 +236,7 @@ lossless_production! {
   /// [`fields_definition`]'s loop with the input-object member. A separate node kind rather than a
   /// shared one, because the two blocks admit different members and a typed accessor that had to
   /// distinguish them at run time would be paying for a difference the grammar already makes.
-  fn input_fields_definition<'inp, Src, Ctx>(inp) {
+  fn input_fields_definition<'inp, Src, Ctx>(inp, konst: Constness) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;
     node(
@@ -236,8 +253,9 @@ lossless_production! {
           }
           match peek_kind::<Src, Ctx>(inp)? {
             None => return recover::unclosed_object::<Src, Ctx>(inp, open),
+            // A member of a list that closes with `}`.
             Some(Kind::Identifier | Kind::InlineString | Kind::BlockString) => {
-              input_value_definition::<Src, Ctx>(inp)?
+              input_value_definition::<Src, Ctx>(inp, konst, Member::InBraces)?
             }
             Some(_) => recover::unexpected::<Src, Ctx>(inp, DESCRIBED_MEMBER_HEADS)?,
           }
@@ -257,7 +275,7 @@ lossless_production! {
   ///
   /// An undelimited repetition, so the trailing-trivia law applies: the loop's terminating `&` peek
   /// crosses whatever follows while the node is still open.
-  fn implements_interfaces<'inp, Src, Ctx>(inp) {
+  fn implements_interfaces<'inp, Src, Ctx>(inp, konst: Constness) {
     node(
       K::ImplementInterfaces.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
@@ -273,7 +291,7 @@ lossless_production! {
             // whatever is here belongs to the next component.
             return recover::report_unexpected::<Src, Ctx>(inp, PATH_HEADS);
           }
-          type_path::<Src, Ctx>(inp)?;
+          type_path::<Src, Ctx>(inp, konst.type_at())?;
           // Each turn consumes an `&` before it can loop again, which is the termination argument.
           if !eat_if::<Src, Ctx>(inp, Kind::Ampersand)? {
             return Ok(());
@@ -288,7 +306,7 @@ lossless_production! {
   ///
   /// **Precondition: the head is `=`.** [`implements_interfaces`]'s shape with a different opener
   /// and separator, and the same trailing-trivia law.
-  fn union_member_types<'inp, Src, Ctx>(inp) {
+  fn union_member_types<'inp, Src, Ctx>(inp, konst: Constness) {
     node(
       K::UnionMemberTypes.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
@@ -301,7 +319,7 @@ lossless_production! {
           ) {
             return recover::report_unexpected::<Src, Ctx>(inp, PATH_HEADS);
           }
-          type_path::<Src, Ctx>(inp)?;
+          type_path::<Src, Ctx>(inp, konst.type_at())?;
           if !eat_if::<Src, Ctx>(inp, Kind::Pipe)? {
             return Ok(());
           }
@@ -365,7 +383,7 @@ lossless_production! {
   ///
   /// `true`, `false` and `null` are refused, and the token is still consumed for the reason
   /// [`directive_location`] records.
-  fn enum_value_definition<'inp, Src, Ctx>(inp) {
+  fn enum_value_definition<'inp, Src, Ctx>(inp, konst: Constness) {
     node(
       K::EnumValueDefinition.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
@@ -379,14 +397,14 @@ lossless_production! {
           recover::report_unexpected::<Src, Ctx>(inp, NAME_HEADS)?;
         }
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        directives::<Src, Ctx>(inp, Constness::Const)
+        directives::<Src, Ctx>(inp, konst)
       },
     )
     .parse_input(inp)
   }
 
   /// `{ EnumValueDefinition+ }`
-  fn enum_values_definition<'inp, Src, Ctx>(inp) {
+  fn enum_values_definition<'inp, Src, Ctx>(inp, konst: Constness) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;
     node(
@@ -404,7 +422,7 @@ lossless_production! {
           match peek_kind::<Src, Ctx>(inp)? {
             None => return recover::unclosed_object::<Src, Ctx>(inp, open),
             Some(Kind::Identifier | Kind::InlineString | Kind::BlockString) => {
-              enum_value_definition::<Src, Ctx>(inp)?
+              enum_value_definition::<Src, Ctx>(inp, konst)?
             }
             Some(_) => recover::unexpected::<Src, Ctx>(inp, DESCRIBED_MEMBER_HEADS)?,
           }
@@ -422,7 +440,7 @@ lossless_production! {
   ///
   /// The target is a [`TypePath`](K::TypePath), not a bare name — `schema.rs:53` calls
   /// `type_path` — so `query: ns::Q` is one root operation type.
-  fn root_operation_type_definition<'inp, Src, Ctx>(inp) {
+  fn root_operation_type_definition<'inp, Src, Ctx>(inp, konst: Constness) {
     node(
       K::RootOperationTypeDefinition.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
@@ -434,14 +452,14 @@ lossless_production! {
         }
         operation_type::<Src, Ctx>(inp)?;
         expect::<Src, Ctx>(inp, Kind::Colon)?;
-        type_path::<Src, Ctx>(inp)
+        type_path::<Src, Ctx>(inp, konst.type_at())
       },
     )
     .parse_input(inp)
   }
 
   /// `{ RootOperationTypeDefinition+ }`
-  fn root_operation_types_definition<'inp, Src, Ctx>(inp) {
+  fn root_operation_types_definition<'inp, Src, Ctx>(inp, konst: Constness) {
     let mut frame = super::descend::<Src, Ctx>(inp)?;
     let inp = &mut *frame;
     node(
@@ -458,7 +476,7 @@ lossless_production! {
           }
           match peek_kind::<Src, Ctx>(inp)? {
             None => return recover::unclosed_object::<Src, Ctx>(inp, open),
-            Some(Kind::Identifier) => root_operation_type_definition::<Src, Ctx>(inp)?,
+            Some(Kind::Identifier) => root_operation_type_definition::<Src, Ctx>(inp, konst)?,
             Some(_) => recover::unexpected::<Src, Ctx>(inp, OPERATION_TYPE_HEADS)?,
           }
         }
@@ -474,14 +492,14 @@ lossless_production! {
   /// because a rule stated at N sites is a rule that holds at N-1 of them after the next edit.
   /// The parameter says which block production closes it; the *constraint* is the same either way,
   /// which is why the two share this function rather than a copy each.
-  fn constrained_fields<'inp, Src, Ctx>(inp, input_object: bool) {
+  fn constrained_fields<'inp, Src, Ctx>(inp, input_object: bool, konst: Constness) {
     let constrained = peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Where);
-    optional_where_clause::<Src, Ctx>(inp)?;
+    optional_where_clause::<Src, Ctx>(inp, konst.type_at())?;
     if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
       return if input_object {
-        input_fields_definition::<Src, Ctx>(inp)
+        input_fields_definition::<Src, Ctx>(inp, konst)
       } else {
-        fields_definition::<Src, Ctx>(inp)
+        fields_definition::<Src, Ctx>(inp, konst)
       };
     }
     if constrained {
@@ -500,16 +518,16 @@ lossless_production! {
   ///
   /// The `where` ends the definition and forces nothing after it, as a directive definition's
   /// does, so the next entry's head is what the clause's continuation test must decline on.
-  fn scalar_type_definition<'inp, Src, Ctx>(inp, mark: EventMark) {
+  fn scalar_type_definition<'inp, Src, Ctx>(inp, mark: EventMark, konst: Constness) {
     node_at(
       mark,
       K::ScalarTypeDefinition.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        definition_name::<Src, Ctx>(inp)?;
-        optional_implements::<Src, Ctx>(inp)?;
-        directives::<Src, Ctx>(inp, Constness::Const)?;
-        optional_where_clause::<Src, Ctx>(inp)
+        definition_name::<Src, Ctx>(inp, konst.type_at())?;
+        optional_implements::<Src, Ctx>(inp, konst)?;
+        directives::<Src, Ctx>(inp, konst)?;
+        optional_where_clause::<Src, Ctx>(inp, konst.type_at())
       },
     )
     .parse_input(inp)
@@ -517,14 +535,14 @@ lossless_production! {
 
   /// `Description? type DefinitionName ImplementInterfaces? Directives[Const]? WhereClause?
   /// FieldsDefinition?`
-  fn object_type_definition<'inp, Src, Ctx>(inp, mark: EventMark) {
+  fn object_type_definition<'inp, Src, Ctx>(inp, mark: EventMark, konst: Constness) {
     node_at(
       mark,
       K::ObjectTypeDefinition.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        definition_name::<Src, Ctx>(inp)?;
-        object_body::<Src, Ctx>(inp)
+        definition_name::<Src, Ctx>(inp, konst.type_at())?;
+        object_body::<Src, Ctx>(inp, konst)
       },
     )
     .parse_input(inp)
@@ -534,14 +552,14 @@ lossless_production! {
   ///
   /// The body is shared rather than copied: the two grammars are identical after their keyword,
   /// and `syntactic/`'s `object.rs` and `interface.rs` are the same file twice.
-  fn interface_type_definition<'inp, Src, Ctx>(inp, mark: EventMark) {
+  fn interface_type_definition<'inp, Src, Ctx>(inp, mark: EventMark, konst: Constness) {
     node_at(
       mark,
       K::InterfaceTypeDefinition.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        definition_name::<Src, Ctx>(inp)?;
-        object_body::<Src, Ctx>(inp)
+        definition_name::<Src, Ctx>(inp, konst.type_at())?;
+        object_body::<Src, Ctx>(inp, konst)
       },
     )
     .parse_input(inp)
@@ -549,20 +567,20 @@ lossless_production! {
 
   /// `ImplementInterfaces?` — the clause every type definition and every type extension may write
   /// after its name and generics. Opens no node when the clause is absent.
-  fn optional_implements<'inp, Src, Ctx>(inp) {
+  fn optional_implements<'inp, Src, Ctx>(inp, konst: Constness) {
     // `implements` is contextual, so the head kind cannot decide this and the spelling must.
     if peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Implements) {
-      implements_interfaces::<Src, Ctx>(inp)?;
+      implements_interfaces::<Src, Ctx>(inp, konst)?;
     }
     Ok(())
   }
 
   /// `ImplementInterfaces? Directives[Const]? WhereClause? FieldsDefinition?` — the tail an object
   /// type and an interface type share, verbatim. Opens no node of its own.
-  fn object_body<'inp, Src, Ctx>(inp) {
-    optional_implements::<Src, Ctx>(inp)?;
-    directives::<Src, Ctx>(inp, Constness::Const)?;
-    constrained_fields::<Src, Ctx>(inp, false)
+  fn object_body<'inp, Src, Ctx>(inp, konst: Constness) {
+    optional_implements::<Src, Ctx>(inp, konst)?;
+    directives::<Src, Ctx>(inp, konst)?;
+    constrained_fields::<Src, Ctx>(inp, false, konst)
   }
 
   /// `Description? union DefinitionName ImplementInterfaces? Directives[Const]? UnionMemberTypes?
@@ -576,16 +594,16 @@ lossless_production! {
   /// parser guards the impossible fourth combination with an
   /// `unreachable!("a where clause requires union members")`, which is the tell that the
   /// constraint is real and not a tidy-up.
-  fn union_type_definition<'inp, Src, Ctx>(inp, mark: EventMark) {
+  fn union_type_definition<'inp, Src, Ctx>(inp, mark: EventMark, konst: Constness) {
     node_at(
       mark,
       K::UnionTypeDefinition.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        definition_name::<Src, Ctx>(inp)?;
-        optional_implements::<Src, Ctx>(inp)?;
-        directives::<Src, Ctx>(inp, Constness::Const)?;
-        constrained_union_members::<Src, Ctx>(inp)
+        definition_name::<Src, Ctx>(inp, konst.type_at())?;
+        optional_implements::<Src, Ctx>(inp, konst)?;
+        directives::<Src, Ctx>(inp, konst)?;
+        constrained_union_members::<Src, Ctx>(inp, konst)
       },
     )
     .parse_input(inp)
@@ -601,16 +619,16 @@ lossless_production! {
   /// the tell that the constraint is real and not a tidy-up.
   ///
   /// Written once and reached by both sites for the reason [`constrained_fields`] records.
-  fn constrained_union_members<'inp, Src, Ctx>(inp) {
+  fn constrained_union_members<'inp, Src, Ctx>(inp, konst: Constness) {
     let members = peek_kind::<Src, Ctx>(inp)? == Some(Kind::Equal);
     if members {
-      union_member_types::<Src, Ctx>(inp)?;
+      union_member_types::<Src, Ctx>(inp, konst)?;
     }
     if peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Where) {
       if !members {
         recover::report_unexpected::<Src, Ctx>(inp, UNION_MEMBERS_HEADS)?;
       }
-      optional_where_clause::<Src, Ctx>(inp)?;
+      optional_where_clause::<Src, Ctx>(inp, konst.type_at())?;
     }
     Ok(())
   }
@@ -619,17 +637,17 @@ lossless_production! {
   ///
   /// The one type definition with **no** `where` clause at all — `enum_after_keyword` does not call
   /// `try_where_clause` (`definition/enum_type.rs:96-121`).
-  fn enum_type_definition<'inp, Src, Ctx>(inp, mark: EventMark) {
+  fn enum_type_definition<'inp, Src, Ctx>(inp, mark: EventMark, konst: Constness) {
     node_at(
       mark,
       K::EnumTypeDefinition.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        definition_name::<Src, Ctx>(inp)?;
-        optional_implements::<Src, Ctx>(inp)?;
-        directives::<Src, Ctx>(inp, Constness::Const)?;
+        definition_name::<Src, Ctx>(inp, konst.type_at())?;
+        optional_implements::<Src, Ctx>(inp, konst)?;
+        directives::<Src, Ctx>(inp, konst)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
-          enum_values_definition::<Src, Ctx>(inp)?;
+          enum_values_definition::<Src, Ctx>(inp, konst)?;
         }
         Ok(())
       },
@@ -642,16 +660,16 @@ lossless_production! {
   ///
   /// The third of divergence 16's five sites; the constraint is [`constrained_fields`]'s, with the
   /// input-object block.
-  fn input_object_type_definition<'inp, Src, Ctx>(inp, mark: EventMark) {
+  fn input_object_type_definition<'inp, Src, Ctx>(inp, mark: EventMark, konst: Constness) {
     node_at(
       mark,
       K::InputObjectTypeDefinition.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        definition_name::<Src, Ctx>(inp)?;
-        optional_implements::<Src, Ctx>(inp)?;
-        directives::<Src, Ctx>(inp, Constness::Const)?;
-        constrained_fields::<Src, Ctx>(inp, true)
+        definition_name::<Src, Ctx>(inp, konst.type_at())?;
+        optional_implements::<Src, Ctx>(inp, konst)?;
+        directives::<Src, Ctx>(inp, konst)?;
+        constrained_fields::<Src, Ctx>(inp, true, konst)
       },
     )
     .parse_input(inp)
@@ -668,20 +686,20 @@ lossless_production! {
   /// It is also the position that makes the `where` continuation's *second* lookahead token
   /// load-bearing — see [`super::generic`]'s module docs. Nothing follows the clause inside this
   /// definition, so the next top-level keyword is what the continuation test must decline on.
-  fn directive_definition<'inp, Src, Ctx>(inp, mark: EventMark) {
+  fn directive_definition<'inp, Src, Ctx>(inp, mark: EventMark, konst: Constness) {
     node_at(
       mark,
       K::DirectiveDefinition.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
         expect::<Src, Ctx>(inp, Kind::At)?;
-        definition_name::<Src, Ctx>(inp)?;
+        definition_name::<Src, Ctx>(inp, konst.type_at())?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LParen) {
-          arguments_definition::<Src, Ctx>(inp)?;
+          arguments_definition::<Src, Ctx>(inp, konst)?;
         }
         // The definition's own directives, after its arguments and before `repeatable` (draft
         // §3.13). No `@` opens no node.
-        directives::<Src, Ctx>(inp, Constness::Const)?;
+        directives::<Src, Ctx>(inp, konst)?;
         // `repeatable` is a contextual keyword and a flag, not a node: the token is in the tree and
         // the kind space has no image for it.
         if peek_as::<Src, Ctx, Keyword>(inp)? == Some(Keyword::Repeatable) {
@@ -700,7 +718,7 @@ lossless_production! {
           Some(Kind::Pipe | Kind::Identifier) => directive_locations::<Src, Ctx>(inp)?,
           _ => recover::report_unexpected::<Src, Ctx>(inp, NAME_HEADS)?,
         }
-        optional_where_clause::<Src, Ctx>(inp)
+        optional_where_clause::<Src, Ctx>(inp, konst.type_at())
       },
     )
     .parse_input(inp)
@@ -711,15 +729,15 @@ lossless_production! {
   /// The block is **not** optional — `schema_after_keyword` calls `root_operation_types_definition`
   /// directly rather than through a `try_` wrapper — so an absent one is reported. There is no
   /// `where` clause on a schema.
-  fn schema_definition<'inp, Src, Ctx>(inp, mark: EventMark) {
+  fn schema_definition<'inp, Src, Ctx>(inp, mark: EventMark, konst: Constness) {
     node_at(
       mark,
       K::SchemaDefinition.raw(),
       |inp: &mut GraphqlxLosslessInput<'inp, '_, Src, Ctx>| {
         expect::<Src, Ctx>(inp, Kind::Identifier)?;
-        directives::<Src, Ctx>(inp, Constness::Const)?;
+        directives::<Src, Ctx>(inp, konst)?;
         if peek_kind::<Src, Ctx>(inp)? == Some(Kind::LBrace) {
-          root_operation_types_definition::<Src, Ctx>(inp)
+          root_operation_types_definition::<Src, Ctx>(inp, konst)
         } else {
           recover::report_unexpected::<Src, Ctx>(inp, ROOT_OPERATION_TYPES_HEADS)
         }
@@ -734,7 +752,7 @@ lossless_production! {
   // minted; this description-reading wrapper is reached only from a driver — see
   // `lossless_drivers!` on why the allow is narrowed to the gate rather than written bare.
   #[cfg_attr(not(feature = "test-support"), allow(dead_code))]
-  fn type_system_definition<'inp, Src, Ctx>(inp) {
+  fn type_system_definition<'inp, Src, Ctx>(inp, konst: Constness) {
     // The head peek first, so the leading trivia it crosses is committed before the mark is minted
     // and therefore lands outside whatever the mark eventually wraps.
     let head = peek_kind::<Src, Ctx>(inp)?;
@@ -742,7 +760,7 @@ lossless_production! {
     if starts_description(head) {
       description::<Src, Ctx>(inp)?;
     }
-    type_system_definition_at::<Src, Ctx>(inp, mark)
+    type_system_definition_at::<Src, Ctx>(inp, mark, konst)
   }
 
   /// [`type_system_definition`]'s keyword dispatch, with the description already committed and its
@@ -751,16 +769,21 @@ lossless_production! {
   /// The split is what lets `document.rs`'s three entry dispatchers share this: each of them has
   /// already read the description — it is the thing divergence 22 makes them branch on — and each
   /// minted its own mark before it.
-  fn type_system_definition_at<'inp, Src, Ctx>(inp, mark: EventMark) {
+  ///
+  /// `konst` is the grammar every definition here hands down to its constant positions and its
+  /// types: [`Schema`](Constness::Schema) wherever a definition stands in its own document, and
+  /// [`Const`](Constness::Const) in a module an executable document refuses, which reads as that
+  /// document's own constant positions read. See `document.rs`'s `mod_definition`.
+  fn type_system_definition_at<'inp, Src, Ctx>(inp, mark: EventMark, konst: Constness) {
     match peek_as::<Src, Ctx, Keyword>(inp)? {
-      Some(Keyword::Scalar) => scalar_type_definition::<Src, Ctx>(inp, mark),
-      Some(Keyword::Type) => object_type_definition::<Src, Ctx>(inp, mark),
-      Some(Keyword::Interface) => interface_type_definition::<Src, Ctx>(inp, mark),
-      Some(Keyword::Union) => union_type_definition::<Src, Ctx>(inp, mark),
-      Some(Keyword::Enum) => enum_type_definition::<Src, Ctx>(inp, mark),
-      Some(Keyword::Input) => input_object_type_definition::<Src, Ctx>(inp, mark),
-      Some(Keyword::Schema) => schema_definition::<Src, Ctx>(inp, mark),
-      Some(Keyword::Directive) => directive_definition::<Src, Ctx>(inp, mark),
+      Some(Keyword::Scalar) => scalar_type_definition::<Src, Ctx>(inp, mark, konst),
+      Some(Keyword::Type) => object_type_definition::<Src, Ctx>(inp, mark, konst),
+      Some(Keyword::Interface) => interface_type_definition::<Src, Ctx>(inp, mark, konst),
+      Some(Keyword::Union) => union_type_definition::<Src, Ctx>(inp, mark, konst),
+      Some(Keyword::Enum) => enum_type_definition::<Src, Ctx>(inp, mark, konst),
+      Some(Keyword::Input) => input_object_type_definition::<Src, Ctx>(inp, mark, konst),
+      Some(Keyword::Schema) => schema_definition::<Src, Ctx>(inp, mark, konst),
+      Some(Keyword::Directive) => directive_definition::<Src, Ctx>(inp, mark, konst),
       // A name that is none of the eight, or no name at all. Reported and skipped — `unexpected`
       // consumes at least one token whenever input remains, which is the document loops' only
       // termination argument. The mark is left unspent, and an unspent mark materializes into
@@ -777,44 +800,48 @@ lossless_drivers! {
   /// for `tests/lossless_x_definition.rs`.
   mod test_support;
 
-  /// `super::input_value_definition` over `src`.
-  fn parse_input_value_definition => input_value_definition;
+  /// `super::input_value_definition` over `src`, as an input object's field, whose list closes
+  /// with `}`.
+  fn parse_input_value_definition => input_value_definition [
+    Constness::Schema,
+    crate::graphqlx::lossless::value::Member::InBraces,
+  ];
 
   /// `super::arguments_definition` over `src`.
-  fn parse_arguments_definition => arguments_definition;
+  fn parse_arguments_definition => arguments_definition [Constness::Schema];
 
   /// `super::field_definition` over `src`.
-  fn parse_field_definition => field_definition;
+  fn parse_field_definition => field_definition [Constness::Schema];
 
   /// `super::fields_definition` over `src`.
-  fn parse_fields_definition => fields_definition;
+  fn parse_fields_definition => fields_definition [Constness::Schema];
 
   /// `super::input_fields_definition` over `src` — the block whose members are input values.
-  fn parse_input_fields_definition => input_fields_definition;
+  fn parse_input_fields_definition => input_fields_definition [Constness::Schema];
 
   /// `super::implements_interfaces` over `src`.
-  fn parse_implements_interfaces => implements_interfaces;
+  fn parse_implements_interfaces => implements_interfaces [Constness::Schema];
 
   /// `super::union_member_types` over `src`.
-  fn parse_union_member_types => union_member_types;
+  fn parse_union_member_types => union_member_types [Constness::Schema];
 
   /// `super::directive_locations` over `src` — the only door to `directive_location`.
   fn parse_directive_locations => directive_locations;
 
   /// `super::enum_values_definition` over `src` — the only door to `enum_value_definition`.
-  fn parse_enum_values_definition => enum_values_definition;
+  fn parse_enum_values_definition => enum_values_definition [Constness::Schema];
 
   /// `super::root_operation_types_definition` over `src` — the only door to
   /// `root_operation_type_definition`.
-  fn parse_root_operation_types_definition => root_operation_types_definition;
+  fn parse_root_operation_types_definition => root_operation_types_definition [Constness::Schema];
 
   /// `super::schema_definition` over `src`.
-  fn parse_schema_definition => schema_definition (mark);
+  fn parse_schema_definition => schema_definition (mark) [Constness::Schema];
 
   /// `super::directive_definition` over `src`.
-  fn parse_directive_definition => directive_definition (mark);
+  fn parse_directive_definition => directive_definition (mark) [Constness::Schema];
 
   /// `super::type_system_definition` over `src` — the entry every SDL definition position uses,
   /// and the only door to the six `*_type_definition` productions.
-  fn parse_type_system_definition => type_system_definition;
+  fn parse_type_system_definition => type_system_definition [Constness::Schema];
 }

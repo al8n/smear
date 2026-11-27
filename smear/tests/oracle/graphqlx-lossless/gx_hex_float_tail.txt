@@ -1,0 +1,7 @@
+ERR LexerErrors([LexerError { span: SimpleSpan { start: 0, end: 6 }, data: HexFloat(UnexpectedSuffix(Char(PositionedChar { char: 'g', position: 5 }))) }])
+OK  6..7  Newline
+ERR LexerErrors([LexerError { span: SimpleSpan { start: 7, end: 15 }, data: HexFloat(UnexpectedSuffix(Char(PositionedChar { char: 'Z', position: 14 }))) }])
+OK  15..16  Newline
+ERR LexerErrors([LexerError { span: SimpleSpan { start: 16, end: 23 }, data: HexFloat(UnexpectedSuffix(Range(SimpleSpan { start: 21, end: 23 }))) }])
+OK  23..24  Newline
+ERR LexerErrors([LexerError { span: SimpleSpan { start: 24, end: 28 }, data: HexFloat(UnexpectedLexeme(UnexpectedLexeme { lexeme: Char(PositionedChar { char: 'g', position: 28 }), hint: Exponent(SignOrDigit) })) }])

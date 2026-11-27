@@ -76,7 +76,7 @@ pub mod lossless;
 // The predicate is the substrate's own `MAX_DOOR_BRACKETS`, which is
 // `MAX_GREEN_DEPTH / GREEN_LEVELS_PER_BRACKET`; over integers that is the same set of accepted
 // values as `HARD_MAX * GREEN_LEVELS_PER_BRACKET <= MAX_GREEN_DEPTH`, so moving the assertion did
-// not widen it. The plant that proves it is live is a `HARD_MAX` of 342: that value passes
+// not widen it. The plant that proves it is live is a `HARD_MAX` of 257: that value passes
 // `HARD_MAX`'s OWN 1.9x margin assertion, so every gate that predates this invariant admits it,
 // and it is exactly the edit that reopens the projection window.
 #[cfg(all(feature = "rowan_0_17", feature = "std"))]

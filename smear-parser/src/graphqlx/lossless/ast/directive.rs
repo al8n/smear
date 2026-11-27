@@ -38,8 +38,8 @@ use crate::{
     lossless::ast::{
       ty::TypePath,
       value::{
-        BooleanValue, EnumValue, FloatValue, IntValue, ListValue, MapValue, NullValue, ObjectValue,
-        SetValue, StringValue, VariableValue,
+        BooleanValue, CharValue, ConstBlock, EnumValue, FloatValue, IntValue, ListValue, MapValue,
+        NullValue, ObjectValue, SetValue, StringValue, TypedObjectValue, TypedValue, VariableValue,
       },
     },
   },
@@ -77,6 +77,14 @@ ast_node!(
     map_value: opt MapValue,
     /// The argument's value, when it is an object.
     object_value: opt ObjectValue,
+    /// The argument's value, when it is a `char` literal.
+    char_value: opt CharValue,
+    /// The argument's value, when it is a typed object.
+    typed_object_value: opt TypedObjectValue,
+    /// The argument's value, when it is a typed value.
+    typed_value: opt TypedValue,
+    /// The argument's value, when it is a block.
+    const_block: opt ConstBlock,
   }
 );
 

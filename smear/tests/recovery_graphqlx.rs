@@ -48,7 +48,8 @@ mod lossless {
       kinds::SyntaxKind as K,
       lossless::{
         GraphqlxLosslessErrorValue, Parse, SyntaxNode, parse_document, parse_document_with_limits,
-        parse_type_system_document, parse_type_system_document_with_limits,
+        parse_executable_document, parse_type_system_document,
+        parse_type_system_document_with_limits,
       },
     },
   };
@@ -870,8 +871,8 @@ mod lossless {
     for (what, text, own) in [
       (
         "angles in an argument list",
-        "mod m { scalar A @d(<<< } mod n { >>>) scalar B }",
-        "mod m { scalar A @d(<<< }",
+        "mod m { scalar A @d(< < < } mod n { >>>) scalar B }",
+        "mod m { scalar A @d(< < < }",
       ),
       (
         "brackets behind a parenthesis",
@@ -880,13 +881,13 @@ mod lossless {
       ),
       (
         "a definition's generic list",
-        "mod m { type T<<< } mod n { >>> scalar B }",
-        "mod m { type T<<< }",
+        "mod m { type T< < < } mod n { >>> scalar B }",
+        "mod m { type T< < < }",
       ),
       (
         "a type's generic list",
-        "mod m { type T { f: Box<<< } } mod n { >>> scalar B }",
-        "mod m { type T { f: Box<<< } }",
+        "mod m { type T { f: Box< < < } } mod n { >>> scalar B }",
+        "mod m { type T { f: Box< < < } }",
       ),
       (
         "a field's argument list",
@@ -1464,6 +1465,1801 @@ mod lossless {
         .unwrap_or_else(|why| panic!("{text} at the {root} root: {why}"));
       assert_eq!(held.read, 1, "at the {root} root");
     }
+  }
+
+  // ── An expression outside a block ──────────────────────────────────────────────────────────
+
+  /// A `(` where the run reads an operand is one value, to its own `)`: the map entry keeps its
+  /// `=>`, and the field after the map stays a field.
+  #[test]
+  fn a_parenthesis_a_run_reads_as_an_operand_leaves_the_arrow_to_its_entry() {
+    let answer = read("input I { a: T = map!{ 1 + (2) => 3 } b: Int }");
+    assert_eq!(answer.reports, 1, "one report, at the `+`");
+    let entry = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::MapEntry)
+      .expect("the map's entry");
+    assert!(
+      entry
+        .children_with_tokens()
+        .any(|element| element.kind() == K::FatArrow),
+      "the entry keeps its `=>`"
+    );
+    let members: Vec<String> = answer
+      .tree
+      .descendants()
+      .filter(|node: &SyntaxNode| node.kind() == K::InputValueDefinition)
+      .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
+      .collect();
+    assert_eq!(members.len(), 2, "{members:?}");
+    assert_eq!(members[1], "b: Int", "`b` stays a field of `I`");
+  }
+
+  /// A schema map's key that begins with `(` is read to its own `)`, so the entry keeps its `=>`
+  /// and its value, and the field after the map stays a field.
+  #[test]
+  fn a_key_that_begins_with_a_parenthesis_leaves_the_arrow_to_its_entry() {
+    let answer = read("input I { a: T = map!{ (2) => 3 } b: Int }");
+    assert_eq!(answer.reports, 1, "one report, at the `(`");
+    let entry = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::MapEntry)
+      .expect("the map's entry");
+    assert!(
+      entry
+        .children_with_tokens()
+        .any(|element| element.kind() == K::FatArrow),
+      "the entry keeps its `=>`"
+    );
+    assert_eq!(
+      kinds(&entry).last(),
+      Some(&K::IntValue),
+      "the entry keeps its value"
+    );
+    let members = answer
+      .tree
+      .descendants()
+      .filter(|node: &SyntaxNode| node.kind() == K::InputValueDefinition)
+      .count();
+    assert_eq!(members, 2, "`b` stays a field of `I`");
+  }
+
+  /// A skip inside a block stops at the block's `}`, with its `(` still open, so nothing after the
+  /// `}` is lexed in the block's mode and then again outside it: under a produce-event budget of
+  /// one event for each lexeme, and one more, the text reads to its end. The `(` is read by its
+  /// own production, which leaves the block's `}` and reports its `)` missing in front of it.
+  #[test]
+  fn a_skip_inside_a_block_reads_nothing_past_the_blocks_brace() {
+    let text = "input I { a: T = [const { 1 (2 } -2] }";
+    let limits = LosslessLimits::default().with_max_produce_events(lexemes(text) + 1);
+    let answer = read_with(&Lossless::with_limits(limits), text);
+    assert_eq!(
+      answer.reports, 2,
+      "two reports, at the `(` and the `)` missing at the `}}`"
+    );
+    let list = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::ListValue)
+      .expect("the list");
+    assert_eq!(kinds(&list), [K::ConstBlock, K::IntValue]);
+    let last = list.children().last().expect("the list's second element");
+    assert_eq!(
+      last.text().to_string(),
+      "-2",
+      "lexed once, outside the block"
+    );
+  }
+
+  /// A missing operand inside a block leaves the delimiter its production reads next: a map entry
+  /// its `=>`, and the member loop its `,`. So the entries after it are read, and the definition
+  /// goes on.
+  #[test]
+  fn a_missing_operand_in_a_block_leaves_the_delimiter_its_production_owns() {
+    for text in [
+      "input I { a: T = const { map!{ => 1, 2 => 3 } } b: Int }",
+      "input I { a: T = const { map!{ 1 => , 2 => 3 } } b: Int }",
+    ] {
+      let answer = read(text);
+      assert_eq!(
+        answer.reports, 1,
+        "{text}: one report, at the missing operand"
+      );
+      let entries = answer
+        .tree
+        .descendants()
+        .filter(|node: &SyntaxNode| node.kind() == K::MapEntry)
+        .count();
+      assert_eq!(entries, 2, "{text}");
+      let members = answer
+        .tree
+        .descendants()
+        .filter(|node: &SyntaxNode| node.kind() == K::InputValueDefinition)
+        .count();
+      assert_eq!(members, 2, "{text}: `b` stays a field of `I`");
+    }
+  }
+
+  /// A skip inside a block stops in front of a `=>`, which only a map entry reads: junk after an
+  /// entry's key leaves the entry its arrow, and the entries after it are read.
+  #[test]
+  fn a_skip_inside_a_block_leaves_a_map_entry_its_arrow() {
+    let text = "input I { a: T = const { map!{ 1 + => 3, 4 => 5 } } b: Int }";
+    let answer = read(text);
+    assert_eq!(answer.reports, 1, "one report, at the `+`");
+    let entries = answer
+      .tree
+      .descendants()
+      .filter(|node: &SyntaxNode| node.kind() == K::MapEntry)
+      .count();
+    assert_eq!(entries, 2);
+    let members = answer
+      .tree
+      .descendants()
+      .filter(|node: &SyntaxNode| node.kind() == K::InputValueDefinition)
+      .count();
+    assert_eq!(members, 2, "`b` stays a field of `I`");
+  }
+
+  // ── Recovery inside a block, by what each production owns ─────────────────────────────────
+
+  /// The aggregate a member stands in, the kind of the member's node, and how it is written: the
+  /// member a hole stands in front of, which recovery at the hole must leave to its aggregate.
+  type Later = Option<(K, K, &'static str)>;
+
+  /// The audit's 34 holes inside a block, each written `@`, with the member after the hole where
+  /// one stands. Each stands in `input I { a : T = … }`, see [`at_hole`].
+  const HOLES: &[(&str, Later)] = &[
+    ("const { 1 @ }", None),
+    ("const { @ 1 }", None),
+    ("const { ( 1 @ ) }", None),
+    ("const { ( @ 1 ) }", None),
+    (
+      "const { [ 1 @ , 2 ] }",
+      Some((K::ListValue, K::Expression, "2")),
+    ),
+    ("const { [ 1 , @ 2 ] }", None),
+    (
+      "const { set!{ 1 @ , 2 } }",
+      Some((K::SetValue, K::Expression, "2")),
+    ),
+    ("const { set @ {1} }", None),
+    (
+      "const { map!{ 1 @ => 2 , 3 => 4 } }",
+      Some((K::MapValue, K::MapEntry, "3 => 4")),
+    ),
+    (
+      "const { map!{ @ 1 => 2 , 3 => 4 } }",
+      Some((K::MapValue, K::MapEntry, "3 => 4")),
+    ),
+    (
+      "const { map!{ 1 => 2 @ , 3 => 4 } }",
+      Some((K::MapValue, K::MapEntry, "3 => 4")),
+    ),
+    (
+      "const { map!{ 1 => @ 2 , 3 => 4 } }",
+      Some((K::MapValue, K::MapEntry, "3 => 4")),
+    ),
+    (
+      "const { { a : 1 @ , c : 2 } }",
+      Some((K::ObjectValue, K::ObjectField, "c : 2")),
+    ),
+    (
+      "const { { a @ : 1 , c : 2 } }",
+      Some((K::ObjectValue, K::ObjectField, "c : 2")),
+    ),
+    (
+      "const { { a : @ 1 , c : 2 } }",
+      Some((K::ObjectValue, K::ObjectField, "c : 2")),
+    ),
+    ("const { { @ a : 1 } }", None),
+    ("const { Url ( 1 @ ) }", None),
+    (
+      "const { P { x : 1 @ , y : 2 } }",
+      Some((K::TypedObjectValue, K::ObjectField, "y : 2")),
+    ),
+    ("const { Box < i32 @ > ( 1 ) }", None),
+    ("const { Box < @ i32 > ( 1 ) }", None),
+    ("const { Box < [ i32 @ ] > ( 1 ) }", None),
+    ("const { Box < i32 > @ ( 1 ) }", None),
+    ("const { const { 1 @ } }", None),
+    ("const { a @ :: c }", None),
+    ("const { a :: @ c }", None),
+    (
+      "const { map!{ 1 => [ 2 @ ] , 3 => 4 } }",
+      Some((K::MapValue, K::MapEntry, "3 => 4")),
+    ),
+    (
+      "const { map!{ 1 => ( 2 @ ) , 3 => 4 } }",
+      Some((K::MapValue, K::MapEntry, "3 => 4")),
+    ),
+    (
+      "const { map!{ 1 => { a : 2 @ } , 3 => 4 } }",
+      Some((K::MapValue, K::MapEntry, "3 => 4")),
+    ),
+    (
+      "const { map!{ ( 1 @ ) => 2 , 3 => 4 } }",
+      Some((K::MapValue, K::MapEntry, "3 => 4")),
+    ),
+    (
+      "const { map!{ [ 1 @ ] => 2 , 3 => 4 } }",
+      Some((K::MapValue, K::MapEntry, "3 => 4")),
+    ),
+    (
+      "const { map!{ Box < i32 @ > ( 1 ) => 2 , 3 => 4 } }",
+      Some((K::MapValue, K::MapEntry, "3 => 4")),
+    ),
+    (
+      "const { [ ( 1 @ ) , 2 ] }",
+      Some((K::ListValue, K::Expression, "2")),
+    ),
+    (
+      "const { [ { a : 1 @ } , 2 ] }",
+      Some((K::ListValue, K::Expression, "2")),
+    ),
+    ("const { ( [ 1 @ ] ) }", None),
+  ];
+
+  /// The audit's eighteen tokens a hole is filled with, a `{ }` one of them, so the junk holds a
+  /// `}` only behind its `{`.
+  const JUNK: &[&str] = &[
+    "1", "x", ",", "=>", "(", ")", "[", "]", "{ }", "{", ":", "+", "<", ">", "::", "!", "$", "~",
+  ];
+
+  /// `hole` filled with `junk`, an empty one taking the hole and its space away, as the default of
+  /// a field `zz` follows, and a scalar after the input.
+  ///
+  /// A `,` stands between the block and `zz`: a comma is a separator only to a lexer in a block's
+  /// mode, so a lexer still in the mode after the block's `}` shows as a separator outside it.
+  fn at_hole(hole: &str, junk: &str) -> String {
+    let value = if junk.is_empty() {
+      hole.replacen("@ ", "", 1)
+    } else {
+      hole.replacen('@', junk, 1)
+    };
+    format!("input I {{ a : T = {value} , zz : Int }}\nscalar S")
+  }
+
+  /// Whether `junk` at `hole` closes a bracket the hole stands inside, which it did not open.
+  fn closes_what_it_did_not_open(hole: &str, junk: &str) -> bool {
+    let opener = match junk {
+      ")" => "(",
+      "]" => "[",
+      ">" => "<",
+      _ => return false,
+    };
+    let before = &hole[..hole.find('@').expect("a hole")];
+    let mut open: Vec<&str> = Vec::new();
+    for token in before.split(' ') {
+      match token {
+        "(" | "[" | "<" | "{" | "set!{" | "map!{" => open.push(token),
+        ")" | "]" | ">" | "}" => {
+          open.pop();
+        }
+        _ => {}
+      }
+    }
+    open.contains(&opener)
+  }
+
+  /// The byte of the `}` that balances the `{` at `open`, counting braces alone, if one does.
+  fn balancing_brace(text: &str, open: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (at, byte) in text.bytes().enumerate().skip(open) {
+      match byte {
+        b'{' => depth += 1,
+        b'}' => {
+          depth -= 1;
+          if depth == 0 {
+            return Some(at);
+          }
+        }
+        _ => {}
+      }
+    }
+    None
+  }
+
+  /// The falsifier for recovery inside a block, reduced to runs of none or one token: the audit's
+  /// 34 holes, each filled from its alphabet of eighteen.
+  ///
+  /// 1. For every text, each block's node ends at the `}` its own braces give it, counting braces
+  ///    alone from its `{`, and the lexer is out of the block's mode after it: no separator stands
+  ///    outside a block.
+  /// 2. Where the junk's braces balance, which is every token of the alphabet but the lone `{`,
+  ///    `zz` is a field and `S` a scalar.
+  /// 3. At the eighteen holes in front of a later member, for junk that leaves no `[` or `{` open,
+  ///    closes nothing it did not open and holds no `<`, the later member is a node of its
+  ///    aggregate. An unclosed `(` is in the family.
+  #[test]
+  fn recovery_inside_a_block_keeps_the_boundary_and_the_later_member() {
+    let mut texts = 0usize;
+    let mut later = 0usize;
+    for (hole, member) in HOLES {
+      for junk in core::iter::once("").chain(JUNK.iter().copied()) {
+        let text = at_hole(hole, junk);
+        let answer = read(&text);
+        texts += 1;
+        // 1. The block's braces, and the mode after them.
+        for block in answer
+          .tree
+          .descendants()
+          .filter(|node: &SyntaxNode| node.kind() == K::ConstBlock)
+        {
+          let own = block
+            .descendants_with_tokens()
+            .filter_map(|element| element.into_token())
+            .find(|token| token.kind() == K::LBrace)
+            .unwrap_or_else(|| panic!("{text}: a block with no `{{`"));
+          let closer = balancing_brace(&text, usize::from(own.text_range().start()))
+            .unwrap_or_else(|| panic!("{text}: no brace balances the block's"));
+          assert_eq!(
+            usize::from(block.text_range().end()),
+            closer + 1,
+            "{text}: the block at {:?} ends at a `}}` its braces do not give it",
+            block.text_range()
+          );
+        }
+        for token in answer
+          .tree
+          .descendants_with_tokens()
+          .filter_map(|element| element.into_token())
+          .filter(|token| token.kind() == K::Separator)
+        {
+          assert!(
+            token
+              .parent_ancestors()
+              .any(|node: SyntaxNode| node.kind() == K::ConstBlock),
+            "{text}: a separator at {:?} outside every block",
+            token.text_range()
+          );
+        }
+        // 2. What follows the block, where the junk's braces balance.
+        if junk != "{" {
+          assert!(
+            answer.tree.descendants().any(|node: SyntaxNode| {
+              node.kind() == K::InputValueDefinition
+                && node.text().to_string().trim().starts_with("zz")
+            }),
+            "{text}: `zz` is no field"
+          );
+          assert_eq!(scalars(&top(&answer.tree)), ["scalar S"], "{text}");
+        }
+        // 3. The later member, for the family that can keep it.
+        if let Some((aggregate, kind, written)) = member
+          && !matches!(junk, "[" | "{" | "<")
+          && !closes_what_it_did_not_open(hole, junk)
+        {
+          later += 1;
+          assert!(
+            answer.tree.descendants().any(|node: SyntaxNode| {
+              node.kind() == *aggregate
+                && node.children().any(|child: SyntaxNode| {
+                  child.kind() == *kind && child.text().to_string().trim() == *written
+                })
+            }),
+            "{text}: `{written}` is no member of its {aggregate:?}"
+          );
+        }
+      }
+    }
+    assert_eq!(texts, 34 * 19);
+    assert!(later >= 18 * 12, "only {later} texts held the later member");
+  }
+
+  /// The defect rows the falsifier does not reach: junk of two tokens in a map's key, a
+  /// parenthesis inside a list that a map entry's value holds, a list in a map's key that never
+  /// closes, a group in the junk after a set's member, type arguments that meet an entry's `=>`, a
+  /// list type that meets the arguments' `>`, and a collection with no `{`. Each keeps the
+  /// definition and the field after it, and what the row names.
+  #[test]
+  fn each_defect_inside_a_block_keeps_the_definition_and_what_its_row_names() {
+    /// The entries of the first map in `tree`, each as it is written.
+    fn entries(tree: &SyntaxNode) -> Vec<String> {
+      tree
+        .descendants()
+        .find(|node: &SyntaxNode| node.kind() == K::MapValue)
+        .expect("a map")
+        .children()
+        .filter(|node: &SyntaxNode| node.kind() == K::MapEntry)
+        .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
+        .collect()
+    }
+    /// How many fields the input holds.
+    fn fields(tree: &SyntaxNode) -> usize {
+      tree
+        .descendants()
+        .filter(|node: &SyntaxNode| node.kind() == K::InputValueDefinition)
+        .count()
+    }
+    for (row, text, names) in [
+      // A2: `2` is junk after the key, `3` is read on to the `=>`, and the entry keeps both halves.
+      (
+        "A2",
+        "input I { a: T = const { map!{ 1 2 3 => 4 } } b: Int }",
+        &["1 2 3 => 4"][..],
+      ),
+      // A4: the parenthesis leaves the list its `]` and the map its `,`.
+      (
+        "A4",
+        "input I { a: T = const { map!{ 1 => [(2], 3 => 4 } } b: Int }",
+        &["1 => [(2]", "3 => 4"][..],
+      ),
+      // A5: the list leaves the entry its `=>`.
+      (
+        "A5",
+        "input I { a: T = const { map!{ [1 => 2, 3 => 4 } } b: Int }",
+        &["[1 => 2", "3 => 4"][..],
+      ),
+    ] {
+      let answer = read(text);
+      assert_eq!(
+        fields(&answer.tree),
+        2,
+        "{row} {text}: `b` stays a field of `I`"
+      );
+      assert_eq!(entries(&answer.tree), names, "{row} {text}");
+    }
+
+    // A9 and A10: the type arguments, and a type missing in them, leave the entry its `=>`. After
+    // a lone `<` a comma is trivia and no separator, until a `>` or a brace, so what follows the
+    // entry's value up to the next `=>` is the entry's and no entry of its own: the lexer's rule,
+    // and no row's.
+    let answer = read("input I { a: T = const { map!{ Box< => 1, 2 => 3 } } b: Int }");
+    assert_eq!(fields(&answer.tree), 2, "A9: `b` stays a field of `I`");
+    assert_eq!(
+      entries(&answer.tree).first().map(String::as_str),
+      Some("Box< => 1, 2"),
+      "A9: {:?}",
+      entries(&answer.tree)
+    );
+    let answer = read("input I { a: T = const { map!{ x < 1 => 2, 3 => 4 } } b: Int }");
+    assert_eq!(fields(&answer.tree), 2, "A10: `b` stays a field of `I`");
+    assert!(
+      entries(&answer.tree)
+        .first()
+        .is_some_and(|entry| entry.starts_with("x < 1 => 2")),
+      "A10: {:?}",
+      entries(&answer.tree)
+    );
+
+    // A11: the list type leaves the arguments their `>`, and the typed value its `(1)`.
+    let answer = read("input I { a: T = const { Box<[i32 >(1) } b: Int }");
+    assert_eq!(fields(&answer.tree), 2, "A11: `b` stays a field of `I`");
+    let typed = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::TypedValue)
+      .expect("A11: the typed value keeps its body");
+    assert_eq!(typed.text().to_string(), "Box<[i32 >(1)", "A11");
+
+    // A8: after a member and the junk behind it, a `{` is read as an object, so its `}` is its own
+    // and the set keeps the member after it.
+    let answer = read("input I { a: T = const { set!{ 1 ! {} , 2 } } b: Int }");
+    assert_eq!(fields(&answer.tree), 2, "A8: `b` stays a field of `I`");
+    let members: Vec<String> = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::SetValue)
+      .expect("A8: the set")
+      .children()
+      .filter(|node: &SyntaxNode| node.kind() == K::Expression)
+      .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
+      .collect();
+    assert_eq!(
+      members.last().map(String::as_str),
+      Some("2"),
+      "A8: {members:?}"
+    );
+
+    // A14: `set!` with no `{` is a form with no body, and the block goes on.
+    let answer = read("input I { a: T = const { set! 1 } b: Int }");
+    assert_eq!(fields(&answer.tree), 2, "A14: `b` stays a field of `I`");
+    let set = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::SetValue)
+      .expect("A14: the set");
+    assert_eq!(set.text().to_string().trim(), "set!", "A14");
+  }
+
+  /// Outside a block, a run after a value at a member position leaves the next member's name,
+  /// which a `:` follows (A25), and a map entry an expression stands in ends where its `=>` is
+  /// missing rather than unwinding the definition (A26), a key's group that never closes stopping
+  /// in front of the entry's `=>` (A27). What main keeps is kept.
+  #[test]
+  fn a_run_outside_a_block_keeps_the_next_member_and_entry() {
+    /// The direct children of kind `kind` of the first node of kind `parent`, each as written.
+    fn members(tree: &SyntaxNode, parent: K, kind: K) -> Vec<String> {
+      tree
+        .descendants()
+        .find(|node: &SyntaxNode| node.kind() == parent)
+        .unwrap_or_else(|| panic!("no {parent:?}"))
+        .children()
+        .filter(|node: &SyntaxNode| node.kind() == kind)
+        .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
+        .collect()
+    }
+    // A25, after a member's default, in an object, and in a directive's arguments.
+    let answer = read("input I { a: T = 1 + b: Int }");
+    assert_eq!(answer.reports, 1, "A25: one report, at the `+`");
+    assert_eq!(
+      members(
+        &answer.tree,
+        K::InputFieldsDefinition,
+        K::InputValueDefinition
+      ),
+      ["a: T = 1 +", "b: Int"]
+    );
+    let answer = read("input I { a: T = { a: 1 + b: 2 } zz: Int }");
+    assert_eq!(answer.reports, 1, "A25: one report, at the `+`");
+    assert_eq!(
+      members(&answer.tree, K::ObjectValue, K::ObjectField),
+      ["a: 1", "b: 2"]
+    );
+    let answer = read("input I { a: T @d(x: 1 + y: 2) zz: Int }");
+    assert_eq!(answer.reports, 1, "A25: one report, at the `+`");
+    assert_eq!(
+      members(&answer.tree, K::Arguments, K::Argument),
+      ["x: 1", "y: 2"]
+    );
+
+    // A26 and A27: the map keeps the entry after the junk, and `b` stays a field.
+    for (row, text) in [
+      ("A26", "input I { a: T = map!{ 1 => 2 () 3 => 4 } b: Int }"),
+      ("A27", "input I { a: T = map!{ (1 => 2 3 => 4 } b: Int }"),
+    ] {
+      let answer = read(text);
+      assert_eq!(answer.reports, 1, "{row} {text}: one report, at the `(`");
+      let entries = members(&answer.tree, K::MapValue, K::MapEntry);
+      assert_eq!(
+        entries.last().map(String::as_str),
+        Some("3 => 4"),
+        "{row} {text}: {entries:?}"
+      );
+      assert_eq!(
+        members(
+          &answer.tree,
+          K::InputFieldsDefinition,
+          K::InputValueDefinition
+        )
+        .len(),
+        2,
+        "{row} {text}: `b` stays a field of `I`"
+      );
+    }
+  }
+
+  /// A run in place of a member's value, an operator's token where the value would be, leaves the
+  /// next member's name to the member loop, as a run after the value does: after a member's `=`,
+  /// in an object and in a directive's arguments. The member after it is kept, as main keeps it.
+  #[test]
+  fn a_run_in_place_of_a_members_value_leaves_the_next_member() {
+    for (text, parent, kind, written) in [
+      (
+        "input I { a: T = + b: Int }",
+        K::InputFieldsDefinition,
+        K::InputValueDefinition,
+        "b: Int",
+      ),
+      (
+        "input I { a: T = { a: + b: 2 } zz: Int }",
+        K::ObjectValue,
+        K::ObjectField,
+        "b: 2",
+      ),
+      (
+        "input I { a: T @d(x: + y: 2) zz: Int }",
+        K::Arguments,
+        K::Argument,
+        "y: 2",
+      ),
+    ] {
+      let answer = read(text);
+      assert_eq!(answer.reports, 1, "{text}: one report, at the `+`");
+      let members: Vec<String> = answer
+        .tree
+        .descendants()
+        .find(|node: &SyntaxNode| node.kind() == parent)
+        .unwrap_or_else(|| panic!("{text}: no {parent:?}"))
+        .children()
+        .filter(|node: &SyntaxNode| node.kind() == kind)
+        .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
+        .collect();
+      assert_eq!(
+        members.last().map(String::as_str),
+        Some(written),
+        "{text}: {members:?}"
+      );
+    }
+  }
+
+  /// The direct children of kind `kind` of the first node of kind `parent` in `tree`, each as it
+  /// is written.
+  fn members_of(tree: &SyntaxNode, parent: K, kind: K) -> Vec<String> {
+    tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == parent)
+      .unwrap_or_else(|| panic!("no {parent:?}"))
+      .children()
+      .filter(|node: &SyntaxNode| node.kind() == kind)
+      .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
+      .collect()
+  }
+
+  /// A `(` a run reads as an operand is closed by its `)` through a brace it opened after it, and
+  /// the read goes on to that brace's own `}`: in `( { x: 1 ) }` the group ends with the brace. So
+  /// the definition's `}` stays the definition's and the member after the run is a member of `I`,
+  /// as main keeps it, whose skip counts every pair in one depth.
+  #[test]
+  fn a_group_closed_inside_its_brace_ends_with_the_brace() {
+    let text = "input I { a: T = 1 + ( { x: 1 ) } b: Int }";
+    let answer = read(text);
+    assert_eq!(answer.reports, 1, "one report, at the `+`");
+    assert_eq!(
+      members_of(
+        &answer.tree,
+        K::InputFieldsDefinition,
+        K::InputValueDefinition
+      ),
+      ["a: T = 1 + ( { x: 1 ) }", "b: Int"]
+    );
+    let fields = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::InputFieldsDefinition)
+      .expect("the input's fields");
+    assert_eq!(
+      fields.text().to_string(),
+      &text["input I ".len()..],
+      "`I` ends at its own `}}`"
+    );
+  }
+
+  /// Whether the first node of kind `kind` in `tree` runs to the end of `text` and ends on a `}`:
+  /// the definition whose members it holds closes at its own brace.
+  fn closes_at_the_end(tree: &SyntaxNode, kind: K, text: &str) -> bool {
+    closes_in_front_of(tree, kind, text, "")
+  }
+
+  /// Whether the first node of kind `kind` in `tree` ends on a `}` with nothing behind it in
+  /// `text` but `after`: the definition whose members it holds closes at its own brace, in front
+  /// of what `after` writes.
+  fn closes_in_front_of(tree: &SyntaxNode, kind: K, text: &str, after: &str) -> bool {
+    tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == kind)
+      .is_some_and(|node: SyntaxNode| {
+        let written = node.text().to_string();
+        written.ends_with('}')
+          && text
+            .strip_suffix(after)
+            .is_some_and(|text: &str| text.ends_with(written.as_str()))
+      })
+  }
+
+  /// The direct child nodes of `node`, each as its kind and as it is written.
+  fn child_nodes(node: &SyntaxNode) -> Vec<(K, String)> {
+    node
+      .children()
+      .map(|child: SyntaxNode| (child.kind(), child.text().to_string().trim().to_string()))
+      .collect()
+  }
+
+  /// The error diagnostics of `text` read as a type-system document, each as its span.
+  fn error_spans(text: &str) -> Vec<Range<usize>> {
+    parse_type_system_document(text)
+      .diagnostics()
+      .iter()
+      .filter(|diagnostic| diagnostic.severity() == Severity::Error)
+      .map(|diagnostic| diagnostic.span())
+      .collect()
+  }
+
+  /// The errors the lossless layer lends a sink for `text` under `layer`, in the order it lends
+  /// them, each as its code and its primary span.
+  fn lent(layer: &Lossless, text: &str) -> Vec<(String, Range<usize>)> {
+    let mut errors: Vec<GraphqlxLosslessErrorValue<&str>> = Vec::new();
+    let _ = layer
+      .type_system_document(text, &mut errors)
+      .expect("short enough for a tree");
+    errors
+      .iter()
+      .map(|error| {
+        let span = error.primary().span();
+        (
+          error.code().as_str().to_string(),
+          span.map_or(0, |span| span.start())..span.map_or(0, |span| span.end()),
+        )
+      })
+      .collect()
+  }
+
+  /// A member position of a run, `OPERAND` standing where its operand does: the node of the list
+  /// the run stands in, the kind of that list's members and how the member written after the run
+  /// reads, and the node of the definition's members and what the text writes after it, in front
+  /// of which the definition closes at its own brace.
+  type AtAMember = (&'static str, K, K, &'static str, K, &'static str);
+
+  /// The five member positions of a run: after a member's default and in its place, after a
+  /// default between a field's parentheses, after an object field's value, and after a directive
+  /// argument's. The lists of the third and the fifth close with `)`.
+  const AT_A_MEMBER: [AtAMember; 5] = [
+    (
+      "input I { a: T = 1 + OPERAND b: Int }",
+      K::InputFieldsDefinition,
+      K::InputValueDefinition,
+      "b: Int",
+      K::InputFieldsDefinition,
+      "",
+    ),
+    (
+      "input I { a: T = + OPERAND b: Int }",
+      K::InputFieldsDefinition,
+      K::InputValueDefinition,
+      "b: Int",
+      K::InputFieldsDefinition,
+      "",
+    ),
+    (
+      "type T { f(a: T = 1 + OPERAND b: Int): Int g: Int }",
+      K::ArgumentsDefinition,
+      K::InputValueDefinition,
+      "b: Int",
+      K::FieldsDefinition,
+      "",
+    ),
+    (
+      "input I { a: T = { a: 1 + OPERAND b: 2 } zz: Int }",
+      K::ObjectValue,
+      K::ObjectField,
+      "b: 2",
+      K::InputFieldsDefinition,
+      "",
+    ),
+    (
+      "input I { a: T @d(x: 1 + OPERAND y: 2) zz: Int }",
+      K::Arguments,
+      K::Argument,
+      "y: 2",
+      K::InputFieldsDefinition,
+      "",
+    ),
+  ];
+
+  /// Three member positions whose list closes with `)`: after a default between a field's
+  /// parentheses, after a directive argument's value inside a definition, and after one on a
+  /// definition's header, where the definition after it is kept as well.
+  const IN_PARENTHESES: [AtAMember; 3] = [
+    (
+      "type T { f(a: T = 1 + OPERAND zz: Int): Int g: Int }",
+      K::ArgumentsDefinition,
+      K::InputValueDefinition,
+      "zz: Int",
+      K::FieldsDefinition,
+      "",
+    ),
+    (
+      "input I { a: T @d(x: 1 + OPERAND y: 2) zz: Int }",
+      K::Arguments,
+      K::Argument,
+      "y: 2",
+      K::InputFieldsDefinition,
+      "",
+    ),
+    (
+      "type T @d(x: 1 + OPERAND y: 2) { f: Int } scalar S",
+      K::Arguments,
+      K::Argument,
+      "y: 2",
+      K::FieldsDefinition,
+      " scalar S",
+    ),
+  ];
+
+  /// `operand` at each of `positions`: the run's report is the only one, the list the run stands
+  /// in holds two members, the second of them the one written after the run, and the definition
+  /// closes at its own brace.
+  fn leaves_the_next_member_at(operand: &str, positions: &[AtAMember]) {
+    for &(template, list, kind, next, closes, after) in positions {
+      let text = template.replace("OPERAND", operand);
+      let answer = read(&text);
+      assert_eq!(answer.reports, 1, "{text}: the run's report alone");
+      let kept = members_of(&answer.tree, list, kind);
+      assert_eq!(kept.len(), 2, "{text}: {kept:?}");
+      assert_eq!(
+        kept.last().map(String::as_str),
+        Some(next),
+        "{text}: {kept:?}"
+      );
+      assert!(
+        closes_in_front_of(&answer.tree, closes, &text, after),
+        "{text}: the definition closes at its own brace"
+      );
+    }
+  }
+
+  /// `operand` at each of [`AT_A_MEMBER`]'s positions, as [`leaves_the_next_member_at`] reads it.
+  fn leaves_the_next_member(operand: &str) {
+    leaves_the_next_member_at(operand, &AT_A_MEMBER);
+  }
+
+  /// An operand a run reads at a member position leaves the member after the run to the member
+  /// loop, whatever the operand is, and the definition closes at its own brace: a path or a
+  /// variable whose name is missing or is the next member's; a failure inside a bracket; a list or
+  /// type arguments left open; an operator's `>` inside a list; a `)` that closes its `(` through a
+  /// brace; nested runs; and a block. At all five member positions: a list or type arguments left
+  /// open inside an argument list stop at the next argument's name, as they do everywhere else.
+  ///
+  /// A `(` left open, alone or as a typed value's, stops at the next member's name only where the
+  /// list closes with `}`. Where it closes with `)` the `(` reads on to the list's own `)`, as
+  /// main's skip reads a `(` (R21): `a_parenthesis_left_open_reads_on_to_the_lists_own_closer`.
+  #[test]
+  fn a_run_leaves_the_next_member() {
+    for operand in [
+      "~",
+      "~::",
+      "^::",
+      "..::..::",
+      "c::",
+      "$",
+      "{ x: ~ }",
+      "{ x 1 }",
+      "[~ c]",
+      "Url(~)",
+      "P{ x: ~ }",
+      "Box<~>(1)",
+      "map!{ ~ => 1 }",
+      "set!",
+      "Box<",
+      "[c",
+      "[1 + 2 >> 3",
+      "( { x: 1 ) }",
+      "{ x: 1 + { q: ~ } bad: ~ }",
+      "Box<[i32>(1)",
+      "c < d",
+      "const { 2 }",
+    ] {
+      leaves_the_next_member(operand);
+    }
+    let in_braces = [AT_A_MEMBER[0], AT_A_MEMBER[1], AT_A_MEMBER[3]];
+    for operand in ["(c", "Url(c"] {
+      leaves_the_next_member_at(operand, &in_braces);
+    }
+  }
+
+  /// No operator's token closes a bracket a run opened: a `>`, alone or half of a `>>`, closes only
+  /// type arguments that are the innermost thing open. So a list, a parenthesis or type arguments
+  /// left open still stop at the next member's name, a parenthesis in a list that closes with `)`
+  /// too, since a `>` that closes nothing is a closer astray (R21).
+  #[test]
+  fn no_operators_token_closes_a_bracket_of_a_run() {
+    for operand in ["[1 + 2 >> 3", "(1 >> 2", "[c > d", "Box<[i32 >> 2"] {
+      leaves_the_next_member(operand);
+    }
+  }
+
+  /// A brace a run's operand opens is read to the `}` that balances it, whatever stands between: a
+  /// closer of another kind is that brace's junk, and what was opened inside the brace closes with
+  /// it. So the member after the run stays a member, and a list's element after it stays an
+  /// element. The review's fourth is `a_group_closed_inside_its_brace_ends_with_the_brace`.
+  #[test]
+  fn a_run_reads_a_brace_to_its_own_closer() {
+    for operand in ["{ x: 1 ) y: 2 }", "P { x: [1 }", "set!{ ( }"] {
+      leaves_the_next_member(operand);
+    }
+    let text = "input I { a: T = [1 + { x: (1 } 5] zz: Int }";
+    let answer = read(text);
+    assert_eq!(answer.reports, 1, "{text}: the run's report alone");
+    let list = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::ListValue)
+      .expect("the list");
+    assert_eq!(
+      child_nodes(&list),
+      [
+        (K::IntValue, String::from("1")),
+        (K::Error, String::from("+")),
+        (K::Error, String::from("{ x: (1 }")),
+        (K::IntValue, String::from("5")),
+      ],
+      "{text}: `5` is an element"
+    );
+    assert!(
+      closes_at_the_end(&answer.tree, K::InputFieldsDefinition, text),
+      "{text}"
+    );
+  }
+
+  /// A value that follows an operand the run read whole ends the run, as one that follows a scalar
+  /// does, so in a list or a set it is the next element. The review's map, r6-2, is in
+  /// `the_runs_review_rounds_4_to_6_raised_keep_what_follows_them`.
+  #[test]
+  fn a_run_ends_at_a_value_behind_a_closed_operand() {
+    let text = "input I { a: T = [1 + { x: ~ } c 5] b: Int }";
+    let answer = read(text);
+    assert_eq!(answer.reports, 1, "{text}: the run's report alone");
+    let list = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::ListValue)
+      .expect("the list");
+    assert_eq!(
+      child_nodes(&list),
+      [
+        (K::IntValue, String::from("1")),
+        (K::Error, String::from("+")),
+        (K::Error, String::from("{ x: ~ }")),
+        (K::EnumValue, String::from("c")),
+        (K::IntValue, String::from("5")),
+      ],
+      "{text}"
+    );
+    assert!(
+      closes_at_the_end(&answer.tree, K::InputFieldsDefinition, text),
+      "{text}"
+    );
+
+    let text = "input I { a: T = set!{ 1 + [~] c } b: Int }";
+    let answer = read(text);
+    assert_eq!(answer.reports, 1, "{text}: the run's report alone");
+    let set = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::SetValue)
+      .expect("the set");
+    assert_eq!(
+      child_nodes(&set),
+      [
+        (K::IntValue, String::from("1")),
+        (K::Error, String::from("+")),
+        (K::Error, String::from("[~]")),
+        (K::EnumValue, String::from("c")),
+      ],
+      "{text}"
+    );
+    assert!(
+      closes_at_the_end(&answer.tree, K::InputFieldsDefinition, text),
+      "{text}"
+    );
+  }
+
+  /// A map entry's key that a run stands in leaves the entry its `=>` at every depth its group has
+  /// open outside a brace, so the entry keeps its value and the entries after it are read.
+  #[test]
+  fn a_key_leaves_its_arrow_at_every_depth() {
+    for (text, first) in [
+      (
+        "input I { a: T = map!{ 1 ((2 => 3 4 => 5 } b: Int }",
+        "1 ((2 => 3",
+      ),
+      (
+        "input I { a: T = map!{ ([2 => 3 4 => 5 } b: Int }",
+        "([2 => 3",
+      ),
+    ] {
+      let answer = read(text);
+      assert_eq!(answer.reports, 1, "{text}: the run's report alone");
+      assert_eq!(
+        members_of(&answer.tree, K::MapValue, K::MapEntry),
+        [first, "4 => 5"],
+        "{text}"
+      );
+      assert!(
+        closes_at_the_end(&answer.tree, K::InputFieldsDefinition, text),
+        "{text}"
+      );
+    }
+  }
+
+  /// A closer the run did not open ends it, inside a list or a parenthesis of its own too, and is
+  /// its owner's: an argument list and a typed value close on their own `)`. Where the list's `]`
+  /// meets a `(` the run left open, the list closes there, and its owner reads what follows it.
+  #[test]
+  fn a_run_stops_at_a_closer_it_did_not_open() {
+    for (text, owner, written) in [
+      (
+        "input I { a: T @d(x: 1 + [c) zz: Int }",
+        K::Arguments,
+        "(x: 1 + [c)",
+      ),
+      (
+        "input I { a: T = Url(1 + [c) zz: Int }",
+        K::TypedValue,
+        "Url(1 + [c)",
+      ),
+    ] {
+      let answer = read(text);
+      assert_eq!(answer.reports, 1, "{text}: the run's report alone");
+      let node = answer
+        .tree
+        .descendants()
+        .find(|node: &SyntaxNode| node.kind() == owner)
+        .unwrap_or_else(|| panic!("{text}: no {owner:?}"));
+      assert_eq!(
+        node.text().to_string(),
+        written,
+        "{text}: it ends at its own `)`"
+      );
+      let fields = members_of(
+        &answer.tree,
+        K::InputFieldsDefinition,
+        K::InputValueDefinition,
+      );
+      assert_eq!(fields.len(), 2, "{text}: {fields:?}");
+      assert_eq!(
+        fields.last().map(String::as_str),
+        Some("zz: Int"),
+        "{text}: {fields:?}"
+      );
+    }
+
+    let text = "input I { a: T = [1 + (2 3] 4] zz: Int }";
+    let answer = read(text);
+    let fields = members_of(
+      &answer.tree,
+      K::InputFieldsDefinition,
+      K::InputValueDefinition,
+    );
+    assert_eq!(
+      fields.last().map(String::as_str),
+      Some("zz: Int"),
+      "{text}: {fields:?}"
+    );
+    assert!(
+      closes_at_the_end(&answer.tree, K::InputFieldsDefinition, text),
+      "{text}"
+    );
+  }
+
+  /// A scalar and a complete path among a run's operands are the values they are, so the brief's
+  /// four pins keep their trees: a number is a number wherever it stands, the one a `-` begins
+  /// among them, and a rooted or a qualified path is an `EnumValue` between the operators'
+  /// `Error`s.
+  #[test]
+  fn a_scalar_and_a_complete_path_stay_the_values_they_are() {
+    for (text, parent, expected) in [
+      (
+        "input I { a: T = [1 << 2, 3] }",
+        K::ListValue,
+        &[K::IntValue, K::Error, K::IntValue, K::IntValue][..],
+      ),
+      (
+        "input I { a: T = [1, <<2>>, 3] }",
+        K::ListValue,
+        &[K::IntValue, K::Error, K::IntValue, K::Error, K::IntValue][..],
+      ),
+      (
+        "input I { a: u32 = 256 >> 4 }",
+        K::InputValueDefinition,
+        &[
+          K::DefinitionTypePath,
+          K::DefaultValue,
+          K::Error,
+          K::IntValue,
+        ][..],
+      ),
+      (
+        "input I { a: u32 = HOUR-1 }",
+        K::InputValueDefinition,
+        &[K::DefinitionTypePath, K::DefaultValue, K::IntValue][..],
+      ),
+      (
+        "input I { a: T = 2 * ~::HOUR + c::d b: Int }",
+        K::InputValueDefinition,
+        &[
+          K::DefinitionTypePath,
+          K::DefaultValue,
+          K::Error,
+          K::EnumValue,
+          K::Error,
+          K::EnumValue,
+        ][..],
+      ),
+    ] {
+      let answer = read(text);
+      assert_eq!(answer.reports, 1, "{text}: the run's report alone");
+      let node = answer
+        .tree
+        .descendants()
+        .find(|node: &SyntaxNode| node.kind() == parent)
+        .unwrap_or_else(|| panic!("{text}: no {parent:?}"));
+      assert_eq!(kinds(&node), expected, "{text}");
+    }
+  }
+
+  /// Every operand in brackets, and a variable, is one `Error` that holds no node, reported by no
+  /// one since the run reported once: a typed value, a typed object, a list, a set, a map, an
+  /// object, a typed value with type arguments and a variable, each in front of the next member.
+  #[test]
+  fn an_operand_in_brackets_is_one_error() {
+    for (expression, operand) in [
+      ("2 * Seconds(30)", "Seconds(30)"),
+      ("1 + P { x: 1 }", "P { x: 1 }"),
+      ("1 + [1 2]", "[1 2]"),
+      ("1 + set!{ 1 }", "set!{ 1 }"),
+      ("1 + map!{ 1 => 2 }", "map!{ 1 => 2 }"),
+      ("1 + { x: 1 }", "{ x: 1 }"),
+      ("1 + Box<i32>(1)", "Box<i32>(1)"),
+      ("1 + $v", "$v"),
+    ] {
+      let text = format!("input I {{ a: T = {expression} b: Int }}");
+      let answer = read(&text);
+      assert_eq!(answer.reports, 1, "{text}: the run's report alone");
+      let member = answer
+        .tree
+        .descendants()
+        .find(|node: &SyntaxNode| node.kind() == K::InputValueDefinition)
+        .expect("the first member");
+      let last = member.children().last().expect("the member's last node");
+      assert_eq!(last.kind(), K::Error, "{text}");
+      assert_eq!(last.text().to_string().trim(), operand, "{text}");
+      assert_eq!(
+        last.children().count(),
+        0,
+        "{text}: the `Error` holds no node"
+      );
+      assert!(
+        closes_at_the_end(&answer.tree, K::InputFieldsDefinition, &text),
+        "{text}"
+      );
+      assert_eq!(
+        members_of(
+          &answer.tree,
+          K::InputFieldsDefinition,
+          K::InputValueDefinition
+        )
+        .last()
+        .map(String::as_str),
+        Some("b: Int"),
+        "{text}"
+      );
+    }
+  }
+
+  /// A `const { … }` block among a run's operands is read as a block, in the block's mode: it is a
+  /// `ConstBlock`. So a number refused right in front of its `}` leaves that `}` to the block, as it
+  /// would not outside the mode, where the refusal takes the brace, and the member after the run is
+  /// kept.
+  #[test]
+  fn a_block_among_a_runs_operands_is_read_as_a_block() {
+    let text = "input I { a: T = 1 + const { 2 } b: Int }";
+    let answer = read(text);
+    assert_eq!(answer.reports, 1, "{text}: the run's report alone");
+    let member = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::InputValueDefinition)
+      .expect("the first member");
+    assert_eq!(
+      kinds(&member),
+      [
+        K::DefinitionTypePath,
+        K::DefaultValue,
+        K::Error,
+        K::ConstBlock
+      ],
+      "{text}"
+    );
+    assert!(
+      closes_at_the_end(&answer.tree, K::InputFieldsDefinition, text),
+      "{text}"
+    );
+
+    let text = "input I { a: T = 1 + const { 2.} b: Int }";
+    let answer = read(text);
+    assert!(
+      answer
+        .tree
+        .descendants()
+        .any(|node: SyntaxNode| node.kind() == K::ConstBlock),
+      "{text}: the block"
+    );
+    let fields = members_of(
+      &answer.tree,
+      K::InputFieldsDefinition,
+      K::InputValueDefinition,
+    );
+    assert_eq!(fields.len(), 2, "{text}: {fields:?}");
+    assert_eq!(
+      fields.last().map(String::as_str),
+      Some("b: Int"),
+      "{text}: {fields:?}"
+    );
+    assert!(
+      closes_at_the_end(&answer.tree, K::InputFieldsDefinition, text),
+      "{text}"
+    );
+  }
+
+  /// A run takes each token once and gives none back. It asks about no name inside a brace, so a
+  /// run whose operand nests braces sixteen deep reads to its end under a produce-event budget of
+  /// one event for each lexeme and one more, as r6-3's two deep does. Where it asks about the names
+  /// behind a `(` left open, a name and what follows it are read once more, so three such names read
+  /// to the end under three events for each lexeme.
+  #[test]
+  fn a_run_reads_no_token_twice() {
+    let mut nested = String::from("{ q: ~ }");
+    for _ in 0..15 {
+      nested = format!("{{ x: 1 + {nested} bad: ~ }}");
+    }
+    for text in [
+      String::from("input I { a: T = 1 + { x: 1 + { q: ~ } bad: ~ } b: Int }"),
+      format!("input I {{ a: T = 1 + {nested} b: Int }}"),
+    ] {
+      let limits = LosslessLimits::default().with_max_produce_events(lexemes(&text) + 1);
+      let answer = read_with(&Lossless::with_limits(limits), &text);
+      assert_eq!(answer.reports, 1, "{text}: the run's report alone");
+      assert!(
+        closes_at_the_end(&answer.tree, K::InputFieldsDefinition, &text),
+        "{text}: read to its end"
+      );
+    }
+
+    let text = "input I { a: T = 1 + (c d b: Int }";
+    let limits = LosslessLimits::default().with_max_produce_events(3 * lexemes(text));
+    let answer = read_with(&Lossless::with_limits(limits), text);
+    assert_eq!(answer.reports, 1, "{text}: the run's report alone");
+    assert_eq!(
+      members_of(
+        &answer.tree,
+        K::InputFieldsDefinition,
+        K::InputValueDefinition
+      ),
+      ["a: T = 1 + (c d", "b: Int"],
+      "{text}"
+    );
+  }
+
+  /// What a run spends on its brackets is linear in what it takes: a closer asks a count of its
+  /// kind and never searches what is open. So a hundred thousand pairs inside one brace, each of
+  /// which opens an entry, a `(` or the `<` behind a name, and closes nothing, read in linear time,
+  /// where a search of the open entries for each closer would take five thousand million steps.
+  #[test]
+  fn a_run_matches_its_brackets_in_linear_time() {
+    const PAIRS: usize = 100_000;
+    for pair in ["( ] ", "a < ] "] {
+      let text = format!(
+        "input I {{ a: T = 1 + {{ {} }} b: Int }}",
+        pair.repeat(PAIRS)
+      );
+      let answer = read(&text);
+      assert_eq!(answer.reports, 1, "{pair:?}: the run's report alone");
+      let fields = members_of(
+        &answer.tree,
+        K::InputFieldsDefinition,
+        K::InputValueDefinition,
+      );
+      assert_eq!(fields.len(), 2, "{pair:?}");
+      assert_eq!(
+        fields.last().map(String::as_str),
+        Some("b: Int"),
+        "{pair:?}"
+      );
+    }
+  }
+
+  /// The texts of the review's rounds 4 to 6 that hold a run, as each was written: r4-1, r4-2, r4-3
+  /// with its gap of 1 024 spaces, r5-1, r5-2, r6-1, r6-2 and r6-3.
+  fn reviewed_runs() -> Vec<String> {
+    let gap = " ".repeat(1024);
+    vec![
+      String::from("input I { a: T = + b: Int }"),
+      String::from("input I { a: T = 1 + ~ b: Int }"),
+      format!("input I {{ a: T = 1 + b{gap}: Int }}"),
+      String::from("input I { a: T = 1 + ~:: b: Int }"),
+      String::from("input I { a: T = 1 + { x: ~ } b: Int }"),
+      String::from("input I { a: T = 1 + [1 + 2 >> 3 b: Int }"),
+      String::from("input I { a: T = map!{ 1 => + { x: ~ } next => 4 } }"),
+      String::from("input I { a: T = 1 + { x: 1 + { q: ~ } bad: ~ } b: Int }"),
+    ]
+  }
+
+  /// What the review's rounds 4 to 6 raised outside a block keeps what main keeps: one report, at
+  /// the run's first token, and the member or the entry the text writes after the run. r4-2's `~`
+  /// is one `Error`, r6-1's run is two, its operator's and its list's, and the definition closes at
+  /// its own brace.
+  #[test]
+  fn the_runs_review_rounds_4_to_6_raised_keep_what_follows_them() {
+    let gap = " ".repeat(1024);
+    let texts = reviewed_runs();
+    let expected: [(K, K, [String; 2]); 8] = [
+      (
+        K::InputFieldsDefinition,
+        K::InputValueDefinition,
+        [String::from("a: T = +"), String::from("b: Int")],
+      ),
+      (
+        K::InputFieldsDefinition,
+        K::InputValueDefinition,
+        [String::from("a: T = 1 + ~"), String::from("b: Int")],
+      ),
+      (
+        K::InputFieldsDefinition,
+        K::InputValueDefinition,
+        [String::from("a: T = 1 +"), format!("b{gap}: Int")],
+      ),
+      (
+        K::InputFieldsDefinition,
+        K::InputValueDefinition,
+        [String::from("a: T = 1 + ~::"), String::from("b: Int")],
+      ),
+      (
+        K::InputFieldsDefinition,
+        K::InputValueDefinition,
+        [String::from("a: T = 1 + { x: ~ }"), String::from("b: Int")],
+      ),
+      (
+        K::InputFieldsDefinition,
+        K::InputValueDefinition,
+        [
+          String::from("a: T = 1 + [1 + 2 >> 3"),
+          String::from("b: Int"),
+        ],
+      ),
+      (
+        K::MapValue,
+        K::MapEntry,
+        [String::from("1 => + { x: ~ }"), String::from("next => 4")],
+      ),
+      (
+        K::InputFieldsDefinition,
+        K::InputValueDefinition,
+        [
+          String::from("a: T = 1 + { x: 1 + { q: ~ } bad: ~ }"),
+          String::from("b: Int"),
+        ],
+      ),
+    ];
+    for (text, (parent, kind, members)) in texts.iter().zip(expected) {
+      let at = text.find('+').expect("the run's first token");
+      let report = at..at + 1;
+      assert_eq!(error_spans(text), [report], "{text}: one report");
+      let answer = read(text);
+      assert_eq!(members_of(&answer.tree, parent, kind), members, "{text}");
+      assert!(
+        closes_at_the_end(&answer.tree, K::InputFieldsDefinition, text),
+        "{text}: the definition closes at its own brace"
+      );
+    }
+
+    let text = "input I { a: T = 1 + ~ b: Int }";
+    let member = read(text)
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::InputValueDefinition)
+      .expect("the first member");
+    assert_eq!(
+      child_nodes(&member)
+        .into_iter()
+        .filter(|(kind, _)| *kind == K::Error)
+        .map(|(_, written)| written)
+        .collect::<Vec<String>>(),
+      ["+", "~"],
+      "{text}: the `~` is one `Error`"
+    );
+
+    let text = "input I { a: T = 1 + [1 + 2 >> 3 b: Int }";
+    let member = read(text)
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::InputValueDefinition)
+      .expect("the first member");
+    assert_eq!(
+      child_nodes(&member)
+        .into_iter()
+        .filter(|(kind, _)| *kind == K::Error)
+        .map(|(_, written)| written)
+        .collect::<Vec<String>>(),
+      ["+", "[1 + 2 >> 3"],
+      "{text}"
+    );
+  }
+
+  /// What the review's rounds 4 to 6 raised that reaches no run reads as it did. An executable
+  /// document's type arguments and a variable's default at the end of input first err where the
+  /// input ends (r4-4, r4-5); a `set!` with no `{` inside a block, under a nesting ceiling the two
+  /// braces around it fill, is refused at the `{` it is missing and not at the depth (r5-3); and a
+  /// module the executable root refuses holds an enum value and an object, no typed form (r6-4).
+  #[test]
+  fn the_inputs_review_rounds_4_to_6_raised_that_hold_no_run_read_as_before() {
+    for text in ["query Q($v: Box<", "query Q($v: T = ~"] {
+      let errors: Vec<Range<usize>> = parse_executable_document(text)
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.severity() == Severity::Error)
+        .map(|diagnostic| diagnostic.span())
+        .collect();
+      assert_eq!(
+        errors.first(),
+        Some(&(text.len()..text.len())),
+        "{text}: {errors:?}"
+      );
+    }
+
+    let text = "input I { a: T = const { set! } b: Int }";
+    let errors = lent(
+      &Lossless::with_limits(LosslessLimits::with_max_nesting_depth(2)),
+      text,
+    );
+    assert_eq!(
+      errors.first(),
+      Some(&(String::from("smear::syntax::unexpected-token"), 30..31)),
+      "{text}: {errors:?}"
+    );
+    assert!(
+      !errors
+        .iter()
+        .any(|(code, _)| code == "smear::syntax::nesting-limit"),
+      "{text}: {errors:?}"
+    );
+
+    let text = "mod M { input I { a: T = [P { x: 1 }] } }";
+    let tree: SyntaxNode = parse_executable_document(text).syntax();
+    let list = tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::ListValue)
+      .expect("the list");
+    assert_eq!(kinds(&list), [K::EnumValue, K::ObjectValue], "{text}");
+  }
+
+  /// Each text of the review's rounds 4 to 6 that holds a run, cut at every token boundary behind
+  /// the run's first token: the first error lent is the run's report at that token, and each after
+  /// it is an owner's, an unclosed delimiter or the end of input where the owner needed more. What
+  /// the run leaves open is no report of its own.
+  #[test]
+  fn a_run_cut_anywhere_is_its_own_first_error() {
+    for text in reviewed_runs() {
+      let at = text.find('+').expect("the run's first token");
+      let boundaries: Vec<usize> = parse_document(&text)
+        .syntax()
+        .descendants_with_tokens()
+        .filter_map(|element| element.into_token())
+        .map(|token| usize::from(token.text_range().end()))
+        .filter(|end| *end > at)
+        .collect();
+      for cut in boundaries {
+        let prefix = &text[..cut];
+        let errors = lent(&Lossless::new(), prefix);
+        assert_eq!(
+          errors.first(),
+          Some(&(String::from("smear::syntax::unexpected-token"), at..at + 1)),
+          "{prefix}: {errors:?}"
+        );
+        assert!(
+          errors.iter().skip(1).all(|(code, _)| matches!(
+            code.as_str(),
+            "smear::syntax::unclosed-delimiter" | "smear::syntax::unexpected-end-of-input"
+          )),
+          "{prefix}: {errors:?}"
+        );
+      }
+    }
+  }
+
+  /// The rows where a run keeps less than main, one for each cause, as they stand, so that a change
+  /// to the reader is seen. A brace left open reads to the brace that balances it, the
+  /// definition's (A). A closer of another kind inside a `[` ends the run in front of it, and its
+  /// owner reads it as main does (B). A `]` inside a brace closes no `(`, so after the brace the `(`
+  /// takes the argument list's `)` (C). A `)` closes its `(` through a brace, the brace ends the
+  /// group, and the `)` after it closes the argument list (D).
+  #[test]
+  fn the_rows_below_main_keep_what_their_cause_leaves() {
+    let text = "input I { a: T = 1 + { x: 1 zz: Int } scalar S";
+    let document = top(&read(text).tree);
+    assert!(
+      !kinds(&document).contains(&K::InputObjectTypeDefinition),
+      "{text}: A, the definition is lost"
+    );
+    assert!(scalars(&document).is_empty(), "{text}: A, and the next one");
+
+    for (text, arguments) in [
+      (
+        "input I { a: T @d(x: 1 + [1 ) 2] y: 2) zz: Int } scalar S",
+        &["x: 1"][..],
+      ),
+      (
+        "input I { a: T @d(x: 1 + ( { ) ) ( ( } ) y: 2) zz: Int } scalar S",
+        &["x: 1"][..],
+      ),
+      (
+        "input I { a: T @d(x: 1 + ( { ] }) zz: Int } scalar S",
+        &["x: 1", "zz: Int"][..],
+      ),
+    ] {
+      let answer = read(text);
+      assert_eq!(
+        members_of(&answer.tree, K::Arguments, K::Argument),
+        arguments,
+        "{text}"
+      );
+      assert_eq!(scalars(&top(&answer.tree)), ["scalar S"], "{text}");
+    }
+    for text in [
+      "input I { a: T @d(x: 1 + [1 ) 2] y: 2) zz: Int } scalar S",
+      "input I { a: T @d(x: 1 + ( { ) ) ( ( } ) y: 2) zz: Int } scalar S",
+      "input I { a: T = [1 + [1 ) 2] 5] zz: Int } scalar S",
+    ] {
+      let fields = members_of(
+        &read(text).tree,
+        K::InputFieldsDefinition,
+        K::InputValueDefinition,
+      );
+      assert_eq!(
+        fields.last().map(String::as_str),
+        Some("zz: Int"),
+        "{text}: B and D keep the member after the owner"
+      );
+    }
+    let text = "input I { a: T @d(x: 1 + ( { ] }) zz: Int } scalar S";
+    assert_eq!(
+      members_of(
+        &read(text).tree,
+        K::InputFieldsDefinition,
+        K::InputValueDefinition
+      )
+      .len(),
+      1,
+      "{text}: C, `zz` is the list's"
+    );
+
+    let text = "input I { a: T = [1 + [1 ) 2] 5] zz: Int } scalar S";
+    let answer = read(text);
+    let list = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::ListValue)
+      .expect("the list");
+    assert_eq!(
+      child_nodes(&list),
+      [
+        (K::IntValue, String::from("1")),
+        (K::Error, String::from("+")),
+        (K::Error, String::from("[1")),
+        (K::Error, String::from(")")),
+        (K::IntValue, String::from("2")),
+      ],
+      "{text}: B, the list closes on its `]`"
+    );
+    assert_eq!(scalars(&top(&answer.tree)), ["scalar S"], "{text}");
+  }
+
+  /// A group the text closes, in a member list that closes with `)`, is read whole: a name inside
+  /// it is the group's, and its own `)` closes it, so the list closes at its own `)` and what
+  /// follows the list is its owner's (R21). Round 7's text: the directive keeps its one argument,
+  /// with the run's two `Error`s behind it, and the field after the header is a field of `T`. And
+  /// six such groups, one in a typed value, one inside another and two with a list around or
+  /// inside, each in front of the next member of three lists that close with `)`: the member is
+  /// the list's second, and the definition closes at its own brace. A typed value's group between
+  /// a field's parentheses keeps the argument definition after it and the field after the field.
+  #[test]
+  fn a_group_that_closes_is_read_whole_where_the_list_closes_with_a_parenthesis() {
+    let text = "type T @d(x: 1 + (a: 2)) { f: Int }";
+    let answer = read(text);
+    assert_eq!(answer.reports, 1, "{text}: the run's report alone");
+    let at = text.find('+').expect("the run's first token");
+    let report = at..at + 1;
+    assert_eq!(
+      error_spans(text),
+      [report],
+      "{text}: at the run's first token"
+    );
+    let arguments = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::Arguments)
+      .expect("the directive's arguments");
+    assert_eq!(
+      child_nodes(&arguments),
+      [
+        (K::Argument, String::from("x: 1")),
+        (K::Error, String::from("+")),
+        (K::Error, String::from("(a: 2)")),
+      ],
+      "{text}"
+    );
+    assert_eq!(
+      members_of(&answer.tree, K::FieldsDefinition, K::FieldDefinition),
+      ["f: Int"],
+      "{text}"
+    );
+    assert!(
+      closes_at_the_end(&answer.tree, K::FieldsDefinition, text),
+      "{text}: `T` ends at its own `}}`"
+    );
+
+    for operand in [
+      "(a: 2)",
+      "(1 a: 2)",
+      "Url(a: 2)",
+      "(a: (b: 2))",
+      "[(a: 2)]",
+      "([a: 2])",
+    ] {
+      leaves_the_next_member_at(operand, &IN_PARENTHESES);
+    }
+
+    let text = "type T { f(a: T = 1 + P(k: 2) zz: Int): Int g: Int }";
+    leaves_the_next_member_at("P(k: 2)", &IN_PARENTHESES[..1]);
+    assert_eq!(
+      members_of(&read(text).tree, K::FieldsDefinition, K::FieldDefinition)
+        .last()
+        .map(String::as_str),
+      Some("g: Int"),
+      "{text}: `g` is a field of `T`"
+    );
+  }
+
+  /// Where the list of members closes with `)`, a `(` the run's junk never closes, with no closer
+  /// astray in it, reads on to the list's own `)`, as main's skip reads a `(` (R21). Inside a
+  /// definition's braces main's skip finds no end there and falls back a token at a time, so main
+  /// keeps the next argument and the field behind the list. The run keeps neither: `y` is inside
+  /// the group, and `zz` is read as an argument of the list, which then meets the definition's `}`.
+  #[test]
+  fn a_parenthesis_left_open_reads_on_to_the_lists_own_closer() {
+    let text = "input I { a: T @d(x: 1 + ( [ [ y: 2) zz: Int }";
+    let answer = read(text);
+    assert_eq!(
+      answer.reports, 2,
+      "{text}: the run's report, and the list's `)` missing at the `}}`"
+    );
+    assert_eq!(
+      members_of(&answer.tree, K::Arguments, K::Argument),
+      ["x: 1", "zz: Int"],
+      "{text}"
+    );
+    assert_eq!(
+      members_of(
+        &answer.tree,
+        K::InputFieldsDefinition,
+        K::InputValueDefinition
+      )
+      .len(),
+      1,
+      "{text}: `zz` is no field of `I`"
+    );
+    assert!(
+      closes_at_the_end(&answer.tree, K::InputFieldsDefinition, text),
+      "{text}: `I` ends at its own `}}`"
+    );
+  }
+
+  /// Where the list of members closes with `}`, the next member's name still ends a `(` of the run,
+  /// closed or not: a `)` the run leaves behind is a stray to such a list and costs it no member,
+  /// and the stop is what keeps the member behind a `(` left open (R21). So a group the text closes
+  /// is cut at the name inside it: what follows is a field `a` with no type and a stray `)`, three
+  /// reports where main makes one, and `b` and `I` are kept.
+  #[test]
+  fn a_name_inside_a_parenthesis_still_ends_it_where_the_list_closes_with_a_brace() {
+    let text = "input I { a: T = 1 + (a: 2) b: Int }";
+    let answer = read(text);
+    assert_eq!(answer.reports, 3, "{text}");
+    let fields = answer
+      .tree
+      .descendants()
+      .find(|node: &SyntaxNode| node.kind() == K::InputFieldsDefinition)
+      .expect("the input's fields");
+    assert_eq!(
+      child_nodes(&fields),
+      [
+        (K::InputValueDefinition, String::from("a: T = 1 + (")),
+        (K::InputValueDefinition, String::from("a: 2")),
+        (K::Error, String::from(")")),
+        (K::InputValueDefinition, String::from("b: Int")),
+      ],
+      "{text}"
+    );
+    let typeless = fields.children().nth(1).expect("the field `a: 2`");
+    assert!(
+      !kinds(&typeless).contains(&K::DefinitionTypePath),
+      "{text}: the field `a` has no type"
+    );
+    assert!(
+      closes_at_the_end(&answer.tree, K::InputFieldsDefinition, text),
+      "{text}: `I` ends at its own `}}`"
+    );
+  }
+
+  /// A type's arguments that meet the end of input in an executable document ask for their first
+  /// type there, as main's do: the first error is the end of input, where that type should stand,
+  /// and not the `<` unclosed that a schema's type reports first. A variable's type, a type
+  /// condition, a directive's name, an operation's parameter and its `where` clause.
+  #[test]
+  fn an_executable_documents_type_arguments_at_the_end_are_read_as_mains() {
+    for text in [
+      "query Q($v: Box<",
+      "query Q { ... on Box<",
+      "query Q @d<",
+      "query Q<T = Box<",
+      "query Q<T> where T: Box<",
+    ] {
+      let errors: Vec<Range<usize>> = parse_executable_document(text)
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.severity() == Severity::Error)
+        .map(|diagnostic| diagnostic.span())
+        .collect();
+      assert_eq!(
+        errors.first(),
+        Some(&(text.len()..text.len())),
+        "{text}: {errors:?}"
+      );
+    }
+  }
+
+  /// A module the executable root refuses is still read, in the grammar that root's constant
+  /// positions read, as main read it: no typed form, no block and no run of an expression reaches
+  /// the recovery tree, at a member's default or in a directive's arguments, in a definition, a
+  /// field's arguments, an extension or a module inside the module; a list keeps an enum value
+  /// and an object apart; and a type's arguments at the end of input ask for their first type.
+  #[test]
+  fn a_module_the_executable_root_refuses_reads_as_the_executable_document_does() {
+    for text in [
+      "mod M { input I { a: T = [P { x: 1 }] } }",
+      "mod M { input I { a: T = Url(1) } }",
+      "mod M { input I { a: T = const { 1 } } }",
+      "mod M { type T { f(a: X = [P { x: 1 }]): Int } }",
+      "mod M { scalar S @d(x: Box<i32>(1)) }",
+      "mod M { extend scalar S @d(x: P { x: 1 }) }",
+      "mod M { mod N { input I { a: T = [P { x: 1 }] } } }",
+    ] {
+      let tree: SyntaxNode = parse_executable_document(text).syntax();
+      assert_eq!(
+        tree.text().to_string(),
+        text,
+        "{text}: the tree spells its text"
+      );
+      let schema_only: Vec<String> = tree
+        .descendants()
+        .filter(|node: &SyntaxNode| {
+          matches!(
+            node.kind(),
+            K::TypedObjectValue | K::TypedValue | K::ConstBlock | K::Expression
+          )
+        })
+        .map(|node: SyntaxNode| format!("{:?} {}", node.kind(), node.text()))
+        .collect();
+      assert!(schema_only.is_empty(), "{text}: {schema_only:?}");
+      if let Some(list) = tree
+        .descendants()
+        .find(|node: &SyntaxNode| node.kind() == K::ListValue)
+      {
+        let items: Vec<K> = list
+          .children()
+          .map(|node: SyntaxNode| node.kind())
+          .collect();
+        assert_eq!(items, [K::EnumValue, K::ObjectValue], "{text}");
+      }
+    }
+
+    // No run reads on after a default: the member ends at its value, as main's does.
+    let text = "mod M { input I { a: T = 1 + 2 b: Int } }";
+    let tree: SyntaxNode = parse_executable_document(text).syntax();
+    let fields: Vec<String> = tree
+      .descendants()
+      .filter(|node: &SyntaxNode| node.kind() == K::InputValueDefinition)
+      .map(|node: SyntaxNode| node.text().to_string().trim().to_string())
+      .collect();
+    assert_eq!(fields, ["a: T = 1", "b: Int"], "{text}");
+
+    // The module is refused first, and then the end of input where the first type argument should
+    // stand, before the `<` unclosed.
+    let text = "mod M { type T { f: Box<";
+    let errors: Vec<Range<usize>> = parse_executable_document(text)
+      .diagnostics()
+      .iter()
+      .filter(|diagnostic| diagnostic.severity() == Severity::Error)
+      .map(|diagnostic| diagnostic.span())
+      .collect();
+    assert_eq!(errors.first(), Some(&(0..3)), "{text}: {errors:?}");
+    assert_eq!(
+      errors.get(1),
+      Some(&(text.len()..text.len())),
+      "{text}: {errors:?}"
+    );
   }
 
   // ── Through the analyzer ───────────────────────────────────────────────────────────────────

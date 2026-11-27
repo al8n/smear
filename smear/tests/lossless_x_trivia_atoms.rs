@@ -184,8 +184,8 @@ fn eat_if_accepts_a_token_behind_trivia() {
 
 /// `peek_as` reads a contextual keyword's **spelling** through the downcast, past trivia.
 ///
-/// The atom GraphQLx leans on hardest. Six of its keywords — `use`, `mod`, `as`, `where`, `set`,
-/// `map` — are ordinary names in GraphQL and contextual keywords here, so every dispatch
+/// The atom GraphQLx leans on hardest. Seven of its keywords — `use`, `mod`, `as`, `where`, `set`,
+/// `map`, `const` — are ordinary names in GraphQL and contextual keywords here, so every dispatch
 /// that turns on one of them is a downcast rather than a kind comparison. `peek_kind` answers
 /// `Identifier` for all of them and can never tell them apart.
 #[test]
@@ -199,6 +199,7 @@ fn peek_as_reads_the_keyword_spelling_behind_trivia() {
     ("where", Keyword::Where),
     ("set", Keyword::Set),
     ("map", Keyword::Map),
+    ("const", Keyword::Const),
   ] {
     assert_eq!(peek_keyword_of(src), Some(keyword), "{src:?} must project");
     let padded = format!("  # c\n\t{src}");

@@ -752,6 +752,13 @@ pub enum StringError<Char = char> {
   /// separately.
   #[from(skip)]
   IncompleteEscape(Span),
+  /// A `\x` that two hexadecimal digits do not follow, in the body of a GraphQLx `b"…"` string,
+  /// the one body a `\x` escape is read in. Elsewhere `\x` is
+  /// [`UnexpectedEscapedCharacter`](Self::UnexpectedEscapedCharacter).
+  ///
+  /// The span is the `\x` and the hexadecimal digits after it, none or one.
+  #[from(skip)]
+  InvalidByteEscape(Span),
   /// A unopened string literal. e.g. a string literal that starts with a non-quote character.
   Unopened(UnexpectedLexeme<Option<Char>, LitStrDelimiterHint>),
   /// An unterminated string literal.
@@ -792,6 +799,7 @@ impl<Char> StringError<Char> {
       Self::UnexpectedLineTerminator(_) => SyntaxErrorKind::LineTerminatorInString,
       Self::UnexpectedEscapedCharacter(_) => SyntaxErrorKind::UnknownEscape,
       Self::IncompleteEscape(_) => SyntaxErrorKind::IncompleteEscape,
+      Self::InvalidByteEscape(_) => SyntaxErrorKind::InvalidByteEscape,
       Self::Unopened(_) => SyntaxErrorKind::UnopenedString,
       Self::Unterminated(_) => SyntaxErrorKind::UnterminatedString,
       Self::Unicode(error) => error.kind(),
@@ -889,7 +897,7 @@ impl<Char> StringError<Char> {
       Self::UnsupportedCharacter(ch) => {
         ch.bump(&n);
       }
-      Self::IncompleteEscape(span) => {
+      Self::IncompleteEscape(span) | Self::InvalidByteEscape(span) => {
         span.bump(&n);
       }
       Self::Unicode(unicode) => {

@@ -4,6 +4,14 @@
 //! slice is fixed by the AST result while the lexer source is inferred from the
 //! supplied parser input, allowing the same APIs over `str`, `[u8]`, and the
 //! lexer-supported owned source wrappers.
+//!
+//! Every production's where-clause pins the lexer's state to
+//! [`SyntacticState`](smear_lexer::graphqlx::syntactic::SyntacticState), as the lossless
+//! productions pin theirs. A `const { … }` block's production switches the lexer into the block's
+//! mode through that state, and over a generic `Src` the state is a projection with nothing to
+//! normalize against without the equality: a clause that bounds the lexer and leaves the state
+//! unnamed hides the lexer's own impl. Every caller with a concrete source meets the pin as it
+//! stands.
 
 use core::num::NonZeroUsize;
 use std::vec::Vec;
@@ -44,7 +52,7 @@ pub type GraphqlxToken<'inp, Src: Source<usize> + ?Sized> =
 #[allow(type_alias_bounds)]
 pub type GraphqlxError<'inp, Src: ?Sized, Ctx>
 where
-  GraphqlxLexer<'inp, Src>: Lexer<'inp>,
+  GraphqlxLexer<'inp, Src>: Lexer<'inp, State = smear_lexer::graphqlx::syntactic::SyntacticState>,
   Ctx: ParseContext<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 = ErrorOf<'inp, GraphqlxLexer<'inp, Src>, Ctx, GraphQLx>;
 
@@ -53,7 +61,7 @@ where
 #[allow(type_alias_bounds)]
 pub type GraphqlxInput<'inp, 'input, Src: ?Sized, Ctx>
 where
-  GraphqlxLexer<'inp, Src>: Lexer<'inp>,
+  GraphqlxLexer<'inp, Src>: Lexer<'inp, State = smear_lexer::graphqlx::syntactic::SyntacticState>,
   Ctx: ParseContext<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 = InputRef<'inp, 'input, GraphqlxLexer<'inp, Src>, Ctx, GraphQLx>;
 
@@ -95,8 +103,14 @@ pub fn name<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 {
   ident(inp).map(ast::Name::from)
@@ -109,8 +123,14 @@ pub fn try_name<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 {
   try_ident(inp).map(|attempt| attempt.map(ast::Name::from))
@@ -136,8 +156,14 @@ pub fn path<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -163,8 +189,14 @@ pub fn try_path<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -191,8 +223,14 @@ pub(crate) fn path_root<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -222,16 +260,32 @@ where
 }
 
 /// The `::` that ends a root's sigil, and where it ends.
+///
+/// Inside a `const { … }` block, where the lexer's state says it is, the end of input is asked
+/// first and refused through [`unexpected_here`], whose anchor there is the block's: the committed
+/// atom would anchor its own refusal at the last token. Outside a block, and at a token, the atom
+/// refuses what is not a `::`, the end of input among it, so a refusal outside a block is the
+/// atom's own and names no `::`.
 fn root_separator<'inp, Src, Ctx>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
 ) -> Result<usize, GraphqlxError<'inp, Src, Ctx>>
 where
   Src: Source<usize> + ?Sized,
-  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
+  GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
+  if inp.state().in_const_block() && peek_kind(inp)?.is_none() {
+    return unexpected_here(inp, Expectation::PathSeparator);
+  }
   double_colon(inp).map(|separator| separator.span().end())
 }
 
@@ -245,8 +299,14 @@ pub(crate) fn dot_dot<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 {
   // `next_or_stop`, not `next`: a terminal scanner stop must not read as an end of input here, as
@@ -272,8 +332,14 @@ pub(crate) fn leading_path_separator<'inp, Src, Ctx, T>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -296,8 +362,14 @@ pub(crate) fn path_after_first<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -324,8 +396,14 @@ pub(crate) fn peek_kind<'inp, Src, Ctx>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
 {
   // THE DIALECT'S OWN `peek_kind`, and it shadows tokora's — which is terminal-aware. Written over
@@ -336,6 +414,12 @@ where
 }
 
 /// Produces a typed GraphQLx unexpected-token error at the current input head.
+///
+/// At the end of input the refusal stands at the last token's end, and inside a `const { … }`
+/// block, where the lexer's state says it is, at the source's end instead: past the trivia after
+/// the last token, where the lossless layer, having read across that trivia, meets the end. So a
+/// helper main has refuses the end of input where a block's own productions do, when a block
+/// reaches it, and nothing changes outside a block. The state is read on that arm alone.
 pub(crate) fn unexpected_here<'inp, Src, Ctx, T>(
   inp: &mut GraphqlxInput<'inp, '_, Src, Ctx>,
   expected: Expectation,
@@ -343,8 +427,14 @@ pub(crate) fn unexpected_here<'inp, Src, Ctx, T>(
 where
   Src: Source<usize> + ?Sized,
   GraphqlxSlice<'inp, Src>: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-  GraphqlxLexer<'inp, Src>:
-    Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+  GraphqlxLexer<'inp, Src>: Lexer<
+      'inp,
+      Source = Src,
+      Token = GraphqlxToken<'inp, Src>,
+      Span = SimpleSpan,
+      Offset = usize,
+      State = smear_lexer::graphqlx::syntactic::SyntacticState,
+    >,
   Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<GraphqlxSlice<'inp, Src>>>,
 {
@@ -357,8 +447,12 @@ where
   Err(match found {
     Some((span, kind)) => DialectGraphqlxError::unexpected_token(kind, expected, span).into(),
     None => {
-      DialectGraphqlxError::maybe_unexpected_token(None, expected, SimpleSpan::new(offset, offset))
-        .into()
+      let end = if inp.state().in_const_block() {
+        inp.source().len()
+      } else {
+        offset
+      };
+      DialectGraphqlxError::maybe_unexpected_token(None, expected, SimpleSpan::new(end, end)).into()
     }
   })
 }
@@ -375,7 +469,14 @@ impl<S> ast::Name<S> {
   where
     Src: Source<usize, Slice<'inp> = S> + ?Sized,
     S: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-    GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+    GraphqlxLexer<'inp, Src>: Lexer<
+        'inp,
+        Source = Src,
+        Token = GraphqlxToken<'inp, Src>,
+        Span = SimpleSpan,
+        Offset = usize,
+        State = smear_lexer::graphqlx::syntactic::SyntacticState,
+      >,
     Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   {
     name(inp)
@@ -388,7 +489,14 @@ impl<S> ast::Name<S> {
   where
     Src: Source<usize, Slice<'inp> = S> + ?Sized,
     S: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-    GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+    GraphqlxLexer<'inp, Src>: Lexer<
+        'inp,
+        Source = Src,
+        Token = GraphqlxToken<'inp, Src>,
+        Span = SimpleSpan,
+        Offset = usize,
+        State = smear_lexer::graphqlx::syntactic::SyntacticState,
+      >,
     Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
   {
     try_name(inp)
@@ -406,7 +514,14 @@ impl<S> ast::Path<S> {
   where
     Src: Source<usize, Slice<'inp> = S> + ?Sized,
     S: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-    GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+    GraphqlxLexer<'inp, Src>: Lexer<
+        'inp,
+        Source = Src,
+        Token = GraphqlxToken<'inp, Src>,
+        Span = SimpleSpan,
+        Offset = usize,
+        State = smear_lexer::graphqlx::syntactic::SyntacticState,
+      >,
     Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
     GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<S>>,
   {
@@ -423,7 +538,14 @@ impl<S> ast::Path<S> {
   where
     Src: Source<usize, Slice<'inp> = S> + ?Sized,
     S: Slice<'inp> + Clone + 'inp + crate::value::Leaf,
-    GraphqlxLexer<'inp, Src>: Lexer<'inp, Source = Src, Token = GraphqlxToken<'inp, Src>, Span = SimpleSpan, Offset = usize>,
+    GraphqlxLexer<'inp, Src>: Lexer<
+        'inp,
+        Source = Src,
+        Token = GraphqlxToken<'inp, Src>,
+        Span = SimpleSpan,
+        Offset = usize,
+        State = smear_lexer::graphqlx::syntactic::SyntacticState,
+      >,
     Ctx: ParseCtx<'inp, GraphqlxLexer<'inp, Src>, GraphQLx>,
     GraphqlxError<'inp, Src, Ctx>: From<DialectGraphqlxError<S>>,
   {

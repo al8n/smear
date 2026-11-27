@@ -23,8 +23,8 @@
 //! The contract, the error vocabulary, the span rule, the `(tree, source)` verification and the
 //! green traversal are [the substrate](crate::lossless::project)'s, and the entry shapes are the
 //! naming symmetry its header states. **Everything below that is this dialect's**: sixteen of
-//! GraphQLx's seventy-six wrappers are structurally identical to a GraphQL one, thirty-seven
-//! share a name with a different shape, and twenty-three have no GraphQL image at all. Three of those
+//! GraphQLx's eighty-four wrappers are structurally identical to a GraphQL one, thirty-seven
+//! share a name with a different shape, and thirty-one have no GraphQL image at all. Three of those
 //! differences are *mapping* divergences rather than renamings, and each one changes what a walk
 //! has to do rather than what it has to call something:
 //!
@@ -120,20 +120,22 @@
 //! GraphQLx's lossless productions **report and continue**: a violation goes on the diagnostic
 //! channel and the node is built anyway, so `Parse::has_errors()` sees it and the *shape* does not.
 //! Every one of those shapes reaches this projection looking well-formed, and each needs an
-//! answer. The population is every call that reports without building a hole — **66**
-//! `recover::report_unexpected::<…>` sites and **17** `recover::unclosed_{list,object,parens,angle}::<…>`
+//! answer. The population is every call that reports without building a hole — **74**
+//! `recover::report_unexpected::<…>` sites and **22** `recover::unclosed_{list,object,parens,angle}::<…>`
 //! sites across `graphqlx/lossless/*.rs`, the counts `grep -c` gives for those spellings — and
-//! **all 83 are mapped** in the table below, one probe each: a text that reaches the site with a
+//! **all 96 are mapped** in the table below, one probe each: a text that reaches the site with a
 //! hole-free tree, and what this projection answers for it. The table is executable:
 //! `every_report_and_build_site_has_a_measured_answer` holds the same rows, asserts their count
 //! per file and family against the source's own spelling of each call, and measures every answer.
 //!
-//! **One site has no hole-free probe**, and its row says so. A `(`, `[` or `<` list that meets a
+//! **Two sites have no hole-free probe**, and each row says so. A `(`, `[` or `<` list that meets a
 //! `}` closing a brace that was open before the list reports its own closer as missing and leaves
 //! the brace to the block around it — eight sites, one per list. Seven of them stand inside a
 //! block of the grammar, whose loop then takes the brace. A variables definition stands inside
 //! none: the brace open in front of it is one a failed definition left, and the `}` it leaves is a
-//! stray the root takes into an `Error`.
+//! stray the root takes into an `Error`. The other is the refusal of an expression written outside
+//! a `const { … }` block: the run that recovers it keeps the expression's tokens as an `Error`, so
+//! every text that reaches it leaves a hole.
 //!
 //! **The "what the site leaves out" column is where the lenient set comes from.** A site either
 //! leaves out one token with **no AST image** (a closer, `on`), leaves out a constituent
@@ -143,10 +145,10 @@
 //! without the token — and the cell derives the missing-token table below from exactly that and
 //! asserts the two are the same set.
 //!
-//! **Twenty-one project; sixty-two refuse.** The twenty-one are the lenient rows a site can leave
+//! **Twenty-nine project; seventy-one refuse.** The twenty-nine are the lenient rows a site can leave
 //! with a well-formed value. The others refuse either the shape the site built, or — for the
 //! unclosed sites whose definition the parser cannot finish at end of input — the rubble the
-//! document is left holding, or, for the one row above, the hole.
+//! document is left holding, or, for the two rows above, the hole.
 //!
 //! **A refusal in the last column is its variant and the kinds its payload names, in field order.**
 //! `UnexpectedChild(Document, InlineString)` reads "parent `Document`, found `InlineString`";
@@ -231,6 +233,23 @@
 //! | `value.rs` | report | `{ f(a: [1 }` | `]` of `ListValue` — **no image** | **projects** |
 //! | `value.rs` | unclosed | `{ f(a: {b: 1` | `}` of `ObjectValue` — **no image** | **projects** |
 //! | `value.rs` | unclosed | `{ f(a: set!{1` | `}` of `SetValue` — **no image** | **projects** |
+//! | `value.rs` | report | `input I { a: T = Box<i32> }` | a constituent with an image | `MissingChild(TypedObjectValue)` |
+//! | `value.rs` | unclosed | `input I { a: T = U(1` | `)` of `TypedValue` — **no image** | **projects** |
+//! | `value.rs` | report | `input I { a: T = U(1 }` | `)` of `TypedValue` — **no image** | **projects** |
+//! | `value.rs` | report | `input I { a: T = const { $v } }` | nothing — a present token is refused | `UnexpectedChild(Expression, VariableValue)` |
+//! | `value.rs` | report | `input I { a: T = const { } }` | a constituent with an image | `MissingChild(Expression)` |
+//! | `value.rs` | report | `input I { a: T = const {` | a constituent with an image | `MissingChild(Expression)` |
+//! | `value.rs` | report | `input I { a: T = const { (1 } }` | `)` of `ParenValue` — **no image** | **projects** |
+//! | `value.rs` | unclosed | `input I { a: T = const { 1` | `}` of `ConstBlock` — **no image** | **projects** |
+//! | `value.rs` | unclosed | `input I { a: T = const { (1` | `)` of `ParenValue` — **no image** | **projects** |
+//! | `value.rs` | report | `input I { a: T = const { [1 } }` | `]` of `ListValue` — **no image** | **projects** |
+//! | `value.rs` | unclosed | `input I { a: T = const { [1` | `]` of `ListValue` — **no image** | **projects** |
+//! | `value.rs` | unclosed | `input I { a: T = const { {b: 1` | `}` of `ObjectValue` — **no image** | **projects** |
+//! | `value.rs` | report | `input I { a: T = const { {b, c: 1} } }` | a constituent with an image — the value, behind the `:` | `MissingChild(ObjectField)` |
+//! | `value.rs` | report | `input I { a: T = const { map!{1, 2 => 3} } }` | a constituent with an image — the value, behind the `=>` | `MissingChild(MapEntry)` |
+//! | `value.rs` | report | `input I { a: T = const { set! } }` | a constituent with an image — the body | `MissingChild(SetValue)` |
+//! | `value.rs` | report | `input I { a: T = const { map!{1 => 2,, 3 => 4} } }` | a constituent with an image — a member | `UnexpectedChild(MapValue, Separator)` |
+//! | `value.rs` | report | `input I { a: u32 = HOUR - 1 }` | nothing — a present token is refused | **a hole** — the run keeps the `-` as an `Error` |
 //! | `directive.rs` | unclosed | `{ f(a: 1` | `)` of `Arguments` — **no image** | **projects** |
 //! | `directive.rs` | report | `{ f(a: 1 }` | `)` of `Arguments` — **no image** | **projects** |
 //! | `ty.rs` | unclosed | `type T { f: A<B` | `>` of `TypeGenerics` — **no image** | **projects** |
@@ -295,6 +314,10 @@
 //! | [`ObjectValue`](SyntaxKind::ObjectValue) | `}` | `value.rs` unclosed — `{ f(a: {b: 1` |
 //! | [`SetValue`](SyntaxKind::SetValue) | `}` | `value.rs` unclosed — `{ f(a: set!{1` |
 //! | [`MapValue`](SyntaxKind::MapValue) | `}` | `value.rs` unclosed — `{ f(a: map!{1 => 2` |
+//! | [`TypedObjectValue`](SyntaxKind::TypedObjectValue) | `}` | `value.rs` unclosed — `input I { a: T = P { x: 1` |
+//! | [`TypedValue`](SyntaxKind::TypedValue) | `)` | `value.rs` unclosed — `input I { a: T = U(1` |
+//! | [`ConstBlock`](SyntaxKind::ConstBlock) | `}` | `value.rs` unclosed — `input I { a: T = const { 1` |
+//! | [`ParenValue`](SyntaxKind::ParenValue) | `)` | `value.rs` unclosed — `input I { a: T = const { (1` |
 //! | [`VariablesDefinition`](SyntaxKind::VariablesDefinition) | `)` | `executable.rs` unclosed — `query Q($a: Int`; refuses either way, the operation being lost |
 //! | [`ArgumentsDefinition`](SyntaxKind::ArgumentsDefinition) | `)` | `definition.rs` unclosed — `type T { f(a: Int`; refuses either way, the definition being lost |
 //! | [`ExecutableDefinitionTypeGenerics`](SyntaxKind::ExecutableDefinitionTypeGenerics) | `>` | `generic.rs` unclosed — `fragment <T`; refuses either way, the fragment being lost |
@@ -303,7 +326,7 @@
 //! lenient iff its token has no AST image and the lossless parser builds a hole-free tree holding
 //! the node without it; the report-and-build census above enumerates every place the parser leaves
 //! a token out without a hole, and the pairs its image-less rows leave out — each witnessed by the
-//! tree of at least one probe — are these twenty-one, which the cell asserts. A pair can have two
+//! tree of at least one probe — are these twenty-five, which the cell asserts. A pair can have two
 //! sites: a `(`, `[` or `<` list leaves its closer out at the end of input, and again at the `}`
 //! of a block around it. Two of the pairs are witnessed only as **orphans**: at end of input the
 //! operation or the fragment around the list cannot be finished, so the root keeps the list as a
@@ -335,14 +358,20 @@
 //! |---|---|---|
 //! | a fragment's name is not `on` | `generic/mod.rs:392` (`Expectation::FragmentName`) | `name_except` in `executable_definition_name` |
 //! | a fragment spread's target is not a relative `on…` | `selection/mod.rs:440` (the spread dispatch reads `on` as an inline fragment's head) and `:541-542` (`fragment_type_path`, `Expectation::Path`) | `path_except` through `type_path_except` in `fragment_spread` |
-//! | an enum value is not a relative `true…`, `false…` or `null…` | `value.rs:290-295` (the enum production, `Expectation::EnumValue`), and the value dispatch that reads those spellings as a boolean or a null in both grammars — `value.rs:814-823` non-const, `:925-934` const | `path_except` in `enum_value`, shared by both value grammars |
+//! | an enum value is not a relative `true…`, `false…` or `null…` | `value.rs`'s `enum_value` (the enum production, `Expectation::EnumValue`), and the value dispatch that reads those spellings as a boolean or a null in both grammars — the identifier arms of `value` and `const_value` | `path_except` in `enum_value`, shared by both value grammars |
 //! | an enum value definition is not named `true`, `false` or `null` | `definition/enum_type.rs:21-22` (`Expectation::EnumValue`) | `name_except` in `enum_value_definition` |
+//!
+//! A fifth position has no refusal of its own and is the dispatch's alone: **a typed form's type
+//! is not a relative `true…`, `false…` or `null…`, nor a bare `const` before `{`**, since the value
+//! head reads those as a boolean, a null and a block, in a block and out of one. It answers
+//! `SemanticRule` from `typed_form_type`, and `~::const {}`, `const<T> {}` and `const(1)` stay typed
+//! forms.
 //!
 //! Each answers [`SemanticRule`](ProjectErrorKind::SemanticRule) at the offending segment, and a
 //! path rule reads only the first segment of a relative path, one with no root — `^::on`, `..::on`,
 //! `ns::on`, `~::true` and `x::true` are the parser's too. The two path rules are invisible to the
 //! mutation law: a tree the parser builds never holds them, and a retexted one re-parses to a
-//! different skeleton. Hand-built cells pin all four. Beside them, two shapes rather than rules:
+//! different skeleton. Hand-built cells pin all four. Beside them, three shapes rather than rules:
 //!
 //! - **A variable has no place in a constant position.** The AST's own type system forbids it —
 //!   [`ConstInputValue`] has no `Variable` variant — so it is
@@ -351,6 +380,11 @@
 //! - **A `use` source must be an inline string.** [`UsePrefix::Source`] holds an
 //!   [`InlineStringValue`], so a block string there is a shape the AST cannot store, and the
 //!   refusal names the token.
+//! - **A path and an object right after it are one typed object** in a schema position outside a
+//!   block, where a `,` is trivia: a list or a set that holds them as two members, or a map whose
+//!   entry's value is the path and whose next entry's key is the object, is no value either parser
+//!   builds there, and is [`UnexpectedChild`](ProjectErrorKind::UnexpectedChild) at the object. An
+//!   executable position, and a block, whose `,` separates, keep two members.
 //!
 //! The fragment-name rule is the draft's `FragmentName : Name but not on`, the same rule the
 //! vanilla dialect carries; this dialect accepted the spelling in both suites until
@@ -513,6 +547,7 @@
 //! |---|---|---|
 //! | [`Int`](SyntaxKind::Int) | [`LitInt`] | `LitInt::try_from`, the shipped scanner, whole-slice |
 //! | [`Float`](SyntaxKind::Float) | [`LitFloat`] | `LitFloat::try_from`, likewise |
+//! | [`Char`](SyntaxKind::Char) | [`LitChar`] | `LitChar::try_from`, likewise: a literal that spells no one character fails there |
 //! | [`InlineString`](SyntaxKind::InlineString), [`BlockString`](SyntaxKind::BlockString) | [`LitStr`] | `LitStr::try_from`, the string sub-lexer — it is what decides `Plain` vs `Complex` and the `required_capacity`, so a malformed image (a slice without its quotes, a bad escape) fails there |
 //! | [`Name`](SyntaxKind::Name) whose text becomes a name | `Name<&str>` | [`identifier`], added beside [`LitInt`]'s for this — every name position reaches it through `Cursor::name_token` |
 //! | a `Name` read for its **spelling** | an operation type, a directive location, `true`/`false`/`null` | `contextual_keyword` — the lexer's own table — and every reader of it refuses a spelling it does not classify |
@@ -626,39 +661,43 @@
 //! per cycle plus one per GraphQLx-only carrier.
 
 use core::num::NonZeroUsize;
-use std::vec::Vec;
+use std::{boxed::Box, vec::Vec};
 
 use rowan_0_17::{NodeOrToken, TextRange, TextSize};
 use tokora::SimpleSpan;
 
 use smear_lexer::{
   LitStr,
-  graphqlx::{ContextualKeyword, LitFloat, LitInt, identifier, keyword::contextual_keyword},
+  graphqlx::{
+    ContextualKeyword, LitChar, LitFloat, LitInt, LitPrefixedStr, StrPrefix, float_in_block,
+    identifier, int_in_block, keyword::contextual_keyword,
+  },
 };
 
 use crate::{
   graphqlx::{
     ast::{
-      Alias, Argument, Arguments, ArgumentsDefinition, BooleanValue, ConstArgument, ConstArguments,
-      ConstDirective, ConstDirectives, ConstInputValue, ConstList, ConstMap, ConstMapEntry,
-      ConstObject, ConstObjectField, ConstSet, DefaultInputValue, DefinitionName,
-      DefinitionTypeGenerics, DefinitionTypeParam, DefinitionTypePath, Described,
-      DescribedVariableDefinition, Directive, DirectiveExtension, DirectiveLocations, Directives,
-      Document, DocumentItem, EnumTypeDefinition, EnumTypeExtension, EnumTypeExtensionData,
-      EnumValue, EnumValuesDefinition, ExecutableDefinition, ExecutableDefinitionHeader,
-      ExecutableDefinitionName, ExecutableDefinitionTypeGenerics, ExecutableDocument,
-      ExtensionDirectives, ExtensionFields, ExtensionMembers, ExtensionName, ExtensionOperations,
-      ExtensionTypeGenerics, ExtensionTypeParam, ExtensionValues, Field, FieldsDefinition,
-      FloatValue, FragmentSpread, ImplementInterfaces, InlineFragment, InlineStringValue,
-      InputFieldsDefinition, InputObjectTypeDefinition, InputObjectTypeExtension,
-      InputObjectTypeExtensionData, InputValue, IntValue, InterfaceTypeDefinition,
-      InterfaceTypeExtension, List, Map, MapEntry, ModDefinition, Name, NamedOperationDefinition,
-      Nest, Nested, NullValue, Object, ObjectField, ObjectTypeDefinition, ObjectTypeExtension,
-      OperationDefinition, OperationType, ParentRoot, Path, PathRoot, RootOperationTypeDefinition,
-      RootOperationTypesDefinition, ScalarTypeDefinition, ScalarTypeExtension,
-      ScalarTypeExtensionData, SchemaDefinition, SchemaExtension, Selection, SelectionSet, Set,
-      SourcePrefix, StringValue, Type, TypeCondition, TypeDefinition, TypeExtension, TypeGenerics,
-      TypePath, TypeSystemDefinition, TypeSystemDocument, TypeSystemExtension, TypeSystemItem,
+      Alias, Argument, Arguments, ArgumentsDefinition, BooleanValue, BytesValue, CharValue,
+      ConstArgument, ConstArguments, ConstBlock, ConstDirective, ConstDirectives, ConstInputValue,
+      ConstList, ConstMap, ConstMapEntry, ConstObject, ConstObjectField, ConstSet,
+      DefaultInputValue, DefinitionName, DefinitionTypeGenerics, DefinitionTypeParam,
+      DefinitionTypePath, Described, DescribedVariableDefinition, Directive, DirectiveExtension,
+      DirectiveLocations, Directives, Document, DocumentItem, EnumTypeDefinition,
+      EnumTypeExtension, EnumTypeExtensionData, EnumValue, EnumValuesDefinition,
+      ExecutableDefinition, ExecutableDefinitionHeader, ExecutableDefinitionName,
+      ExecutableDefinitionTypeGenerics, ExecutableDocument, ExtensionDirectives, ExtensionFields,
+      ExtensionMembers, ExtensionName, ExtensionOperations, ExtensionTypeGenerics,
+      ExtensionTypeParam, ExtensionValues, Field, FieldsDefinition, FloatValue, FragmentSpread,
+      IdValue, ImplementInterfaces, InlineFragment, InlineStringValue, InputFieldsDefinition,
+      InputObjectTypeDefinition, InputObjectTypeExtension, InputObjectTypeExtensionData,
+      InputValue, IntValue, InterfaceTypeDefinition, InterfaceTypeExtension, List, Map, MapEntry,
+      ModDefinition, Name, NamedOperationDefinition, Nest, Nested, NullValue, Object, ObjectField,
+      ObjectTypeDefinition, ObjectTypeExtension, OperationDefinition, OperationType, ParenValue,
+      ParentRoot, Path, PathRoot, RootOperationTypeDefinition, RootOperationTypesDefinition,
+      ScalarTypeDefinition, ScalarTypeExtension, ScalarTypeExtensionData, SchemaDefinition,
+      SchemaExtension, Selection, SelectionSet, Set, SourcePrefix, StringValue, Type,
+      TypeCondition, TypeDefinition, TypeExtension, TypeGenerics, TypePath, TypeSystemDefinition,
+      TypeSystemDocument, TypeSystemExtension, TypeSystemItem, TypedObjectValue, TypedValue,
       UnionMemberTypes, UnionTypeDefinition, UnionTypeExtension, UnionTypeExtensionData,
       UseDefinition, UseOrExecutableDefinition, UsePrefix, UseTree, UseTreeKind,
       VariableDefinition, VariableValue, VariablesDefinition, WhereClause, WherePredicate,
@@ -1746,8 +1785,17 @@ fn inline_string_value<'src>(
 /// grammar. A refusal here means the tree labelled `Int` a slice the scanner will not read back as
 /// one — [`MalformedToken`](ProjectErrorKind::MalformedToken), reachable from a caller-minted tree
 /// and never from a parse, whose number tokens come from that scanner.
-fn int_lit(text: &str, span: SimpleSpan) -> Out<LitInt<&str>> {
-  LitInt::try_from(text).map_err(|_| {
+///
+/// Inside a `const { … }` block, where `in_block` holds, the slice is scanned as the scanner reads
+/// it there, from a state that has entered one: a number carries no sign in a block, so a tree that
+/// puts `-1` under a block's `IntValue` is refused, as no parse builds it.
+fn int_lit(text: &str, span: SimpleSpan, in_block: bool) -> Out<LitInt<&str>> {
+  let lit = if in_block {
+    int_in_block(text)
+  } else {
+    LitInt::try_from(text)
+  };
+  lit.map_err(|_| {
     ProjectError::new(
       ProjectErrorKind::MalformedToken(K::Int),
       span.start()..span.end(),
@@ -1760,11 +1808,40 @@ fn int_lit(text: &str, span: SimpleSpan) -> Out<LitInt<&str>> {
 ///
 /// The two doors do not coerce into each other: `LitFloat::try_from("0x1")` refuses rather than
 /// widening an integer, which is what makes a `Float`-labelled integer token a refusal here
-/// instead of a wrongly classified AST literal.
-fn float_lit(text: &str, span: SimpleSpan) -> Out<LitFloat<&str>> {
-  LitFloat::try_from(text).map_err(|_| {
+/// instead of a wrongly classified AST literal. Inside a block, `in_block`, it is scanned as
+/// [`int_lit`] scans there.
+fn float_lit(text: &str, span: SimpleSpan, in_block: bool) -> Out<LitFloat<&str>> {
+  let lit = if in_block {
+    float_in_block(text)
+  } else {
+    LitFloat::try_from(text)
+  };
+  lit.map_err(|_| {
     ProjectError::new(
       ProjectErrorKind::MalformedToken(K::Float),
+      span.start()..span.end(),
+    )
+  })
+}
+
+/// A `char` literal's payload, re-scanned by the lexer that produced it — [`int_lit`]'s twin, and
+/// see it for why the classification is the scanner's rather than this module's. A slice that
+/// spells no one character, or more than one, is refused here.
+fn char_lit(text: &str, span: SimpleSpan) -> Out<LitChar<&str>> {
+  LitChar::try_from(text).map_err(|_| {
+    ProjectError::new(
+      ProjectErrorKind::MalformedToken(K::Char),
+      span.start()..span.end(),
+    )
+  })
+}
+
+/// A prefixed string's literal, read again through the lexer's door from a state inside a block,
+/// the only place one is lexed.
+fn prefixed_lit(text: &str, span: SimpleSpan) -> Out<LitPrefixedStr<&str>> {
+  LitPrefixedStr::try_from(text).map_err(|_| {
+    ProjectError::new(
+      ProjectErrorKind::MalformedToken(K::PrefixedString),
       span.start()..span.end(),
     )
   })
@@ -3151,6 +3228,42 @@ fn type_path<'src>(node: Node<'_>, source: &'src str) -> Out<(TypePath<&'src str
   type_path_except(node, source, &[], "")
 }
 
+/// The type a typed form names, read by the rules the value head reads its path by, in a block
+/// and out of one.
+///
+/// A relative path whose first segment is `true`, `false` or `null` is a boolean or a null there,
+/// and a bare `const` before `{`, with no root, no second segment and no type arguments, opens a
+/// block: neither names a typed form, so `object` says whether the form is a typed object. Each is
+/// [`SemanticRule`](ProjectErrorKind::SemanticRule). `~::const {}`, `const<T> {}`, `const(1)` and
+/// `x::true {}` are typed forms the parser builds.
+fn typed_form_type<'src>(
+  node: Node<'_>,
+  source: &'src str,
+  object: bool,
+) -> Out<(TypePath<&'src str>, TextRange)> {
+  let (ty, extent) = type_path_except(
+    node,
+    source,
+    &[
+      ContextualKeyword::True,
+      ContextualKeyword::False,
+      ContextualKeyword::Null,
+    ],
+    "a typed form's type may not begin with `true`, `false` or `null`",
+  )?;
+  let bare_const = object
+    && ty.type_generics().is_none()
+    && ty.path().root().is_relative()
+    && matches!(ty.path().segments(), [only] if *only.source() == "const");
+  if bare_const {
+    return Err(ProjectError::new(
+      ProjectErrorKind::SemanticRule("a bare `const` before `{` opens a block, not a typed object"),
+      to_range(extent),
+    ));
+  }
+  Ok((ty, extent))
+}
+
 /// [`type_path`] whose path is read through [`path_except`] — a fragment spread's target.
 fn type_path_except<'src>(
   node: Node<'_>,
@@ -3518,10 +3631,15 @@ fn argument<'src>(node: Node<'_>, source: &'src str) -> Out<(Argument<&'src str>
   Ok((Argument::new(to_span(extent), name, value), extent))
 }
 
-fn optional_const_directives<'src>(
+/// A constant directive run, its arguments' values read by the grammar `G` names: [`Schema`] where
+/// a type-system definition or extension applies it, and [`Constant`] on a variable.
+fn optional_const_directives<'src, G>(
   run: Option<Node<'_>>,
   source: &'src str,
-) -> Out<Optional<ConstDirectives<&'src str>>> {
+) -> Out<Optional<ConstDirectives<&'src str>>>
+where
+  G: ValueGrammar<'src, Value = ConstInputValue<&'src str>>,
+{
   let Some(run) = run else {
     return Ok((None, None));
   };
@@ -3531,7 +3649,7 @@ fn optional_const_directives<'src>(
   cursor.end()?;
   let mut directives = Vec::with_capacity(listed.len());
   for child in listed {
-    directives.push(cursor.keep(const_directive(child, source)?));
+    directives.push(cursor.keep(const_directive::<G>(child, source)?));
   }
   let extent = cursor.range("a token")?;
   Ok((
@@ -3540,10 +3658,13 @@ fn optional_const_directives<'src>(
   ))
 }
 
-fn const_directive<'src>(
+fn const_directive<'src, G>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<(ConstDirective<&'src str>, TextRange)> {
+) -> Out<(ConstDirective<&'src str>, TextRange)>
+where
+  G: ValueGrammar<'src, Value = ConstInputValue<&'src str>>,
+{
   // `@ TypePath Arguments[Const]?`
   let mut cursor = Cursor::new(node);
   cursor.token(K::At, "the `@` a directive opens with")?;
@@ -3551,7 +3672,7 @@ fn const_directive<'src>(
   let arguments_node = cursor.opt_node(K::Arguments);
   cursor.end()?;
   let name = cursor.keep(type_path(name_node, source)?);
-  let arguments = cursor.keep_optional(optional_const_arguments(arguments_node, source)?);
+  let arguments = cursor.keep_optional(optional_const_arguments::<G>(arguments_node, source)?);
   let extent = cursor.range("a token")?;
   Ok((
     ConstDirective::new(to_span(extent), name, arguments),
@@ -3559,10 +3680,13 @@ fn const_directive<'src>(
   ))
 }
 
-fn optional_const_arguments<'src>(
+fn optional_const_arguments<'src, G>(
   list: Option<Node<'_>>,
   source: &'src str,
-) -> Out<Optional<ConstArguments<&'src str>>> {
+) -> Out<Optional<ConstArguments<&'src str>>>
+where
+  G: ValueGrammar<'src, Value = ConstInputValue<&'src str>>,
+{
   let Some(list) = list else {
     return Ok((None, None));
   };
@@ -3574,7 +3698,7 @@ fn optional_const_arguments<'src>(
   cursor.end()?;
   let mut arguments = Vec::with_capacity(listed.len());
   for child in listed {
-    arguments.push(cursor.keep(const_argument(child, source)?));
+    arguments.push(cursor.keep(const_argument::<G>(child, source)?));
   }
   let extent = cursor.range("a token")?;
   Ok((
@@ -3583,17 +3707,20 @@ fn optional_const_arguments<'src>(
   ))
 }
 
-fn const_argument<'src>(
+fn const_argument<'src, G>(
   node: Node<'_>,
   source: &'src str,
-) -> Out<(ConstArgument<&'src str>, TextRange)> {
+) -> Out<(ConstArgument<&'src str>, TextRange)>
+where
+  G: ValueGrammar<'src, Value = ConstInputValue<&'src str>>,
+{
   // `Name : Value[Const]`
   let mut cursor = Cursor::new(node);
   let name = cursor.name_token(source, "an argument name")?;
   cursor.token(K::Colon, "the `:` before an argument's value")?;
   let value_node = cursor.one_of(&VALUE_KINDS, "a value")?;
   cursor.end()?;
-  let value = cursor.keep(const_value(node, value_node, source)?);
+  let value = cursor.keep(const_value::<G>(node, value_node, source)?);
   let extent = cursor.range("a token")?;
   Ok((ConstArgument::new(to_span(extent), name, value), extent))
 }
@@ -3602,9 +3729,12 @@ fn const_argument<'src>(
 // values
 // ---------------------------------------------------------------------------------------------
 
-/// The eleven value node kinds — GraphQL's nine plus [`SetValue`](SyntaxKind::SetValue) and
-/// [`MapValue`](SyntaxKind::MapValue).
-const VALUE_KINDS: [SyntaxKind; 11] = [
+/// The fifteen value node kinds — GraphQL's nine plus [`SetValue`](SyntaxKind::SetValue),
+/// [`MapValue`](SyntaxKind::MapValue) and [`CharValue`](SyntaxKind::CharValue), and a schema
+/// position's [`TypedObjectValue`](SyntaxKind::TypedObjectValue),
+/// [`TypedValue`](SyntaxKind::TypedValue) and [`ConstBlock`](SyntaxKind::ConstBlock), which every
+/// other grammar refuses where it meets one.
+const VALUE_KINDS: [SyntaxKind; 15] = [
   K::VariableValue,
   K::IntValue,
   K::FloatValue,
@@ -3616,7 +3746,64 @@ const VALUE_KINDS: [SyntaxKind; 11] = [
   K::SetValue,
   K::MapValue,
   K::ObjectValue,
+  K::CharValue,
+  K::TypedObjectValue,
+  K::TypedValue,
+  K::ConstBlock,
 ];
+
+/// The operand kinds an [`Expression`](SyntaxKind::Expression) may hold while no operator is read:
+/// a block's own grammar, in which a parenthesis, bytes and an id stand and nowhere else, and whose
+/// lists, sets, maps, objects and typed forms hold expressions. A variable is built there and
+/// refused here, as in a constant position.
+const BLOCK_OPERAND_KINDS: [SyntaxKind; 18] = [
+  K::VariableValue,
+  K::IntValue,
+  K::FloatValue,
+  K::StringValue,
+  K::BytesValue,
+  K::IdValue,
+  K::CharValue,
+  K::BooleanValue,
+  K::NullValue,
+  K::EnumValue,
+  K::ParenValue,
+  K::ConstBlock,
+  K::ListValue,
+  K::SetValue,
+  K::MapValue,
+  K::ObjectValue,
+  K::TypedObjectValue,
+  K::TypedValue,
+];
+
+/// The kinds a member of a container may be: a value, and inside a `const { … }` block the
+/// [`Expression`](SyntaxKind::Expression) that holds one.
+const fn member_kinds(in_block: bool) -> &'static [SyntaxKind] {
+  if in_block {
+    &[K::Expression]
+  } else {
+    &VALUE_KINDS
+  }
+}
+
+/// Whether the walk may read another member of a container after one: always outside a block, and
+/// inside one only past the `,` that separates two, which this consumes. A trailing `,` is the
+/// container's own, and a member written with no `,` before it is left for the container's end to
+/// refuse where it stands.
+fn past_separator(cursor: &mut Cursor<'_>, in_block: bool) -> bool {
+  !in_block || cursor.opt_token(K::Separator).is_some()
+}
+
+/// The one operand an [`Expression`](SyntaxKind::Expression) holds: an expression of one operand
+/// projects to that operand. An empty one is [`MissingChild`](ProjectErrorKind::MissingChild), and
+/// anything beside the operand, an operator's token among them, is refused where it stands.
+fn expression_operand(node: Node<'_>) -> Out<Node<'_>> {
+  let mut cursor = Cursor::new(node);
+  let operand = cursor.one_of(&BLOCK_OPERAND_KINDS, "an operand")?;
+  cursor.end()?;
+  Ok(operand)
+}
 
 /// A leaf value's slice, its **token's** span and the node's extent.
 ///
@@ -3757,9 +3944,10 @@ fn variable_value<'src>(
   Ok((VariableValue::new(to_span(extent), name), extent))
 }
 
-/// The two value grammars this dialect projects, over one walk.
+/// The value grammars this dialect projects, over one walk: an executable position's, an executable
+/// document's constant one, and a schema position's, which answers as the constant one does.
 ///
-/// `value` and `const_value` are each other with `Const` spelled in: eleven arms, ten of them
+/// `value` and `const_value` are each other with `Const` spelled in: twelve arms, eleven of them
 /// character-for-character identical, differing in the constructors they name and in one refusal.
 /// Duplicating a `match` is cheap; **duplicating a worklist is not** — the arms are the easy half
 /// and the frame discipline is the half a second copy gets subtly wrong — so the machine below is
@@ -3782,6 +3970,7 @@ trait ValueGrammar<'src> {
 
   fn int(span: SimpleSpan, value: LitInt<&'src str>) -> Self::Value;
   fn float(span: SimpleSpan, value: LitFloat<&'src str>) -> Self::Value;
+  fn character(span: SimpleSpan, value: LitChar<&'src str>) -> Self::Value;
   fn string(value: StringValue<&'src str>) -> Self::Value;
   fn boolean(value: BooleanValue<&'src str>) -> Self::Value;
   fn null(span: SimpleSpan, text: &'src str) -> Self::Value;
@@ -3792,6 +3981,39 @@ trait ValueGrammar<'src> {
   fn object(span: SimpleSpan, fields: Vec<Self::Field>) -> Self::Value;
   fn field(span: SimpleSpan, name: Name<&'src str>, value: Self::Value) -> Self::Field;
   fn entry(span: SimpleSpan, key: Self::Value, value: Self::Value) -> Self::Entry;
+
+  /// Whether this grammar reads a schema position's own forms: the typed forms, `Point { x: 1 }`
+  /// and `Url("x")`, and a `const { … }` block with what only a block holds. Elsewhere such a
+  /// node is refused where the walk meets it.
+  const SCHEMA_FORMS: bool;
+
+  /// A typed object. `None` in a grammar that reads no typed form, which the walk never asks: it
+  /// refuses the node before it reads it.
+  fn typed_object(
+    span: SimpleSpan,
+    ty: TypePath<&'src str>,
+    fields: Vec<Self::Field>,
+  ) -> Option<Self::Value>;
+
+  /// A typed value, on the terms of [`typed_object`](Self::typed_object).
+  fn typed(span: SimpleSpan, ty: TypePath<&'src str>, value: Self::Value) -> Option<Self::Value>;
+
+  /// A `const { … }` block, on the terms of [`typed_object`](Self::typed_object).
+  fn block(span: SimpleSpan, value: Self::Value) -> Option<Self::Value>;
+
+  /// A parenthesis inside a block, on the terms of [`typed_object`](Self::typed_object).
+  fn paren(span: SimpleSpan, value: Self::Value) -> Option<Self::Value>;
+
+  /// A bytes value inside a block, on the terms of [`typed_object`](Self::typed_object).
+  fn bytes(value: BytesValue<&'src str>) -> Option<Self::Value>;
+
+  /// An id value inside a block, on the terms of [`typed_object`](Self::typed_object).
+  fn id(value: IdValue<&'src str>) -> Option<Self::Value>;
+
+  /// Whether `value` is an enum value: a path, which in a schema position outside a block an object
+  /// right after it makes a typed object's type. The walk asks it only where
+  /// [`SCHEMA_FORMS`](Self::SCHEMA_FORMS) holds.
+  fn is_enum(value: &Self::Value) -> bool;
 }
 
 /// A value position that admits a variable — an argument, a collection member, or an object field
@@ -3816,6 +4038,10 @@ impl<'src> ValueGrammar<'src> for Executable {
     InputValue::Float(FloatValue::new(span, value))
   }
 
+  fn character(span: SimpleSpan, value: LitChar<&'src str>) -> Self::Value {
+    InputValue::Char(CharValue::new(span, value))
+  }
+
   fn string(value: StringValue<&'src str>) -> Self::Value {
     InputValue::String(value)
   }
@@ -3830,6 +4056,10 @@ impl<'src> ValueGrammar<'src> for Executable {
 
   fn enumeration(value: EnumValue<&'src str>) -> Self::Value {
     InputValue::Enum(value)
+  }
+
+  fn is_enum(value: &Self::Value) -> bool {
+    matches!(value, InputValue::Enum(_))
   }
 
   fn list(span: SimpleSpan, values: Vec<Self::Value>) -> Self::Value {
@@ -3854,6 +4084,36 @@ impl<'src> ValueGrammar<'src> for Executable {
 
   fn entry(span: SimpleSpan, key: Self::Value, value: Self::Value) -> Self::Entry {
     MapEntry::new(span, key, value)
+  }
+
+  const SCHEMA_FORMS: bool = false;
+
+  fn typed_object(
+    _: SimpleSpan,
+    _: TypePath<&'src str>,
+    _: Vec<Self::Field>,
+  ) -> Option<Self::Value> {
+    None
+  }
+
+  fn typed(_: SimpleSpan, _: TypePath<&'src str>, _: Self::Value) -> Option<Self::Value> {
+    None
+  }
+
+  fn block(_: SimpleSpan, _: Self::Value) -> Option<Self::Value> {
+    None
+  }
+
+  fn paren(_: SimpleSpan, _: Self::Value) -> Option<Self::Value> {
+    None
+  }
+
+  fn bytes(_: BytesValue<&'src str>) -> Option<Self::Value> {
+    None
+  }
+
+  fn id(_: IdValue<&'src str>) -> Option<Self::Value> {
+    None
   }
 }
 
@@ -3881,6 +4141,10 @@ impl<'src> ValueGrammar<'src> for Constant {
     ConstInputValue::Float(FloatValue::new(span, value))
   }
 
+  fn character(span: SimpleSpan, value: LitChar<&'src str>) -> Self::Value {
+    ConstInputValue::Char(CharValue::new(span, value))
+  }
+
   fn string(value: StringValue<&'src str>) -> Self::Value {
     ConstInputValue::String(value)
   }
@@ -3895,6 +4159,10 @@ impl<'src> ValueGrammar<'src> for Constant {
 
   fn enumeration(value: EnumValue<&'src str>) -> Self::Value {
     ConstInputValue::Enum(value)
+  }
+
+  fn is_enum(value: &Self::Value) -> bool {
+    matches!(value, ConstInputValue::Enum(_))
   }
 
   fn list(span: SimpleSpan, values: Vec<Self::Value>) -> Self::Value {
@@ -3919,6 +4187,147 @@ impl<'src> ValueGrammar<'src> for Constant {
 
   fn entry(span: SimpleSpan, key: Self::Value, value: Self::Value) -> Self::Entry {
     ConstMapEntry::new(span, key, value)
+  }
+
+  const SCHEMA_FORMS: bool = false;
+
+  fn typed_object(
+    _: SimpleSpan,
+    _: TypePath<&'src str>,
+    _: Vec<Self::Field>,
+  ) -> Option<Self::Value> {
+    None
+  }
+
+  fn typed(_: SimpleSpan, _: TypePath<&'src str>, _: Self::Value) -> Option<Self::Value> {
+    None
+  }
+
+  fn block(_: SimpleSpan, _: Self::Value) -> Option<Self::Value> {
+    None
+  }
+
+  fn paren(_: SimpleSpan, _: Self::Value) -> Option<Self::Value> {
+    None
+  }
+
+  fn bytes(_: BytesValue<&'src str>) -> Option<Self::Value> {
+    None
+  }
+
+  fn id(_: IdValue<&'src str>) -> Option<Self::Value> {
+    None
+  }
+}
+
+/// A schema position: a constant position of a type-system definition or extension, which is a
+/// member's default and an argument of each directive such a definition applies.
+///
+/// It answers everything [`Constant`] answers, a variable's refusal included, and reads the typed
+/// forms besides.
+struct Schema;
+
+impl<'src> ValueGrammar<'src> for Schema {
+  type Value = ConstInputValue<&'src str>;
+  type Field = ConstObjectField<&'src str>;
+  type Entry = ConstMapEntry<&'src str>;
+
+  fn variable(
+    parent: Node<'_>,
+    node: Node<'_>,
+    source: &'src str,
+  ) -> Out<(Self::Value, TextRange)> {
+    <Constant as ValueGrammar<'src>>::variable(parent, node, source)
+  }
+
+  fn int(span: SimpleSpan, value: LitInt<&'src str>) -> Self::Value {
+    <Constant as ValueGrammar<'src>>::int(span, value)
+  }
+
+  fn float(span: SimpleSpan, value: LitFloat<&'src str>) -> Self::Value {
+    <Constant as ValueGrammar<'src>>::float(span, value)
+  }
+
+  fn character(span: SimpleSpan, value: LitChar<&'src str>) -> Self::Value {
+    <Constant as ValueGrammar<'src>>::character(span, value)
+  }
+
+  fn string(value: StringValue<&'src str>) -> Self::Value {
+    <Constant as ValueGrammar<'src>>::string(value)
+  }
+
+  fn boolean(value: BooleanValue<&'src str>) -> Self::Value {
+    <Constant as ValueGrammar<'src>>::boolean(value)
+  }
+
+  fn null(span: SimpleSpan, text: &'src str) -> Self::Value {
+    <Constant as ValueGrammar<'src>>::null(span, text)
+  }
+
+  fn enumeration(value: EnumValue<&'src str>) -> Self::Value {
+    <Constant as ValueGrammar<'src>>::enumeration(value)
+  }
+
+  fn is_enum(value: &Self::Value) -> bool {
+    <Constant as ValueGrammar<'src>>::is_enum(value)
+  }
+
+  fn list(span: SimpleSpan, values: Vec<Self::Value>) -> Self::Value {
+    <Constant as ValueGrammar<'src>>::list(span, values)
+  }
+
+  fn set(span: SimpleSpan, values: Vec<Self::Value>) -> Self::Value {
+    <Constant as ValueGrammar<'src>>::set(span, values)
+  }
+
+  fn map(span: SimpleSpan, entries: Vec<Self::Entry>) -> Self::Value {
+    <Constant as ValueGrammar<'src>>::map(span, entries)
+  }
+
+  fn object(span: SimpleSpan, fields: Vec<Self::Field>) -> Self::Value {
+    <Constant as ValueGrammar<'src>>::object(span, fields)
+  }
+
+  fn field(span: SimpleSpan, name: Name<&'src str>, value: Self::Value) -> Self::Field {
+    <Constant as ValueGrammar<'src>>::field(span, name, value)
+  }
+
+  fn entry(span: SimpleSpan, key: Self::Value, value: Self::Value) -> Self::Entry {
+    <Constant as ValueGrammar<'src>>::entry(span, key, value)
+  }
+
+  const SCHEMA_FORMS: bool = true;
+
+  fn typed_object(
+    span: SimpleSpan,
+    ty: TypePath<&'src str>,
+    fields: Vec<Self::Field>,
+  ) -> Option<Self::Value> {
+    Some(ConstInputValue::TypedObject(Box::new(
+      TypedObjectValue::new(span, ty, Nested::new(fields)),
+    )))
+  }
+
+  fn typed(span: SimpleSpan, ty: TypePath<&'src str>, value: Self::Value) -> Option<Self::Value> {
+    Some(ConstInputValue::Typed(Nest::new(TypedValue::new(
+      span, ty, value,
+    ))))
+  }
+
+  fn block(span: SimpleSpan, value: Self::Value) -> Option<Self::Value> {
+    Some(ConstInputValue::Block(ConstBlock::new(span, value)))
+  }
+
+  fn paren(span: SimpleSpan, value: Self::Value) -> Option<Self::Value> {
+    Some(ConstInputValue::Paren(ParenValue::new(span, value)))
+  }
+
+  fn bytes(value: BytesValue<&'src str>) -> Option<Self::Value> {
+    Some(ConstInputValue::Bytes(value))
+  }
+
+  fn id(value: IdValue<&'src str>) -> Option<Self::Value> {
+    Some(ConstInputValue::Id(value))
   }
 }
 
@@ -3994,6 +4403,10 @@ struct ValueFrame<'g, 'src, G: ValueGrammar<'src>> {
   cursor: Cursor<'g>,
   /// What has been folded so far, and which container this is.
   built: Built<'g, 'src, G>,
+  /// Whether what this container holds stands inside a `const { … }` block: a block's and a
+  /// parenthesis's operand, and every member of a container inside one, each an
+  /// [`Expression`](SyntaxKind::Expression), with a `,` between two members.
+  in_block: bool,
 }
 
 /// A container's accumulator.
@@ -4005,6 +4418,25 @@ enum Built<'g, 'src, G: ValueGrammar<'src>> {
   Object(BuiltObject<'g, 'src, G>),
   /// A `MapValue`'s finished entries, and the entry one of whose halves is being built below.
   Map(BuiltMap<'g, 'src, G>),
+  /// A `TypedObjectValue`'s type path, its finished fields, and the field whose value is being
+  /// built below.
+  TypedObject(BuiltTypedObject<'g, 'src, G>),
+  /// A `TypedValue`'s type path, while its one value is built below.
+  Typed(TypePath<&'src str>),
+  /// A `ConstBlock`, while the operand its expression holds is built below.
+  Block,
+  /// A `ParenValue`, while the operand its expression holds is built below.
+  Paren,
+}
+
+/// A `TypedObjectValue`'s accumulator: [`Built::TypedObject`]'s payload.
+struct BuiltTypedObject<'g, 'src, G: ValueGrammar<'src>> {
+  /// The type path the object is of, read before the first field.
+  ty: TypePath<&'src str>,
+  /// The fields finished so far, in document order.
+  fields: Vec<G::Field>,
+  /// The field whose value is being built below.
+  open: OpenField<'g, 'src>,
 }
 
 /// An `ObjectValue`'s accumulator: [`Built::Object`]'s payload.
@@ -4057,21 +4489,26 @@ struct NextValue<'g> {
 fn next_field<'g, 'src>(
   cursor: &mut Cursor<'g>,
   source: &'src str,
+  in_block: bool,
 ) -> Out<Option<OpenField<'g, 'src>>> {
   match cursor.opt_node(K::ObjectField) {
-    Some(child) => open_object_field(child, source).map(Some),
+    Some(child) => open_object_field(child, source, in_block).map(Some),
     None => Ok(None),
   }
 }
 
-/// An `ObjectField` read as far as its value.
-fn open_object_field<'g, 'src>(node: Node<'g>, source: &'src str) -> Out<OpenField<'g, 'src>> {
+/// An `ObjectField` read as far as its value, which inside a block is the expression that holds it.
+fn open_object_field<'g, 'src>(
+  node: Node<'g>,
+  source: &'src str,
+  in_block: bool,
+) -> Out<OpenField<'g, 'src>> {
   // `Name : Value` — the value is the last constituent, so everything else is read before the
   // descent and only the fold travels.
   let mut cursor = Cursor::new(node);
   let name = cursor.name_token(source, "a field name")?;
   cursor.token(K::Colon, "the `:` before a field's value")?;
-  let pending = cursor.one_of(&VALUE_KINDS, "a value")?;
+  let pending = cursor.one_of(member_kinds(in_block), "a value")?;
   cursor.end()?;
   Ok(OpenField {
     node,
@@ -4101,23 +4538,28 @@ fn close_field<'src, G: ValueGrammar<'src>>(
 /// The next entry of a map value, with the tokens passed on the way folded in.
 fn next_entry<'g, 'src, G: ValueGrammar<'src>>(
   cursor: &mut Cursor<'g>,
+  in_block: bool,
 ) -> Out<Option<OpenEntry<'g, 'src, G>>> {
   match cursor.opt_node(K::MapEntry) {
-    Some(child) => open_map_entry(child).map(Some),
+    Some(child) => open_map_entry(child, in_block).map(Some),
     None => Ok(None),
   }
 }
 
-/// A `MapEntry` read as far as its key, with the value half recorded for afterwards.
+/// A `MapEntry` read as far as its key, with the value half recorded for afterwards. Inside a
+/// block each half is the expression that holds it.
 ///
 /// **Positional, and forced to be**: both halves are full values with nothing between them but the
 /// `=>`, so an entry's key is its first node child and its value is the one after.
-fn open_map_entry<'g, 'src, G: ValueGrammar<'src>>(node: Node<'g>) -> Out<OpenEntry<'g, 'src, G>> {
+fn open_map_entry<'g, 'src, G: ValueGrammar<'src>>(
+  node: Node<'g>,
+  in_block: bool,
+) -> Out<OpenEntry<'g, 'src, G>> {
   // `Value => Value`
   let mut cursor = Cursor::new(node);
-  let key = cursor.one_of(&VALUE_KINDS, "a key")?;
+  let key = cursor.one_of(member_kinds(in_block), "a key")?;
   cursor.token(K::FatArrow, "the `=>` between a key and a value")?;
-  let value = cursor.one_of(&VALUE_KINDS, "a value")?;
+  let value = cursor.one_of(member_kinds(in_block), "a value")?;
   cursor.end()?;
   Ok(OpenEntry::Key(OpenKey {
     node,
@@ -4144,6 +4586,9 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
   source: &'src str,
 ) -> Out<(G::Value, TextRange)> {
   let (mut parent, mut node) = (parent, node);
+  // Whether `node` stands inside a `const { … }` block: the frame it was reached from says so, and
+  // a block or a parenthesis says so of everything below it.
+  let mut in_block = frames.last().is_some_and(|frame| frame.in_block);
   loop {
     match node.kind() {
       K::VariableValue => return G::variable(parent, node, source),
@@ -4153,7 +4598,7 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
           span,
           range: extent,
         } = leaf(node, source, K::Int, "an integer literal")?;
-        return Ok((G::int(span, int_lit(text, span)?), extent));
+        return Ok((G::int(span, int_lit(text, span, in_block)?), extent));
       }
       K::FloatValue => {
         let LeafText {
@@ -4161,7 +4606,15 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
           span,
           range: extent,
         } = leaf(node, source, K::Float, "a float literal")?;
-        return Ok((G::float(span, float_lit(text, span)?), extent));
+        return Ok((G::float(span, float_lit(text, span, in_block)?), extent));
+      }
+      K::CharValue => {
+        let LeafText {
+          text,
+          span,
+          range: extent,
+        } = leaf(node, source, K::Char, "a character literal")?;
+        return Ok((G::character(span, char_lit(text, span)?), extent));
       }
       K::StringValue => {
         let (string, extent) = string_literal(node, source)?;
@@ -4193,6 +4646,115 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
         let (value, extent) = enum_value(node, source)?;
         return Ok((G::enumeration(value), extent));
       }
+      // A schema position's forms. Under any other grammar the node falls to the refusal below.
+      K::TypedObjectValue if G::SCHEMA_FORMS => {
+        // `TypePath { ObjectField* }` — the type path read whole, then a field list as an
+        // object's is, each field's value one descent.
+        let mut cursor = Cursor::new(node);
+        let ty_node = cursor.node(K::TypePath, "the type a typed object names")?;
+        let ty = cursor.keep(typed_form_type(ty_node, source, true)?);
+        cursor.token(K::LBrace, "the `{` a typed object opens with")?;
+        match next_field(&mut cursor, source, in_block)? {
+          Some(open) => {
+            let (owner, first) = (open.node, open.pending);
+            frames.push(ValueFrame {
+              cursor,
+              built: Built::TypedObject(BuiltTypedObject {
+                ty,
+                fields: Vec::new(),
+                open,
+              }),
+              in_block,
+            });
+            parent = owner;
+            node = first;
+          }
+          None => {
+            let range = close_container(&mut cursor)?;
+            let built = G::typed_object(to_span(range), ty, Vec::new())
+              .ok_or_else(|| unexpected(parent, K::TypedObjectValue, node.text_range()))?;
+            return Ok((built, range));
+          }
+        }
+      }
+      K::TypedValue if G::SCHEMA_FORMS => {
+        // `TypePath ( Value )` — the type path read whole, then the one value, one descent.
+        let mut cursor = Cursor::new(node);
+        let ty_node = cursor.node(K::TypePath, "the type a typed value names")?;
+        let ty = cursor.keep(typed_form_type(ty_node, source, false)?);
+        cursor.token(K::LParen, "the `(` a typed value opens with")?;
+        let first = cursor.one_of(member_kinds(in_block), "the value a typed value holds")?;
+        frames.push(ValueFrame {
+          cursor,
+          built: Built::Typed(ty),
+          in_block,
+        });
+        parent = node;
+        node = first;
+      }
+      K::ConstBlock if G::SCHEMA_FORMS => {
+        // `const { Expression }` — the keyword and the brace, and then the operand the one
+        // expression holds, one descent. The expression has no image: it projects to its operand.
+        let mut cursor = Cursor::new(node);
+        cursor.keyword(ContextualKeyword::Const, "the `const` a block opens with")?;
+        cursor.token(K::LBrace, "the `{` after a block's `const`")?;
+        let expression = cursor.node(K::Expression, "the expression a block holds")?;
+        let operand = expression_operand(expression)?;
+        frames.push(ValueFrame {
+          cursor,
+          built: Built::Block,
+          in_block: true,
+        });
+        in_block = true;
+        parent = expression;
+        node = operand;
+      }
+      // A parenthesis stands inside a block alone, and so do bytes and an id: anywhere else each
+      // falls to the refusal below.
+      K::ParenValue if in_block => {
+        // `( Expression )` — the bracket, and then the operand the one expression holds.
+        let mut cursor = Cursor::new(node);
+        cursor.token(K::LParen, "the `(` a parenthesis opens with")?;
+        let expression = cursor.node(K::Expression, "the expression a parenthesis holds")?;
+        let operand = expression_operand(expression)?;
+        frames.push(ValueFrame {
+          cursor,
+          built: Built::Paren,
+          in_block: true,
+        });
+        parent = expression;
+        node = operand;
+      }
+      // A member of a container inside a block: the one operand its expression holds, as a
+      // block's own expression projects. An expression anywhere else falls to the refusal below.
+      K::Expression if in_block => {
+        let operand = expression_operand(node)?;
+        parent = node;
+        node = operand;
+      }
+      K::BytesValue | K::IdValue if in_block => {
+        let LeafText {
+          text,
+          span,
+          range: extent,
+        } = leaf(node, source, K::PrefixedString, "a prefixed string")?;
+        let literal = prefixed_lit(text, span)?;
+        // The node's kind and the literal's prefix say the same thing, or the tree holds a
+        // literal its production never put under that node.
+        let built = match (node.kind(), literal.prefix()) {
+          (K::BytesValue, StrPrefix::Bytes) => G::bytes(BytesValue::new(span, literal)),
+          (K::IdValue, StrPrefix::Id) => G::id(IdValue::new(span, literal)),
+          _ => {
+            return Err(ProjectError::new(
+              ProjectErrorKind::MalformedToken(K::PrefixedString),
+              to_range(node.text_range()),
+            ));
+          }
+        };
+        return built
+          .map(|value| (value, extent))
+          .ok_or_else(|| unexpected(parent, node.kind(), node.text_range()));
+      }
       K::ListValue | K::SetValue | K::ObjectValue | K::MapValue => {
         // `[ Value* ]`, `set!{ Value* }`, `{ ObjectField* }`, `map!{ MapEntry* }` — the opener
         // here, each member one descent, and the closer when the members run out.
@@ -4217,9 +4779,9 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
         }
         let opened = match node.kind() {
           K::ListValue | K::SetValue => cursor
-            .opt_one_of(&VALUE_KINDS)
+            .opt_one_of(member_kinds(in_block))
             .map(|first| (node, first, Built::Values(Vec::new()))),
-          K::ObjectValue => next_field(&mut cursor, source)?.map(|open| {
+          K::ObjectValue => next_field(&mut cursor, source, in_block)?.map(|open| {
             (
               open.node,
               open.pending,
@@ -4229,7 +4791,7 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
               }),
             )
           }),
-          _ => next_entry::<G>(&mut cursor)?.map(|open| {
+          _ => next_entry::<G>(&mut cursor, in_block)?.map(|open| {
             (
               open.node(),
               open.pending(),
@@ -4242,7 +4804,11 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
         };
         match opened {
           Some((owner, first, built)) => {
-            frames.push(ValueFrame { cursor, built });
+            frames.push(ValueFrame {
+              cursor,
+              built,
+              in_block,
+            });
             parent = owner;
             node = first;
           }
@@ -4264,12 +4830,14 @@ fn open_value_chain<'g, 'src, G: ValueGrammar<'src>>(
   }
 }
 
-/// The closer of a container value whose members have run out: `]` for a list, `}` for the
-/// other three — **lenient**, because `unclosed_list` and `unclosed_object` build each of the four
-/// hole-free without it and the closer has no AST image — and then nothing left over.
+/// The closer of a container value whose members have run out: `]` for a list, `)` for a typed
+/// value and a parenthesis, `}` for the other five — **lenient**, because `unclosed_list`,
+/// `unclosed_parens` and `unclosed_object` build each of the eight hole-free without it and the
+/// closer has no AST image — and then nothing left over.
 fn close_container(cursor: &mut Cursor<'_>) -> Out<TextRange> {
   match cursor.node.kind() {
     K::ListValue => cursor.opt_token(K::RBracket),
+    K::TypedValue | K::ParenValue => cursor.opt_token(K::RParen),
     _ => cursor.opt_token(K::RBrace),
   };
   cursor.finish("a token")
@@ -4284,17 +4852,36 @@ fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
   piece: TextRange,
   source: &'src str,
 ) -> Out<ResumedValue<'g, 'src, G>> {
-  let ValueFrame { mut cursor, built } = frame;
+  let ValueFrame {
+    mut cursor,
+    built,
+    in_block,
+  } = frame;
   let node = cursor.node;
   Ok(match built {
     Built::Values(mut values) => {
       cursor.extent.cover(piece);
+      let after_a_path = G::SCHEMA_FORMS && !in_block && G::is_enum(&value);
       values.push(value);
-      match cursor.opt_one_of(&VALUE_KINDS) {
+      let next = if past_separator(&mut cursor, in_block) {
+        cursor.opt_one_of(member_kinds(in_block))
+      } else {
+        None
+      };
+      // A path and an object right after it are one typed object in a schema position outside a
+      // block, where no `,` separates them, so both parsers build no list of the two.
+      if let Some(next) = next
+        && after_a_path
+        && next.kind() == K::ObjectValue
+      {
+        return Err(unexpected(node, K::ObjectValue, next.text_range()));
+      }
+      match next {
         Some(next) => {
           frames.push(ValueFrame {
             cursor,
             built: Built::Values(values),
+            in_block,
           });
           ResumedValue::Descend(NextValue {
             dispatch: node,
@@ -4316,12 +4903,18 @@ fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
       let (field, range) = close_field::<G>(open, value, piece)?;
       cursor.extent.cover(range);
       fields.push(field);
-      match next_field(&mut cursor, source)? {
+      let next = if past_separator(&mut cursor, in_block) {
+        next_field(&mut cursor, source, in_block)?
+      } else {
+        None
+      };
+      match next {
         Some(next) => {
           let (parent, pending) = (next.node, next.pending);
           frames.push(ValueFrame {
             cursor,
             built: Built::Object(BuiltObject { fields, open: next }),
+            in_block,
           });
           ResumedValue::Descend(NextValue {
             dispatch: parent,
@@ -4333,6 +4926,67 @@ fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
           ResumedValue::Done((G::object(to_span(range), fields), range))
         }
       }
+    }
+    Built::TypedObject(BuiltTypedObject {
+      ty,
+      mut fields,
+      open,
+    }) => {
+      let (field, range) = close_field::<G>(open, value, piece)?;
+      cursor.extent.cover(range);
+      fields.push(field);
+      let next = if past_separator(&mut cursor, in_block) {
+        next_field(&mut cursor, source, in_block)?
+      } else {
+        None
+      };
+      match next {
+        Some(next) => {
+          let (parent, pending) = (next.node, next.pending);
+          frames.push(ValueFrame {
+            cursor,
+            built: Built::TypedObject(BuiltTypedObject {
+              ty,
+              fields,
+              open: next,
+            }),
+            in_block,
+          });
+          ResumedValue::Descend(NextValue {
+            dispatch: parent,
+            value: pending,
+          })
+        }
+        None => {
+          let range = close_container(&mut cursor)?;
+          let built = G::typed_object(to_span(range), ty, fields)
+            .ok_or_else(|| unexpected(node, K::TypedObjectValue, range))?;
+          ResumedValue::Done((built, range))
+        }
+      }
+    }
+    // A block's or a parenthesis's operand came back, and the closer is all that is left.
+    Built::Block => {
+      cursor.extent.cover(piece);
+      let range = close_container(&mut cursor)?;
+      let built =
+        G::block(to_span(range), value).ok_or_else(|| unexpected(node, K::ConstBlock, range))?;
+      ResumedValue::Done((built, range))
+    }
+    Built::Paren => {
+      cursor.extent.cover(piece);
+      let range = close_container(&mut cursor)?;
+      let built =
+        G::paren(to_span(range), value).ok_or_else(|| unexpected(node, K::ParenValue, range))?;
+      ResumedValue::Done((built, range))
+    }
+    // The one value came back, and the `)` is all that is left.
+    Built::Typed(ty) => {
+      cursor.extent.cover(piece);
+      let range = close_container(&mut cursor)?;
+      let built = G::typed(to_span(range), ty, value)
+        .ok_or_else(|| unexpected(node, K::TypedValue, range))?;
+      ResumedValue::Done((built, range))
     }
     Built::Map(BuiltMap { mut entries, open }) => match open {
       // The key came back. It rides on the frame while the value half is built.
@@ -4355,6 +5009,7 @@ fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
                 value: value_node,
               }),
             }),
+            in_block,
           });
           ResumedValue::Descend(NextValue {
             dispatch: entry,
@@ -4370,9 +5025,27 @@ fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
       }) => {
         inner.cover(piece);
         let range = inner.range(entry, "a token")?;
+        let after_a_path = G::SCHEMA_FORMS && !in_block && G::is_enum(&value);
         entries.push(G::entry(to_span(range), key, value));
         cursor.extent.cover(range);
-        match next_entry::<G>(&mut cursor)? {
+        let next = if past_separator(&mut cursor, in_block) {
+          next_entry::<G>(&mut cursor, in_block)?
+        } else {
+          None
+        };
+        // An entry's value that is a path, and the next entry's key that is an object, are one
+        // typed object outside a block: both parsers read the entry's value on through the object.
+        if let Some(next) = &next
+          && after_a_path
+          && next.pending().kind() == K::ObjectValue
+        {
+          return Err(unexpected(
+            next.node(),
+            K::ObjectValue,
+            next.pending().text_range(),
+          ));
+        }
+        match next {
           Some(next) => {
             let (parent, pending) = (next.node(), next.pending());
             frames.push(ValueFrame {
@@ -4381,6 +5054,7 @@ fn resume_value<'g, 'src, G: ValueGrammar<'src>>(
                 entries,
                 open: next,
               }),
+              in_block,
             });
             ResumedValue::Descend(NextValue {
               dispatch: parent,
@@ -4424,23 +5098,32 @@ fn value<'src>(node: Node<'_>, source: &'src str) -> Out<(InputValue<&'src str>,
   value_tree::<Executable>(node, node, source)
 }
 
-/// A constant value position, where the AST's own type system forbids a variable.
+/// A constant value position, where the AST's own type system forbids a variable, read by the
+/// grammar `G` names: [`Schema`] in a type-system definition or extension, and [`Constant`] in an
+/// executable document.
 ///
 /// `parent` is the node whose dispatch reached `node`. A green tree carries no parent pointer, and
 /// the caller's own frame is where the one the refusal names comes from.
-fn const_value<'src>(
+fn const_value<'src, G>(
   parent: Node<'_>,
   node: Node<'_>,
   source: &'src str,
-) -> Out<(ConstInputValue<&'src str>, TextRange)> {
-  value_tree::<Constant>(parent, node, source)
+) -> Out<(ConstInputValue<&'src str>, TextRange)>
+where
+  G: ValueGrammar<'src, Value = ConstInputValue<&'src str>>,
+{
+  value_tree::<G>(parent, node, source)
 }
 
-/// `= Value[Const]`, which is const in both positions the grammar puts it in.
-fn optional_default_value<'src>(
+/// `= Value[Const]`, which is const in both positions the grammar puts it in: a member's default,
+/// read by [`Schema`], and a variable's, read by [`Constant`].
+fn optional_default_value<'src, G>(
   default: Option<Node<'_>>,
   source: &'src str,
-) -> Out<Option<(DefaultInputValue<&'src str>, TextRange)>> {
+) -> Out<Option<(DefaultInputValue<&'src str>, TextRange)>>
+where
+  G: ValueGrammar<'src, Value = ConstInputValue<&'src str>>,
+{
   let Some(default) = default else {
     return Ok(None);
   };
@@ -4449,7 +5132,7 @@ fn optional_default_value<'src>(
   cursor.token(K::Equal, "the `=` a default opens with")?;
   let value_node = cursor.one_of(&VALUE_KINDS, "a value")?;
   cursor.end()?;
-  let value = cursor.keep(const_value(default, value_node, source)?);
+  let value = cursor.keep(const_value::<G>(default, value_node, source)?);
   let extent = cursor.range("a token")?;
   Ok(Some((
     DefaultInputValue::new(to_span(extent), value),
@@ -4995,8 +5678,11 @@ fn variable_definition<'src>(
   let (description, described) = hoisted_description(description_token, source)?;
   let variable = cursor.keep(variable_value(variable_node, source)?);
   let ty = cursor.keep(ty(type_node, source)?);
-  let default_value = cursor.keep_opt(optional_default_value(default_node, source)?);
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let default_value = cursor.keep_opt(optional_default_value::<Constant>(default_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Constant>(
+    directives_node,
+    source,
+  )?);
 
   // The one described node below document level whose inner span excludes the description — see
   // the module header for the three that do not.
@@ -5178,7 +5864,10 @@ fn field_definition<'src>(
   let arguments_definition =
     cursor.keep_opt(optional_arguments_definition(arguments_node, source)?);
   let ty = cursor.keep(ty(type_node, source)?);
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
 
   let extent = cursor.range("a token")?;
   let span = to_span(extent);
@@ -5245,8 +5934,11 @@ fn input_value_definition<'src>(
 
   let (description, _) = hoisted_description(description_token, source)?;
   let ty = cursor.keep(ty(type_node, source)?);
-  let default_value = cursor.keep_opt(optional_default_value(default_node, source)?);
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let default_value = cursor.keep_opt(optional_default_value::<Schema>(default_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
 
   let extent = cursor.range("a token")?;
   let span = to_span(extent);
@@ -5351,7 +6043,10 @@ fn enum_value_definition<'src>(
   cursor.end()?;
 
   let (description, _) = hoisted_description(description_token, source)?;
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
 
   let extent = cursor.range("a token")?;
   let span = to_span(extent);
@@ -5384,7 +6079,10 @@ fn scalar_type_definition<'src>(
   let (description, described) = hoisted_description(description_token, source)?;
   let name = cursor.keep(definition_name(name_node, source)?);
   let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
   let where_clause = cursor.keep_opt(optional_where_clause(where_node, source)?);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
@@ -5420,7 +6118,10 @@ fn object_type_definition<'src>(
   let (description, described) = hoisted_description(description_token, source)?;
   let name = cursor.keep(definition_name(name_node, source)?);
   let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
   let fields = optional_constrained_before(
     node,
     optional_where_clause(where_node, source)?,
@@ -5462,7 +6163,10 @@ fn interface_type_definition<'src>(
   let (description, described) = hoisted_description(description_token, source)?;
   let name = cursor.keep(definition_name(name_node, source)?);
   let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
   let fields = optional_constrained_before(
     node,
     optional_where_clause(where_node, source)?,
@@ -5504,7 +6208,10 @@ fn union_type_definition<'src>(
   let (description, described) = hoisted_description(description_token, source)?;
   let name = cursor.keep(definition_name(name_node, source)?);
   let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
   let members = optional_constrained_after(
     node,
     optional_union_members(members_node, source)?,
@@ -5545,7 +6252,10 @@ fn enum_type_definition<'src>(
   let (description, described) = hoisted_description(description_token, source)?;
   let name = cursor.keep(definition_name(name_node, source)?);
   let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
   let values = cursor.keep_opt(optional_enum_values(values_node, source)?);
 
   let (outer, inner) = described_extents(node, cursor.extent, described)?;
@@ -5575,7 +6285,10 @@ fn input_object_type_definition<'src>(
   let (description, described) = hoisted_description(description_token, source)?;
   let name = cursor.keep(definition_name(name_node, source)?);
   let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
   let fields = optional_constrained_before(
     node,
     optional_where_clause(where_node, source)?,
@@ -5626,7 +6339,10 @@ fn directive_definition<'src>(
   let name = cursor.keep(definition_name(name_node, source)?);
   let arguments_definition =
     cursor.keep_opt(optional_arguments_definition(arguments_node, source)?);
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
   // The other site this grammar puts the clause after the thing it constrains.
   let locations = cursor.keep(constrained_after(
     directive_locations(locations_node)?,
@@ -5693,7 +6409,10 @@ fn schema_definition<'src>(
   )?;
 
   let (description, described) = hoisted_description(description_token, source)?;
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
   let roots = cursor.keep(root_operation_types(roots_node, source)?);
 
   cursor.end()?;
@@ -5847,7 +6566,10 @@ fn extension_parts<'src>(node: Node<'_>, source: &'src str) -> Out<ExtensionPart
 
   let name = cursor.keep(extension_name(name_node, source)?);
   let implements = cursor.keep_opt(optional_implements(implements_node, source)?);
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
 
   // At most one tail is in any kind's sequence, so the three below cannot both be `Some` and the
   // clause belongs to whichever one is here.
@@ -6057,7 +6779,10 @@ fn schema_extension<'src>(
   let directives_node = cursor.opt_node(K::Directives);
   let roots_node = cursor.opt_node(K::RootOperationTypesDefinition);
 
-  let directives = cursor.keep_optional(optional_const_directives(directives_node, source)?);
+  let directives = cursor.keep_optional(optional_const_directives::<Schema>(
+    directives_node,
+    source,
+  )?);
   let roots = match roots_node {
     Some(block) => Some(cursor.keep(root_operation_types(block, source)?)),
     None => None,
@@ -6096,7 +6821,10 @@ fn directive_extension<'src>(
   let name = cursor.keep(extension_name(name_node, source)?);
   // The extension's only tail, so the grammar makes it mandatory.
   let directives = cursor
-    .keep_optional(optional_const_directives(directives_node, source)?)
+    .keep_optional(optional_const_directives::<Schema>(
+      directives_node,
+      source,
+    )?)
     .ok_or_else(|| missing(node, "the directives a directive extension must add"))?;
   let extent = cursor.range("a token")?;
   Ok((

@@ -50,7 +50,7 @@
 use std::{collections::BTreeSet, path::PathBuf};
 
 use smear::{
-  lexer::graphqlx::syntactic::SyntacticLexer,
+  lexer::graphqlx::syntactic::{SyntacticLexer, SyntacticToken},
   parser::graphqlx::{
     GraphQLx,
     ast::Document,
@@ -128,42 +128,115 @@ fn parse_recovering(src: &str) -> Result<Document<&str>, GraphqlxErrors<&str>> {
   .parse_str(src)
 }
 
+/// The outermost `const { … }` blocks of `src`, each its start and its end, read off the AST's
+/// `ConstBlock` spans.
+///
+/// A block's region is lexed in the block's mode, and only a parser can say where one is: this gate
+/// is built without the lossless layer, so the AST says it, through the fail-fast parse or, for an
+/// entry that one rejects, the recovering one. A source neither parse accepts has none.
+fn block_extents(src: &str) -> Vec<(usize, usize)> {
+  let dump = match parse(src).or_else(|_| parse_recovering(src)) {
+    Ok(document) => format!("{document:#?}"),
+    Err(_) => return Vec::new(),
+  };
+  let blocks: Vec<(usize, usize)> = spans_of(&dump)
+    .into_iter()
+    .filter(|span| span.owner == "ConstBlock")
+    .map(|span| (span.start, span.end))
+    .collect();
+  blocks
+    .iter()
+    .copied()
+    .filter(|&(start, end)| {
+      !blocks
+        .iter()
+        .any(|&(s, e)| (s, e) != (start, end) && s <= start && end <= e)
+    })
+    .collect()
+}
+
+/// Every token's span, lexed as the parser lexes it: the lexer enters a block's mode after the `{`
+/// of each outermost block of [`block_extents`] and leaves it after the block's `}`, and lexes
+/// everything else from the default state. The first lexer error is the answer.
+fn lexed(src: &str) -> Result<Vec<SimpleSpan>, String> {
+  let blocks = block_extents(src);
+  let mut lexer = SyntacticLexer::<str>::new(src);
+  let mut out = Vec::new();
+  // The end of the block whose mode the lexer is in.
+  let mut inside: Option<usize> = None;
+  while let Some(result) = lexer.lex() {
+    let token = result.map_err(|e| format!("{e:?}"))?;
+    let span = lexer.span();
+    match inside {
+      None => {
+        if matches!(token, SyntacticToken::LBrace)
+          && let Some(&(_, end)) = blocks
+            .iter()
+            .find(|(start, end)| *start <= span.start() && span.end() < *end)
+        {
+          lexer.state_mut().enter_const_block();
+          inside = Some(end);
+        }
+      }
+      Some(end) => {
+        if span.end() == end {
+          lexer.state_mut().leave_const_block();
+          inside = None;
+        }
+      }
+    }
+    out.push(span);
+  }
+  Ok(out)
+}
+
 /// Does the **lexer** accept `src` end to end?
 ///
 /// The `invalid_lex_*` class does not, and for those there are no token extents to measure a span
 /// against — the yardstick itself is missing.
 fn lexes(src: &str) -> bool {
-  let mut lexer = SyntacticLexer::<str>::new(src);
-  while let Some(result) = lexer.lex() {
-    if result.is_err() {
-      return false;
-    }
-  }
-  true
+  lexed(src).is_ok()
 }
 
 /// Every token's start and end, from the **lexer** rather than from the tree under test.
 fn extents(src: &str) -> Extents {
-  let mut lexer = SyntacticLexer::<str>::new(src);
   let mut out = Extents::default();
-  while let Some(result) = lexer.lex() {
-    result.unwrap_or_else(|e| panic!("{src:?} must lex: {e:?}"));
-    out.starts.insert(lexer.span().start());
-    out.ends.insert(lexer.span().end());
+  for span in lexed(src).unwrap_or_else(|e| panic!("{src:?} must lex: {e}")) {
+    out.starts.insert(span.start());
+    out.ends.insert(span.end());
   }
   out
 }
 
 /// Every token boundary in `src`: offset 0, then the end of each token.
 fn boundaries(src: &str) -> Vec<usize> {
-  let mut lexer = SyntacticLexer::<str>::new(src);
   let mut out = vec![0usize];
-  while let Some(result) = lexer.lex() {
-    result.unwrap_or_else(|e| panic!("a corpus entry the sweep pads must lex: {e:?}"));
-    out.push(lexer.span().end());
-  }
+  out.extend(
+    lexed(src)
+      .unwrap_or_else(|e| panic!("a corpus entry the sweep pads must lex: {e}"))
+      .into_iter()
+      .map(|span| span.end()),
+  );
   out.dedup();
   out
+}
+
+/// The boundaries `pad` is injected at: every one of `marks`, but that **a comma is no padding
+/// inside a block** — between an outermost block's braces the lexer reads it as a separator.
+fn marks_for(src: &str, marks: &[usize], pad: &str) -> Vec<usize> {
+  if pad != "," {
+    return marks.to_vec();
+  }
+  let blocks = block_extents(src);
+  marks
+    .iter()
+    .copied()
+    .filter(|&mark| {
+      !blocks
+        .iter()
+        .any(|&(start, end)| start < mark && mark < end)
+    })
+    .collect()
 }
 
 /// One half of the GraphQLx corpus, selected by file-name prefix, in a deterministic order.
@@ -429,6 +502,7 @@ fn trivia_injection_leaves_every_span_on_its_own_tokens() {
     compact_owners.extend(extent::owners(&compact_spans));
 
     for (form, pad) in ALPHABET {
+      let marks = marks_for(src, &marks, pad);
       let padded_src = inject(src, &marks, pad);
       assert_eq!(
         padded_src.len(),
@@ -619,6 +693,7 @@ fn recovered_spans_are_token_extents_over_the_invalid_corpus() {
 
     let marks = boundaries(src);
     for (form, pad) in ALPHABET {
+      let marks = marks_for(src, &marks, pad);
       let padded_src = inject(src, &marks, pad);
       assert_eq!(
         padded_src.len(),

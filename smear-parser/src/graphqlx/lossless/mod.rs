@@ -10,8 +10,9 @@
 //! - **A fourth balanced pair.** GraphQLx's `<>` is depth-counted by the lexer alongside `()`,
 //!   `[]` and `{}` (`smear-lexer/src/graphqlx/syntactic/mod.rs:807-814`), so the `unclosed` list
 //!   below has four entries and [`crate::graphqlx::error::Unclosed`] a fourth variant.
-//! - **A wider image space.** Ten images GraphQL has no counterpart for — `<`, `>`, `::`, `~`,
-//!   `..`, `^`, `=>`, `*`, `+`, `-` — which is why [`crate::graphqlx::kinds::SyntaxKind`] cannot be
+//! - **A wider image space.** Seventeen images GraphQL has no counterpart for — `<`, `>`, `::`,
+//!   `~`, `..`, `^`, `=>`, `*`, `+`, `-`, `/`, `%`, `<<`, `>>`, a separating `,`, a character
+//!   literal and a prefixed string — which is why [`crate::graphqlx::kinds::SyntaxKind`] cannot be
 //!   GraphQL's space with a tail appended, and why [`kind_map`] is not GraphQL's mapper with arms
 //!   added.
 //! - **A different expectation vocabulary.** The two dialects' `Expectation` enums agree on their
@@ -124,22 +125,22 @@ pub type TokenKind = LosslessTokenKind;
 /// This dialect's contextual-keyword projection — the door a production reads a keyword's
 /// *spelling* through, since every one of them arrives as an ordinary identifier token.
 ///
-/// GraphQLx has forty-five of them against GraphQL's thirty-nine: `use`, `mod`, `as`, `where`,
-/// `set` and `map` are keywords here and ordinary names there.
+/// GraphQLx has forty-six of them against GraphQL's thirty-nine: `use`, `mod`, `as`, `where`,
+/// `set`, `map` and `const` are keywords here and ordinary names there.
 pub type Keyword = smear_lexer::graphqlx::ContextualKeyword;
 
 /// [`GraphqlxLosslessLexer`], under the name the shared macros reach it by.
 #[allow(type_alias_bounds)]
 pub type Lexer<'inp, Src: Source<usize> + ?Sized> = GraphqlxLosslessLexer<'inp, Src>;
 
-/// The resource budget this dialect's lossless lex runs under — the Logos `Extras`, and the
-/// [`Lexer::State`](tokora::Lexer::State) the shared production bundle pins.
+/// The state this dialect's lossless lex runs under, which holds its resource budget — the Logos
+/// `Extras`, and the [`Lexer::State`](tokora::Lexer::State) the shared production bundle pins.
 ///
 /// Pinned rather than left as a projection because a production has to *read* it: the nesting
 /// ceiling a parse was configured with lives here, and this module's `descend` hands it to the
 /// parser-frame budget. Over a generic `Src` the projection has nothing to normalize against
 /// without the equality, exactly as the token's `Kind` does not.
-pub type LexerState = smear_lexer::limits::LosslessLimits;
+pub type LexerState = smear_lexer::graphqlx::lossless::LosslessState;
 
 /// [`GraphqlxLosslessToken`], under the name the shared macros reach it by.
 #[allow(type_alias_bounds)]
@@ -254,9 +255,32 @@ crate::lossless::lossless_error_impls! {
 /// and are reached from productions that name a value shape directly.
 ///
 /// The ten rows GraphQL has no counterpart for — `<`, `>`, `*`, `+`, `-`, `::`, `~`, `..`, `^`,
-/// `=>` — are the ten images that widened the kind space.
+/// `=>` — are ten of the seventeen images that widened the kind space. No production expects the
+/// other seven, `/`, `%`, `<<`, `>>`, a separating `,`, a character literal and a prefixed string,
+/// so they have no row.
+///
+/// A report through a head set answers [`Expectation::Unspecified`], whatever the set, but for five
+/// sets read by their contents: inside a `const { … }` block, what may follow an operand, which
+/// answers [`Expectation::OperatorOrSeparator`]; the two tokens a block opens with, offered where a
+/// schema position's value would be an expression, which answers [`Expectation::ConstBlock`]; and
+/// the `:`, the `=>` and the `{` a block's field, map entry and collection read rather than expect,
+/// which answer [`Expectation::Colon`], [`Expectation::FatArrow`] and [`Expectation::LBrace`] as a
+/// declined `expect` of each does. Each is what the syntactic layer's refusal there says.
 fn expectation_of(expected: Option<Expected<'_, LosslessTokenKind>>) -> Expectation {
   match expected {
+    Some(Expected::OneOf(set)) if set.as_slice() == recover::OPERATOR_OR_SEPARATOR_HEADS => {
+      Expectation::OperatorOrSeparator
+    }
+    Some(Expected::OneOf(set)) if set.as_slice() == recover::CONST_BLOCK_HEADS => {
+      Expectation::ConstBlock
+    }
+    Some(Expected::OneOf(set)) if set.as_slice() == recover::COLON_HEADS => Expectation::Colon,
+    Some(Expected::OneOf(set)) if set.as_slice() == recover::FAT_ARROW_HEADS => {
+      Expectation::FatArrow
+    }
+    Some(Expected::OneOf(set)) if set.as_slice() == recover::COLLECTION_BODY_HEADS => {
+      Expectation::LBrace
+    }
     Some(Expected::One(kind)) => match kind {
       LosslessTokenKind::Identifier => Expectation::Name,
       LosslessTokenKind::Int => Expectation::InputValue,
@@ -310,6 +334,9 @@ pub mod trivia;
 pub mod ty;
 pub mod use_tree;
 pub mod value;
+
+#[cfg(test)]
+mod tests;
 
 // The three document roots this suite parses, all at the same module level: the mixed one
 // (`parse_document`), the SDL-only one and the executable-only one. A consumer picks a root here,
