@@ -2,14 +2,16 @@ name: perf
 
 # ── THE MEASUREMENT LANE ────────────────────────────────────────────────────────────────────
 #
-# Two gates over one corpus: **peak allocation**, which is exact, and **wall clock**, which is
-# coarse. `ci/perf/run.sh` carries the design — both sides built and measured in one run, no
-# committed baseline — and `smear/benches/solo/perf/mod.rs` carries the workloads and why each
-# declares two sizes.
+# Three gates over one corpus: **peak allocation** and **instruction counts**, which are exact, and
+# **wall clock**, which is coarse. `ci/perf/run.sh` carries the design — both sides built and
+# measured in one run, no committed baseline — and `smear/benches/solo/perf/mod.rs` carries the
+# workloads and why each declares two sizes. The counts run in a job of their own, `instruction
+# counts (<image>)`, on two Linux images; its header below says why.
 #
 # A comparison needs no pull request. `gh workflow run perf.yml --ref <branch> -f base=<rev>` runs
-# `perf-against` alone: `ci/perf/run.sh --against <rev>`, that branch against the revision itself.
-# Without `-f base`, a dispatch runs `perf-floor`'s self-comparison, as a push to `main` does.
+# `perf-against` and the count job's two legs, each `ci/perf/run.sh --against <rev>`: that branch
+# against the revision itself. Without `-f base`, a dispatch runs the self-comparisons,
+# `perf-floor`'s and the count job's, as a push to `main` does.
 #
 # ── WHY A LANE OF ITS OWN AND NOT A JOB IN `CI` ─────────────────────────────────────────────
 #
@@ -29,9 +31,9 @@ name: perf
 #
 # ── ADVISORY FIRST, AND WHAT WOULD PROMOTE IT ───────────────────────────────────────────────
 #
-# Both gates are `continue-on-error: true` today. The criterion for making either required is
-# stated here so that promoting it is a decision somebody makes rather than a thing that never
-# happens:
+# Every gate is `continue-on-error: true` today. The criterion for making one required is stated
+# so that promoting it is a decision somebody makes rather than a thing that never happens. The
+# count gate's is per image and is in the `icount` job's header below; the other two are here:
 #
 #   * **The allocation gate** is promoted when the `perf-floor` job below has run `--self` on this
 #     runner on **ten consecutive trunk pushes** and reported a difference of exactly zero on every
@@ -46,9 +48,10 @@ name: perf
 #
 # ── PYTHON >= 3.9 ───────────────────────────────────────────────────────────────────────────
 #
-# `ci/perf/compare.py` and `ci/perf/exe_path.py` use nothing newer, which is deliberate: every
-# Python gate in `ci/` except `ci/miri_scope.py` is 3.9-safe, so a local run on macOS's
-# `/usr/bin/python3` works. GitHub's `ubuntu-latest` ships far newer and no setup step is needed.
+# `ci/perf/compare.py`, `ci/perf/icount.py` and `ci/perf/exe_path.py` use nothing newer, which is
+# deliberate: every Python gate in `ci/` except `ci/miri_scope.py` is 3.9-safe, so a local run on
+# macOS's `/usr/bin/python3` works. GitHub's Ubuntu images ship far newer and no setup step is
+# needed.
 
 # `push`/`pull_request` triggers and `paths-ignore` are deliberately identical to
 # `.github/workflows/ci.yml`, `windows.yml`, `macos.yml` and `miri.yml`; read the comment in
@@ -82,7 +85,8 @@ on:
       - 'docs/**.md'
       - '**.txt'
   workflow_dispatch:
-    # Empty, a dispatch is the self-comparison it always was. Set, it is `perf-against` alone.
+    # Empty, a dispatch is the self-comparison it always was. Set, it is `perf-against`, and the
+    # count job against the same revision.
     inputs:
       base:
         description: >-
@@ -133,7 +137,8 @@ jobs:
   #
   # One build of each side serves both instruments, which is why they share a job rather than
   # getting one each: the build is the expensive half and running it twice to separate two tables
-  # would double the lane's cost for a formatting preference.
+  # would double the lane's cost for a formatting preference. The counts are the exception, for
+  # reasons the `icount` job below gives, and this job stays on x86 alone.
   perf:
     name: perf
     if: github.event_name == 'pull_request'
@@ -167,9 +172,9 @@ jobs:
           ~/.cargo/git
           ${{ runner.temp }}/smear-perf/target-head
           ${{ runner.temp }}/smear-perf/target-base
-        key: ${{ runner.os }}-perf-${{ hashFiles('**/Cargo.toml') }}
+        key: ${{ runner.os }}-${{ runner.arch }}-perf-${{ hashFiles('**/Cargo.toml') }}
         restore-keys: |
-          ${{ runner.os }}-perf-
+          ${{ runner.os }}-${{ runner.arch }}-perf-
     - name: ci/perf/run.sh ${{ github.base_ref }}
       # `origin/` prefixed, because `actions/checkout` leaves the base branch as a REMOTE ref: a
       # bare `feat/proto` does not resolve in the checkout and `git merge-base` would exit
@@ -190,8 +195,9 @@ jobs:
   # that a repeated reading cannot see.
   perf-floor:
     name: perf-floor
-    # A push, and a dispatch without `base`. A dispatch with `base` is `perf-against`'s alone; the
-    # clause that says so tests the event first, so neither a push nor a pull request reads it.
+    # A push, and a dispatch without `base`. A dispatch with `base` is `perf-against`'s, and the
+    # count job's; the clause that says so tests the event first, so neither a push nor a pull
+    # request reads it.
     if: >-
       github.event_name != 'pull_request'
       && !(github.event_name == 'workflow_dispatch' && inputs.base != '')
@@ -211,9 +217,9 @@ jobs:
           ~/.cargo/git
           ${{ runner.temp }}/smear-perf/target-head
           ${{ runner.temp }}/smear-perf/target-base
-        key: ${{ runner.os }}-perf-${{ hashFiles('**/Cargo.toml') }}
+        key: ${{ runner.os }}-${{ runner.arch }}-perf-${{ hashFiles('**/Cargo.toml') }}
         restore-keys: |
-          ${{ runner.os }}-perf-
+          ${{ runner.os }}-${{ runner.arch }}-perf-
     - name: ci/perf/run.sh --self
       # More interleaved rounds than the pull-request gate, because this job's output is the
       # THRESHOLD DERIVATION and not a verdict: the wider the sample, the less the number it
@@ -248,10 +254,121 @@ jobs:
           ~/.cargo/git
           ${{ runner.temp }}/smear-perf/target-head
           ${{ runner.temp }}/smear-perf/target-base
-        key: ${{ runner.os }}-perf-${{ hashFiles('**/Cargo.toml') }}
+        key: ${{ runner.os }}-${{ runner.arch }}-perf-${{ hashFiles('**/Cargo.toml') }}
         restore-keys: |
-          ${{ runner.os }}-perf-
+          ${{ runner.os }}-${{ runner.arch }}-perf-
     - name: ci/perf/run.sh --against "$PERF_BASE"
       env:
         PERF_BASE: ${{ inputs.base }}
       run: ci/perf/run.sh --against "$PERF_BASE"
+
+  # ── INSTRUCTION COUNTS, ON TWO LINUX IMAGES ───────────────────────────────────────────────
+  #
+  # `ci/perf/run.sh`'s count stage, run alone: `PERF_ONLY=icount`, through the script's own path —
+  # the two trees, the instrument laid over the merge-base, the pinned profile, one lock, every
+  # refusal the other gates get — and then `wall_clock`'s count mode under callgrind on both sides.
+  # The script's header carries what a count reads and every way it refuses; this says why it is a
+  # job of its own and what would make it required.
+  #
+  # A JOB OF ITS OWN, at the cost of a second build of both sides: its verdict is the count's alone,
+  # readable apart from the other two gates, and its time does not land on theirs. And it runs on
+  # two architectures where they run on one. A count is a property of the binary, so the ARM leg is
+  # a second exact reading of every change, compiled by another backend, where an ARM clock would
+  # only be a second noisy one; `perf` keeps allocation and wall clock on x86 alone.
+  #
+  # ONE UBUNTU RELEASE ON BOTH LEGS, named rather than `-latest`, so the two differ in architecture
+  # and in nothing the image chooses, such as glibc and valgrind's release. Each table names the
+  # image, valgrind's version and the CPU model, because an absolute count is a property of all
+  # three; a difference read on one runner in one run is a property of none of them.
+  #
+  # EVERY TRIGGER, mirroring the three jobs above: a pull request against its merge-base, a push to
+  # the trunk or a dispatch without `base` as the self-comparison, a dispatch with `base` as
+  # `--against`. On the trunk `--self` is the determinism check, and the only one the ARM leg has:
+  # no smear binary had run under valgrind on ARM before this job.
+  #
+  # ── ADVISORY, AND WHAT WOULD PROMOTE IT ─────────────────────────────────────────────────────
+  #
+  # `continue-on-error: true`, like every job in this file. Making a leg required is the owner's
+  # decision, per image, when both of these hold for that image:
+  #
+  #   1. this job's `--self` on the trunk has read +0.000% on every workload at both sizes, with no
+  #      workload NOT MEASURED, on ten consecutive trunk pushes; and
+  #   2. a drift sample exists: merged commits replayed against their parents with dispatches of
+  #      this workflow (`gh workflow run perf.yml --ref <commit's branch> -f base=<its parent>`),
+  #      whose largest movement on a workload the commit's source did not touch stays under the +1%
+  #      line. x86 has the lexer-dispatch campaign's sample, whose largest step was 0.92%; ARM has
+  #      none, and its table says so.
+  #
+  # The first is the property the threshold assumes, shown on the runner rather than argued. The
+  # second is the property it rests on, and the first cannot show it: one source gives one binary,
+  # so a self-comparison of counts reads zero by construction.
+  icount:
+    name: instruction counts (${{ matrix.image }})
+    strategy:
+      # Each leg is its own reading. Under the default a red leg would cancel the other, which
+      # `gh pr checks` then shows as a failure of its own.
+      fail-fast: false
+      matrix:
+        image:
+          - ubuntu-26.04
+          - ubuntu-26.04-arm
+    runs-on: ${{ matrix.image }}
+    continue-on-error: true
+    # Two builds and the count stage. Each callgrind run has its own bound in `run.sh`,
+    # `PERF_ICOUNT_TIMEOUT`, so a run that hangs costs its row and not the job; this is for the rest.
+    timeout-minutes: 60
+    env:
+      PERF_ONLY: icount
+      # Named in each table's heading.
+      PERF_RUNNER_IMAGE: ${{ matrix.image }}
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+    # The half of the gate that decides, over synthetic readings, and `icount.py`'s reader of
+    # callgrind's files, over lines real runs wrote, before anything is built: a comparator that
+    # passed everything would leave this job green with the gate off, and a reader stricter than
+    # callgrind leaves every row NOT MEASURED.
+    - name: compare.py and the callgrind reader, self-test before anything is built
+      run: bash ci/perf/compare_selftest.sh
+    - name: Install Rust
+      run: rustup update stable --no-self-update && rustup default stable
+    - name: Install valgrind
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends valgrind
+        valgrind --version
+    - name: Cache cargo registry and both sides' target directories
+      uses: actions/cache@v6
+      with:
+        # As in `perf`, and keyed by the image as well as the architecture: each leg restores only
+        # what a build on its own image saved, never an entry `perf` saved on `ubuntu-latest`.
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ${{ runner.temp }}/smear-perf/target-head
+          ${{ runner.temp }}/smear-perf/target-base
+        key: ${{ runner.os }}-${{ runner.arch }}-${{ matrix.image }}-perf-${{ hashFiles('**/Cargo.toml') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ runner.arch }}-${{ matrix.image }}-perf-
+    - name: ci/perf/run.sh ${{ github.base_ref }}, counts only
+      if: github.event_name == 'pull_request'
+      run: ci/perf/run.sh "origin/${{ github.base_ref }}"
+    - name: ci/perf/run.sh --self, counts only
+      if: >-
+        github.event_name != 'pull_request'
+        && !(github.event_name == 'workflow_dispatch' && inputs.base != '')
+      run: ci/perf/run.sh --self
+    - name: ci/perf/run.sh --against "$PERF_BASE", counts only
+      if: github.event_name == 'workflow_dispatch' && inputs.base != ''
+      env:
+        PERF_BASE: ${{ inputs.base }}
+      run: ci/perf/run.sh --against "$PERF_BASE"
+    - name: Keep both sides' readings
+      if: always()
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        # One name per leg: a second artifact of one name in one run fails the upload.
+        name: icount-readings-${{ matrix.image }}
+        path: ${{ runner.temp }}/smear-perf/icount/*.json
+        if-no-files-found: warn

@@ -31,10 +31,27 @@
 //! binaries rather than running all of one and then all of the other, so a drift in the runner's
 //! throughput over the job's lifetime lands on both sides instead of on whichever ran second.
 //!
+//! # The count mode, which times nothing
+//!
+//! This binary also hosts the instruction-count reading. `--only <name> --size lo|hi
+//! --iterations <n>` runs one workload's measured region `n` times at one of its two sizes and
+//! never enters `measure`, whose loop is sized from `Instant`: a count that depended on how fast
+//! the machine was would not be a count. The instrument is outside the process. `ci/perf/icount.py`
+//! runs the mode under callgrind at `n`, `2n` and `3n`, and the difference of two totals is the
+//! cost of `n` iterations, so every once-per-process cost — the loader, `warm_up`, building and
+//! parsing the corpus — is in both totals and cancels. `--list` prints the rows that script reads.
+//!
+//! The mode lives here and not in `peak_alloc`, whose counting allocator would add its own
+//! bookkeeping to every count, and not in a third bench target, which a merge-base without one
+//! could not build: `ci/perf/run.sh` declines to compare two revisions whose instruments differ in
+//! their targets.
+//!
 //! # Usage
 //!
 //!     cargo bench -p smear --features validator --bench wall_clock
 //!     cargo bench -p smear --features validator --bench wall_clock -- --rounds 7 --json out.json
+//!     <binary> --list
+//!     <binary> --only parse_executable --size hi --iterations 10
 
 mod perf;
 
@@ -43,7 +60,7 @@ use std::{
   time::{Duration, Instant},
 };
 
-use perf::{Reading, WORKLOADS};
+use perf::{Reading, Request, Size, WORKLOADS, Workload};
 
 /// How long one timed batch should take. Long enough that `Instant`'s own resolution and the
 /// call overhead are noise beside it, short enough that the whole binary is a couple of seconds.
@@ -55,21 +72,41 @@ const MAX_ITERS: u64 = 100_000;
 
 fn main() {
   let args: Vec<String> = std::env::args().skip(1).collect();
-  let destination = perf::json_destination(&args);
-  let rounds = perf::rounds(&args, 5);
+  match perf::request(&args, true) {
+    Request::Measure { json, rounds } => clock(json, rounds.unwrap_or(5)),
+    Request::List => perf::list(),
+    Request::Count {
+      workload,
+      size,
+      iterations,
+    } => count(workload, size, iterations),
+  }
+}
 
+/// The count mode: `workload`'s region, `iterations` times at `size`, untimed.
+///
+/// The last line names what ran, `<name> <lo|hi> <n>`, so the script can refuse a run that did
+/// something else. The script reads three values of `n` with one digit count, so the line is as
+/// long at each of them, costs the same and cancels with the rest.
+fn count(workload: &Workload, size: Size, iterations: u64) {
+  perf::assert_doubling(workload);
+  perf::warm_up();
+  (workload.run)(size.of(workload), &mut |body: &mut dyn FnMut()| {
+    for _ in 0..iterations {
+      body();
+    }
+  });
+  println!("{} {} {iterations}", workload.name, size.as_str());
+}
+
+/// The measuring mode: every workload at both sizes, by wall clock.
+fn clock(destination: Option<String>, rounds: usize) {
   perf::warm_up();
 
   let readings: Vec<Reading> = WORKLOADS
     .iter()
     .map(|workload| {
-      assert_eq!(
-        workload.hi,
-        workload.lo * 2,
-        "`{}` declares sizes that are not a doubling, so its ratio would not be a per-doubling \
-         reading",
-        workload.name
-      );
+      perf::assert_doubling(workload);
       Reading {
         name: workload.name,
         family: workload.family,

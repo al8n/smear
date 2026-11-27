@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# The two performance gates: this branch's peak allocation and wall clock against its merge-base's.
+# The performance gates: this branch's peak allocation, wall clock and instruction counts against
+# its merge-base's.
 #
 # ── THE ONE DECISION THIS SCRIPT IS ─────────────────────────────────────────────────────────
 #
@@ -83,6 +84,33 @@
 # Both read the SAME workloads at TWO sizes and gate on the ratio as well as the absolute; see
 # `smear/benches/solo/perf/mod.rs` for why that is the design and not a nicety.
 #
+# ── THE THIRD READING: INSTRUCTION COUNTS ───────────────────────────────────────────────────
+#
+# **A count is exact, like the allocation figure, and sees what the clock sees.** callgrind counts
+# what a binary executes, which is a property of the binary and not of the runner, so a count reads
+# a lost inline, a longer path through the lexer or a loop that does more work, without the clock's
+# spread: about a per cent, not ten. It reads the same workloads at the same two sizes, out of
+# `wall_clock`'s count mode, so the ratio is gated here too: `ci/perf/icount.py` runs each row at
+# each size at n, 2n and 3n iterations under callgrind, and the difference of two totals is the
+# cost of n. It is the last stage, after the wall clock, so that its runs, which go in parallel,
+# cannot load a timed one; `PERF_ONLY` names it `icount`. It needs valgrind, which runs on Linux and
+# not on macOS, and in CI it runs alone, in a job of its own on two Linux images —
+# `.github/workflows/perf.yml` says why.
+#
+# EVERY WAY THE STAGE CAN FAIL TO READ A ROW IS A REFUSAL, NOT A NUMBER. The stage reads NOT
+# MEASURED, and the table and the last line say on which side and why, when:
+#
+#   * valgrind is absent — and a run that asked for counts alone stops before it builds anything;
+#   * a callgrind run on either side exits non-zero, or outlives `PERF_ICOUNT_TIMEOUT`;
+#   * a row's two runs at n differ, or its count does not grow from n to 2n and from 2n to 3n;
+#   * the two halves of a row's reading disagree by more than `PERF_ICOUNT_SPREAD` of the finest
+#     line it is read against, and still do when the row is read again at four times n (see that
+#     setting);
+#   * the two sides were read at different n.
+#
+# A row so refused fails the stage and stays in the table. Dropped, it would be a row the gate had
+# stopped watching without anyone deciding that it should.
+#
 # ── USAGE ───────────────────────────────────────────────────────────────────────────────────
 #
 #     ci/perf/run.sh <base-ref>         # compare HEAD against its merge-base with <base-ref>
@@ -98,7 +126,11 @@
 # builds of identical source, in two directories, into two target directories, measured
 # independently.
 #
+# `PERF_ONLY=icount ci/perf/run.sh --self` reads the counts alone, on a Linux host with valgrind.
+#
 # Environment: PERF_ALLOC_THRESHOLD, PERF_ALLOC_RATIO, PERF_WALL_THRESHOLD, PERF_WALL_RATIO,
+# PERF_ICOUNT_THRESHOLD, PERF_ICOUNT_RATIO, PERF_ICOUNT_J1, PERF_ICOUNT_SPREAD, PERF_ICOUNT_N,
+# PERF_ICOUNT_TIMEOUT, PERF_ICOUNT_JOBS, PERF_ICOUNT_DATA, PERF_RUNNER_IMAGE,
 # PERF_ROUNDS, PERF_INNER_ROUNDS, PERF_WORK, PERF_ONLY, PERF_LOCK.
 
 set -euo pipefail
@@ -207,6 +239,136 @@ set -euo pipefail
 : "${PERF_WALL_THRESHOLD:=12.0}"
 : "${PERF_WALL_RATIO:=0.40}"
 
+# ── The instruction-count threshold ─────────────────────────────────────────────────────────
+#
+# THE CLAIM A CALLER RELIES ON: **this gate sees a 1% change in any workload's instructions per
+# iteration, at either size, and a move of its per-doubling ratio past the tolerance below.**
+#
+# A count does not vary from run to run: two runs of one binary execute the same instructions, and
+# `icount.py` refuses a row whose repeated run says otherwise. So `--self` reads exactly zero on
+# every row by construction — it builds identical source twice, and one source gives one binary —
+# which proves the reading deterministic and calibrates nothing. **What the number rests on is
+# codegen drift**: a pull request moves inlining and partitioning in code it never touched, and a
+# row whose source did not change moves with it — a delta that is the compiler's and reads as the
+# pull request's.
+#
+# THE DRIFT, MEASURED. The lexer-dispatch campaign's calibration read it by count on GitHub's x86
+# runners: 26 steps along that campaign's chain of commits, each a build whose binary differed from
+# the one before, read on GraphQL's own two syntactic rows. The chain was GraphQLx's and changed
+# nothing that is GraphQL's alone. The 95th percentile of a step was **0.39% and 0.32%** of
+# instructions on the two rows, the largest **0.49%**, and **0.92%** at the one step that changed
+# code the two dialects share. +1% is above every one of them, and a row that moves past it has
+# moved further than any step of that sample did.
+#
+# Three bounds on that sample, recorded rather than glossed:
+#
+#   * **it is x86 alone.** No step has been read on ARM. Until merged commits are replayed against
+#     their parents on that image (a `perf.yml` dispatch with `base`), ARM's +1% is x86's figure,
+#     and the ARM table says it has no drift sample of its own;
+#   * **it is two rows.** No schema or validate row's drift has been sampled by count;
+#   * **0.92% is close.** A change to code every row shares can read most of a per cent with nothing
+#     wrong. An `icount/` trailer (see `compare.py`) is how such a change gets through.
+: "${PERF_ICOUNT_THRESHOLD:=1.0}"
+
+# The count's ratio gate, in the ratio's own units as `PERF_ALLOC_RATIO` is, and at its value for
+# its reason: linear is 2 and quadratic is 4, so 0.15 is under a tenth of the distance between
+# them. A ratio moves only as far as a row's two sizes part, and drift moves both sizes of a row
+# together; the worst step above, landing on one size alone, would move a ratio of 2 by 0.018. A
+# trade an `icount/` trailer accepts may land on one size more than the other, and 0.15 leaves it
+# room that a change of law does not need. What no count has yet is the planted subject the
+# allocation ratio was read against, so this rests on that arithmetic, not on a measured plant.
+: "${PERF_ICOUNT_RATIO:=0.15}"
+
+# ── J1: a second verdict on the GraphQLx syntactic rows ─────────────────────────────────────
+#
+# The owner's rule for the lexer-dispatch work, J1: each of the three GraphQLx syntactic rows
+# executes no more than the base's instructions and an allowance, which the owner put at about
+# half a per cent. The +1% line alone misleads there — the campaign's head after its first repair
+# read +0.83% and +0.87% on two of these rows, which +1% passes and J1 fails — so they carry a
+# second verdict at 0.5%, printed in the table and raised as a warning, and never shown as `ok`.
+#
+# It fails nothing, with one exception that is not a verdict: a J1 row whose halves read more than
+# the spread bound below apart at n and again at 4n is NOT MEASURED, and that fails the stage at any
+# delta. A red J1 leg of that kind means the row was not measured, not that it regressed.
+#
+# On the executable row, single inlining decisions that moved with unrelated commits were each
+# about the size of the allowance, so a red at 0.5% would fire on pull requests that never touched
+# the parser. The lexer row's own figure is the owner's to set; it takes the
+# parse rows' half per cent until they do. `lex_graphql_syntactic` is not here: it is GraphQL's own
+# row, and belongs with the drift sample, not with J1. No verdict of any kind reads reads and
+# writes: their 95th-percentile step in the sample above was 0.47% and 0.65%.
+: "${PERF_ICOUNT_J1:=0.5}"
+icount_j1_rows=lex_graphqlx_syntactic,parse_graphqlx_type_system,parse_graphqlx_executable
+
+# ── A reading's spread, and how much of it a line can bear ──────────────────────────────────
+#
+# A count reads one iteration's cost over iterations n+1 to 3n, and its SPREAD is how far apart the
+# two halves of that baseline read, as a per cent of one half (`icount.py`). A cost per iteration
+# that is constant has none. MEASURED on the first runs of this stage, both images, every row and
+# size on each side:
+#
+#   * the lexer and validate rows, exactly 0 — one allocation of a known size an iteration, or
+#     buffers kept across iterations;
+#   * the executable and deep-value parse rows, under 0.007%;
+#   * the GraphQLx syntactic rows, J1's three, at most 0.050% (`parse_graphqlx_type_system` at hi
+#     on x86);
+#   * the rows that build and free many heap objects in each iteration, the schema family and the
+#     type-system parses, up to 0.45% on x86 and 0.52% on aarch64, of either sign.
+#
+# THAT LAST IS NOT A WARM-UP, and more warm-up iterations would not remove it. The first n
+# iterations already cancel in every difference, and both halves come after them. A warm-up still
+# settling would move a row's two halves one way at both of its sizes; of the eleven x86 readings
+# over 0.01%, six rise and five fall, and three of the five rows that spread go opposite ways at
+# their two sizes. Nothing grows across iterations either: no cache, interner or kept `Vec` on these
+# paths, and the two validate rows, which do keep their buffers, read exactly 0. What one of these
+# iterations costs depends on where the allocator's free lists left the last one, and nothing shows
+# it settling.
+#
+# SO A SPREAD IS BOUNDED, AGAINST THE LINE IT HAS TO SUPPORT. The reading sits between its two
+# halves, and a head-against-base delta takes two readings, so a delta can carry about one spread
+# of allocator placement that is not the change. A quarter of the finest line a workload is read
+# against keeps a delta that reaches that line at four spreads or more of it: at most 0.25% for the
+# +1% threshold, and 0.125% for J1's 0.5% on its three rows. Every table shows each workload's
+# widest spread, and the n it was read at. On the first runs every J1 row read with room, and two
+# rows missed: `schema_iface_mismatch` (0.450% at lo) on x86 and `schema_valid` (0.519% at lo) on
+# aarch64.
+#
+# A MISS IS READ AGAIN, NOT REFUSED AT ONCE. A workload past its bound on either side, at either
+# size, is read again on both sides at four times n — 40, 80 and 120 — and that reading replaces
+# the first; past the bound there too, it is NOT MEASURED. If the offset placement puts on a half
+# is bounded, a half four times as long carries a quarter of the spread; if each iteration's
+# placement is independent of the last, half of it. One length of half cannot tell those apart, so
+# the first runs predict a range: x86's miss would read 0.112% or 0.225%, under its 0.25% either
+# way, and aarch64's 0.130% or 0.259%, under it by the first and just over it by the second. The
+# second reading is 24n iterations a size and side against the first's 7n, and only rows that miss
+# pay for it: at the first runs' speeds, about 600 s of callgrind for x86's miss and 140 s for
+# aarch64's, under four minutes and under one at four runs at a time.
+: "${PERF_ICOUNT_SPREAD:=0.25}"
+
+# How many iterations a count is read at: n, 2n and 3n, and n again for the repeat. The first n
+# cancel in every difference, so they are the warm-up — the allocator's bins and `Scratch` grow over
+# the first iterations and are reused after, and tokora's gate takes 8 for the same reason. Every
+# run's `--iterations` is zero-padded to one width, a second reading's 12n included, so argv is the
+# same length in every run. 16 would serve as well as 10, at 60% more callgrind time.
+: "${PERF_ICOUNT_N:=10}"
+
+# Seconds one callgrind run may take before its row reads NOT MEASURED. A bound, not an estimate:
+# the dearest run is 3n iterations of the dearest row at its large size, and the probe branch made
+# two calls of every row's region at both sizes, on both sides and with branch simulation as well,
+# in one CI step of 75 s that included installing valgrind. It is here so that a run which hangs is
+# a refusal on its row and not the job's timeout. A second reading's runs are four times as long
+# and are given four times this.
+: "${PERF_ICOUNT_TIMEOUT:=600}"
+
+# How many callgrind runs go at once; empty is one per CPU. The count stage runs after the wall
+# clock, so nothing it does can load a timed run, and a count does not depend on load.
+: "${PERF_ICOUNT_JOBS:=}"
+
+# `yes` reads data reads and writes beside the instructions, through callgrind's cache simulator,
+# which costs time; `no` reads instructions only, and the table says so. Reads and writes are
+# advisory either way.
+: "${PERF_ICOUNT_DATA:=yes}"
+
 # How many times the two wall-clock binaries are INTERLEAVED. Interleaving rather than running all
 # of one side then all of the other is the half that matters: a runner whose throughput drifts over
 # the job's lifetime otherwise charges the whole drift to whichever side ran second.
@@ -218,9 +380,13 @@ set -euo pipefail
 
 : "${PERF_WORK:=${RUNNER_TEMP:-/tmp}/smear-perf}"
 
-# `alloc`, `wall`, or `both`. The allocation gate does not depend on the wall-clock one and is
-# worth running alone on a host whose timing is not worth reading.
-: "${PERF_ONLY:=both}"
+# Which stages run: `alloc`, `wall` and `icount`, comma-separated. They run in that order whatever
+# the list says, counts last. The allocation gate does not depend on the wall-clock one and is worth
+# running alone on a host whose timing is not worth reading, and the counts need a host with
+# valgrind. `both` is the spelling from before the third stage and means what it meant, `alloc,wall`:
+# it does not include the counts, and the run says so. Any other word is refused rather than read as
+# some subset, because a stage a typo left out is a stage nobody sees missing.
+: "${PERF_ONLY:=alloc,wall}"
 
 # ── THE INSTRUMENT, AS CARGO KNOWS IT ───────────────────────────────────────────────────────
 #
@@ -294,6 +460,12 @@ done
 # `continue-on-error`: its run concludes success whatever this script does, so a base side that did
 # not build — every run #273 had — read as a green run with no table, and nothing on the summary
 # page said that nothing had been compared. Each stage sets it to what stopping there would mean.
+#
+# Once both sides are built, the line names every stage that ran and what it found —
+# `alloc: …; wall: …; icount: …` — each part the one line that stage's comparator left in
+# `$PERF_WORK/<stage>.outcome`. A stage NOT MEASURED says so in its part, and when every stage that
+# ran is NOT MEASURED the line starts with it, so a run that compared nothing still cannot read as
+# one that did.
 outcome="NOT MEASURED: the run stopped before it compared anything; the log above says where"
 
 headline() {
@@ -534,8 +706,54 @@ if [ "$#" -ne "$arguments" ]; then
 fi
 
 mkdir -p "$PERF_WORK"
-rm -f "$PERF_WORK/summary.md"
+rm -f "$PERF_WORK/summary.md" "$PERF_WORK/alloc.outcome" "$PERF_WORK/wall.outcome" \
+  "$PERF_WORK/icount.outcome"
 trap headline EXIT
+
+# The stages asked for. See `PERF_ONLY` above for why `both` stays and anything unknown does not.
+want_alloc=0
+want_wall=0
+want_icount=0
+if [ "$PERF_ONLY" = both ]; then
+  echo "perf: PERF_ONLY=both is alloc,wall, as it was before the count stage; counts run only where"
+  echo "perf: \`icount\` is named"
+  PERF_ONLY=alloc,wall
+fi
+stages_left="$PERF_ONLY,"
+while [ -n "$stages_left" ]; do
+  stage="${stages_left%%,*}"
+  stages_left="${stages_left#*,}"
+  case "$stage" in
+    alloc) want_alloc=1 ;;
+    wall) want_wall=1 ;;
+    icount) want_icount=1 ;;
+    *) stop "PERF_ONLY=$PERF_ONLY is not a list of the stages alloc, wall and icount" ;;
+  esac
+done
+stages_asked=""
+for stage in alloc wall icount; do
+  case "$stage" in
+    alloc) wanted="$want_alloc" ;;
+    wall) wanted="$want_wall" ;;
+    icount) wanted="$want_icount" ;;
+  esac
+  if [ "$wanted" -eq 1 ]; then
+    stages_asked="${stages_asked:+$stages_asked, }$stage"
+  fi
+done
+echo "perf: stages: $stages_asked"
+
+# valgrind is looked for before anything is built: a run that asked for counts alone has nothing
+# else to do without it, and one that asked for more still reads the others and says the counts
+# were NOT MEASURED.
+icount_unavailable=""
+if [ "$want_icount" -eq 1 ] && ! command -v valgrind > /dev/null 2>&1; then
+  icount_unavailable="valgrind is not installed on this host"
+  if [ "$want_alloc" -eq 0 ] && [ "$want_wall" -eq 0 ]; then
+    stop "the count stage was the only one asked for, and $icount_unavailable"
+  fi
+  echo "::warning::perf: the count stage will read NOT MEASURED: $icount_unavailable"
+fi
 
 if [ "$1" = "--self" ]; then
   base="$(git rev-parse HEAD)"
@@ -600,7 +818,9 @@ wall_base="$(python3 "$perf_dir/exe_path.py" "$PERF_WORK/base.build.json" wall_c
 # travels with and is gone from the next branch's range. A file checked into the tree would instead
 # sit there licensing every future drift in the same workload, which — against a merge-base
 # comparison that resets each time — is an unbounded allowance written as a bounded one. The
-# spelling is `tokora`'s, deliberately: one convention across the two repositories, not two.
+# spelling is `tokora`'s, deliberately: one convention across the two repositories, not two. Each
+# trailer is scoped to the instrument it names, and `compare.py` reads only its own stage's: a bare
+# workload name licenses the allocation and wall-clock gates, and `icount/<workload>` the count.
 git log --format=%B "$base..HEAD" | grep -E '^\s*Perf-accept:' > "$PERF_WORK/accept.txt" || true
 if [ -s "$PERF_WORK/accept.txt" ]; then
   echo "perf: this branch carries acceptances:"
@@ -609,7 +829,7 @@ fi
 
 status=0
 
-if [ "$PERF_ONLY" != "wall" ]; then
+if [ "$want_alloc" -eq 1 ]; then
   echo
   echo "perf: === peak allocation ==="
 
@@ -637,10 +857,11 @@ if [ "$PERF_ONLY" != "wall" ]; then
     --threshold "$PERF_ALLOC_THRESHOLD" \
     --ratio-tolerance "$PERF_ALLOC_RATIO" \
     --accept-file "$PERF_WORK/accept.txt" \
-    --summary "$PERF_WORK/summary.md" || status=1
+    --summary "$PERF_WORK/summary.md" \
+    --outcome "$PERF_WORK/alloc.outcome" || status=1
 fi
 
-if [ "$PERF_ONLY" != "alloc" ]; then
+if [ "$want_wall" -eq 1 ]; then
   echo
   echo "perf: === wall clock ==="
 
@@ -661,13 +882,86 @@ if [ "$PERF_ONLY" != "alloc" ]; then
     --threshold "$PERF_WALL_THRESHOLD" \
     --ratio-tolerance "$PERF_WALL_RATIO" \
     --accept-file "$PERF_WORK/accept.txt" \
-    --summary "$PERF_WORK/summary.md" || status=1
+    --summary "$PERF_WORK/summary.md" \
+    --outcome "$PERF_WORK/wall.outcome" || status=1
 fi
 
-outcome="measured ${head_sha:0:12} against ${base:0:12} ($mode)"
-if [ "$status" -eq 0 ]; then
-  outcome="$outcome: no workload over its threshold"
+if [ "$want_icount" -eq 1 ]; then
+  echo
+  echo "perf: === instruction counts ==="
+
+  # Last, after the clock, so that the parallel callgrind runs load no timed one. Both binaries are
+  # the ones `build_side` built and `compiled` vetted, so every refusal of the two revisions as not
+  # comparable has already been made before a count is taken.
+  if [ -n "$icount_unavailable" ]; then
+    echo "::error::perf: the count stage did not run: $icount_unavailable"
+    echo "NOT MEASURED: $icount_unavailable" > "$PERF_WORK/icount.outcome"
+    status=1
+  else
+    rm -rf "$PERF_WORK/icount"
+    icount_status=0
+    python3 "$perf_dir/icount.py" \
+      --head "$wall_head" \
+      --base "$wall_base" \
+      --out "$PERF_WORK/icount" \
+      --outcome "$PERF_WORK/icount.outcome" \
+      --iterations "$PERF_ICOUNT_N" \
+      --timeout "$PERF_ICOUNT_TIMEOUT" \
+      --jobs "${PERF_ICOUNT_JOBS:-0}" \
+      --data "$PERF_ICOUNT_DATA" \
+      --threshold "$PERF_ICOUNT_THRESHOLD" \
+      --j1-rows "$icount_j1_rows" \
+      --j1-threshold "$PERF_ICOUNT_J1" \
+      --spread-share "$PERF_ICOUNT_SPREAD" || icount_status=$?
+    if [ "$icount_status" -eq 0 ]; then
+      python3 "$perf_dir/compare.py" \
+        --kind icount \
+        --base "$PERF_WORK/icount/base.json" \
+        --head "$PERF_WORK/icount/head.json" \
+        --threshold "$PERF_ICOUNT_THRESHOLD" \
+        --ratio-tolerance "$PERF_ICOUNT_RATIO" \
+        --j1-rows "$icount_j1_rows" \
+        --j1-threshold "$PERF_ICOUNT_J1" \
+        --spread-share "$PERF_ICOUNT_SPREAD" \
+        --accept-file "$PERF_WORK/accept.txt" \
+        --summary "$PERF_WORK/summary.md" \
+        --outcome "$PERF_WORK/icount.outcome" || status=1
+    else
+      if [ ! -s "$PERF_WORK/icount.outcome" ]; then
+        echo "NOT MEASURED: icount.py stopped with status $icount_status; the log above says why" \
+          > "$PERF_WORK/icount.outcome"
+      fi
+      status=1
+    fi
+  fi
+fi
+
+# The last line: each stage that ran, and the one line it left about itself. A stage whose
+# comparator stopped before it wrote one is NOT MEASURED; its error is in the log above.
+stages_said=""
+measured_any=0
+for stage in alloc wall icount; do
+  case "$stage" in
+    alloc) wanted="$want_alloc" ;;
+    wall) wanted="$want_wall" ;;
+    icount) wanted="$want_icount" ;;
+  esac
+  if [ "$wanted" -ne 1 ]; then
+    continue
+  fi
+  said="NOT MEASURED: its comparison stopped before it decided; the log above says why"
+  if [ -s "$PERF_WORK/$stage.outcome" ]; then
+    said="$(head -n 1 "$PERF_WORK/$stage.outcome")"
+  fi
+  case "$said" in
+    "NOT MEASURED"*) ;;
+    *) measured_any=1 ;;
+  esac
+  stages_said="${stages_said:+$stages_said; }$stage: $said"
+done
+if [ "$measured_any" -eq 1 ]; then
+  outcome="measured ${head_sha:0:12} against ${base:0:12} ($mode); $stages_said"
 else
-  outcome="$outcome: a gate failed, and the tables and errors above say which"
+  outcome="NOT MEASURED: ${head_sha:0:12} against ${base:0:12} ($mode); $stages_said"
 fi
 exit "$status"
